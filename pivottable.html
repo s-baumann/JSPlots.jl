@@ -1,8 +1,29 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
     <title>PivotTable.js</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 20px; 
+            font-family: Arial, sans-serif; 
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id { 
+            width: 100%; 
+            height: 600px; 
+        }
+    </style>
 
     <!-- external libs -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
@@ -36,8 +57,89 @@ $(function(){
                                 $.pivotUtilities.export_renderers
                                 ),
                             hiddenAttributes: [""]
-                        }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-0.05, 0.0, 0.05]).range(["#9e0303", "#ffffff", "#00e32d"])}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
+                        }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-0.05, 0.0, 0.05]).range(["#9e0303", "#ffffff", "#00e32d"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
                     );
+    // Configuration
+    const X_COL = 'x';
+    const Y_COL = 'y';
+    const COLOR_COL = 'color';
+    const FILTER_COLS = ['categ22', 'categ'];
+    const COLOR_MAP = {'A': '#636efa', 'B': '#EF553B'};
+    const X_LABEL = 'This is the x axis';
+    const Y_LABEL = 'This is the y axis';
+                
+    let allData = [];
+
+    // Make it global so inline onchange can see it
+    window.updateChart = function() {
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = select.value;
+            }
+        });
+
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                if (String(row[col]) !== String(filters[col])) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        const groupedData = {};
+        filteredData.forEach(row => {
+            const colorVal = row[COLOR_COL];
+            if (!groupedData[colorVal]) {
+                groupedData[colorVal] = [];
+            }
+            groupedData[colorVal].push(row);
+        });
+
+        const traces = [];
+        for (let colorVal in groupedData) {
+            const group = groupedData[colorVal];
+            group.sort((a, b) => a[X_COL] - b[X_COL]);
+
+            traces.push({
+                x: group.map(row => row[X_COL]),
+                y: group.map(row => row[Y_COL]),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: colorVal,
+                line: {
+                    color: COLOR_MAP[colorVal] || '#000000',
+                    width: 2
+                },
+                marker: { size: 6 }
+            });
+        }
+        
+        // Layout
+        const layout = {
+            xaxis: { title: X_LABEL || X_COL },
+            yaxis: { title: Y_LABEL || Y_COL },
+            hovermode: 'closest',
+            showlegend: true
+        };
+        
+        // Plot
+        Plotly.newPlot('pchart', traces, layout, {responsive: true});
+    };
+
+    // Parse CSV data
+    const csvText = document.getElementById('data_label').textContent;
+    Papa.parse(csvText, {
+        header: true,
+        dynamicTyping: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            allData = results.data;
+            updateChart();
+        }
+    });
     $("#Correlation_Matrix").pivotUI(
                         $.csv.toArrays($("#correlations").text()),
                         $.extend({
@@ -48,7 +150,7 @@ $(function(){
                                 $.pivotUtilities.export_renderers
                                 ),
                             hiddenAttributes: [""]
-                        }, {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"])}}},"cols":["Symbol2"]})
+                        }, {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]})
                     );
 
 
@@ -77,14 +179,60 @@ MSFT,MSFT,1.0
 GOOG,RTX,-0.85
 MSFT,RTX,-0.75
 MSFT,GOOG,0.8
+</div><div id="data_label" style="display: none;">date,x,y,color,categ,categ22
+2024-01-01,1,0.6624701688917178,A,B,Category_A
+2024-01-02,2,0.3017392742574878,B,B,Category_A
+2024-01-03,3,0.9621901640456392,A,B,Category_A
+2024-01-04,4,0.8331479132124531,B,B,Category_A
+2024-01-05,5,0.8007460893391596,A,B,Category_A
+2024-01-06,6,0.33080806159816367,B,A,Category_A
+2024-01-07,7,0.10863311291577837,A,A,Category_A
+2024-01-08,8,0.19488382728303977,B,A,Category_A
+2024-01-09,9,0.6681438256417775,A,A,Category_A
+2024-01-10,10,0.7683849528997813,B,C,Category_A
+2024-01-01,1,0.8395757820373536,A,A,Category_B
+2024-01-02,2,0.2285762701932207,B,A,Category_B
+2024-01-03,3,0.27086996431575405,A,A,Category_B
+2024-01-04,4,0.37271721765200483,B,A,Category_B
+2024-01-05,5,0.36466059125363026,A,A,Category_B
+2024-01-06,6,0.5848128448571077,B,B,Category_B
+2024-01-07,7,0.2668844566273101,A,B,Category_B
+2024-01-08,8,0.8036881107369657,B,B,Category_B
+2024-01-09,9,0.4490552861584548,A,B,Category_B
+2024-01-10,10,0.13071996286413257,B,C,Category_B
 </div>
 
-<!-- PIVOT TABLES -->
+<!-- ACTUAL CONTENT -->
 
     <h2>Returns_Over_Last_Few_Days</h2>
     <div id="Returns_Over_Last_Few_Days"></div>
 
     <br><hr><br>
+<h2>Line Chart</h2>
+
+<!-- Controls -->
+<div id="controls">
+            <div style="margin: 10px;">
+            <label for="categ22_select">categ22: </label>
+            <select id="categ22_select" onchange="updateChart()">
+                <option value="Category_A" selected>Category_A</option>
+                <option value="Category_B">Category_B</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="categ_select">categ: </label>
+            <select id="categ_select" onchange="updateChart()">
+                <option value="B">B</option>
+                <option value="A" selected>A</option>
+                <option value="C">C</option>
+            </select>
+        </div>
+        
+</div>
+
+<!-- Chart -->
+<div id="pchart"></div>
+<br><hr><br>
     <h2>Correlation_Matrix</h2>
     <div id="Correlation_Matrix"></div>
 

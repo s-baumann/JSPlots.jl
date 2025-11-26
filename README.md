@@ -22,6 +22,27 @@ correlations = DataFrame(
     Correlation = [-0.85, -0.75, 0.80, 1.0, 1.0, 1.0, -0.85, -0.75, 0.80]
 )
 
+df1 = DataFrame(
+    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
+    x = 1:10,
+    y = rand(10),
+    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
+)
+df1[!, :categ] .=  [ :B, :B, :B, :B, :B, :A, :A, :A, :A, :C]
+df1[!, :categ22] .= "Category_A"
+
+df2 = DataFrame(
+    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
+    x = 1:10,
+    y = rand(10),
+    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
+)
+df2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
+df2[!, :categ22] .= "Category_B"
+df = vcat(df1, df2)
+
+
+
 exclusions = Dict(
     :Symbol => [:MSFT]
 )
@@ -37,7 +58,19 @@ pt = PivotTable(:Returns_Over_Last_Few_Days, :stockReturns;
     rendererName = :Heatmap
 )
 
-pt2 = PivotTable(:Correlation_Matrix, :correlations;
+
+
+pt2 = PChart(:pchart, df, :data_label;
+            x_col=:x,
+            y_col=:y,
+            color_col=:color,
+            filters=Dict(:categ => :A, :categ22 => "Category_A"),
+            title="Line Chart",
+            x_label="This is the x axis",
+            y_label="This is the y axis")
+
+
+pt23 = PivotTable(:Correlation_Matrix, :correlations;
     rows = [:Symbol1],
     cols = [:Symbol2],
     vals = :Correlation,
@@ -47,12 +80,12 @@ pt2 = PivotTable(:Correlation_Matrix, :correlations;
 )
 
 # To plot both of these together we can do:
-pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations), [pt, pt2])
-create_pivot_table_html(pge,"pivottable.html")
+pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :data_label => df), [pt, pt2, pt23])
+create_html(pge,"pivottable.html")
 
 
 # Or if you are only charting one single pivottable you dont have to make a PivotTablePage, you can simply do:
-create_pivot_table_html(pt, stockReturns, "only_one.html")
+create_html(pt, stockReturns, "only_one.html")
 
 ```
 
