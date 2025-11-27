@@ -107,7 +107,7 @@ struct PChart <: PivotTablesType
                         name: colorVal,
                         line: {
                             color: COLOR_MAP[colorVal] || '#000000',
-                            width: 2
+                            width: 1
                         },
                         marker: { size: 6 }
                     });
