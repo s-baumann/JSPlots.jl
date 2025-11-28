@@ -16,14 +16,16 @@ const pivottable_function_template = raw"""
 
 const PIVOTTABLE_IN_PAGE_TEMPLATE = raw"""
     <h2>___TABLE_HEADING___</h2>
+    <p>___NOTES___</p>
     <div id="__FUNCTION_NAME___"></div>
 
     <br><hr><br>
 """
 
-function table_to_html(chart_title)
+function table_to_html(chart_title, notes)
     html_str = replace(PIVOTTABLE_IN_PAGE_TEMPLATE, "___TABLE_HEADING___" => string(chart_title))
     html_str = replace(html_str, "__FUNCTION_NAME___" => replace(string(chart_title), " " => "_"))
+    html_str = replace(html_str, "___NOTES___" => notes)
     return html_str
 end
 
@@ -42,7 +44,8 @@ struct PivotTable <: PivotTablesType
                             aggregatorName::Symbol=:Average,
                             extrapolate_colours::Bool=false,
                             rendererName::Symbol=:Heatmap,
-                            rendererOptions::Union{Missing,Dict{Symbol,Any}}=missing)
+                            rendererOptions::Union{Missing,Dict{Symbol,Any}}=missing,
+                            notes::String="")
         #
         kwargs_d = Dict{Symbol,Any}()
         if ismissing(rows) == false kwargs_d[:rows] = rows end
@@ -72,7 +75,7 @@ struct PivotTable <: PivotTablesType
             end
         end
         #
-        appearance_html = table_to_html(chart_title)
+        appearance_html = table_to_html(chart_title, notes)
         new(chart_title, data_label, strr, appearance_html)
     end
 end

@@ -11,7 +11,10 @@ struct PChart <: PivotTablesType
                             filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                             title::String="Line Chart",
                             x_label::String="",
-                            y_label::String="")
+                            y_label::String="",
+                            line_width::Int=1,
+                            marker_size::Int=1,
+                            notes::String="")
 
         # Get unique values for each filter column
         filter_options = Dict()
@@ -107,9 +110,9 @@ struct PChart <: PivotTablesType
                         name: colorVal,
                         line: {
                             color: COLOR_MAP[colorVal] || '#000000',
-                            width: 1
+                            width: $line_width
                         },
-                        marker: { size: 6 }
+                        marker: { size: $marker_size }
                     });
                 }
                 
@@ -140,6 +143,7 @@ struct PChart <: PivotTablesType
 
         appearance_html = """
         <h2>$title</h2>
+        <p>$notes</p>
         
         <!-- Controls -->
         <div id="controls">
