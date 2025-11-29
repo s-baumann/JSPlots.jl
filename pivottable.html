@@ -57,7 +57,7 @@ $(function(){
                                 $.pivotUtilities.export_renderers
                                 ),
                             hiddenAttributes: [""]
-                        }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-0.05, 0.0, 0.05]).range(["#9e0303", "#ffffff", "#00e32d"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
+                        }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
                     );
     // Configuration
     const X_COL = 'x';
@@ -111,9 +111,9 @@ $(function(){
                 name: colorVal,
                 line: {
                     color: COLOR_MAP[colorVal] || '#000000',
-                    width: 2
+                    width: 1
                 },
-                marker: { size: 6 }
+                marker: { size: 1 }
             });
         }
         
@@ -130,7 +130,7 @@ $(function(){
     };
 
     // Parse CSV data
-    const csvText = document.getElementById('data_label').textContent;
+    const csvText = document.getElementById('df').textContent;
     Papa.parse(csvText, {
         header: true,
         dynamicTyping: true,
@@ -152,6 +152,94 @@ $(function(){
                             hiddenAttributes: [""]
                         }, {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return Plotly.d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]})
                     );
+    const csvText3d = document.getElementById('subframe').textContent;
+        Papa.parse(csvText3d, {
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
+            complete: function(results) {
+                // ========== 3D SURFACE PLOT CONFIGURATION ==========
+                // Define your column names here
+                const x = 'x';
+                const y = 'y';
+                const z = 'z';
+                const group = 'group';
+                // ===================================================
+                
+                const data3d = results.data;
+                
+                // Get unique groups
+                const uniqueGroups = [...new Set(data3d.map(row => row[group]))].sort();
+                
+                // Define a set of distinct color gradients
+                const colorGradients = [
+                    // Blue gradient
+                    [[0, 'rgb(8,48,107)'], [0.25, 'rgb(33,102,172)'], [0.5, 'rgb(67,147,195)'], [0.75, 'rgb(146,197,222)'], [1, 'rgb(209,229,240)']],
+                    // Red-Orange gradient
+                    [[0, 'rgb(127,0,0)'], [0.25, 'rgb(189,0,38)'], [0.5, 'rgb(227,74,51)'], [0.75, 'rgb(252,141,89)'], [1, 'rgb(253,204,138)']],
+                    // Green gradient
+                    [[0, 'rgb(0,68,27)'], [0.25, 'rgb(0,109,44)'], [0.5, 'rgb(35,139,69)'], [0.75, 'rgb(116,196,118)'], [1, 'rgb(199,233,192)']],
+                    // Purple gradient
+                    [[0, 'rgb(63,0,125)'], [0.25, 'rgb(106,81,163)'], [0.5, 'rgb(158,154,200)'], [0.75, 'rgb(188,189,220)'], [1, 'rgb(218,218,235)']],
+                    // Yellow-Orange gradient
+                    [[0, 'rgb(102,37,6)'], [0.25, 'rgb(153,52,4)'], [0.5, 'rgb(217,95,14)'], [0.75, 'rgb(254,153,41)'], [1, 'rgb(254,217,142)']],
+                    // Teal gradient
+                    [[0, 'rgb(1,70,54)'], [0.25, 'rgb(1,102,94)'], [0.5, 'rgb(2,129,138)'], [0.75, 'rgb(54,175,172)'], [1, 'rgb(178,226,226)']],
+                    // Pink-Magenta gradient
+                    [[0, 'rgb(73,0,106)'], [0.25, 'rgb(123,50,148)'], [0.5, 'rgb(194,165,207)'], [0.75, 'rgb(231,212,232)'], [1, 'rgb(247,242,247)']],
+                    // Brown gradient
+                    [[0, 'rgb(84,48,5)'], [0.25, 'rgb(140,81,10)'], [0.5, 'rgb(191,129,45)'], [0.75, 'rgb(223,194,125)'], [1, 'rgb(246,232,195)']],
+                ];
+                
+                // Function to create z matrix for a group
+                function createSurface(groupData, colorscale, name) {
+                    const xVals = [...new Set(groupData.map(row => row[x]))].sort((a,b) => a-b);
+                    const yVals = [...new Set(groupData.map(row => row[y]))].sort((a,b) => a-b);
+                    
+                    const zMatrix = [];
+                    for (let i = 0; i < yVals.length; i++) {
+                        zMatrix[i] = [];
+                        for (let j = 0; j < xVals.length; j++) {
+                            const point = groupData.find(row => row[x] === xVals[j] && row[y] === yVals[i]);
+                            zMatrix[i][j] = point ? point[z] : null;
+                        }
+                    }
+                    
+                    return {
+                        z: zMatrix,
+                        x: xVals,
+                        y: yVals,
+                        type: 'surface',
+                        name: name,
+                        colorscale: colorscale,
+                        showscale: false
+                    };
+                }
+            
+            // Create a surface for each group
+            const plotData = uniqueGroups.map((grp, index) => {
+                const groupData = data3d.filter(row => row[group] === grp);
+                const colorscale = colorGradients[index % colorGradients.length];
+                return createSurface(groupData, colorscale, `Group ${grp}`);
+            });
+            
+            const layout = {
+                title: 'threeD',
+                autosize: true,
+                height: 600,
+                scene: {
+                    xaxis: { title: 'X directions' },
+                    yaxis: { title: 'Y dim' },
+                    zaxis: { title: 'Z directions' }
+                },
+                showlegend: false,
+            };
+            
+            Plotly.newPlot('threeD', plotData, layout);
+        }
+    });
+
+
 
 
 });
@@ -160,15 +248,88 @@ $(function(){
 <!-- DATASETS -->
 
 <div id="stockReturns" style="display: none;">Symbol,Date,Return
-RTX,2023-01-01,0.01
-RTX,2023-01-02,-0.005
-RTX,2023-01-03,0.002
-GOOG,2023-01-01,0.015
+RTX,2023-01-01,10.01
+RTX,2023-01-02,-10.005
+RTX,2023-01-03,-0.5
+GOOG,2023-01-01,1.0
 GOOG,2023-01-02,0.01
 GOOG,2023-01-03,-0.003
 MSFT,2023-01-01,0.008
 MSFT,2023-01-02,0.004
 MSFT,2023-01-03,-0.002
+</div><div id="subframe" style="display: none;">x,y,group,z
+1,1,A,0.15594369476537437
+2,1,A,-0.6172728764571667
+3,1,A,-0.9997860728793259
+4,1,A,-0.5557653904191477
+5,1,A,0.37706981246168597
+6,1,A,0.9799824974549554
+1,2,A,-0.6172728764571667
+2,2,A,-0.9513631281258474
+3,2,A,-0.894288058558276
+4,2,A,-0.2379483919805909
+5,2,A,0.6231593449762197
+6,2,A,0.9991443830469295
+1,3,A,-0.9997860728793259
+2,3,A,-0.894288058558276
+3,3,A,-0.4526618572923528
+4,3,A,0.28366218546322625
+5,3,A,0.8994733999984659
+6,3,A,0.9110310531896002
+1,4,A,-0.5557653904191477
+2,4,A,-0.2379483919805909
+3,4,A,0.28366218546322625
+4,4,A,0.8101836031147954
+5,4,A,0.9928159447966954
+6,4,A,0.5995022633598608
+1,5,A,0.37706981246168597
+2,5,A,0.6231593449762197
+3,5,A,0.8994733999984659
+4,5,A,0.9928159447966954
+5,5,A,0.7053479063084421
+6,5,A,0.04371801995456107
+1,6,A,0.9799824974549554
+2,6,A,0.9991443830469295
+3,6,A,0.9110310531896002
+4,6,A,0.5995022633598608
+5,6,A,0.04371801995456107
+6,6,A,-0.5901944859052752
+1,1,B,-0.8440563052346256
+2,1,B,-1.6172728764571667
+3,1,B,-1.999786072879326
+4,1,B,-1.5557653904191477
+5,1,B,-0.622930187538314
+6,1,B,-0.02001750254504464
+1,2,B,-1.1605565385746905
+2,2,B,-1.769905729749893
+3,2,B,-1.9847209431240276
+4,2,B,-1.4526618572923529
+5,2,B,-0.5348859483071466
+6,2,B,-0.007045023716309329
+1,3,B,-1.4161468365471424
+2,3,B,-1.8795687341082288
+3,3,B,-1.9484431958418278
+4,3,B,-1.346174157871352
+5,3,B,-0.45271768395849554
+6,3,B,-0.0007290466739067192
+1,4,B,-1.6172728764571667
+2,4,B,-1.9513631281258474
+3,4,B,-1.894288058558276
+4,4,B,-1.237948391980591
+5,4,B,-0.3768406550237803
+6,4,B,-0.0008556169530704594
+1,5,B,-1.769905729749893
+2,5,B,-1.9899924966004454
+3,5,B,-1.8252990620752587
+4,5,B,-1.1294490013073428
+5,5,B,-0.3075808884062521
+6,5,B,-0.007184055203304562
+1,6,B,-1.8795687341082288
+2,6,B,-1.999786072879326
+3,6,B,-1.7442462713722906
+4,6,B,-1.021971452410018
+5,6,B,-0.24518280412638171
+6,6,B,-0.019450682346141668
 </div><div id="correlations" style="display: none;">Symbol1,Symbol2,Correlation
 RTX,GOOG,-0.85
 RTX,MSFT,-0.75
@@ -179,36 +340,38 @@ MSFT,MSFT,1.0
 GOOG,RTX,-0.85
 MSFT,RTX,-0.75
 MSFT,GOOG,0.8
-</div><div id="data_label" style="display: none;">date,x,y,color,categ,categ22
-2024-01-01,1,0.6624701688917178,A,B,Category_A
-2024-01-02,2,0.3017392742574878,B,B,Category_A
-2024-01-03,3,0.9621901640456392,A,B,Category_A
-2024-01-04,4,0.8331479132124531,B,B,Category_A
-2024-01-05,5,0.8007460893391596,A,B,Category_A
-2024-01-06,6,0.33080806159816367,B,A,Category_A
-2024-01-07,7,0.10863311291577837,A,A,Category_A
-2024-01-08,8,0.19488382728303977,B,A,Category_A
-2024-01-09,9,0.6681438256417775,A,A,Category_A
-2024-01-10,10,0.7683849528997813,B,C,Category_A
-2024-01-01,1,0.8395757820373536,A,A,Category_B
-2024-01-02,2,0.2285762701932207,B,A,Category_B
-2024-01-03,3,0.27086996431575405,A,A,Category_B
-2024-01-04,4,0.37271721765200483,B,A,Category_B
-2024-01-05,5,0.36466059125363026,A,A,Category_B
-2024-01-06,6,0.5848128448571077,B,B,Category_B
-2024-01-07,7,0.2668844566273101,A,B,Category_B
-2024-01-08,8,0.8036881107369657,B,B,Category_B
-2024-01-09,9,0.4490552861584548,A,B,Category_B
-2024-01-10,10,0.13071996286413257,B,C,Category_B
+</div><div id="df" style="display: none;">date,x,y,color,categ,categ22
+2024-01-01,1,0.716276993654819,A,B,Category_A
+2024-01-02,2,0.6423649944206601,B,B,Category_A
+2024-01-03,3,0.4958845001458856,A,B,Category_A
+2024-01-04,4,0.5445094184596678,B,B,Category_A
+2024-01-05,5,0.16467913738301565,A,B,Category_A
+2024-01-06,6,0.27309023839033064,B,A,Category_A
+2024-01-07,7,0.07145800377915923,A,A,Category_A
+2024-01-08,8,0.9968517415397815,B,A,Category_A
+2024-01-09,9,0.731009956973597,A,A,Category_A
+2024-01-10,10,0.9019718460406881,B,C,Category_A
+2024-01-01,1,0.35711891494334713,A,A,Category_B
+2024-01-02,2,0.19344574321522368,B,A,Category_B
+2024-01-03,3,0.5103189039984609,A,A,Category_B
+2024-01-04,4,0.631785205355996,B,A,Category_B
+2024-01-05,5,0.9095273529603235,A,A,Category_B
+2024-01-06,6,0.548219551629551,B,B,Category_B
+2024-01-07,7,0.23171073152237875,A,B,Category_B
+2024-01-08,8,0.34630037144646597,B,B,Category_B
+2024-01-09,9,0.29504475034837085,A,B,Category_B
+2024-01-10,10,0.47039562214826913,B,C,Category_B
 </div>
 
 <!-- ACTUAL CONTENT -->
 
     <h2>Returns_Over_Last_Few_Days</h2>
+    <p></p>
     <div id="Returns_Over_Last_Few_Days"></div>
 
     <br><hr><br>
 <h2>Line Chart</h2>
+<p></p>
 
 <!-- Controls -->
 <div id="controls">
@@ -234,9 +397,15 @@ MSFT,GOOG,0.8
 <div id="pchart"></div>
 <br><hr><br>
     <h2>Correlation_Matrix</h2>
+    <p></p>
     <div id="Correlation_Matrix"></div>
 
     <br><hr><br>
+<h2>3D Surface Chart of shapes</h2>
+<p>This is a 3D surface chart.</p>       
+<!-- Chart -->
+<div id="threeD"></div>
+<br><hr><br>
 
 
 </body>

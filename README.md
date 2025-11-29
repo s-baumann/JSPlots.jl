@@ -13,7 +13,7 @@ using PivotTables, DataFrames, Dates
 stockReturns = DataFrame(
     Symbol = ["RTX", "RTX", "RTX", "GOOG", "GOOG", "GOOG", "MSFT", "MSFT", "MSFT"],
     Date = Date.(["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-01", "2023-01-02", "2023-01-03", "2023-01-01", "2023-01-02", "2023-01-03"]),
-    Return = [0.01, -0.005, 0.002, 0.015, 0.01, -0.003, 0.008, 0.004, -0.002]
+    Return = [10.01, -10.005, -0.5, 1.0, 0.01, -0.003, 0.008, 0.004, -0.002]
 )   
 
 correlations = DataFrame(
@@ -21,6 +21,48 @@ correlations = DataFrame(
     Symbol2 = ["GOOG", "MSFT", "MSFT", "RTX", "GOOG", "MSFT", "RTX", "RTX", "GOOG",],
     Correlation = [-0.85, -0.75, 0.80, 1.0, 1.0, 1.0, -0.85, -0.75, 0.80]
 )
+
+exclusions = Dict(
+    :Symbol => [:MSFT]
+)
+
+
+pt = PivotTable(:Returns_Over_Last_Few_Days, :stockReturns;
+    rows = [:Symbol],
+    cols = [:Date],
+    vals = :Return,
+    exclusions = exclusions,
+    aggregatorName = :Average,
+    rendererName = :Heatmap
+)
+
+pt2 = PivotTable(:Correlation_Matrix, :correlations;
+    rows = [:Symbol1],
+    cols = [:Symbol2],
+    vals = :Correlation,
+    colour_map = Dict{Float64,String}([-1.0, 0.0, 1.0] .=> ["#FF4545", "#ffffff", "#4F92FF"]),
+    aggregatorName = :Average,
+    rendererName = :Heatmap
+)
+
+subframe = allcombinations(DataFrame, x = collect(1:6), y = collect(1:6)); subframe[!, :group] .= "A";
+sf2 = deepcopy(subframe); sf2[!, :group] .= "B"
+subframe[!, :z] = cos.(sqrt.(subframe.x .^ 2 .+  subframe.y .^ 2))
+sf2[!, :z] = cos.(sqrt.(sf2.x .^ 2 .+  sf2.y .^ 1)) .- 1.0
+subframe = vcat(subframe, sf2)
+
+pt3 = PThreeDChart(:threeD, :subframe;
+        x_col = :x,
+        y_col = :y,
+        z_col = :z,
+        group_col = :group,
+        title = "3D Surface Chart of shapes",
+        x_label = "X directions",
+        y_label = "Y dim",
+        z_label = "Z directions",
+        notes = "This is a 3D surface chart."
+    )
+
 
 df1 = DataFrame(
     date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
@@ -41,26 +83,7 @@ df2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
 df2[!, :categ22] .= "Category_B"
 df = vcat(df1, df2)
 
-
-
-exclusions = Dict(
-    :Symbol => [:MSFT]
-)
-
-
-pt = PivotTable(:Returns_Over_Last_Few_Days, :stockReturns;
-    rows = [:Symbol],
-    cols = [:Date],
-    vals = :Return,
-    exclusions = exclusions,
-    colour_map = Dict{Float64,String}([-0.05, 0.0, 0.05] .=> ["#9e0303", "#ffffff", "#00e32d"]),
-    aggregatorName = :Average,
-    rendererName = :Heatmap
-)
-
-
-
-pt2 = PChart(:pchart, df, :data_label;
+pt00 = PChart(:pchart, df, :df;
             x_col=:x,
             y_col=:y,
             color_col=:color,
@@ -70,22 +93,14 @@ pt2 = PChart(:pchart, df, :data_label;
             y_label="This is the y axis")
 
 
-pt23 = PivotTable(:Correlation_Matrix, :correlations;
-    rows = [:Symbol1],
-    cols = [:Symbol2],
-    vals = :Correlation,
-    colour_map = Dict{Float64,String}([-1.0, 0.0, 1.0] .=> ["#FF4545", "#ffffff", "#4F92FF"]),
-    aggregatorName = :Average,
-    rendererName = :Heatmap
-)
-
 # To plot both of these together we can do:
-pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :data_label => df), [pt, pt2, pt23])
+pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :subframe => subframe, :df => df), [pt, pt00, pt2, pt3])
 create_html(pge,"pivottable.html")
 
 
 # Or if you are only charting one single pivottable you dont have to make a PivotTablePage, you can simply do:
 create_html(pt, stockReturns, "only_one.html")
+
 
 ```
 
