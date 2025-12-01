@@ -16,7 +16,7 @@ const FULL_PAGE_TEMPLATE = raw"""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>__TITLE_OF_PAGE___</title>
+    <title>___TITLE_OF_PAGE___</title>
     <meta charset="UTF-8">
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>

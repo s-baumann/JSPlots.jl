@@ -17,6 +17,9 @@ module PivotTables
     include("PScatterPlot.jl")
     export PScatterPlot
 
+    include("distplot.jl")
+    export PDistPlot
+
     include("make_html.jl")
     export PivotTablePage, create_html
 
