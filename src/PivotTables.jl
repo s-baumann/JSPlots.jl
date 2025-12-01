@@ -1,7 +1,7 @@
 module PivotTables
 
 
-    using CSV, DataFrames, JSON
+    using CSV, DataFrames, JSON, Dates
     
     abstract type PivotTablesType end
 
@@ -13,6 +13,9 @@ module PivotTables
 
     include("threedchart.jl")
     export PThreeDChart
+
+    include("PScatterPlot.jl")
+    export PScatterPlot
 
     include("make_html.jl")
     export PivotTablePage, create_html

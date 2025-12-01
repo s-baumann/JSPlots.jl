@@ -2,6 +2,10 @@
 struct PivotTablePage
     dataframes::Dict{Symbol,DataFrame}
     pivot_tables::Vector
+    title_of_page::String
+    function PivotTablePage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; title_of_page::String="PivotTables.jl")
+        new(dataframes, pivot_tables, title_of_page)
+    end
 end
 
 const DATASET_TEMPLATE = raw"""<div id="___DDATA_LABEL___" style="display: none;">___DATA1___</div>"""
@@ -12,10 +16,13 @@ const FULL_PAGE_TEMPLATE = raw"""
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PivotTable.js</title>
+    <title>__TITLE_OF_PAGE___</title>
     <meta charset="UTF-8">
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
     <style>
         body { 
             margin: 0; 
@@ -93,6 +100,7 @@ function create_html(pt::PivotTablePage, outfile_path::String="pivottable.html")
     full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
     full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
     full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
+    full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => pt.title_of_page)
 
     open(outfile_path, "w") do outfile
         write(outfile, full_page_html)
