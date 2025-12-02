@@ -1,7 +1,7 @@
 module JSPlots
 
 
-    using CSV, DataFrames, JSON, Dates
+    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface
 
     abstract type JSPlotsType end
 

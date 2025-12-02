@@ -106,7 +106,7 @@ create_html(pt, stockReturns, "only_one.html")
 
 ## Data Format Options
 
-JSPlots supports three different data embedding formats, which you can specify using the `dataformat` parameter when creating a `JSPlotPage`:
+JSPlots supports five different data embedding formats, which you can specify using the `dataformat` parameter when creating a `JSPlotPage`:
 
 ### 1. `:csv_embedded` (Default)
 
@@ -200,6 +200,82 @@ The launcher scripts will try to open the HTML in the following order:
 
 **Note:** The `--allow-file-access-from-files` flag is required for Chromium-based browsers to allow the HTML to load local CSV files. Firefox doesn't require special flags for local file access.
 
+### 4. `:json_external`
+
+Data is saved as separate JSON files in a `data/` subdirectory, and the HTML references these files.
+
+**Advantages:**
+- Much smaller HTML file size
+- Faster page load for large datasets
+- JSON preserves data types better than CSV
+- Better for version control (can diff data and HTML separately)
+- JSON files can be easily consumed by other tools and languages
+
+**Disadvantages:**
+- Requires multiple files (HTML + JSON files + launcher scripts)
+- Browsers block local file access by default (CORS)
+- Must use provided launcher scripts to open with proper browser flags
+- Slightly larger file size than Parquet for large datasets
+
+**Usage:**
+```julia
+page = JSPlotPage(dataframes, plots, dataformat=:json_external)
+create_html(page, "output_dir/myplots.html")
+```
+
+**Output structure:**
+```
+output_dir/
+└── myplots/              # Project folder (named after HTML file)
+    ├── myplots.html      # Main HTML file
+    ├── open.bat          # Windows launcher script
+    ├── open.sh           # Linux/macOS launcher script
+    └── data/             # Data subdirectory
+        ├── dataset1.json
+        ├── dataset2.json
+        └── dataset3.json
+```
+
+### 5. `:parquet`
+
+Data is saved as separate Parquet files in a `data/` subdirectory, and the HTML references these files. Parquet is a columnar binary format optimized for analytics workloads.
+
+**Advantages:**
+- **Smallest file size** - Highly compressed binary format
+- **Fastest loading** - Efficient binary parsing
+- Much smaller HTML file size
+- Industry-standard format used by data engineering tools
+- Excellent for very large datasets
+- Better for version control
+
+**Disadvantages:**
+- Requires multiple files (HTML + Parquet files + launcher scripts)
+- Browsers block local file access by default (CORS)
+- Must use provided launcher scripts to open with proper browser flags
+- Binary format (not human-readable)
+- Requires parquet-wasm library to be loaded in browser
+
+**Usage:**
+```julia
+page = JSPlotPage(dataframes, plots, dataformat=:parquet)
+create_html(page, "output_dir/myplots.html")
+```
+
+**Output structure:**
+```
+output_dir/
+└── myplots/              # Project folder (named after HTML file)
+    ├── myplots.html      # Main HTML file
+    ├── open.bat          # Windows launcher script
+    ├── open.sh           # Linux/macOS launcher script
+    └── data/             # Data subdirectory
+        ├── dataset1.parquet
+        ├── dataset2.parquet
+        └── dataset3.parquet
+```
+
+**Note:** Parquet format requires DuckDB.jl for writing files and uses parquet-wasm for reading in the browser.
+
 ## Choosing a Data Format
 
 **Use `:csv_embedded` when:**
@@ -219,6 +295,23 @@ The launcher scripts will try to open the HTML in the following order:
 - You want to keep HTML and data separate
 - You're using version control
 - You need to frequently update data without regenerating HTML
-- You want to inspect or process the data with other tools
+- You want to inspect or edit the data with text editors or spreadsheet tools
+- Human readability of data files is important
+
+**Use `:json_external` when:**
+- You have large datasets (> 10MB)
+- You want to keep HTML and data separate
+- Data type preservation is critical (dates, numbers, booleans)
+- You need to share data with other JavaScript/web applications
+- You're using version control
+- Human readability of data files is important
+
+**Use `:parquet` when:**
+- You have very large datasets (> 50MB)
+- File size and loading speed are critical
+- You're working with data engineering/analytics pipelines
+- You don't need human-readable data files
+- You want the best compression and performance
+- You're using version control (smallest diffs for data changes)
 
 

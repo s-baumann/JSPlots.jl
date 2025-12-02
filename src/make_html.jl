@@ -7,8 +7,8 @@ struct JSPlotPage
     notes::String
     dataformat::Symbol
     function JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
-        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external])
-            error("dataformat must be :csv_embedded, :json_embedded, or :csv_external")
+        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
+            error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
         end
         new(dataframes, pivot_tables, tab_title, page_header, notes, dataformat)
     end
@@ -26,6 +26,7 @@ const FULL_PAGE_TEMPLATE = raw"""
     <meta charset="UTF-8">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
     <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
@@ -68,10 +69,39 @@ const FULL_PAGE_TEMPLATE = raw"""
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
 <script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
 // Centralized data loading function
 // This function parses data from embedded or external sources and returns a Promise
-// Supports CSV (embedded/external) and JSON (embedded) formats based on the data-format attribute
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
@@ -83,6 +113,78 @@ function loadDataset(dataLabel) {
 
         var format = dataElement.getAttribute('data-format') || 'csv_embedded';
         var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
 
         // Handle external CSV files
         if (format === 'csv_external' && dataSrc) {
@@ -202,6 +304,14 @@ function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_
     if format == :csv_external
         # For external CSV, we just reference the file
         data_src = "data/$(string(data_label)).csv"
+        # No data content needed for external format
+    elseif format == :json_external
+        # For external JSON, we just reference the file
+        data_src = "data/$(string(data_label)).json"
+        # No data content needed for external format
+    elseif format == :parquet
+        # For external Parquet, we just reference the file
+        data_src = "data/$(string(data_label)).parquet"
         # No data content needed for external format
     elseif format == :csv_embedded
         io_buffer = IOBuffer()
@@ -363,9 +473,9 @@ function generate_sh_launcher(html_filename::String)
 end
 
 function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
-    # Handle csv_external format differently
-    if pt.dataformat == :csv_external
-        # For csv_external, create a subfolder structure
+    # Handle external formats (csv_external, json_external, parquet) differently
+    if pt.dataformat in [:csv_external, :json_external, :parquet]
+        # For external formats, create a subfolder structure
         # e.g., "generated_html_examples/pivottable.html" becomes
         #       "generated_html_examples/pivottable/pivottable.html"
 
@@ -388,11 +498,46 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             mkpath(data_dir)
         end
 
-        # Save all dataframes as separate CSV files
+        # Save all dataframes as separate files based on format
         for (data_label, df) in pt.dataframes
-            csv_path = joinpath(data_dir, "$(string(data_label)).csv")
-            CSV.write(csv_path, df)
-            println("  Data saved to $csv_path")
+            if pt.dataformat == :csv_external
+                file_path = joinpath(data_dir, "$(string(data_label)).csv")
+                CSV.write(file_path, df)
+                println("  Data saved to $file_path")
+            elseif pt.dataformat == :json_external
+                file_path = joinpath(data_dir, "$(string(data_label)).json")
+                # Convert DataFrame to array of dictionaries
+                rows = []
+                for row in eachrow(df)
+                    row_dict = Dict(String(col) => row[col] for col in names(df))
+                    push!(rows, row_dict)
+                end
+                open(file_path, "w") do f
+                    write(f, JSON.json(rows, 2))
+                end
+                println("  Data saved to $file_path")
+            elseif pt.dataformat == :parquet
+                file_path = joinpath(data_dir, "$(string(data_label)).parquet")
+                # Use DuckDB to write Parquet file
+                con = DBInterface.connect(DuckDB.DB)
+
+                # Convert Symbol columns to String (DuckDB doesn't support Symbol type)
+                df_converted = copy(df)
+                for col in names(df_converted)
+                    col_type = eltype(df_converted[!, col])
+                    # Check if the column type is Symbol or Union{Missing, Symbol} or similar
+                    if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
+                        df_converted[!, col] = string.(df_converted[!, col])
+                    end
+                end
+
+                # Register the DataFrame with DuckDB
+                DuckDB.register_data_frame(con, df_converted, "temp_table")
+                # Write to Parquet file
+                DBInterface.execute(con, "COPY temp_table TO '$file_path' (FORMAT PARQUET)")
+                DBInterface.close!(con)
+                println("  Data saved to $file_path")
+            end
         end
 
         # Generate HTML content
