@@ -541,9 +541,9 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         end
 
         # Generate HTML content
-        data_set_bit   = reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
-        functional_bit = reduce(*, [pti.functional_html for pti in pt.pivot_tables])
-        table_bit      = reduce(*, [pti.appearance_html for pti in pt.pivot_tables])
+        data_set_bit   = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
+        functional_bit = isempty(pt.pivot_tables) ? "" : reduce(*, [pti.functional_html for pti in pt.pivot_tables])
+        table_bit      = isempty(pt.pivot_tables) ? "" : reduce(*, [pti.appearance_html for pti in pt.pivot_tables])
         full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
         full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
         full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
@@ -586,9 +586,9 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
 
     else
         # Original embedded format logic
-        data_set_bit   = reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
-        functional_bit = reduce(*, [pti.functional_html for pti in pt.pivot_tables])
-        table_bit      = reduce(*, [pti.appearance_html for pti in pt.pivot_tables])
+        data_set_bit   = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
+        functional_bit = isempty(pt.pivot_tables) ? "" : reduce(*, [pti.functional_html for pti in pt.pivot_tables])
+        table_bit      = isempty(pt.pivot_tables) ? "" : reduce(*, [pti.appearance_html for pti in pt.pivot_tables])
         full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
         full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
         full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)

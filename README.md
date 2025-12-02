@@ -314,4 +314,315 @@ output_dir/
 - You want the best compression and performance
 - You're using version control (smallest diffs for data changes)
 
+## Plot Types Reference
+
+JSPlots provides six different plot types, each designed for specific visualization needs.
+
+### PivotTable
+
+Interactive pivot table using PivotTable.js library. Allows dynamic reorganization and aggregation of data.
+
+**Constructor:**
+```julia
+PivotTable(chart_title::Symbol, data_label::Symbol;
+    rows = missing,              # Column(s) for rows
+    cols = missing,              # Column(s) for columns
+    vals = missing,              # Column for values
+    inclusions = missing,        # Dict of values to include
+    exclusions = missing,        # Dict of values to exclude
+    colour_map = Dict(...),      # Custom color mapping for heatmaps
+    aggregatorName = :Average,   # Aggregation function
+    extrapolate_colours = false, # Extrapolate color scale
+    rendererName = :Heatmap,     # Renderer type
+    rendererOptions = missing,   # Custom renderer options
+    notes = ""                   # Description text
+)
+```
+
+**Example:**
+```julia
+df = DataFrame(
+    Product = ["A", "A", "B", "B"],
+    Region = ["North", "South", "North", "South"],
+    Sales = [100, 150, 200, 175]
+)
+
+pt = PivotTable(:sales_pivot, :df;
+    rows = [:Product],
+    cols = [:Region],
+    vals = :Sales,
+    aggregatorName = :Sum,
+    rendererName = :Heatmap
+)
+```
+
+**Features:**
+- Interactive drag-and-drop interface
+- Multiple aggregation functions (Sum, Average, Count, etc.)
+- Various renderers (Table, Heatmap, Bar Chart, Line Chart)
+- Custom color scales for heatmaps
+- Filtering with inclusions/exclusions
+
+---
+
+### LineChart
+
+Time series or sequential data visualization with line plots.
+
+**Constructor:**
+```julia
+LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+    x_col::Symbol,               # X-axis column
+    y_col::Symbol,               # Y-axis column
+    color_col = missing,         # Column for color grouping
+    filters = Dict{Symbol,Any}(), # Default filter values
+    title = "",                  # Chart title
+    x_label = "",                # X-axis label
+    y_label = "",                # Y-axis label
+    notes = ""                   # Description text
+)
+```
+
+**Example:**
+```julia
+df = DataFrame(
+    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 31),
+    temperature = randn(31) .+ 20,
+    city = repeat(["NYC", "LA"], 16)[1:31]
+)
+
+chart = LineChart(:temp_chart, df, :df;
+    x_col = :date,
+    y_col = :temperature,
+    color_col = :city,
+    title = "Daily Temperature",
+    x_label = "Date",
+    y_label = "Temperature (°C)"
+)
+```
+
+**Features:**
+- Multiple line series with color grouping
+- Interactive filtering with dropdown menus
+- Automatic legend generation
+- Hover tooltips showing data points
+- Responsive sizing
+
+---
+
+### Chart3d
+
+Three-dimensional surface plots for visualizing functions of two variables.
+
+**Constructor:**
+```julia
+Chart3d(chart_title::Symbol, data_label::Symbol;
+    x_col::Symbol,           # X-axis column
+    y_col::Symbol,           # Y-axis column
+    z_col::Symbol,           # Z-axis (height) column
+    group_col = missing,     # Column for multiple surfaces
+    title = "",              # Chart title
+    x_label = "",            # X-axis label
+    y_label = "",            # Y-axis label
+    z_label = "",            # Z-axis label
+    notes = ""               # Description text
+)
+```
+
+**Example:**
+```julia
+df = allcombinations(DataFrame, x = 1:20, y = 1:20)
+df[!, :z] = sin.(sqrt.(df.x.^2 .+ df.y.^2))
+
+chart = Chart3d(:surface, :df;
+    x_col = :x,
+    y_col = :y,
+    z_col = :z,
+    title = "3D Surface Plot",
+    x_label = "X",
+    y_label = "Y",
+    z_label = "Z = sin(√(x²+y²))"
+)
+```
+
+**Features:**
+- Interactive 3D rotation and zoom
+- Multiple surface groups with distinct colors
+- Automatic color gradient assignment
+- Surface interpolation from scattered points
+- Configurable axes labels
+
+---
+
+### ScatterPlot
+
+Scatter plots with optional marginal distributions and interactive filtering.
+
+**Constructor:**
+```julia
+ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+    x_col::Symbol,                    # X-axis column
+    y_col::Symbol,                    # Y-axis column
+    color_col = missing,              # Column for color grouping
+    slider_col = missing,             # Column(s) for filter sliders
+    marker_size = 5,                  # Point size
+    marker_opacity = 0.7,             # Point transparency
+    show_marginals = true,            # Show marginal histograms
+    title = "",                       # Chart title
+    x_label = "",                     # X-axis label
+    y_label = "",                     # Y-axis label
+    notes = ""                        # Description text
+)
+```
+
+**Example:**
+```julia
+df = DataFrame(
+    height = randn(500) .* 10 .+ 170,
+    weight = randn(500) .* 15 .+ 70,
+    gender = rand(["Male", "Female"], 500),
+    age = rand(20:60, 500)
+)
+
+scatter = ScatterPlot(:height_weight, df, :df;
+    x_col = :height,
+    y_col = :weight,
+    color_col = :gender,
+    slider_col = [:age, :gender],
+    title = "Height vs Weight",
+    x_label = "Height (cm)",
+    y_label = "Weight (kg)"
+)
+```
+
+**Features:**
+- Interactive range and category sliders
+- Multiple slider types (continuous, categorical, date)
+- Marginal distribution histograms
+- Color-coded groups
+- Customizable marker appearance
+- Real-time filtering
+
+---
+
+### DistPlot
+
+Distribution visualization combining histogram, box plot, and rug plot.
+
+**Constructor:**
+```julia
+DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+    value_col::Symbol,              # Column with values to plot
+    group_col = missing,            # Column for group comparison
+    slider_col = missing,           # Column(s) for filter sliders
+    histogram_bins = 30,            # Number of histogram bins
+    show_histogram = true,          # Show histogram
+    show_box = true,                # Show box plot
+    show_rug = true,                # Show rug plot
+    box_opacity = 0.6,              # Box plot transparency
+    title = "",                     # Chart title
+    value_label = "",               # Value axis label
+    notes = ""                      # Description text
+)
+```
+
+**Example:**
+```julia
+df = DataFrame(
+    score = vcat(randn(300) .* 10 .+ 75, randn(200) .* 8 .+ 85),
+    group = vcat(fill("Control", 300), fill("Treatment", 200)),
+    age_group = rand(["18-30", "31-50", "51+"], 500)
+)
+
+dist = DistPlot(:score_dist, df, :df;
+    value_col = :score,
+    group_col = :group,
+    slider_col = [:group, :age_group],
+    histogram_bins = 40,
+    title = "Test Score Distribution",
+    value_label = "Score"
+)
+```
+
+**Features:**
+- Three complementary visualizations (histogram, box, rug)
+- Group comparison with overlaid distributions
+- Interactive filtering
+- Configurable bin counts
+- Toggle individual plot components
+- Outlier detection via box plots
+
+---
+
+### TextBlock
+
+HTML text block for adding formatted text, tables, and documentation to plot pages.
+
+**Constructor:**
+```julia
+TextBlock(html_content::String)
+```
+
+**Example:**
+```julia
+intro = TextBlock("""
+<h2>Analysis Report</h2>
+<p>This report presents findings from our study conducted in Q1 2024.</p>
+<ul>
+    <li>Sample size: 1,000 participants</li>
+    <li>Duration: 3 months</li>
+    <li>Methods: Double-blind randomized trial</li>
+</ul>
+""")
+
+summary = TextBlock("""
+<h2>Key Findings</h2>
+<table>
+    <tr><th>Metric</th><th>Control</th><th>Treatment</th></tr>
+    <tr><td>Mean</td><td>72.3</td><td>78.9</td></tr>
+    <tr><td>Std Dev</td><td>8.2</td><td>7.1</td></tr>
+</table>
+""")
+```
+
+**Supported HTML:**
+- Headings (`<h1>` to `<h6>`)
+- Paragraphs (`<p>`)
+- Lists (`<ul>`, `<ol>`, `<li>`)
+- Tables (`<table>`, `<tr>`, `<td>`, `<th>`)
+- Text formatting (`<strong>`, `<em>`, `<code>`)
+- Links (`<a>`)
+- Blockquotes (`<blockquote>`)
+
+**Features:**
+- No data dependencies (doesn't require DataFrame)
+- Full HTML support with automatic styling
+- Mix with plots on the same page
+- Ideal for annotations, explanations, and summaries
+
+---
+
+## Combining Multiple Plots
+
+You can combine multiple plot types and text blocks on a single page:
+
+```julia
+# Create plots
+line = LineChart(:trends, df1, :df1; x_col=:date, y_col=:value)
+scatter = ScatterPlot(:correlation, df2, :df2; x_col=:x, y_col=:y)
+pivot = PivotTable(:summary, :df3; rows=[:category], vals=:amount)
+intro = TextBlock("<h1>Analysis Dashboard</h1><p>Overview of results</p>")
+
+# Combine into single page
+page = JSPlotPage(
+    Dict{Symbol,DataFrame}(:df1 => df1, :df2 => df2, :df3 => df3),
+    [intro, line, scatter, pivot],
+    tab_title = "My Analysis"
+)
+
+create_html(page, "dashboard.html")
+```
+
+The plots will appear in the order specified in the array, with each properly spaced and labeled.
+
 

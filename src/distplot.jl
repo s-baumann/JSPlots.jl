@@ -450,27 +450,3 @@ struct DistPlot <: JSPlotsType
         new(chart_title, data_label, functional_html, appearance_html)
     end
 end
-
-function detect_slider_type(df::DataFrame, col::Symbol)
-    col_data = df[!, col]
-    
-    # Check if it's a Date type
-    if eltype(col_data) <: Union{Date, DateTime, Missing}
-        return :date
-    end
-    
-    # Check if it's numeric
-    if eltype(col_data) <: Union{Number, Missing}
-        unique_vals = unique(skipmissing(col_data))
-        
-        # If there are few unique values, treat as categorical
-        if length(unique_vals) <= 20
-            return :categorical
-        else
-            return :continuous
-        end
-    end
-    
-    # Otherwise treat as categorical
-    return :categorical
-end
