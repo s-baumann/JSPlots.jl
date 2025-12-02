@@ -1,10 +1,10 @@
-struct PScatterPlot <: PivotTablesType
+struct ScatterPlot <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String
     appearance_html::String
-    
-    function PScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+
+    function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                          x_col::Symbol=:x,
                          y_col::Symbol=:y,
                          color_col::Union{Symbol,Nothing}=nothing,

@@ -1,10 +1,10 @@
 
-struct PChart <: PivotTablesType
+struct LineChart <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String
     appearance_html::String
-    function PChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+    function LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_col::Symbol=:x,
                             y_col::Symbol=:y,
                             color_col::Symbol=:color,

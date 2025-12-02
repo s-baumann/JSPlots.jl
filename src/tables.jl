@@ -48,7 +48,7 @@ end
 
 
 
-struct PivotTable <: PivotTablesType
+struct PivotTable <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String

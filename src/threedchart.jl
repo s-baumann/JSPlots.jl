@@ -1,10 +1,10 @@
 
-struct PThreeDChart <: PivotTablesType
+struct Chart3d <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String
     appearance_html::String
-    function PThreeDChart(chart_title::Symbol, data_label::Symbol;
+    function Chart3d(chart_title::Symbol, data_label::Symbol;
                             height::Int=600,
                             x_col::Symbol=:x,
                             y_col::Symbol=:y,

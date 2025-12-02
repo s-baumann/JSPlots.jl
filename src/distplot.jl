@@ -1,10 +1,10 @@
-struct PDistPlot <: PivotTablesType
+struct DistPlot <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String
     appearance_html::String
-    
-    function PDistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+
+    function DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_col::Symbol=:value,
                       group_col::Union{Symbol,Nothing}=nothing,
                       slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,

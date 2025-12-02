@@ -1,14 +1,14 @@
-# PivotTable
+# JSPlots
 
-This is a wrapper over PivotTableJS. You can use it to embed your data into a html page. Once in there you can visualise the data like a pivottable. You can see examples here https://pivottable.js.org/examples/index.html.
+This is a Julia package for creating interactive JavaScript-based visualizations. It includes support for pivot tables (via PivotTableJS), line charts, 3D charts, scatter plots, and distribution plots using Plotly.js. You can embed your data into HTML pages and visualize them interactively.
 
-The functionality is quite similar to the [python module](https://pypi.org/project/pivottablejs/). One change is that it is possible to put multiple different tables onto the same page (either sharing or not sharing data sources). It is also easy to change the colour mapping for use in HeatMap.
+The pivot table functionality is a wrapper over PivotTableJS (examples: https://pivottable.js.org/examples/index.html), similar to the [python module](https://pypi.org/project/pivottablejs/). You can put multiple different charts and tables onto the same page (either sharing or not sharing data sources). It is also easy to change the colour mapping for use in HeatMap.
 
 As an example see the following. This produces the file pivottable.html
 
 ```
 
-using PivotTables, DataFrames, Dates
+using JSPlots, DataFrames, Dates
 
 stockReturns = DataFrame(
     Symbol = ["RTX", "RTX", "RTX", "GOOG", "GOOG", "GOOG", "MSFT", "MSFT", "MSFT"],
@@ -51,7 +51,7 @@ subframe[!, :z] = cos.(sqrt.(subframe.x .^ 2 .+  subframe.y .^ 2))
 sf2[!, :z] = cos.(sqrt.(sf2.x .^ 2 .+  sf2.y .^ 1)) .- 1.0
 subframe = vcat(subframe, sf2)
 
-pt3 = PThreeDChart(:threeD, :subframe;
+pt3 = Chart3d(:threeD, :subframe;
         x_col = :x,
         y_col = :y,
         z_col = :z,
@@ -83,7 +83,7 @@ df2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
 df2[!, :categ22] .= "Category_B"
 df = vcat(df1, df2)
 
-pt00 = PChart(:pchart, df, :df;
+pt00 = LineChart(:pchart, df, :df;
             x_col=:x,
             y_col=:y,
             color_col=:color,
@@ -94,11 +94,11 @@ pt00 = PChart(:pchart, df, :df;
 
 
 # To plot both of these together we can do:
-pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :subframe => subframe, :df => df), [pt, pt00, pt2, pt3])
+pge = JSPlotPage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :subframe => subframe, :df => df), [pt, pt00, pt2, pt3])
 create_html(pge,"pivottable.html")
 
 
-# Or if you are only charting one single pivottable you dont have to make a PivotTablePage, you can simply do:
+# Or if you are only charting one single pivottable you dont have to make a JSPlotPage, you can simply do:
 create_html(pt, stockReturns, "only_one.html")
 
 

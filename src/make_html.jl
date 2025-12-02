@@ -1,12 +1,12 @@
 
-struct PivotTablePage
+struct JSPlotPage
     dataframes::Dict{Symbol,DataFrame}
     pivot_tables::Vector
     tab_title::String
     page_header::String
     notes::String
     dataformat::Symbol
-    function PivotTablePage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="PivotTables.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
+    function JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
         if !(dataformat in [:csv_embedded, :json_embedded])
             error("dataformat must be either :csv_embedded or :json_embedded")
         end
@@ -14,7 +14,7 @@ struct PivotTablePage
     end
 end
 
-const DATASET_TEMPLATE = raw"""<div id="___DDATA_LABEL___" data-format="___DATA_FORMAT___" style="display: none;">___DATA1___</div>"""
+const DATASET_TEMPLATE = raw"""<script type="text/plain" id="___DDATA_LABEL___" data-format="___DATA_FORMAT___">___DATA1___</script>"""
 
 
 
@@ -24,7 +24,7 @@ const FULL_PAGE_TEMPLATE = raw"""
 <head>
     <title>___TITLE_OF_PAGE___</title>
     <meta charset="UTF-8">
-    <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -66,7 +66,7 @@ const FULL_PAGE_TEMPLATE = raw"""
 
 <body>
 
-<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 
 <script>
 // Centralized data loading function
@@ -82,7 +82,7 @@ function loadDataset(dataLabel) {
         }
 
         var format = dataElement.getAttribute('data-format') || 'csv_embedded';
-        var dataText = dataElement.textContent;
+        var dataText = dataElement.textContent.trim();
 
         if (format === 'json_embedded') {
             // Parse JSON data
@@ -100,11 +100,21 @@ function loadDataset(dataLabel) {
                 dynamicTyping: true,
                 skipEmptyLines: true,
                 complete: function(results) {
-                    if (results.errors.length > 0) {
-                        console.error('CSV parsing errors:', results.errors);
-                        reject(results.errors);
-                    } else {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
                         resolve(results.data);
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
                     }
                 },
                 error: function(error) {
@@ -158,12 +168,11 @@ function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_
         error("Unsupported format: $format")
     end
 
-    # HTML escape the data to prevent issues with special characters
-    data_string_escaped = replace(data_string, "&" => "&amp;")
-    data_string_escaped = replace(data_string_escaped, "<" => "&lt;")
-    data_string_escaped = replace(data_string_escaped, ">" => "&gt;")
+    # Escape only </script> to prevent premature script tag closing
+    # Using <\/script> is safe in script tags and won't interfere with CSV/JSON parsing
+    data_string_safe = replace(data_string, "</script>" => "<\\/script>")
 
-    html_str = replace(DATASET_TEMPLATE, "___DATA1___" => "\n" * data_string_escaped * "\n")
+    html_str = replace(DATASET_TEMPLATE, "___DATA1___" => "\n" * data_string_safe * "\n")
     html_str = replace(html_str, "___DDATA_LABEL___" => replace(string(data_label), " " => "_"))
     html_str = replace(html_str, "___DATA_FORMAT___" => string(format))
     return html_str
@@ -171,7 +180,7 @@ end
 
 
 
-function create_html(pt::PivotTablePage, outfile_path::String="pivottable.html")
+function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
     data_set_bit   = reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
     functional_bit = reduce(*, [pti.functional_html for pti in pt.pivot_tables])
     table_bit      = reduce(*, [pti.appearance_html for pti in pt.pivot_tables])
@@ -189,7 +198,7 @@ function create_html(pt::PivotTablePage, outfile_path::String="pivottable.html")
     println("Pivot table page saved to $outfile_path")
 end
 
-function create_html(pt::PivotTablesType, dd::DataFrame, outfile_path::String="pivottable.html")
-    pge = PivotTablePage(Dict{Symbol,DataFrame}(pt.data_label => dd), [pt])
+function create_html(pt::JSPlotsType, dd::DataFrame, outfile_path::String="pivottable.html")
+    pge = JSPlotPage(Dict{Symbol,DataFrame}(pt.data_label => dd), [pt])
     create_html(pge,outfile_path)
 end
