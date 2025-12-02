@@ -1,4 +1,4 @@
-using PivotTables, DataFrames, Dates, Random, Distributions
+using JSPlots, DataFrames, Dates, Random, Distributions
 
 # Example 1: Simple distribution plot - single group
 Random.seed!(42)
@@ -7,7 +7,7 @@ df1 = DataFrame(
     value = randn(n) .* 10 .+ 50
 )
 
-distplot1 = PDistPlot(:simple_dist, df1, :df1;
+distplot1 = DistPlot(:simple_dist, df1, :df1;
     value_col = :value,
     title = "Simple Distribution Plot",
     value_label = "Values",
@@ -29,7 +29,7 @@ df2 = DataFrame(
     group = repeat(groups, inner=n)
 )
 
-distplot2 = PDistPlot(:multi_group_dist, df2, :df2;
+distplot2 = DistPlot(:multi_group_dist, df2, :df2;
     value_col = :value,
     group_col = :group,
     title = "Treatment Effect Comparison",
@@ -51,7 +51,7 @@ df3 = DataFrame(
     quality = rand(["High", "Medium", "Low"], n)
 )
 
-distplot3 = PDistPlot(:filtered_dist, df3, :df3;
+distplot3 = DistPlot(:filtered_dist, df3, :df3;
     value_col = :value,
     slider_col = :category,
     title = "Distribution with Categorical Filter",
@@ -68,7 +68,7 @@ df4 = DataFrame(
     income = rand(20000:150000, n)
 )
 
-distplot4 = PDistPlot(:range_filtered_dist, df4, :df4;
+distplot4 = DistPlot(:range_filtered_dist, df4, :df4;
     value_col = :score,
     slider_col = [:age, :income],
     histogram_bins = 40,
@@ -89,7 +89,7 @@ df5 = DataFrame(
     region = rand(["North", "South", "East", "West"], n)
 )
 
-distplot5 = PDistPlot(:seasonal_dist, df5, :df5;
+distplot5 = DistPlot(:seasonal_dist, df5, :df5;
     value_col = :temperature,
     group_col = :region,
     slider_col = [:date, :region],
@@ -114,7 +114,7 @@ df6 = DataFrame(
     volume = rand(1_000_000:50_000_000, n)
 )
 
-distplot6 = PDistPlot(:stock_returns_dist, df6, :df6;
+distplot6 = DistPlot(:stock_returns_dist, df6, :df6;
     value_col = :return_pct,
     group_col = :symbol,
     slider_col = [:symbol, :date, :volume],
@@ -130,7 +130,7 @@ df7 = DataFrame(
     measurement = rand(Exponential(5), 1000)
 )
 
-distplot7 = PDistPlot(:histogram_only, df7, :df7;
+distplot7 = DistPlot(:histogram_only, df7, :df7;
     value_col = :measurement,
     show_box = false,
     show_rug = false,
@@ -156,7 +156,7 @@ df8 = DataFrame(
     subject_id = repeat(1:20, outer=30)
 )
 
-distplot8 = PDistPlot(:longitudinal_dist, df8, :df8;
+distplot8 = DistPlot(:longitudinal_dist, df8, :df8;
     value_col = :measurement,
     group_col = :time_point,
     show_histogram = true,
@@ -179,7 +179,7 @@ df9 = DataFrame(
     sample_type = rand(["Morning", "Evening"], n)
 )
 
-distplot9 = PDistPlot(:bimodal_dist, df9, :df9;
+distplot9 = DistPlot(:bimodal_dist, df9, :df9;
     value_col = :value,
     slider_col = :sample_type,
     histogram_bins = 50,
@@ -199,7 +199,7 @@ df10 = DataFrame(
     hire_date = rand(Date(2010, 1, 1):Day(30):Date(2024, 12, 31), n)
 )
 
-distplot10 = PDistPlot(:employee_scores, df10, :df10;
+distplot10 = DistPlot(:employee_scores, df10, :df10;
     value_col = :score,
     group_col = :performance_rating,
     slider_col = [:department, :experience_years, :performance_rating, :hire_date],
@@ -224,10 +224,11 @@ data_dict = Dict{Symbol,DataFrame}(
     :df10 => df10
 )
 
-page = PivotTablePage(
+page = JSPlotPage(
     data_dict,
     [distplot1, distplot2, distplot3, distplot4, distplot5, 
      distplot6, distplot7, distplot8, distplot9, distplot10]
+    ; dataformat = :json_embedded
 )
 
 create_html(page, "generated_html_examples/distplots.html")

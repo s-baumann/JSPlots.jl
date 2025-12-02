@@ -1,4 +1,4 @@
-using PivotTables, DataFrames, Dates, Random
+using JSPlots, DataFrames, Dates, Random
 
 # Example 1: Simple scatter plot with single continuous slider
 Random.seed!(42)
@@ -10,7 +10,7 @@ df1 = DataFrame(
 )
 df1.y .+= 0.5 .* df1.x  # Add some correlation
 
-scatter1 = PScatterPlot(:simple_scatter, df1, :df1;
+scatter1 = ScatterPlot(:simple_scatter, df1, :df1;
     x_col = :x,
     y_col = :y,
     slider_col = :value,  # Single slider
@@ -34,7 +34,7 @@ df2 = DataFrame(
     score = rand(n) .* 50
 )
 
-scatter2 = PScatterPlot(:multi_slider, df2, :df2;
+scatter2 = ScatterPlot(:multi_slider, df2, :df2;
     x_col = :x,
     y_col = :y,
     color_col = :group,
@@ -59,7 +59,7 @@ df3 = DataFrame(
                       Dates.month(d) ∈ [6, 7, 8] ? "Summer" : "Fall", dates)
 )
 
-scatter3 = PScatterPlot(:weather_scatter, df3, :df3;
+scatter3 = ScatterPlot(:weather_scatter, df3, :df3;
     x_col = :temperature,
     y_col = :rainfall,
     color_col = :season,
@@ -76,7 +76,7 @@ df4 = DataFrame(
     y = rand(1000) .* 100
 )
 
-scatter4 = PScatterPlot(:no_sliders, df4, :df4;
+scatter4 = ScatterPlot(:no_sliders, df4, :df4;
     x_col = :x,
     y_col = :y,
     show_marginals = false,
@@ -96,7 +96,7 @@ stock_data = DataFrame(
     sector = repeat(["Tech", "Tech", "Tech"], outer=91)
 )
 
-scatter5 = PScatterPlot(:stock_scatter, stock_data, :stock_data;
+scatter5 = ScatterPlot(:stock_scatter, stock_data, :stock_data;
     x_col = :volume,
     y_col = :return_pct,
     color_col = :symbol,
@@ -118,7 +118,7 @@ df6 = DataFrame(
     value = rand(n) .* 1000
 )
 
-scatter6 = PScatterPlot(:complex_filters, df6, :df6;
+scatter6 = ScatterPlot(:complex_filters, df6, :df6;
     x_col = :x,
     y_col = :y,
     color_col = :priority,
@@ -139,7 +139,7 @@ data_dict = Dict{Symbol,DataFrame}(
     :df6 => df6
 )
 
-page = PivotTablePage(
+page = JSPlotPage(
     data_dict,
     [scatter1, scatter2, scatter3, scatter4, scatter5, scatter6]
 )

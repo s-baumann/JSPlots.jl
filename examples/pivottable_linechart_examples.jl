@@ -1,5 +1,5 @@
 
-using PivotTables, DataFrames, Dates
+using JSPlots, DataFrames, Dates
 
 stockReturns = DataFrame(
     Symbol = ["RTX", "RTX", "RTX", "GOOG", "GOOG", "GOOG", "MSFT", "MSFT", "MSFT"],
@@ -46,7 +46,7 @@ sf3[!, :z] = cos.(sqrt.(sf3.x .^ 2 .+  sf3.y .^ 0.5)) .+ 1.0
 sf4[!, :z] = sqrt.(sf4.x) .- sqrt.(sf4.y)
 subframe = reduce(vcat, [subframe, sf2, sf3, sf4])
 
-pt3 = PThreeDChart(:threeD, :subframe;
+pt3 = Chart3d(:threeD, :subframe;
         x_col = :x,
         y_col = :y,
         z_col = :z,
@@ -78,7 +78,7 @@ df2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
 df2[!, :categ22] .= "Category_B"
 df = vcat(df1, df2)
 
-pt00 = PChart(:pchart, df, :df;
+pt00 = LineChart(:pchart, df, :df;
             x_col=:x,
             y_col=:y,
             color_col=:color,
@@ -89,9 +89,9 @@ pt00 = PChart(:pchart, df, :df;
 
 
 # To plot both of these together we can do:
-pge = PivotTablePage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :subframe => subframe, :df => df), [pt, pt00, pt2, pt3]; dataformat = :json_embedded)
+pge = JSPlotPage(Dict{Symbol,DataFrame}(:stockReturns => stockReturns, :correlations => correlations, :subframe => subframe, :df => df), [pt, pt00, pt2, pt3]; dataformat = :json_embedded)
 create_html(pge,"generated_html_examples/pivottable.html")
 
 
-# Or if you are only charting one single pivottable you dont have to make a PivotTablePage, you can simply do:
+# Or if you are only charting one single pivottable you dont have to make a JSPlotPage, you can simply do:
 create_html(pt, stockReturns, "generated_html_examples/only_one.html")
