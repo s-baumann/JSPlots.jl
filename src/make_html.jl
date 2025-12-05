@@ -17,6 +17,12 @@ end
 const DATASET_TEMPLATE = raw"""<script type="text/plain" id="___DDATA_LABEL___" data-format="___DATA_FORMAT___" data-src="___DATA_SRC___">___DATA1___</script>"""
 
 
+const SEGMENT_SEPARATOR = """
+<br>
+<hr>
+<br>
+"""
+
 
 const FULL_PAGE_TEMPLATE = raw"""
 <!DOCTYPE html>
@@ -474,6 +480,37 @@ function generate_sh_launcher(html_filename::String)
     """
 end
 
+"""
+    generate_data_source_attribution(data_label::Symbol, dataformat::Symbol)
+
+Generate HTML for data source attribution text.
+Returns a small text element showing the data source based on the dataformat.
+"""
+function generate_data_source_attribution(data_label::Symbol, dataformat::Symbol)
+    data_text = if dataformat == :parquet
+        "Data: $(string(data_label)).parquet"
+    elseif dataformat == :csv_external
+        "Data: $(string(data_label)).csv"
+    elseif dataformat == :json_external
+        "Data: $(string(data_label)).json"
+    else  # embedded formats
+        "Data: $(string(data_label))"
+    end
+
+    return """<p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">$data_text</p>"""
+end
+
+"""
+    generate_picture_attribution(image_path::String)
+
+Generate HTML for picture source attribution text.
+Returns a small text element showing the picture filename.
+"""
+function generate_picture_attribution(image_path::String)
+    filename = basename(image_path)
+    return """<p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">$filename</p>"""
+end
+
 function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
     # Collect extra styles needed for TextBlock, Picture, and Table
     extra_styles = ""
@@ -563,14 +600,27 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         functional_bit = ""
         table_bit = ""
 
-        for pti in pt.pivot_tables
+        for (i, pti) in enumerate(pt.pivot_tables)
+            sp = i == 1 ? "" : SEGMENT_SEPARATOR
             if isa(pti, Picture)
                 # Generate Picture HTML based on dataformat
-                table_bit *= generate_picture_html(pti, pt.dataformat, project_dir)
+                table_bit *= sp * generate_picture_html(pti, pt.dataformat, project_dir)
+                # Add picture attribution
+                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
                 # Picture has no functional HTML
+            elseif isa(pti, Table)
+                functional_bit *= pti.functional_html
+                table_bit *= sp * pti.appearance_html
+                # Add table attribution (Table is self-contained, use chart_title)
+                table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
+            elseif hasfield(typeof(pti), :data_label)
+                functional_bit *= pti.functional_html
+                table_bit *= sp * pti.appearance_html
+                # Add data source attribution for charts with data_label
+                table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, pt.dataformat)
             else
                 functional_bit *= pti.functional_html
-                table_bit *= pti.appearance_html
+                table_bit *= sp * pti.appearance_html
             end
         end
 
@@ -621,14 +671,29 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         functional_bit = ""
         table_bit = ""
 
-        for pti in pt.pivot_tables
+
+
+        for (i, pti) in enumerate(pt.pivot_tables)
+            sp = i == 1 ? "" : SEGMENT_SEPARATOR
             if isa(pti, Picture)
                 # Generate Picture HTML based on dataformat (embedded)
-                table_bit *= generate_picture_html(pti, pt.dataformat, "")
+                table_bit *= sp * generate_picture_html(pti, pt.dataformat, "")
+                # Add picture attribution
+                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
                 # Picture has no functional HTML
+            elseif isa(pti, Table)
+                functional_bit *= pti.functional_html
+                table_bit *= sp * pti.appearance_html
+                # Add table attribution (Table is self-contained, use chart_title)
+                table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
+            elseif hasfield(typeof(pti), :data_label)
+                functional_bit *= pti.functional_html
+                table_bit *= sp * pti.appearance_html
+                # Add data source attribution for charts with data_label
+                table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, pt.dataformat)
             else
                 functional_bit *= pti.functional_html
-                table_bit *= pti.appearance_html
+                table_bit *= sp * pti.appearance_html
             end
         end
 

@@ -6,17 +6,19 @@ n = 500
 df1 = DataFrame(
     x = randn(n) .* 2,
     y = randn(n) .* 2,
-    value = rand(n) .* 100
+    value = rand(n) .* 100,
+    color = repeat(["default"], n)  # Added color column
 )
 df1.y .+= 0.5 .* df1.x  # Add some correlation
 
 scatter1 = ScatterPlot(:simple_scatter, df1, :df1;
-    x_col = :x,
-    y_col = :y,
+    x_cols = [:x],
+    y_cols = [:y],
+    color_cols = [:color],
+    pointtype_cols = [:color],
+    pointsize_cols = [:color],
     slider_col = :value,  # Single slider
     title = "Simple Scatter with Continuous Range Slider",
-    x_label = "X Variable",
-    y_label = "Y Variable",
     notes = "Use the range slider to filter by value"
 )
 
@@ -35,13 +37,13 @@ df2 = DataFrame(
 )
 
 scatter2 = ScatterPlot(:multi_slider, df2, :df2;
-    x_col = :x,
-    y_col = :y,
-    color_col = :group,
+    x_cols = [:x],
+    y_cols = [:y],
+    color_cols = [:group],
+    pointtype_cols = [:group],
+    pointsize_cols = [:group],
     slider_col = [:category, :score],  # Multiple sliders!
     title = "Scatter with Multiple Filters",
-    x_label = "X Variable",
-    y_label = "Y Variable",
     notes = "Points must pass ALL filter criteria to be displayed"
 )
 
@@ -60,31 +62,32 @@ df3 = DataFrame(
 )
 
 scatter3 = ScatterPlot(:weather_scatter, df3, :df3;
-    x_col = :temperature,
-    y_col = :rainfall,
-    color_col = :season,
+    x_cols = [:temperature],
+    y_cols = [:rainfall],
+    color_cols = [:season],
+    pointtype_cols = [:season],
+    pointsize_cols = [:season],
     slider_col = [:date, :season, :temperature],  # Three sliders: date, categorical, and continuous
     title = "Weather Data with Multiple Range Sliders",
-    x_label = "Temperature (°C)",
-    y_label = "Rainfall (mm)",
     notes = "Filter by date range, season(s), and temperature range simultaneously"
 )
 
 # Example 4: Scatter without sliders (showing it's still optional)
 df4 = DataFrame(
     x = rand(1000) .* 100,
-    y = rand(1000) .* 100
+    y = rand(1000) .* 100,
+    color = repeat(["default"], 1000)  # Added color column
 )
 
 scatter4 = ScatterPlot(:no_sliders, df4, :df4;
-    x_col = :x,
-    y_col = :y,
-    show_marginals = false,
+    x_cols = [:x],
+    y_cols = [:y],
+    color_cols = [:color],
+    pointtype_cols = [:color],
+    pointsize_cols = [:color],
     marker_size = 3,
     marker_opacity = 0.4,
-    title = "Simple Scatter (No Filters)",
-    x_label = "X Coordinate",
-    y_label = "Y Coordinate"
+    title = "Simple Scatter (No Filters)"
 )
 
 # Example 5: Stock data with date range + categorical filters
@@ -97,13 +100,13 @@ stock_data = DataFrame(
 )
 
 scatter5 = ScatterPlot(:stock_scatter, stock_data, :stock_data;
-    x_col = :volume,
-    y_col = :return_pct,
-    color_col = :symbol,
+    x_cols = [:volume],
+    y_cols = [:return_pct],
+    color_cols = [:symbol],
+    pointtype_cols = [:symbol],
+    pointsize_cols = [:symbol],
     slider_col = [:date, :symbol, :volume],  # Date range + multi-select + volume range
     title = "Stock Returns vs Volume with Multiple Filters",
-    x_label = "Trading Volume",
-    y_label = "Daily Return (%)",
     notes = "Filter by date range, symbol(s), and volume range"
 )
 
@@ -119,13 +122,13 @@ df6 = DataFrame(
 )
 
 scatter6 = ScatterPlot(:complex_filters, df6, :df6;
-    x_col = :x,
-    y_col = :y,
-    color_col = :priority,
+    x_cols = [:x],
+    y_cols = [:y],
+    color_cols = [:priority],
+    pointtype_cols = [:priority],
+    pointsize_cols = [:priority],
     slider_col = [:region, :priority, :timestamp, :value],  # Four different slider types
     title = "Complex Multi-Filter Scatter Plot",
-    x_label = "X Position",
-    y_label = "Y Position",
     notes = "Demonstrates 4 simultaneous filters: 2 categorical + 1 date range + 1 continuous range"
 )
 

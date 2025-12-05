@@ -12,7 +12,6 @@ const TABLE_TEMPLATE = raw"""
             </button>
         </div>
     </div>
-    <br><hr><br>
 """
 
 const TABLE_STYLE = raw"""

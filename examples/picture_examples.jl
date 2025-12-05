@@ -78,6 +78,7 @@ df = DataFrame(
 line_chart = LineChart(:trend, df, :df;
     x_col = :category,
     y_col = :value,
+    color_cols = [:color],
     title = "Monthly Trend",
     x_label = "Month",
     y_label = "Value"

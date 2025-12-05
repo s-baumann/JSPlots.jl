@@ -47,7 +47,8 @@ df = DataFrame(
 line_chart = LineChart(:timeseries, df, :df;
     x_col = :date,
     y_col = :value,
-    color_col = :category,
+    color_cols = [:category],
+    linetype_cols = [:category],
     title = "Time Series Data",
     x_label = "Date",
     y_label = "Value"
@@ -62,12 +63,12 @@ stock_data = DataFrame(
 )
 
 scatter_chart = ScatterPlot(:stock_scatter, stock_data, :stock_data;
-    x_col = :volume,
-    y_col = :price,
-    color_col = :symbol,
-    title = "Stock Price vs Volume",
-    x_label = "Volume",
-    y_label = "Price"
+    x_cols = [:volume],
+    y_cols = [:price],
+    color_cols = [:symbol],
+    pointtype_cols = [:symbol],
+    pointsize_cols = [:symbol],
+    title = "Stock Price vs Volume"
 )
 
 usage_notes = TextBlock("""

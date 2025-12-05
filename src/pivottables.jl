@@ -45,8 +45,6 @@ const PIVOTTABLE_IN_PAGE_TEMPLATE = raw"""
     <h2>___TABLE_HEADING___</h2>
     <p>___NOTES___</p>
     <div id="__FUNCTION_NAME___"></div>
-
-    <br><hr><br>
 """
 
 function table_to_html(chart_title, notes)

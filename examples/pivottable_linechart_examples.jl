@@ -89,7 +89,7 @@ df = vcat(df1, df2)
 pt00 = LineChart(:pchart, df, :df;
             x_col=:x,
             y_col=:y,
-            color_col=:color,
+            color_cols=[:color],
             filters=Dict(:categ => :A, :categ22 => "Category_A"),
             title="Line Chart with Filters",
             x_label="This is the x axis",

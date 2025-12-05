@@ -5,7 +5,6 @@ const PICTURE_TEMPLATE = raw"""
         <p>___NOTES___</p>
         ___IMAGE_CONTENT___
     </div>
-    <br><hr><br>
 """
 
 const PICTURE_STYLE = raw"""

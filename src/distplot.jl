@@ -444,7 +444,6 @@ struct DistPlot <: JSPlotsType
         
         <!-- Chart -->
         <div id="$chart_title"></div>
-        <br><hr><br>
         """
         
         new(chart_title, data_label, functional_html, appearance_html)

@@ -1,10 +1,8 @@
-
+ 
 const TEXTBLOCK_TEMPLATE = raw"""
     <div class="textblock-content">
         ___HTML_CONTENT___
     </div>
-
-    <br><hr><br>
 """
 
 const TEXTBLOCK_STYLE = raw"""
