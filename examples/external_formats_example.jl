@@ -45,8 +45,8 @@ df = DataFrame(
 
 # Create a line chart
 line_chart = LineChart(:timeseries, df, :df;
-    x_col = :date,
-    y_col = :value,
+    x_cols = [:date],
+    y_cols = [:value],
     color_cols = [:category],
     linetype_cols = [:category],
     title = "Time Series Data",

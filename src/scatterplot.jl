@@ -4,9 +4,7 @@ struct ScatterPlot <: JSPlotsType
     functional_html::String
     appearance_html::String
 
-    function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                         x_cols::Vector{Symbol}=[:x],
-                         y_cols::Vector{Symbol}=[:y],
+    function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                          color_cols::Vector{Symbol}=[:color],
                          pointtype_cols::Vector{Symbol}=[:color],
                          pointsize_cols::Vector{Symbol}=[:color],
@@ -18,16 +16,26 @@ struct ScatterPlot <: JSPlotsType
                          marker_opacity::Float64=0.6,
                          title::String="Scatter Plot",
                          notes::String="")
-        
-        # Validate that required columns exist
+
         all_cols = names(df)
-        for col in vcat(x_cols, y_cols, color_cols, pointtype_cols, pointsize_cols)
-            if !(String(col) in all_cols)
-                error("Column $col not found in dataframe. Available columns: $all_cols")
-            end
+
+        # Helper function to validate columns
+        validate_cols(cols, name) = begin
+            valid = [col for col in cols if String(col) in all_cols]
+            isempty(valid) && error("None of the specified $(name) exist in dataframe. Available: $all_cols")
+            valid
         end
 
-        # Normalize facet_cols to a vector
+        valid_x_cols = dimensions
+        valid_y_cols = dimensions
+        default_x_col = string(dimensions[1])  # First dimension is default X
+        default_y_col = string(dimensions[2])  # Second dimension is default Y
+
+        valid_color_cols = validate_cols(color_cols, "color_cols")
+        valid_pointtype_cols = validate_cols(pointtype_cols, "pointtype_cols")
+        valid_pointsize_cols = validate_cols(pointsize_cols, "pointsize_cols")
+
+        # Normalize facet_cols
         facet_choices = if facet_cols === nothing
             Symbol[]
         elseif facet_cols isa Symbol
@@ -36,23 +44,24 @@ struct ScatterPlot <: JSPlotsType
             facet_cols
         end
 
-        # Validate facet columns exist
-        for col in facet_choices
-            if !(String(col) in all_cols)
-                error("Facet column $col not found in dataframe. Available columns: $all_cols")
-            end
-        end
-
-        # Normalize default faceting
-        default_facet = if default_facet_cols === nothing
-            nothing
+        default_facet_array = if default_facet_cols === nothing
+            Symbol[]
         elseif default_facet_cols isa Symbol
             [default_facet_cols]
         else
             default_facet_cols
         end
 
-        # Normalize slider_col to always be a vector
+        # Validate facets
+        length(default_facet_array) > 2 && error("default_facet_cols can have at most 2 columns")
+        for col in default_facet_array
+            col in facet_choices || error("default_facet_cols must be a subset of facet_cols")
+        end
+        for col in facet_choices
+            String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
+        end
+
+        # Normalize slider_col
         slider_cols = if slider_col === nothing
             Symbol[]
         elseif slider_col isa Symbol
@@ -60,168 +69,111 @@ struct ScatterPlot <: JSPlotsType
         else
             slider_col
         end
-        
-        # Build dropdown controls for dynamic dimensions
-        dropdowns_html = ""
 
-        # X dimension dropdown
-        x_options = ""
-        for col in x_cols
-            selected = (col == first(x_cols)) ? " selected" : ""
-            x_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-        end
-        dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="x_col_select_$chart_title">X dimension: </label>
-            <select id="x_col_select_$chart_title" onchange="updateChart_$chart_title()">
-$x_options            </select>
-        </div>
-        """
-
-        # Y dimension dropdown
-        y_options = ""
-        for col in y_cols
-            selected = (col == first(y_cols)) ? " selected" : ""
-            y_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-        end
-        dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="y_col_select_$chart_title">Y dimension: </label>
-            <select id="y_col_select_$chart_title" onchange="updateChart_$chart_title()">
-$y_options            </select>
-        </div>
-        """
-
-        # Color dropdown
-        color_options = ""
-        for col in color_cols
-            selected = (col == first(color_cols)) ? " selected" : ""
-            color_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-        end
-        dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="color_col_select_$chart_title">Color by: </label>
-            <select id="color_col_select_$chart_title" onchange="updateChart_$chart_title()">
-$color_options            </select>
-        </div>
-        """
-
-        # Point type dropdown
-        pointtype_options = ""
-        for col in pointtype_cols
-            selected = (col == first(pointtype_cols)) ? " selected" : ""
-            pointtype_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-        end
-        dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="pointtype_col_select_$chart_title">Point type by: </label>
-            <select id="pointtype_col_select_$chart_title" onchange="updateChart_$chart_title()">
-$pointtype_options            </select>
-        </div>
-        """
-
-        # Point size dropdown
-        pointsize_options = ""
-        for col in pointsize_cols
-            selected = (col == first(pointsize_cols)) ? " selected" : ""
-            pointsize_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-        end
-        dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="pointsize_col_select_$chart_title">Point size by: </label>
-            <select id="pointsize_col_select_$chart_title" onchange="updateChart_$chart_title()">
-$pointsize_options            </select>
-        </div>
-        """
-
-        # Faceting dropdowns (conditional on number of facet options)
-        if length(facet_choices) == 1
-            # Single facet option - just on/off toggle
-            facet_col = first(facet_choices)
-            facet1_default = (default_facet !== nothing && facet_col in default_facet) ? facet_col : "None"
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"" * (facet1_default == "None" ? " selected" : "") * ">None</option>\n"
-            facet1_options *= "                <option value=\"$facet_col\"" * (facet1_default == facet_col ? " selected" : "") * ">$facet_col</option>\n"
-            dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="facet1_select_$chart_title">Facet by: </label>
-            <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$facet1_options            </select>
-        </div>
-        """
-        elseif length(facet_choices) >= 2
-            # Multiple facet options - show both facet 1 and facet 2 dropdowns
-            facet1_default = (default_facet !== nothing && length(default_facet) >= 1) ? default_facet[1] : "None"
-            facet2_default = (default_facet !== nothing && length(default_facet) >= 2) ? default_facet[2] : "None"
-
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"" * (facet1_default == "None" ? " selected" : "") * ">None</option>\n"
-            for col in facet_choices
-                selected = (col == facet1_default) ? " selected" : ""
-                facet1_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            facet2_options = ""
-            facet2_options *= "                <option value=\"None\"" * (facet2_default == "None" ? " selected" : "") * ">None</option>\n"
-            for col in facet_choices
-                selected = (col == facet2_default) ? " selected" : ""
-                facet2_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            dropdowns_html *= """
-        <div style="margin: 10px;">
-            <label for="facet1_select_$chart_title">Facet 1: </label>
-            <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$facet1_options            </select>
-        </div>
-        <div style="margin: 10px;">
-            <label for="facet2_select_$chart_title">Facet 2: </label>
-            <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-$facet2_options            </select>
-        </div>
-        """
+        # Helper function to build dropdown HTML
+        build_dropdown(id, label, cols, title) = begin
+            length(cols) <= 1 && return ""
+            options = join(["                    <option value=\"$col\"$((col == first(cols)) ? " selected" : "")>$col</option>"
+                           for col in cols], "\n")
+            """
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="$(id)_$title">$label:</label>
+                    <select id="$(id)_$title" onchange="updateChart_$title()">
+$options                </select>
+                </div>
+            """
         end
 
-        # Density toggle button
-        density_button_html = """
-        <div style="margin: 10px;">
+        # Build all dropdowns
+        dropdowns_html = """
+        <div style="margin: 10px 0;">
             <button id="$(chart_title)_density_toggle" style="padding: 5px 15px; cursor: pointer;">
                 $(show_density ? "Hide" : "Show") Density Contours
             </button>
         </div>
         """
 
-        dropdowns_html = density_button_html * dropdowns_html
+        # X and Y dropdowns (on same line if either has multiple options)
+        xy_html = build_dropdown("x_col_select", "X", valid_x_cols, chart_title) *
+                  build_dropdown("y_col_select", "Y", valid_y_cols, chart_title)
+        if !isempty(xy_html)
+            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+$xy_html        </div>
+"""
+        end
 
-        # Generate sliders HTML and initialization
+        # Style dropdowns (color, pointtype, pointsize on same line)
+        style_html = build_dropdown("color_col_select", "Color", valid_color_cols, chart_title) *
+                     build_dropdown("pointtype_col_select", "Point type", valid_pointtype_cols, chart_title) *
+                     build_dropdown("pointsize_col_select", "Point size", valid_pointsize_cols, chart_title)
+        if !isempty(style_html)
+            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+$style_html        </div>
+"""
+        end
+
+        # Facet dropdowns
+        if length(facet_choices) == 1
+            facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
+            options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
+                     "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
+            dropdowns_html *= """
+            <div style="margin: 10px 0;">
+                <label for="facet1_select_$chart_title">Facet by: </label>
+                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+$options                </select>
+            </div>
+            """
+        elseif length(facet_choices) >= 2
+            facet1_default = length(default_facet_array) >= 1 ? default_facet_array[1] : "None"
+            facet2_default = length(default_facet_array) >= 2 ? default_facet_array[2] : "None"
+
+            options1 = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
+                      join(["                <option value=\"$col\"$((col == facet1_default) ? " selected" : "")>$col</option>"
+                           for col in facet_choices], "\n")
+            options2 = "                <option value=\"None\"$((facet2_default == "None") ? " selected" : "")>None</option>\n" *
+                      join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
+                           for col in facet_choices], "\n")
+
+            dropdowns_html *= """
+            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet1_select_$chart_title">Facet 1:</label>
+                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+$options1                </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet2_select_$chart_title">Facet 2:</label>
+                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
+$options2                </select>
+                </div>
+            </div>
+            """
+        end
+
+        # Generate sliders
         sliders_html = ""
         slider_init_js = ""
-        slider_initialized_checks = String[]
-        
+
         for col in slider_cols
             slider_type = detect_slider_type(df, col)
             slider_id = "$(chart_title)_$(col)_slider"
-            
+
             if slider_type == :categorical
                 unique_vals = sort(unique(skipmissing(df[!, col])))
-                options_html = join(["""<option value="$(v)" selected>$(v)</option>""" for v in unique_vals], "\n")
+                options = join(["<option value=\"$(v)\" selected>$(v)</option>" for v in unique_vals], "\n")
                 sliders_html *= """
                 <div style="margin: 20px 0;">
                     <label for="$slider_id">Filter by $(col): </label>
                     <select id="$slider_id" multiple style="width: 300px; height: 100px;">
-                        $options_html
+                        $options
                     </select>
                     <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
                 </div>
                 """
-                slider_init_js *= """
-                    document.getElementById('$slider_id').addEventListener('change', function() {
-                        updatePlotWithFilters_$(chart_title)();
-                    });
-                """
+                slider_init_js *= "                    document.getElementById('$slider_id').addEventListener('change', () => updatePlotWithFilters_$(chart_title)());\n"
             elseif slider_type == :continuous
-                min_val = minimum(skipmissing(df[!, col]))
-                max_val = maximum(skipmissing(df[!, col]))
+                min_val, max_val = extrema(skipmissing(df[!, col]))
                 sliders_html *= """
                 <div style="margin: 20px 0;">
                     <label>Filter by $(col): </label>
@@ -231,20 +183,12 @@ $facet2_options            </select>
                 """
                 slider_init_js *= """
                     \$("#$slider_id").slider({
-                        range: true,
-                        min: $min_val,
-                        max: $max_val,
-                        step: $(abs(max_val - min_val) / 1000),
+                        range: true, min: $min_val, max: $max_val, step: $(abs(max_val - min_val) / 1000),
                         values: [$min_val, $max_val],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2));
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
+                        slide: (e, ui) => \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2)),
+                        change: () => updatePlotWithFilters_$(chart_title)()
                     });
                 """
-                push!(slider_initialized_checks, "\$(\"#$slider_id\").data('ui-slider')")
             elseif slider_type == :date
                 unique_dates = sort(unique(skipmissing(df[!, col])))
                 date_strings = string.(unique_dates)
@@ -258,70 +202,43 @@ $facet2_options            </select>
                 slider_init_js *= """
                     window.dateValues_$(slider_id) = $(JSON.json(date_strings));
                     \$("#$slider_id").slider({
-                        range: true,
-                        min: 0,
-                        max: $(length(unique_dates)-1),
-                        step: 1,
+                        range: true, min: 0, max: $(length(unique_dates)-1), step: 1,
                         values: [0, $(length(unique_dates)-1)],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]);
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
+                        slide: (e, ui) => \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]),
+                        change: () => updatePlotWithFilters_$(chart_title)()
                     });
                 """
-                push!(slider_initialized_checks, "\$(\"#$slider_id\").data('ui-slider')")
             end
         end
-        
-        # Generate filtering JavaScript for all sliders
-        filter_logic_js = ""
-        if !isempty(slider_cols)
+
+        # Generate filter logic
+        filter_logic_js = if !isempty(slider_cols)
             filter_checks = String[]
             for col in slider_cols
                 slider_type = detect_slider_type(df, col)
                 slider_id = "$(chart_title)_$(col)_slider"
-                
+
                 if slider_type == :categorical
-                    push!(filter_checks, """
-                        // Filter for $(col) (categorical)
-                        var $(col)_select = document.getElementById('$slider_id');
-                        var $(col)_selected = Array.from($(col)_select.selectedOptions).map(opt => opt.value);
-                        if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) {
-                            return false;
-                        }
-                    """)
+                    push!(filter_checks, "const $(col)_selected = Array.from(document.getElementById('$slider_id').selectedOptions).map(opt => opt.value);\n" *
+                                        "                        if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) return false;")
                 elseif slider_type == :continuous
-                    push!(filter_checks, """
-                        // Filter for $(col) (continuous)
-                        if (\$("#$slider_id").data('ui-slider')) {
-                            var $(col)_values = \$("#$slider_id").slider("values");
-                            var $(col)_val = parseFloat(row.$(col));
-                            if ($(col)_val < $(col)_values[0] || $(col)_val > $(col)_values[1]) {
-                                return false;
-                            }
-                        }
-                    """)
+                    push!(filter_checks, "if (\$(\"#$slider_id\").data('ui-slider')) {\n" *
+                                        "                            const $(col)_values = \$(\"#$slider_id\").slider(\"values\");\n" *
+                                        "                            const $(col)_val = parseFloat(row.$(col));\n" *
+                                        "                            if ($(col)_val < $(col)_values[0] || $(col)_val > $(col)_values[1]) return false;\n" *
+                                        "                        }")
                 elseif slider_type == :date
-                    push!(filter_checks, """
-                        // Filter for $(col) (date)
-                        if (\$("#$slider_id").data('ui-slider')) {
-                            var $(col)_values = \$("#$slider_id").slider("values");
-                            var $(col)_minDate = window.dateValues_$(slider_id)[$(col)_values[0]];
-                            var $(col)_maxDate = window.dateValues_$(slider_id)[$(col)_values[1]];
-                            var $(col)_rowDate = row.$(col);
-                            if ($(col)_rowDate < $(col)_minDate || $(col)_rowDate > $(col)_maxDate) {
-                                return false;
-                            }
-                        }
-                    """)
+                    push!(filter_checks, "if (\$(\"#$slider_id\").data('ui-slider')) {\n" *
+                                        "                            const $(col)_values = \$(\"#$slider_id\").slider(\"values\");\n" *
+                                        "                            const $(col)_minDate = window.dateValues_$(slider_id)[$(col)_values[0]];\n" *
+                                        "                            const $(col)_maxDate = window.dateValues_$(slider_id)[$(col)_values[1]];\n" *
+                                        "                            if (row.$(col) < $(col)_minDate || row.$(col) > $(col)_maxDate) return false;\n" *
+                                        "                        }")
                 end
             end
-            
-            filter_logic_js = """
+            """
                 function updatePlotWithFilters_$(chart_title)() {
-                    var filteredData = window.allData_$(chart_title).filter(function(row) {
+                    const filteredData = window.allData_$(chart_title).filter(row => {
                         $(join(filter_checks, "\n                        "))
                         return true;
                     });
@@ -329,87 +246,41 @@ $facet2_options            </select>
                 }
             """
         else
-            filter_logic_js = """
-                function updatePlotWithFilters_$(chart_title)() {
-                    updatePlot_$(chart_title)(window.allData_$(chart_title));
-                }
-            """
+            "function updatePlotWithFilters_$(chart_title)() { updatePlot_$(chart_title)(window.allData_$(chart_title)); }"
         end
-        
-        # Build point type symbol map
+
         point_symbols = ["circle", "square", "diamond", "cross", "x", "triangle-up",
-                        "triangle-down", "triangle-left", "triangle-right", "pentagon",
-                        "hexagon", "star"]
-        
+                        "triangle-down", "triangle-left", "triangle-right", "pentagon", "hexagon", "star"]
+        default_color_col = string(valid_color_cols[1])
+        default_pointtype_col = string(valid_pointtype_cols[1])
+        default_pointsize_col = string(valid_pointsize_cols[1])
+
         functional_html = """
-            // Initialize density toggle state
+            (function() {
             window.showDensity_$(chart_title) = $(show_density ? "true" : "false");
+            const POINT_SYMBOLS = $(JSON.json(point_symbols));
+            const DEFAULT_X_COL = '$default_x_col';
+            const DEFAULT_Y_COL = '$default_y_col';
+            const DEFAULT_COLOR_COL = '$default_color_col';
+            const DEFAULT_POINTTYPE_COL = '$default_pointtype_col';
+            const DEFAULT_POINTSIZE_COL = '$default_pointsize_col';
 
-            // Define point type symbols
-            const POINT_SYMBOLS_$(chart_title) = $(JSON.json(point_symbols));
-
-            // Load and parse data using centralized parser
-            loadDataset('$data_label').then(function(data) {
-                window.allData_$(chart_title) = data;
-
-                // Initialize sliders and button after data is loaded
-                \$(function() {
-                    // Density toggle button
-                    document.getElementById('$(chart_title)_density_toggle').addEventListener('click', function() {
-                        window.showDensity_$(chart_title) = !window.showDensity_$(chart_title);
-                        this.textContent = window.showDensity_$(chart_title) ? 'Hide Density Contours' : 'Show Density Contours';
-                        updatePlotWithFilters_$(chart_title)();
-                    });
-
-                    $slider_init_js
-
-                    // Initial plot
-                    updatePlotWithFilters_$(chart_title)();
-                });
-            }).catch(function(error) {
-                console.error('Error loading data for chart $chart_title:', error);
-            });
-
-            // Main update function
-            window.updateChart_$(chart_title) = function() {
-                updatePlotWithFilters_$(chart_title)();
-            }
-
-            // Helper function to build symbol map
-            function buildSymbolMap_$(chart_title)(data, col) {
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
                 const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
-                const symbolMap = {};
-                uniqueVals.forEach((val, i) => {
-                    symbolMap[val] = POINT_SYMBOLS_$(chart_title)[i % POINT_SYMBOLS_$(chart_title).length];
-                });
-                return symbolMap;
-            }
-
-            // Helper function to build size map
-            function buildSizeMap_$(chart_title)(data, col) {
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
                 const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
-                const sizeMap = {};
-                const minSize = $marker_size;
-                const maxSize = $marker_size * 3;
-                uniqueVals.forEach((val, i) => {
-                    if (uniqueVals.length === 1) {
-                        sizeMap[val] = $marker_size;
-                    } else {
-                        sizeMap[val] = minSize + (maxSize - minSize) * i / (uniqueVals.length - 1);
-                    }
-                });
-                return sizeMap;
-            }
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: $marker_size};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, $marker_size + ($marker_size * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
 
-            // Render without faceting (with marginals)
-            function renderNoFacets_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
-                const traces = [];
-
-                // Build maps
-                const symbolMap = buildSymbolMap_$(chart_title)(data, POINTTYPE_COL);
-                const sizeMap = buildSizeMap_$(chart_title)(data, POINTSIZE_COL);
-
-                // Group data by color column
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
                 const groups = {};
                 data.forEach(row => {
                     const key = row[COLOR_COL];
@@ -417,386 +288,206 @@ $facet2_options            </select>
                     groups[key].push(row);
                 });
 
-                // Create a trace for each group
-                Object.keys(groups).forEach(key => {
-                    const groupData = groups[key];
-                    traces.push({
-                        x: groupData.map(d => d[X_COL]),
-                        y: groupData.map(d => d[Y_COL]),
-                        mode: 'markers',
-                        name: key,
-                        marker: {
-                            size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
-                            opacity: $marker_opacity,
-                            symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
-                        },
-                        type: 'scatter'
-                    });
-                });
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: $marker_opacity,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
 
-                // Add density contours if enabled
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
                 if (window.showDensity_$(chart_title)) {
                     traces.push({
-                        x: data.map(d => d[X_COL]),
-                        y: data.map(d => d[Y_COL]),
-                        name: 'density',
-                        ncontours: 20,
-                        colorscale: 'Hot',
-                        reversescale: true,
-                        showscale: false,
-                        type: 'histogram2dcontour',
-                        showlegend: false
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
                     });
                 }
 
-                // Add marginal histograms
-                traces.push({
-                    x: data.map(d => d[X_COL]),
-                    name: 'x density',
-                    marker: {color: 'rgba(128, 128, 128, 0.5)'},
-                    yaxis: 'y2',
-                    type: 'histogram',
-                    showlegend: false
-                });
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
 
-                traces.push({
-                    y: data.map(d => d[Y_COL]),
-                    name: 'y density',
-                    marker: {color: 'rgba(128, 128, 128, 0.5)'},
-                    xaxis: 'x2',
-                    type: 'histogram',
-                    showlegend: false
-                });
-
-                const layout = {
-                    title: '$title',
-                    showlegend: true,
-                    autosize: true,
-                    hovermode: 'closest',
-                    xaxis: {
-                        title: X_COL,
-                        domain: [0, 0.85],
-                        showgrid: true,
-                        zeroline: true
-                    },
-                    yaxis: {
-                        title: Y_COL,
-                        domain: [0, 0.85],
-                        showgrid: true,
-                        zeroline: true
-                    },
-                    xaxis2: {
-                        domain: [0.85, 1],
-                        showgrid: false,
-                        zeroline: false
-                    },
-                    yaxis2: {
-                        domain: [0.85, 1],
-                        showgrid: false,
-                        zeroline: false
-                    },
+                Plotly.newPlot('$chart_title', traces, {
+                    title: '$title', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
                     margin: {t: 100, r: 100, b: 100, l: 100}
-                };
-
-                Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
+                }, {responsive: true});
             }
 
-            // Render with facet wrap (1 facet variable, no marginals)
-            function renderFacetWrap_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
-                const traces = [];
-
-                // Build maps
-                const symbolMap = buildSymbolMap_$(chart_title)(data, POINTTYPE_COL);
-                const sizeMap = buildSizeMap_$(chart_title)(data, POINTSIZE_COL);
-
-                // Get unique facet values
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
                 const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
-                const numFacets = facetValues.length;
-                const cols = Math.ceil(Math.sqrt(numFacets));
-                const rows = Math.ceil(numFacets / cols);
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
 
                 facetValues.forEach((facetVal, idx) => {
                     const facetData = data.filter(row => row[FACET_COL] === facetVal);
-
-                    // Group by color within this facet
-                    const groups = {};
-                    facetData.forEach(row => {
-                        const key = row[COLOR_COL];
-                        if (!groups[key]) groups[key] = [];
-                        groups[key].push(row);
-                    });
-
-                    const row = Math.floor(idx / cols);
-                    const col = idx % cols;
                     const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                     const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
 
-                    Object.keys(groups).forEach(key => {
-                        const groupData = groups[key];
-                        traces.push({
-                            x: groupData.map(d => d[X_COL]),
-                            y: groupData.map(d => d[Y_COL]),
-                            mode: 'markers',
-                            name: key,
-                            legendgroup: key,
-                            showlegend: idx === 0,
-                            xaxis: xaxis,
-                            yaxis: yaxis,
-                            marker: {
-                                size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
-                                opacity: $marker_opacity,
-                                symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
-                            },
-                            type: 'scatter'
-                        });
-                    });
-
-                    // Add density contours if enabled
                     if (window.showDensity_$(chart_title)) {
                         traces.push({
-                            x: facetData.map(d => d[X_COL]),
-                            y: facetData.map(d => d[Y_COL]),
-                            name: 'density',
-                            ncontours: 20,
-                            colorscale: 'Hot',
-                            reversescale: true,
-                            showscale: false,
-                            type: 'histogram2dcontour',
-                            showlegend: false,
-                            xaxis: xaxis,
-                            yaxis: yaxis
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                         });
                     }
                 });
 
                 const layout = {
-                    title: '$title',
-                    showlegend: true,
-                    grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    title: '$title', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
                     annotations: facetValues.map((val, idx) => ({
-                        text: FACET_COL + ': ' + val,
-                        showarrow: false,
-                        xref: idx === 0 ? 'x domain' : 'x' + (idx + 1) + ' domain',
-                        yref: idx === 0 ? 'y domain' : 'y' + (idx + 1) + ' domain',
-                        x: 0.5,
-                        y: 1.1,
-                        xanchor: 'center',
-                        yanchor: 'bottom'
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
                     })),
                     margin: {t: 100, r: 50, b: 50, l: 50}
                 };
-
-                // Set axis titles for all subplots
                 facetValues.forEach((val, idx) => {
-                    const xaxis = idx === 0 ? 'xaxis' : 'xaxis' + (idx + 1);
-                    const yaxis = idx === 0 ? 'yaxis' : 'yaxis' + (idx + 1);
-                    layout[xaxis] = {title: X_COL};
-                    layout[yaxis] = {title: Y_COL};
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
                 });
-
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
             }
 
-            // Render with facet grid (2 facet variables, no marginals)
-            function renderFacetGrid_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
-                const traces = [];
-
-                // Build maps
-                const symbolMap = buildSymbolMap_$(chart_title)(data, POINTTYPE_COL);
-                const sizeMap = buildSizeMap_$(chart_title)(data, POINTSIZE_COL);
-
-                // Get unique facet values
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
                 const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
                 const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
-                const rows = facet1Values.length;
-                const cols = facet2Values.length;
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
 
                 facet1Values.forEach((facet1Val, rowIdx) => {
                     facet2Values.forEach((facet2Val, colIdx) => {
-                        const facetData = data.filter(row =>
-                            row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val
-                        );
-
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
                         if (facetData.length === 0) return;
-
-                        // Group by color within this facet
-                        const groups = {};
-                        facetData.forEach(row => {
-                            const key = row[COLOR_COL];
-                            if (!groups[key]) groups[key] = [];
-                            groups[key].push(row);
-                        });
 
                         const idx = rowIdx * cols + colIdx;
                         const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                         const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
 
-                        Object.keys(groups).forEach(key => {
-                            const groupData = groups[key];
-                            traces.push({
-                                x: groupData.map(d => d[X_COL]),
-                                y: groupData.map(d => d[Y_COL]),
-                                mode: 'markers',
-                                name: key,
-                                legendgroup: key,
-                                showlegend: idx === 0,
-                                xaxis: xaxis,
-                                yaxis: yaxis,
-                                marker: {
-                                    size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
-                                    opacity: $marker_opacity,
-                                    symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
-                                },
-                                type: 'scatter'
-                            });
-                        });
-
-                        // Add density contours if enabled
                         if (window.showDensity_$(chart_title)) {
                             traces.push({
-                                x: facetData.map(d => d[X_COL]),
-                                y: facetData.map(d => d[Y_COL]),
-                                name: 'density',
-                                ncontours: 20,
-                                colorscale: 'Hot',
-                                reversescale: true,
-                                showscale: false,
-                                type: 'histogram2dcontour',
-                                showlegend: false,
-                                xaxis: xaxis,
-                                yaxis: yaxis
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                             });
                         }
                     });
                 });
 
                 const layout = {
-                    title: '$title',
-                    showlegend: true,
-                    grid: {rows: rows, columns: cols, pattern: 'independent'},
-                    annotations: [],
+                    title: '$title', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
                     margin: {t: 100, r: 50, b: 50, l: 50}
                 };
-
-                // Add column headers
-                facet2Values.forEach((val, colIdx) => {
-                    const idx = colIdx;
-                    layout.annotations.push({
-                        text: FACET2_COL + ': ' + val,
-                        showarrow: false,
-                        xref: idx === 0 ? 'x domain' : 'x' + (idx + 1) + ' domain',
-                        yref: idx === 0 ? 'y domain' : 'y' + (idx + 1) + ' domain',
-                        x: 0.5,
-                        y: 1.1,
-                        xanchor: 'center',
-                        yanchor: 'bottom'
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
                     });
                 });
-
-                // Add row headers
-                facet1Values.forEach((val, rowIdx) => {
-                    const idx = rowIdx * cols;
-                    layout.annotations.push({
-                        text: FACET1_COL + ': ' + val,
-                        showarrow: false,
-                        xref: idx === 0 ? 'x domain' : 'x' + (idx + 1) + ' domain',
-                        yref: idx === 0 ? 'y domain' : 'y' + (idx + 1) + ' domain',
-                        x: -0.15,
-                        y: 0.5,
-                        xanchor: 'center',
-                        yanchor: 'middle',
-                        textangle: -90
-                    });
-                });
-
-                // Set axis titles for all subplots
-                facet1Values.forEach((val1, rowIdx) => {
-                    facet2Values.forEach((val2, colIdx) => {
-                        const idx = rowIdx * cols + colIdx;
-                        const xaxis = idx === 0 ? 'xaxis' : 'xaxis' + (idx + 1);
-                        const yaxis = idx === 0 ? 'yaxis' : 'yaxis' + (idx + 1);
-                        layout[xaxis] = {title: X_COL};
-                        layout[yaxis] = {title: Y_COL};
-                    });
-                });
-
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
             }
 
             function updatePlot_$(chart_title)(data) {
-                // Read dropdown values
-                const X_COL = document.getElementById('x_col_select_$chart_title').value;
-                const Y_COL = document.getElementById('y_col_select_$chart_title').value;
-                const COLOR_COL = document.getElementById('color_col_select_$chart_title').value;
-                const POINTTYPE_COL = document.getElementById('pointtype_col_select_$chart_title').value;
-                const POINTSIZE_COL = document.getElementById('pointsize_col_select_$chart_title').value;
+                const X_COL = getCol('x_col_select_$chart_title', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_$chart_title', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_$chart_title', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_$chart_title', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_$chart_title', DEFAULT_POINTSIZE_COL);
 
-                // Determine faceting mode
-                let FACET1 = null;
-                let FACET2 = null;
+                let FACET1 = getCol('facet1_select_$chart_title', null);
+                let FACET2 = getCol('facet2_select_$chart_title', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
 
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-
-                if (facet1Select) {
-                    FACET1 = facet1Select.value;
-                    if (FACET1 === 'None') FACET1 = null;
-                }
-                if (facet2Select) {
-                    FACET2 = facet2Select.value;
-                    if (FACET2 === 'None') FACET2 = null;
-                }
-
-                // Render based on faceting mode
                 if (FACET1 && FACET2) {
-                    // Facet grid mode (no marginals)
-                    renderFacetGrid_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
                 } else if (FACET1) {
-                    // Facet wrap mode (no marginals)
-                    renderFacetWrap_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
                 } else {
-                    // No facets mode (with marginals)
-                    renderNoFacets_$(chart_title)(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
                 }
             }
 
+            window.updateChart_$(chart_title) = () => updatePlotWithFilters_$(chart_title)();
             $filter_logic_js
+
+            loadDataset('$data_label').then(data => {
+                window.allData_$(chart_title) = data;
+                \$(function() {
+                    const densityBtn = document.getElementById('$(chart_title)_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_$(chart_title) = !window.showDensity_$(chart_title);
+                            this.textContent = window.showDensity_$(chart_title) ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_$(chart_title)();
+                        });
+                    }
+$slider_init_js                    updatePlotWithFilters_$(chart_title)();
+                });
+            }).catch(error => console.error('Error loading data for chart $chart_title:', error));
+            })();
         """
-        
+
         appearance_html = """
         <h2>$title</h2>
         <p>$notes</p>
-        
+
         $sliders_html
-        
+        $dropdowns_html
+
         <!-- Chart -->
         <div id="$chart_title"></div>
         """
-        
+
         new(chart_title, data_label, functional_html, appearance_html)
     end
 end
 
 function detect_slider_type(df::DataFrame, col::Symbol)
     col_data = df[!, col]
-    
-    # Check if it's a Date type
-    if eltype(col_data) <: Union{Date, DateTime, Missing}
-        return :date
-    end
-    
-    # Check if it's numeric
+    eltype(col_data) <: Union{Date, DateTime, Missing} && return :date
+
     if eltype(col_data) <: Union{Number, Missing}
         unique_vals = unique(skipmissing(col_data))
-        
-        # If there are few unique values, treat as categorical
-        if length(unique_vals) <= 20
-            return :categorical
-        else
-            return :continuous
-        end
+        return length(unique_vals) <= 20 ? :categorical : :continuous
     end
-    
-    # Otherwise treat as categorical
+
     return :categorical
 end

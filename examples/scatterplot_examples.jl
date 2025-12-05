@@ -1,144 +1,157 @@
 using JSPlots, DataFrames, Dates, Random
 
-# Example 1: Simple scatter plot with single continuous slider
 Random.seed!(42)
-n = 500
-df1 = DataFrame(
-    x = randn(n) .* 2,
-    y = randn(n) .* 2,
-    value = rand(n) .* 100,
-    color = repeat(["default"], n)  # Added color column
-)
-df1.y .+= 0.5 .* df1.x  # Add some correlation
 
-scatter1 = ScatterPlot(:simple_scatter, df1, :df1;
-    x_cols = [:x],
-    y_cols = [:y],
-    color_cols = [:color],
-    pointtype_cols = [:color],
-    pointsize_cols = [:color],
-    slider_col = :value,  # Single slider
-    title = "Simple Scatter with Continuous Range Slider",
-    notes = "Use the range slider to filter by value"
-)
+println("Creating comprehensive ScatterPlot examples...")
 
-
-# Example 2: Multiple sliders - categorical + continuous
+# Example 1: Multi-dimensional scatter with dimensions parameter
 n = 300
-categories = ["A", "B", "C", "D"]
-groups = ["Group1", "Group2"]
-
-df2 = DataFrame(
-    x = randn(n) .* 3,
-    y = randn(n) .* 3,
-    category = rand(categories, n),
-    group = rand(groups, n),
-    score = rand(n) .* 50
+df1 = DataFrame(
+    mass = randn(n) .* 10 .+ 70,
+    height = randn(n) .* 10 .+ 170,
+    age = rand(20:60, n),
+    bmi = zeros(n),
+    gender = rand(["Male", "Female"], n),
+    activity = rand(["Low", "Medium", "High"], n),
+    color = repeat(["default"], n)
 )
+df1.bmi = df1.mass ./ ((df1.height ./100) .^ 2)
 
-scatter2 = ScatterPlot(:multi_slider, df2, :df2;
-    x_cols = [:x],
-    y_cols = [:y],
-    color_cols = [:group],
-    pointtype_cols = [:group],
-    pointsize_cols = [:group],
-    slider_col = [:category, :score],  # Multiple sliders!
-    title = "Scatter with Multiple Filters",
-    notes = "Points must pass ALL filter criteria to be displayed"
-)
-
-
-# Example 3: Three sliders - categorical + date + continuous
-dates = Date(2023, 1, 1):Day(1):Date(2023, 12, 31)
-n = length(dates)
-
-df3 = DataFrame(
-    date = dates,
-    temperature = 15 .+ 10 .* sin.(2π .* (1:n) ./ 365) .+ randn(n) .* 2,
-    rainfall = abs.(randn(n) .* 20),
-    season = map(d -> Dates.month(d) ∈ [12, 1, 2] ? "Winter" :
-                      Dates.month(d) ∈ [3, 4, 5] ? "Spring" :
-                      Dates.month(d) ∈ [6, 7, 8] ? "Summer" : "Fall", dates)
-)
-
-scatter3 = ScatterPlot(:weather_scatter, df3, :df3;
-    x_cols = [:temperature],
-    y_cols = [:rainfall],
-    color_cols = [:season],
-    pointtype_cols = [:season],
-    pointsize_cols = [:season],
-    slider_col = [:date, :season, :temperature],  # Three sliders: date, categorical, and continuous
-    title = "Weather Data with Multiple Range Sliders",
-    notes = "Filter by date range, season(s), and temperature range simultaneously"
-)
-
-# Example 4: Scatter without sliders (showing it's still optional)
-df4 = DataFrame(
-    x = rand(1000) .* 100,
-    y = rand(1000) .* 100,
-    color = repeat(["default"], 1000)  # Added color column
-)
-
-scatter4 = ScatterPlot(:no_sliders, df4, :df4;
-    x_cols = [:x],
-    y_cols = [:y],
+scatter1 = ScatterPlot(:multi_dim, df1, :df1, [:mass, :height, :age, :bmi];
     color_cols = [:color],
     pointtype_cols = [:color],
     pointsize_cols = [:color],
-    marker_size = 3,
-    marker_opacity = 0.4,
-    title = "Simple Scatter (No Filters)"
+    title = "Multi-Dimensional Health Data",
+    notes = "Use the X and Y dropdowns to explore different dimension combinations. " *
+           "Try: mass vs height, age vs bmi, etc. Marginal distributions show on both axes."
 )
 
-# Example 5: Stock data with date range + categorical filters
-stock_data = DataFrame(
-    date = repeat(Date(2024, 1, 1):Day(1):Date(2024, 3, 31), inner=3),
-    symbol = repeat(["AAPL", "GOOGL", "MSFT"], outer=91),
-    return_pct = randn(273) .* 2,
-    volume = rand(273) .* 1_000_000,
-    sector = repeat(["Tech", "Tech", "Tech"], outer=91)
-)
-
-scatter5 = ScatterPlot(:stock_scatter, stock_data, :stock_data;
-    x_cols = [:volume],
-    y_cols = [:return_pct],
-    color_cols = [:symbol],
-    pointtype_cols = [:symbol],
-    pointsize_cols = [:symbol],
-    slider_col = [:date, :symbol, :volume],  # Date range + multi-select + volume range
-    title = "Stock Returns vs Volume with Multiple Filters",
-    notes = "Filter by date range, symbol(s), and volume range"
-)
-
-# Example 6: Complex filtering scenario
-n = 1000
-df6 = DataFrame(
+# Example 2: Multiple styling options (color, point type, point size)
+n = 400
+df2 = DataFrame(
     x = randn(n) .* 10,
     y = randn(n) .* 10,
     region = rand(["North", "South", "East", "West"], n),
+    category = rand(["A", "B", "C"], n),
     priority = rand(["Low", "Medium", "High"], n),
-    timestamp = rand(Date(2024, 1, 1):Day(1):Date(2024, 12, 31), n),
-    value = rand(n) .* 1000
+    size_group = rand(["Small", "Medium", "Large"], n)
 )
 
-scatter6 = ScatterPlot(:complex_filters, df6, :df6;
-    x_cols = [:x],
-    y_cols = [:y],
-    color_cols = [:priority],
-    pointtype_cols = [:priority],
-    pointsize_cols = [:priority],
-    slider_col = [:region, :priority, :timestamp, :value],  # Four different slider types
-    title = "Complex Multi-Filter Scatter Plot",
-    notes = "Demonstrates 4 simultaneous filters: 2 categorical + 1 date range + 1 continuous range"
+scatter2 = ScatterPlot(:multi_style, df2, :df2, [:x, :y];
+    color_cols = [:region, :category, :priority],
+    pointtype_cols = [:region, :category, :priority],
+    pointsize_cols = [:region, :size_group, :priority],
+    title = "Multiple Styling Options",
+    notes = "Use the Color, Point type, and Point size dropdowns to change visual encoding. " *
+           "Try different combinations to highlight different aspects of the data."
 )
 
-# Create a page with all scatter plots
+# Example 3: Faceting with single facet (marginals disappear when faceted)
+n = 500
+df3 = DataFrame(
+    temperature = randn(n) .* 5 .+ 20,
+    humidity = randn(n) .* 10 .+ 60,
+    season = rand(["Spring", "Summer", "Fall", "Winter"], n),
+    location = rand(["Urban", "Rural", "Coastal"], n),
+    color = repeat(["Measurement"], n)
+)
+
+scatter3 = ScatterPlot(:facet_single, df3, :df3, [:temperature, :humidity];
+    color_cols = [:color],
+    pointtype_cols = [:color],
+    pointsize_cols = [:color],
+    facet_cols = [:season, :location],
+    title = "Faceting Example - Weather Data",
+    notes = "Use the 'Facet by' dropdown to split the data. " *
+           "Notice: Marginal distributions appear when no faceting is selected, " *
+           "but disappear when a facet is applied to save space."
+)
+
+# Example 4: Two-dimensional faceting (facet grid)
+n = 600
+df4 = DataFrame(
+    score1 = randn(n) .* 15 .+ 75,
+    score2 = randn(n) .* 12 .+ 70,
+    grade = rand(["Freshman", "Sophomore", "Junior", "Senior"], n),
+    major = rand(["Science", "Arts", "Engineering"], n),
+    semester = rand(["Fall", "Spring"], n),
+    performance = rand(["Below Average", "Average", "Above Average"], n),
+    color = repeat(["Student"], n)
+)
+
+scatter4 = ScatterPlot(:facet_grid, df4, :df4,  [:score1, :score2];
+    color_cols = [:color],
+    pointtype_cols = [:color],
+    pointsize_cols = [:color],
+    facet_cols = [:grade, :major, :semester],
+    default_facet_cols = [:grade, :major],
+    title = "Two-Dimensional Faceting - Student Performance",
+    notes = "Uses Facet 1 and Facet 2 to create a grid of subplots. " *
+           "Default shows grade × major. Try different combinations like semester × major. " *
+           "Set either facet to 'None' to reduce to single facet or no faceting."
+)
+
+# Example 5: Complex multi-everything example
+n = 800
+df5 = DataFrame(
+    var1 = randn(n) .* 20,
+    var2 = randn(n) .* 25,
+    var3 = randn(n) .* 15 .+ 50,
+    var4 = randn(n) .* 30 .+ 100,
+    group_A = rand(["Group1", "Group2", "Group3"], n),
+    group_B = rand(["TypeX", "TypeY", "TypeZ"], n),
+    group_C = rand(["Class1", "Class2"], n),
+    intensity = rand(["Low", "Medium", "High"], n)
+)
+
+scatter5 = ScatterPlot(:complex, df5, :df5,  [:var1, :var2, :var3, :var4];
+    color_cols = [:group_A, :group_B, :group_C],
+    pointtype_cols = [:group_A, :group_B, :intensity],
+    pointsize_cols = [:group_A, :intensity],
+    facet_cols = [:group_C, :group_B],
+    title = "Complex Multi-Dimensional Exploration",
+    notes = "Demonstrates all features together: " *
+           "4 dimensions for X/Y axes, multiple color/shape/size options, and faceting. " *
+           "Explore different combinations to find interesting patterns."
+)
+
+# Example 6: Time series scatter with filters
+dates = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
+n = length(dates)
+df6 = DataFrame(
+    date = repeat(dates, outer=3),
+    value1 = vcat(
+        cumsum(randn(n)) .+ 100,
+        cumsum(randn(n)) .+ 120,
+        cumsum(randn(n)) .+ 110
+    ),
+    value2 = vcat(
+        cumsum(randn(n)) .+ 50,
+        cumsum(randn(n)) .+ 55,
+        cumsum(randn(n)) .+ 52
+    ),
+    portfolio = repeat(["Portfolio A", "Portfolio B", "Portfolio C"], inner=n),
+    quarter = map(d -> Dates.quarter(d), repeat(dates, outer=3)),
+    color = repeat(["Investment"], n*3)
+)
+
+scatter6 = ScatterPlot(:timeseries, df6, :df6, [:value1, :value2];
+    color_cols = [:portfolio, :color],
+    pointtype_cols = [:portfolio, :color],
+    pointsize_cols = [:portfolio, :color],
+    slider_col = [:date, :quarter],
+    title = "Time Series Scatter with Filters",
+    notes = "Use date range slider and quarter filter to focus on specific time periods. " *
+           "Switch between viewing by portfolio or as aggregate using the color dropdown."
+)
+
+# Create the page
 data_dict = Dict{Symbol,DataFrame}(
     :df1 => df1,
     :df2 => df2,
     :df3 => df3,
     :df4 => df4,
-    :stock_data => stock_data,
+    :df5 => df5,
     :df6 => df6
 )
 
@@ -150,11 +163,21 @@ page = JSPlotPage(
 
 create_html(page, "generated_html_examples/scatterplot_examples.html")
 
-println("Scatter plots created successfully!")
-println("Open scatterplot_examples.html to view all examples")
-println("  - Example 1: Single continuous range slider")
-println("  - Example 2: Two sliders (categorical + continuous)")
-println("  - Example 3: Three sliders (date + categorical + continuous)")
-println("  - Example 4: No sliders")
-println("  - Example 5: Stock data with multiple filters")
-println("  - Example 6: Complex scenario with 4 different filters")
+println("\n" * "="^60)
+println("ScatterPlot examples created successfully!")
+println("="^60)
+println("\nFile created: generated_html_examples/scatterplot_examples.html")
+println("\nThis page includes:")
+println("  • Multi-dimensional exploration (dimensions parameter)")
+println("  • Multiple styling options (color, point type, point size)")
+println("  • Single faceting (marginals disappear)")
+println("  • Two-dimensional faceting (grid layout)")
+println("  • Complex multi-feature example")
+println("  • Time series with date filters")
+println("\nKey features demonstrated:")
+println("  ✓ dimensions parameter for X/Y selection")
+println("  ✓ Multiple options for color, point type, and point size")
+println("  ✓ Faceting (1D and 2D)")
+println("  ✓ Marginal distributions (appear/disappear with faceting)")
+println("  ✓ Inline controls to save space")
+println("  ✓ Only showing dropdowns when there are multiple options")

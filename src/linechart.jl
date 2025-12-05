@@ -5,8 +5,8 @@ struct LineChart <: JSPlotsType
     functional_html::String
     appearance_html::String
     function LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                            x_col::Symbol=:x,
-                            y_col::Symbol=:y,
+                            x_cols::Vector{Symbol}=[:x],
+                            y_cols::Vector{Symbol}=[:y],
                             color_cols::Vector{Symbol}=[:color],
                             linetype_cols::Vector{Symbol}=[:color],
                             filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
@@ -19,6 +19,31 @@ struct LineChart <: JSPlotsType
                             line_width::Int=1,
                             marker_size::Int=1,
                             notes::String="")
+
+        # Get available columns in dataframe
+        available_cols = Set(names(df))
+
+        # Validate x_cols
+        valid_x_cols = Symbol[]
+        for col in x_cols
+            if string(col) in available_cols
+                push!(valid_x_cols, col)
+            end
+        end
+        if isempty(valid_x_cols)
+            error("None of the specified x_cols exist in the dataframe. Available columns: $(names(df))")
+        end
+
+        # Validate y_cols
+        valid_y_cols = Symbol[]
+        for col in y_cols
+            if string(col) in available_cols
+                push!(valid_y_cols, col)
+            end
+        end
+        if isempty(valid_y_cols)
+            error("None of the specified y_cols exist in the dataframe. Available columns: $(names(df))")
+        end
 
         # Normalize facet_cols to array (possible choices)
         facet_choices = if facet_cols === nothing
@@ -60,9 +85,6 @@ struct LineChart <: JSPlotsType
             filter_options[string(col)] = unique(df[!, col])
         end
 
-        # Get available columns in dataframe
-        available_cols = Set(names(df))
-
         # Build color maps for all possible color columns that exist
         color_palette = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
                         "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
@@ -100,8 +122,42 @@ struct LineChart <: JSPlotsType
             error("None of the specified linetype_cols exist in the dataframe. Available columns: $(names(df))")
         end
 
-        # Build filter dropdowns
+        # Build dropdowns HTML
         dropdowns_html = ""
+
+        # X dimension dropdown
+        if length(valid_x_cols) > 1
+            x_options = ""
+            for col in valid_x_cols
+                selected = (col == valid_x_cols[1]) ? " selected" : ""
+                x_options *= "                <option value=\"$col\"$selected>$col</option>\n"
+            end
+            dropdowns_html *= """
+            <div style="margin: 10px;">
+                <label for="x_col_select_$chart_title">X dimension: </label>
+                <select id="x_col_select_$chart_title" onchange="updateChart_$chart_title()">
+    $x_options            </select>
+            </div>
+            """
+        end
+
+        # Y dimension dropdown
+        if length(valid_y_cols) > 1
+            y_options = ""
+            for col in valid_y_cols
+                selected = (col == valid_y_cols[1]) ? " selected" : ""
+                y_options *= "                <option value=\"$col\"$selected>$col</option>\n"
+            end
+            dropdowns_html *= """
+            <div style="margin: 10px;">
+                <label for="y_col_select_$chart_title">Y dimension: </label>
+                <select id="y_col_select_$chart_title" onchange="updateChart_$chart_title()">
+    $y_options            </select>
+            </div>
+            """
+        end
+
+        # Build filter dropdowns
         for col in keys(filters)
             default_val = filters[col]
             options_html = ""
@@ -218,10 +274,10 @@ struct LineChart <: JSPlotsType
         end
 
 
-        # Create filter column names as JavaScript array
+        # Create JavaScript arrays for columns
         filter_cols_js = "[" * join(["'$col'" for col in keys(filters)], ", ") * "]"
-
-        # Create color_cols and linetype_cols as JavaScript arrays
+        x_cols_js = "[" * join(["'$col'" for col in valid_x_cols], ", ") * "]"
+        y_cols_js = "[" * join(["'$col'" for col in valid_y_cols], ", ") * "]"
         color_cols_js = "[" * join(["'$col'" for col in valid_color_cols], ", ") * "]"
         linetype_cols_js = "[" * join(["'$col'" for col in valid_linetype_cols], ", ") * "]"
 
@@ -237,20 +293,24 @@ struct LineChart <: JSPlotsType
             for (col, map) in linetype_maps
         ], ", ") * "}"
 
-        # Default color and linetype columns
+        # Default columns
+        default_x_col = string(valid_x_cols[1])
+        default_y_col = string(valid_y_cols[1])
         default_color_col = string(valid_color_cols[1])
         default_linetype_col = string(valid_linetype_cols[1])
 
         functional_html = """
         (function() {
             // Configuration
-            const X_COL = '$x_col';
-            const Y_COL = '$y_col';
             const FILTER_COLS = $filter_cols_js;
+            const X_COLS = $x_cols_js;
+            const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
             const LINETYPE_COLS = $linetype_cols_js;
             const COLOR_MAPS = $color_maps_js;
             const LINETYPE_MAPS = $linetype_maps_js;
+            const DEFAULT_X_COL = '$default_x_col';
+            const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
             const DEFAULT_LINETYPE_COL = '$default_linetype_col';
             const X_LABEL = '$x_label';
@@ -281,6 +341,13 @@ struct LineChart <: JSPlotsType
 
             // Make it global so inline onchange can see it
             window.updateChart_$chart_title = function() {
+                // Get current X and Y columns
+                const xColSelect = document.getElementById('x_col_select_$chart_title');
+                const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+                const yColSelect = document.getElementById('y_col_select_$chart_title');
+                const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
                 // Get current filter values
                 const filters = {};
                 FILTER_COLS.forEach(col => {
@@ -677,12 +744,12 @@ struct LineChart <: JSPlotsType
         appearance_html = """
         <h2>$title</h2>
         <p>$notes</p>
-        
+
         <!-- Controls -->
         <div id="controls">
             $dropdowns_html
         </div>
-        
+
         <!-- Chart -->
         <div id="$chart_title"></div>
         """

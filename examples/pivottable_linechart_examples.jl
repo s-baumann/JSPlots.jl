@@ -87,8 +87,8 @@ df2[!, :categ22] .= "Category_B"
 df = vcat(df1, df2)
 
 pt00 = LineChart(:pchart, df, :df;
-            x_col=:x,
-            y_col=:y,
+            x_cols=[:x],
+            y_cols=[:y],
             color_cols=[:color],
             filters=Dict(:categ => :A, :categ22 => "Category_A"),
             title="Line Chart with Filters",

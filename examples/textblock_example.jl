@@ -63,8 +63,8 @@ df = DataFrame(
 )
 
 line_plot = LineChart(:example_chart, df, :df;
-    x_col = :x,
-    y_col = :y,
+    x_cols = [:x],
+    y_cols = [:y],
     color_cols = [:color],
     title = "Sample Data",
     x_label = "Time",

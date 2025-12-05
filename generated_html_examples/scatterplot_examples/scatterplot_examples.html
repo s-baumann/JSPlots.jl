@@ -1,0 +1,1855 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSPlots.jl</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                resolve(results.data);
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                resolve(data);
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        resolve(results.data);
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+            (function() {
+            window.showDensity_multi_dim = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'mass';
+            const DEFAULT_Y_COL = 'height';
+            const DEFAULT_COLOR_COL = 'color';
+            const DEFAULT_POINTTYPE_COL = 'color';
+            const DEFAULT_POINTSIZE_COL = 'color';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_multi_dim) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('multi_dim', traces, {
+                    title: 'Multi-Dimensional Health Data', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_multi_dim) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Multi-Dimensional Health Data', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('multi_dim', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_multi_dim) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Multi-Dimensional Health Data', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('multi_dim', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_multi_dim(data) {
+                const X_COL = getCol('x_col_select_multi_dim', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_multi_dim', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_multi_dim', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_multi_dim', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_multi_dim', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_multi_dim', null);
+                let FACET2 = getCol('facet2_select_multi_dim', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_multi_dim = () => updatePlotWithFilters_multi_dim();
+            function updatePlotWithFilters_multi_dim() { updatePlot_multi_dim(window.allData_multi_dim); }
+
+            loadDataset('df1').then(data => {
+                window.allData_multi_dim = data;
+                $(function() {
+                    const densityBtn = document.getElementById('multi_dim_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_multi_dim = !window.showDensity_multi_dim;
+                            this.textContent = window.showDensity_multi_dim ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_multi_dim();
+                        });
+                    }
+                    updatePlotWithFilters_multi_dim();
+                });
+            }).catch(error => console.error('Error loading data for chart multi_dim:', error));
+            })();
+                    (function() {
+            window.showDensity_multi_style = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'x';
+            const DEFAULT_Y_COL = 'y';
+            const DEFAULT_COLOR_COL = 'region';
+            const DEFAULT_POINTTYPE_COL = 'region';
+            const DEFAULT_POINTSIZE_COL = 'region';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_multi_style) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('multi_style', traces, {
+                    title: 'Multiple Styling Options', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_multi_style) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Multiple Styling Options', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('multi_style', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_multi_style) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Multiple Styling Options', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('multi_style', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_multi_style(data) {
+                const X_COL = getCol('x_col_select_multi_style', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_multi_style', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_multi_style', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_multi_style', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_multi_style', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_multi_style', null);
+                let FACET2 = getCol('facet2_select_multi_style', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_multi_style = () => updatePlotWithFilters_multi_style();
+            function updatePlotWithFilters_multi_style() { updatePlot_multi_style(window.allData_multi_style); }
+
+            loadDataset('df2').then(data => {
+                window.allData_multi_style = data;
+                $(function() {
+                    const densityBtn = document.getElementById('multi_style_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_multi_style = !window.showDensity_multi_style;
+                            this.textContent = window.showDensity_multi_style ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_multi_style();
+                        });
+                    }
+                    updatePlotWithFilters_multi_style();
+                });
+            }).catch(error => console.error('Error loading data for chart multi_style:', error));
+            })();
+                    (function() {
+            window.showDensity_facet_single = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'temperature';
+            const DEFAULT_Y_COL = 'humidity';
+            const DEFAULT_COLOR_COL = 'color';
+            const DEFAULT_POINTTYPE_COL = 'color';
+            const DEFAULT_POINTSIZE_COL = 'color';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_facet_single) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('facet_single', traces, {
+                    title: 'Faceting Example - Weather Data', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_facet_single) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Faceting Example - Weather Data', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('facet_single', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_facet_single) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Faceting Example - Weather Data', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('facet_single', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_facet_single(data) {
+                const X_COL = getCol('x_col_select_facet_single', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_facet_single', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_facet_single', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_facet_single', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_facet_single', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_facet_single', null);
+                let FACET2 = getCol('facet2_select_facet_single', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_facet_single = () => updatePlotWithFilters_facet_single();
+            function updatePlotWithFilters_facet_single() { updatePlot_facet_single(window.allData_facet_single); }
+
+            loadDataset('df3').then(data => {
+                window.allData_facet_single = data;
+                $(function() {
+                    const densityBtn = document.getElementById('facet_single_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_facet_single = !window.showDensity_facet_single;
+                            this.textContent = window.showDensity_facet_single ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_facet_single();
+                        });
+                    }
+                    updatePlotWithFilters_facet_single();
+                });
+            }).catch(error => console.error('Error loading data for chart facet_single:', error));
+            })();
+                    (function() {
+            window.showDensity_facet_grid = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'score1';
+            const DEFAULT_Y_COL = 'score2';
+            const DEFAULT_COLOR_COL = 'color';
+            const DEFAULT_POINTTYPE_COL = 'color';
+            const DEFAULT_POINTSIZE_COL = 'color';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_facet_grid) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('facet_grid', traces, {
+                    title: 'Two-Dimensional Faceting - Student Performance', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_facet_grid) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Two-Dimensional Faceting - Student Performance', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('facet_grid', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_facet_grid) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Two-Dimensional Faceting - Student Performance', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('facet_grid', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_facet_grid(data) {
+                const X_COL = getCol('x_col_select_facet_grid', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_facet_grid', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_facet_grid', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_facet_grid', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_facet_grid', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_facet_grid', null);
+                let FACET2 = getCol('facet2_select_facet_grid', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_facet_grid = () => updatePlotWithFilters_facet_grid();
+            function updatePlotWithFilters_facet_grid() { updatePlot_facet_grid(window.allData_facet_grid); }
+
+            loadDataset('df4').then(data => {
+                window.allData_facet_grid = data;
+                $(function() {
+                    const densityBtn = document.getElementById('facet_grid_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_facet_grid = !window.showDensity_facet_grid;
+                            this.textContent = window.showDensity_facet_grid ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_facet_grid();
+                        });
+                    }
+                    updatePlotWithFilters_facet_grid();
+                });
+            }).catch(error => console.error('Error loading data for chart facet_grid:', error));
+            })();
+                    (function() {
+            window.showDensity_complex = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'var1';
+            const DEFAULT_Y_COL = 'var2';
+            const DEFAULT_COLOR_COL = 'group_A';
+            const DEFAULT_POINTTYPE_COL = 'group_A';
+            const DEFAULT_POINTSIZE_COL = 'group_A';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_complex) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('complex', traces, {
+                    title: 'Complex Multi-Dimensional Exploration', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_complex) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Complex Multi-Dimensional Exploration', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('complex', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_complex) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Complex Multi-Dimensional Exploration', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('complex', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_complex(data) {
+                const X_COL = getCol('x_col_select_complex', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_complex', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_complex', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_complex', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_complex', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_complex', null);
+                let FACET2 = getCol('facet2_select_complex', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_complex = () => updatePlotWithFilters_complex();
+            function updatePlotWithFilters_complex() { updatePlot_complex(window.allData_complex); }
+
+            loadDataset('df5').then(data => {
+                window.allData_complex = data;
+                $(function() {
+                    const densityBtn = document.getElementById('complex_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_complex = !window.showDensity_complex;
+                            this.textContent = window.showDensity_complex ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_complex();
+                        });
+                    }
+                    updatePlotWithFilters_complex();
+                });
+            }).catch(error => console.error('Error loading data for chart complex:', error));
+            })();
+                    (function() {
+            window.showDensity_timeseries = true;
+            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+            const DEFAULT_X_COL = 'value1';
+            const DEFAULT_Y_COL = 'value2';
+            const DEFAULT_COLOR_COL = 'portfolio';
+            const DEFAULT_POINTTYPE_COL = 'portfolio';
+            const DEFAULT_POINTSIZE_COL = 'portfolio';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+            const buildSizeMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                if (uniqueVals.length === 1) return {[uniqueVals[0]]: 4};
+                return Object.fromEntries(uniqueVals.map((val, i) =>
+                    [val, 4 + (4 * 2) * i / (uniqueVals.length - 1)]
+                ));
+            };
+
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, POINTTYPE_COL);
+                const sizeMap = buildSizeMap(data, POINTSIZE_COL);
+                const groups = {};
+                data.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                return Object.entries(groups).map(([key, groupData]) => ({
+                    x: groupData.map(d => d[X_COL]),
+                    y: groupData.map(d => d[Y_COL]),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: showlegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {
+                        size: groupData.map(d => sizeMap[d[POINTSIZE_COL]]),
+                        opacity: 0.6,
+                        symbol: groupData.map(d => symbolMap[d[POINTTYPE_COL]])
+                    },
+                    type: 'scatter'
+                }));
+            }
+
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+
+                if (window.showDensity_timeseries) {
+                    traces.push({
+                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                traces.push(
+                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                Plotly.newPlot('timeseries', traces, {
+                    title: 'Time Series Scatter with Filters', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET_COL) {
+                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+                const traces = [];
+
+                facetValues.forEach((facetVal, idx) => {
+                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                    if (window.showDensity_timeseries) {
+                        traces.push({
+                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                        });
+                    }
+                });
+
+                const layout = {
+                    title: 'Time Series Scatter with Filters', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: facetValues.map((val, idx) => ({
+                        text: FACET_COL + ': ' + val, showarrow: false,
+                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                    })),
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facetValues.forEach((val, idx) => {
+                    const ax = idx === 0 ? '' : (idx + 1);
+                    layout['xaxis' + ax] = {title: X_COL};
+                    layout['yaxis' + ax] = {title: Y_COL};
+                });
+                Plotly.newPlot('timeseries', traces, layout, {responsive: true});
+            }
+
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1_COL, FACET2_COL) {
+                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+                const rows = facet1Values.length, cols = facet2Values.length;
+                const traces = [];
+
+                facet1Values.forEach((facet1Val, rowIdx) => {
+                    facet2Values.forEach((facet2Val, colIdx) => {
+                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                        if (facetData.length === 0) return;
+
+                        const idx = rowIdx * cols + colIdx;
+                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, xaxis, yaxis, idx === 0));
+
+                        if (window.showDensity_timeseries) {
+                            traces.push({
+                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                            });
+                        }
+                    });
+                });
+
+                const layout = {
+                    title: 'Time Series Scatter with Filters', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+                    annotations: [
+                        ...facet2Values.map((val, colIdx) => ({
+                            text: FACET2_COL + ': ' + val, showarrow: false,
+                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                        })),
+                        ...facet1Values.map((val, rowIdx) => ({
+                            text: FACET1_COL + ': ' + val, showarrow: false,
+                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                        }))
+                    ],
+                    margin: {t: 100, r: 50, b: 50, l: 50}
+                };
+                facet1Values.forEach((v1, rowIdx) => {
+                    facet2Values.forEach((v2, colIdx) => {
+                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                        layout['xaxis' + ax] = {title: X_COL};
+                        layout['yaxis' + ax] = {title: Y_COL};
+                    });
+                });
+                Plotly.newPlot('timeseries', traces, layout, {responsive: true});
+            }
+
+            function updatePlot_timeseries(data) {
+                const X_COL = getCol('x_col_select_timeseries', DEFAULT_X_COL);
+                const Y_COL = getCol('y_col_select_timeseries', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_timeseries', DEFAULT_COLOR_COL);
+                const POINTTYPE_COL = getCol('pointtype_col_select_timeseries', DEFAULT_POINTTYPE_COL);
+                const POINTSIZE_COL = getCol('pointsize_col_select_timeseries', DEFAULT_POINTSIZE_COL);
+
+                let FACET1 = getCol('facet1_select_timeseries', null);
+                let FACET2 = getCol('facet2_select_timeseries', null);
+                if (FACET1 === 'None') FACET1 = null;
+                if (FACET2 === 'None') FACET2 = null;
+
+                if (FACET1 && FACET2) {
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1, FACET2);
+                } else if (FACET1) {
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL, FACET1);
+                } else {
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, POINTTYPE_COL, POINTSIZE_COL);
+                }
+            }
+
+            window.updateChart_timeseries = () => updatePlotWithFilters_timeseries();
+                function updatePlotWithFilters_timeseries() {
+        const filteredData = window.allData_timeseries.filter(row => {
+            if ($("#timeseries_date_slider").data('ui-slider')) {
+                            const date_values = $("#timeseries_date_slider").slider("values");
+                            const date_minDate = window.dateValues_timeseries_date_slider[date_values[0]];
+                            const date_maxDate = window.dateValues_timeseries_date_slider[date_values[1]];
+                            if (row.date < date_minDate || row.date > date_maxDate) return false;
+                        }
+                        const quarter_selected = Array.from(document.getElementById('timeseries_quarter_slider').selectedOptions).map(opt => opt.value);
+                        if (quarter_selected.length > 0 && !quarter_selected.includes(String(row.quarter))) return false;
+            return true;
+        });
+        updatePlot_timeseries(filteredData);
+    }
+
+
+            loadDataset('df6').then(data => {
+                window.allData_timeseries = data;
+                $(function() {
+                    const densityBtn = document.getElementById('timeseries_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_timeseries = !window.showDensity_timeseries;
+                            this.textContent = window.showDensity_timeseries ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_timeseries();
+                        });
+                    }
+    window.dateValues_timeseries_date_slider = ["2024-01-01","2024-01-02","2024-01-03","2024-01-04","2024-01-05","2024-01-06","2024-01-07","2024-01-08","2024-01-09","2024-01-10","2024-01-11","2024-01-12","2024-01-13","2024-01-14","2024-01-15","2024-01-16","2024-01-17","2024-01-18","2024-01-19","2024-01-20","2024-01-21","2024-01-22","2024-01-23","2024-01-24","2024-01-25","2024-01-26","2024-01-27","2024-01-28","2024-01-29","2024-01-30","2024-01-31","2024-02-01","2024-02-02","2024-02-03","2024-02-04","2024-02-05","2024-02-06","2024-02-07","2024-02-08","2024-02-09","2024-02-10","2024-02-11","2024-02-12","2024-02-13","2024-02-14","2024-02-15","2024-02-16","2024-02-17","2024-02-18","2024-02-19","2024-02-20","2024-02-21","2024-02-22","2024-02-23","2024-02-24","2024-02-25","2024-02-26","2024-02-27","2024-02-28","2024-02-29","2024-03-01","2024-03-02","2024-03-03","2024-03-04","2024-03-05","2024-03-06","2024-03-07","2024-03-08","2024-03-09","2024-03-10","2024-03-11","2024-03-12","2024-03-13","2024-03-14","2024-03-15","2024-03-16","2024-03-17","2024-03-18","2024-03-19","2024-03-20","2024-03-21","2024-03-22","2024-03-23","2024-03-24","2024-03-25","2024-03-26","2024-03-27","2024-03-28","2024-03-29","2024-03-30","2024-03-31","2024-04-01","2024-04-02","2024-04-03","2024-04-04","2024-04-05","2024-04-06","2024-04-07","2024-04-08","2024-04-09","2024-04-10","2024-04-11","2024-04-12","2024-04-13","2024-04-14","2024-04-15","2024-04-16","2024-04-17","2024-04-18","2024-04-19","2024-04-20","2024-04-21","2024-04-22","2024-04-23","2024-04-24","2024-04-25","2024-04-26","2024-04-27","2024-04-28","2024-04-29","2024-04-30","2024-05-01","2024-05-02","2024-05-03","2024-05-04","2024-05-05","2024-05-06","2024-05-07","2024-05-08","2024-05-09","2024-05-10","2024-05-11","2024-05-12","2024-05-13","2024-05-14","2024-05-15","2024-05-16","2024-05-17","2024-05-18","2024-05-19","2024-05-20","2024-05-21","2024-05-22","2024-05-23","2024-05-24","2024-05-25","2024-05-26","2024-05-27","2024-05-28","2024-05-29","2024-05-30","2024-05-31","2024-06-01","2024-06-02","2024-06-03","2024-06-04","2024-06-05","2024-06-06","2024-06-07","2024-06-08","2024-06-09","2024-06-10","2024-06-11","2024-06-12","2024-06-13","2024-06-14","2024-06-15","2024-06-16","2024-06-17","2024-06-18","2024-06-19","2024-06-20","2024-06-21","2024-06-22","2024-06-23","2024-06-24","2024-06-25","2024-06-26","2024-06-27","2024-06-28","2024-06-29","2024-06-30"];
+    $("#timeseries_date_slider").slider({
+        range: true, min: 0, max: 181, step: 1,
+        values: [0, 181],
+        slide: (e, ui) => $("#timeseries_date_slider_label").text(window.dateValues_timeseries_date_slider[ui.values[0]] + " to " + window.dateValues_timeseries_date_slider[ui.values[1]]),
+        change: () => updatePlotWithFilters_timeseries()
+    });
+                    document.getElementById('timeseries_quarter_slider').addEventListener('change', () => updatePlotWithFilters_timeseries());
+                    updatePlotWithFilters_timeseries();
+                });
+            }).catch(error => console.error('Error loading data for chart timeseries:', error));
+            })();
+        
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="df2" data-format="parquet" data-src="data/df2.parquet"></script><script type="text/plain" id="df6" data-format="parquet" data-src="data/df6.parquet"></script><script type="text/plain" id="df3" data-format="parquet" data-src="data/df3.parquet"></script><script type="text/plain" id="df4" data-format="parquet" data-src="data/df4.parquet"></script><script type="text/plain" id="df1" data-format="parquet" data-src="data/df1.parquet"></script><script type="text/plain" id="df5" data-format="parquet" data-src="data/df5.parquet"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1></h1>
+<p></p>
+
+<h2>Multi-Dimensional Health Data</h2>
+<p>Use the X and Y dropdowns to explore different dimension combinations. Try: mass vs height, age vs bmi, etc. Marginal distributions show on both axes.</p>
+
+
+<div style="margin: 10px 0;">
+    <button id="multi_dim_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_multi_dim">X:</label>
+                    <select id="x_col_select_multi_dim" onchange="updateChart_multi_dim()">
+                    <option value="mass" selected>mass</option>
+                    <option value="height">height</option>
+                    <option value="age">age</option>
+                    <option value="bmi">bmi</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_multi_dim">Y:</label>
+                    <select id="y_col_select_multi_dim" onchange="updateChart_multi_dim()">
+                    <option value="mass" selected>mass</option>
+                    <option value="height">height</option>
+                    <option value="age">age</option>
+                    <option value="bmi">bmi</option>                </select>
+                </div>
+                    </div>
+
+
+<!-- Chart -->
+<div id="multi_dim"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df1.parquet</p><br>
+<hr>
+<br>
+<h2>Multiple Styling Options</h2>
+<p>Use the Color, Point type, and Point size dropdowns to change visual encoding. Try different combinations to highlight different aspects of the data.</p>
+
+
+<div style="margin: 10px 0;">
+    <button id="multi_style_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_multi_style">X:</label>
+                    <select id="x_col_select_multi_style" onchange="updateChart_multi_style()">
+                    <option value="x" selected>x</option>
+                    <option value="y">y</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_multi_style">Y:</label>
+                    <select id="y_col_select_multi_style" onchange="updateChart_multi_style()">
+                    <option value="x" selected>x</option>
+                    <option value="y">y</option>                </select>
+                </div>
+                    </div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="color_col_select_multi_style">Color:</label>
+                    <select id="color_col_select_multi_style" onchange="updateChart_multi_style()">
+                    <option value="region" selected>region</option>
+                    <option value="category">category</option>
+                    <option value="priority">priority</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointtype_col_select_multi_style">Point type:</label>
+                    <select id="pointtype_col_select_multi_style" onchange="updateChart_multi_style()">
+                    <option value="region" selected>region</option>
+                    <option value="category">category</option>
+                    <option value="priority">priority</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointsize_col_select_multi_style">Point size:</label>
+                    <select id="pointsize_col_select_multi_style" onchange="updateChart_multi_style()">
+                    <option value="region" selected>region</option>
+                    <option value="size_group">size_group</option>
+                    <option value="priority">priority</option>                </select>
+                </div>
+                    </div>
+
+
+<!-- Chart -->
+<div id="multi_style"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df2.parquet</p><br>
+<hr>
+<br>
+<h2>Faceting Example - Weather Data</h2>
+<p>Use the 'Facet by' dropdown to split the data. Notice: Marginal distributions appear when no faceting is selected, but disappear when a facet is applied to save space.</p>
+
+
+<div style="margin: 10px 0;">
+    <button id="facet_single_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_facet_single">X:</label>
+                    <select id="x_col_select_facet_single" onchange="updateChart_facet_single()">
+                    <option value="temperature" selected>temperature</option>
+                    <option value="humidity">humidity</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_facet_single">Y:</label>
+                    <select id="y_col_select_facet_single" onchange="updateChart_facet_single()">
+                    <option value="temperature" selected>temperature</option>
+                    <option value="humidity">humidity</option>                </select>
+                </div>
+                    </div>
+            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet1_select_facet_single">Facet 1:</label>
+                    <select id="facet1_select_facet_single" onchange="updateChart_facet_single()">
+                <option value="None" selected>None</option>
+                <option value="season">season</option>
+                <option value="location">location</option>                </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet2_select_facet_single">Facet 2:</label>
+                    <select id="facet2_select_facet_single" onchange="updateChart_facet_single()">
+                <option value="None" selected>None</option>
+                <option value="season">season</option>
+                <option value="location">location</option>                </select>
+                </div>
+            </div>
+            
+
+<!-- Chart -->
+<div id="facet_single"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df3.parquet</p><br>
+<hr>
+<br>
+<h2>Two-Dimensional Faceting - Student Performance</h2>
+<p>Uses Facet 1 and Facet 2 to create a grid of subplots. Default shows grade × major. Try different combinations like semester × major. Set either facet to 'None' to reduce to single facet or no faceting.</p>
+
+
+<div style="margin: 10px 0;">
+    <button id="facet_grid_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_facet_grid">X:</label>
+                    <select id="x_col_select_facet_grid" onchange="updateChart_facet_grid()">
+                    <option value="score1" selected>score1</option>
+                    <option value="score2">score2</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_facet_grid">Y:</label>
+                    <select id="y_col_select_facet_grid" onchange="updateChart_facet_grid()">
+                    <option value="score1" selected>score1</option>
+                    <option value="score2">score2</option>                </select>
+                </div>
+                    </div>
+            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet1_select_facet_grid">Facet 1:</label>
+                    <select id="facet1_select_facet_grid" onchange="updateChart_facet_grid()">
+                <option value="None">None</option>
+                <option value="grade" selected>grade</option>
+                <option value="major">major</option>
+                <option value="semester">semester</option>                </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet2_select_facet_grid">Facet 2:</label>
+                    <select id="facet2_select_facet_grid" onchange="updateChart_facet_grid()">
+                <option value="None">None</option>
+                <option value="grade">grade</option>
+                <option value="major" selected>major</option>
+                <option value="semester">semester</option>                </select>
+                </div>
+            </div>
+            
+
+<!-- Chart -->
+<div id="facet_grid"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df4.parquet</p><br>
+<hr>
+<br>
+<h2>Complex Multi-Dimensional Exploration</h2>
+<p>Demonstrates all features together: 4 dimensions for X/Y axes, multiple color/shape/size options, and faceting. Explore different combinations to find interesting patterns.</p>
+
+
+<div style="margin: 10px 0;">
+    <button id="complex_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_complex">X:</label>
+                    <select id="x_col_select_complex" onchange="updateChart_complex()">
+                    <option value="var1" selected>var1</option>
+                    <option value="var2">var2</option>
+                    <option value="var3">var3</option>
+                    <option value="var4">var4</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_complex">Y:</label>
+                    <select id="y_col_select_complex" onchange="updateChart_complex()">
+                    <option value="var1" selected>var1</option>
+                    <option value="var2">var2</option>
+                    <option value="var3">var3</option>
+                    <option value="var4">var4</option>                </select>
+                </div>
+                    </div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="color_col_select_complex">Color:</label>
+                    <select id="color_col_select_complex" onchange="updateChart_complex()">
+                    <option value="group_A" selected>group_A</option>
+                    <option value="group_B">group_B</option>
+                    <option value="group_C">group_C</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointtype_col_select_complex">Point type:</label>
+                    <select id="pointtype_col_select_complex" onchange="updateChart_complex()">
+                    <option value="group_A" selected>group_A</option>
+                    <option value="group_B">group_B</option>
+                    <option value="intensity">intensity</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointsize_col_select_complex">Point size:</label>
+                    <select id="pointsize_col_select_complex" onchange="updateChart_complex()">
+                    <option value="group_A" selected>group_A</option>
+                    <option value="intensity">intensity</option>                </select>
+                </div>
+                    </div>
+            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet1_select_complex">Facet 1:</label>
+                    <select id="facet1_select_complex" onchange="updateChart_complex()">
+                <option value="None" selected>None</option>
+                <option value="group_C">group_C</option>
+                <option value="group_B">group_B</option>                </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet2_select_complex">Facet 2:</label>
+                    <select id="facet2_select_complex" onchange="updateChart_complex()">
+                <option value="None" selected>None</option>
+                <option value="group_C">group_C</option>
+                <option value="group_B">group_B</option>                </select>
+                </div>
+            </div>
+            
+
+<!-- Chart -->
+<div id="complex"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df5.parquet</p><br>
+<hr>
+<br>
+<h2>Time Series Scatter with Filters</h2>
+<p>Use date range slider and quarter filter to focus on specific time periods. Switch between viewing by portfolio or as aggregate using the color dropdown.</p>
+
+<div style="margin: 20px 0;">
+    <label>Filter by date: </label>
+    <span id="timeseries_date_slider_label">2024-01-01 to 2024-06-30</span>
+    <div id="timeseries_date_slider" style="width: 300px; margin: 10px 0;"></div>
+</div>
+<div style="margin: 20px 0;">
+    <label for="timeseries_quarter_slider">Filter by quarter: </label>
+    <select id="timeseries_quarter_slider" multiple style="width: 300px; height: 100px;">
+        <option value="1" selected>1</option>
+<option value="2" selected>2</option>
+    </select>
+    <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
+</div>
+
+<div style="margin: 10px 0;">
+    <button id="timeseries_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_col_select_timeseries">X:</label>
+                    <select id="x_col_select_timeseries" onchange="updateChart_timeseries()">
+                    <option value="value1" selected>value1</option>
+                    <option value="value2">value2</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_timeseries">Y:</label>
+                    <select id="y_col_select_timeseries" onchange="updateChart_timeseries()">
+                    <option value="value1" selected>value1</option>
+                    <option value="value2">value2</option>                </select>
+                </div>
+                    </div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="color_col_select_timeseries">Color:</label>
+                    <select id="color_col_select_timeseries" onchange="updateChart_timeseries()">
+                    <option value="portfolio" selected>portfolio</option>
+                    <option value="color">color</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointtype_col_select_timeseries">Point type:</label>
+                    <select id="pointtype_col_select_timeseries" onchange="updateChart_timeseries()">
+                    <option value="portfolio" selected>portfolio</option>
+                    <option value="color">color</option>                </select>
+                </div>
+                            <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="pointsize_col_select_timeseries">Point size:</label>
+                    <select id="pointsize_col_select_timeseries" onchange="updateChart_timeseries()">
+                    <option value="portfolio" selected>portfolio</option>
+                    <option value="color">color</option>                </select>
+                </div>
+                    </div>
+
+
+<!-- Chart -->
+<div id="timeseries"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+</body>
+</html>

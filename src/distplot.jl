@@ -13,6 +13,7 @@ struct DistPlot <: JSPlotsType
                       show_rug::Bool=true,
                       histogram_bins::Int=30,
                       box_opacity::Float64=0.7,
+                      show_controls::Bool=false,
                       title::String="Distribution Plot",
                       value_label::String="",
                       notes::String="")
@@ -356,8 +357,9 @@ struct DistPlot <: JSPlotsType
             };
         """
         
-        # Add toggle buttons for histogram, box, and rug
-        toggle_buttons_html = """
+        # Add toggle buttons for histogram, box, and rug (only if show_controls is true)
+        toggle_buttons_html = if show_controls
+            """
         <div style="margin: 20px 0;">
             <button id="$(chart_title)_histogram_toggle" style="padding: 5px 15px; cursor: pointer; margin-right: 10px;">
                 $(show_histogram ? "Hide" : "Show") Histogram
@@ -370,7 +372,10 @@ struct DistPlot <: JSPlotsType
             </button>
         </div>
         """
-        
+        else
+            ""
+        end
+
         sliders_html = toggle_buttons_html * sliders_html
         
         functional_html = """
@@ -393,29 +398,31 @@ struct DistPlot <: JSPlotsType
 
                 // Initialize buttons and sliders after data is loaded
                 \$(function() {
+                        $(show_controls ? """
                         // Histogram toggle button
                         document.getElementById('$(chart_title)_histogram_toggle').addEventListener('click', function() {
                             window.showHistogram_$(chart_title) = !window.showHistogram_$(chart_title);
                             this.textContent = window.showHistogram_$(chart_title) ? 'Hide Histogram' : 'Show Histogram';
                             updatePlotWithFilters_$(chart_title)();
                         });
-                        
+
                         // Box plot toggle button
                         document.getElementById('$(chart_title)_box_toggle').addEventListener('click', function() {
                             window.showBox_$(chart_title) = !window.showBox_$(chart_title);
                             this.textContent = window.showBox_$(chart_title) ? 'Hide Box Plot' : 'Show Box Plot';
                             updatePlotWithFilters_$(chart_title)();
                         });
-                        
+
                         // Rug plot toggle button
                         document.getElementById('$(chart_title)_rug_toggle').addEventListener('click', function() {
                             window.showRug_$(chart_title) = !window.showRug_$(chart_title);
                             this.textContent = window.showRug_$(chart_title) ? 'Hide Rug Plot' : 'Show Rug Plot';
                             updatePlotWithFilters_$(chart_title)();
                         });
-                        
+                        """ : "")
+
                         $slider_init_js
-                        
+
                     // Initial plot
                     updatePlotWithFilters_$(chart_title)();
                 });

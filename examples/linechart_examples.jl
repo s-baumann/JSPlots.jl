@@ -26,8 +26,8 @@ df1 = DataFrame(
 )
 
 chart1 = LineChart(:revenue_trend, df1, :revenue_data;
-    x_col = :Date,
-    y_col = :Revenue,
+    x_cols = [:Date],
+    y_cols = [:Revenue],
     color_cols = [:color],
     title = "Daily Revenue Trend - H1 2024",
     x_label = "Date",
@@ -47,8 +47,8 @@ df2 = DataFrame(
 )
 
 chart2 = LineChart(:multi_series, df2, :sales_data;
-    x_col = :Month,
-    y_col = :Sales,
+    x_cols = [:Month],
+    y_cols = [:Sales],
     color_cols = [:Year],
     linetype_cols = [:Year],
     title = "Monthly Sales Comparison Across Years",
@@ -80,8 +80,8 @@ for dept in departments
 end
 
 chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
-    x_col = :Month,
-    y_col = :Productivity,
+    x_cols = [:Month],
+    y_cols = [:Productivity],
     color_cols = [:Metric],
     linetype_cols = [:Metric],
     filters = Dict{Symbol,Any}(:Department => "Engineering", :Quarter => "Q1"),
@@ -117,8 +117,8 @@ for product in products
 end
 
 chart5 = LineChart(:facet_wrap_example, facet_df, :facet_data;
-    x_col = :Month,
-    y_col = :Sales,
+    x_cols = [:Month],
+    y_cols = [:Sales],
     color_cols = [:color, :Product],
     linetype_cols = [:color],
     facet_cols = [:Product],
@@ -155,8 +155,8 @@ for product in products_small
 end
 
 chart6 = LineChart(:facet_grid_example, facet_grid_df, :facet_grid_data;
-    x_col = :Month,
-    y_col = :Sales,
+    x_cols = [:Month],
+    y_cols = [:Sales],
     color_cols = [:color],
     linetype_cols = [:color],
     facet_cols = [:Product, :Region],
@@ -191,8 +191,8 @@ for stock in stocks
 end
 
 chart7 = LineChart(:dynamic_controls, dynamic_df, :dynamic_data;
-    x_col = :Month,
-    y_col = :Return,
+    x_cols = [:Month],
+    y_cols = [:Return],
     color_cols = [:Stock, :Strategy, :Region],
     linetype_cols = [:Stock, :Strategy, :Region],
     facet_cols = [:Stock, :Strategy, :Region],
@@ -222,8 +222,8 @@ for product in ["Product A", "Product B"]
 end
 
 chart8 = LineChart(:aggregation_demo, agg_df, :agg_data;
-    x_col = :Month,
-    y_col = :Sales,
+    x_cols = [:Month],
+    y_cols = [:Sales],
     color_cols = [:Product],
     linetype_cols = [:Product],
     aggregator = "mean",
@@ -233,9 +233,32 @@ chart8 = LineChart(:aggregation_demo, agg_df, :agg_data;
     notes = "This dataset has 5 observations per month. Use the Aggregator dropdown to switch between: none (all points), mean, median, count, min, max."
 )
 
+# Example 9: Multiple X and Y dimensions with dynamic switching
+df_multi = DataFrame(
+    time_hours = 1:24,
+    time_halfhours = 0.5:0.5:12,
+    temperature_celsius = 15 .+ 8 .* sin.(2π .* (1:24) ./ 24) .+ randn(24),
+    temperature_fahrenheit = 59 .+ 14.4 .* sin.(2π .* (1:24) ./ 24) .+ randn(24) .* 1.8,
+    humidity_percent = 60 .+ 20 .* cos.(2π .* (1:24) ./ 24) .+ randn(24) .* 5,
+    pressure_hpa = 1013 .+ 5 .* sin.(2π .* (1:24) ./ 24 .+ π/4) .+ randn(24) .* 2,
+    location = repeat(["Station A"], 24),
+    color = repeat(["default"], 24)
+)
+
+chart9 = LineChart(:multi_dimensions, df_multi, :multi_data;
+    x_cols = [:time_hours, :time_halfhours],
+    y_cols = [:temperature_celsius, :temperature_fahrenheit, :humidity_percent, :pressure_hpa],
+    color_cols = [:color],
+    linetype_cols = [:color],
+    title = "Multi-Dimensional Weather Data - Dynamic X and Y Selection",
+    notes = "Use the dropdowns to dynamically switch between different time scales (X) and measurements (Y). " *
+           "This demonstrates how you can provide multiple options for both axes and let users explore different views of the same dataset."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
+    <li><strong>Dynamic X and Y dimensions:</strong> Choose which variables to plot on X and Y axes from dropdowns</li>
     <li><strong>Time series support:</strong> Automatic date formatting and axis scaling</li>
     <li><strong>Dynamic color grouping:</strong> Choose which variable to color by from dropdown</li>
     <li><strong>Dynamic linetype:</strong> Choose which variable controls line style (solid, dashed, dotted, etc.)</li>
@@ -257,9 +280,10 @@ page = JSPlotPage(
         :facet_data => facet_df,
         :facet_grid_data => facet_grid_df,
         :dynamic_data => dynamic_df,
-        :agg_data => agg_df
+        :agg_data => agg_df,
+        :multi_data => df_multi
     ),
-    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, conclusion],
+    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, conclusion],
     tab_title = "LineChart Examples"
 )
 
@@ -277,4 +301,5 @@ println("  • Facet wrap (1 variable)")
 println("  • Facet grid (2 variables)")
 println("  • Dynamic controls (color, linetype, faceting)")
 println("  • Aggregation demo (mean, median, count, min, max)")
+println("  • Dynamic X and Y dimension selection")
 println("  • Integration with images and text")
