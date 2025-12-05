@@ -10,4 +10,4 @@ The pivot table functionality is a wrapper over PivotTableJS (examples: https://
 
 I have implemented the Plotly javascrip plots that I want to use for my own use cases. Pull requests welcome if you implement anything else. Just try to copy the coding style.
 
-For examples see the examples folder. For the resultant htmls see generated_html_examples.
+For examples see the examples folder (This was vibecoded to a large extent so if the examples seem a bit wierd that is why). For the resultant htmls see generated_html_examples.

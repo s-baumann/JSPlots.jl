@@ -82,7 +82,8 @@ using Dates
             chart = LineChart(:color_chart, test_df, :test_df;
                 x_col = :x,
                 y_col = :y,
-                color_col = :category,
+                color_cols = [:category],
+                linetype_cols = [:category],
                 filters = Dict{Symbol,Any}(:category => "A"),
                 title = "Colored Chart"
             )
