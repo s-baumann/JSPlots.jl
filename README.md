@@ -6,8 +6,6 @@
 
 This is a Julia package for creating interactive JavaScript-based visualizations. It includes support for pivot tables (via PivotTableJS), line charts, 3D charts, scatter plots, and distribution plots using Plotly.js. You can embed your data into HTML pages and visualize them interactively.
 
-The pivot table functionality is a wrapper over PivotTableJS (examples: https://pivottable.js.org/examples/index.html), similar to the [python module](https://pypi.org/project/pivottablejs/). You can put multiple different charts and tables onto the same page (either sharing or not sharing data sources). It is also easy to change the colour mapping for use in HeatMap.
+The pivot table functionality is a wrapper over PivotTableJS (examples: https://pivottable.js.org/examples/index.html), similar to the [python module](https://pypi.org/project/pivottablejs/). You can put multiple different charts and tables onto the same page (either sharing or not sharing data sources). There are also Plotly javascript plots that are supported. Pull requests welcome if you implement anything else. Just try to copy the coding style.
 
-I have implemented the Plotly javascrip plots that I want to use for my own use cases. Pull requests welcome if you implement anything else. Just try to copy the coding style.
-
-For examples see the examples folder (This was vibecoded to a large extent so if the examples seem a bit wierd that is why). For the resultant htmls see generated_html_examples.
+For examples see the examples folder (These were vibecoded with Claude to a large extent so if the examples seem a bit wierd that is why). For the resultant htmls see generated_html_examples.
