@@ -679,7 +679,6 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         open(bat_path, "w") do f
             write(f, generate_bat_launcher(original_name))
         end
-        println("Windows launcher saved to $bat_path")
 
         open(sh_path, "w") do f
             write(f, generate_sh_launcher(original_name))
@@ -693,14 +692,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         catch
             # Silently fail on Windows
         end
-        println("Linux/macOS launcher saved to $sh_path")
 
-        println("\nProject created in: $project_dir")
-        println("To view the plots:")
-        println("  Windows: Run $bat_path")
-        println("  Linux/macOS: Run $sh_path")
-        println("\nIMPORTANT: Do not open the HTML file directly!")
-        println("Use the launcher scripts to avoid CORS errors.")
 
     else
         # Original embedded format logic
