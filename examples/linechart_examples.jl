@@ -10,7 +10,7 @@ header = TextBlock("""
     <li><strong>Basic time series:</strong> Simple line chart with date axis</li>
     <li><strong>Multiple series:</strong> Comparing multiple lines with color dimension</li>
     <li><strong>Interactive filters:</strong> Dropdown menus to filter data dynamically</li>
-    <li><strong>Dynamic controls:</strong> Change color, linetype, aggregation, and faceting on the fly</li>
+    <li><strong>Dynamic controls:</strong> Change color, aggregation, and faceting on the fly</li>
     <li><strong>Aggregation:</strong> Handle multiple observations per x value</li>
     <li><strong>Faceting:</strong> Facet wrap (1 variable) and facet grid (2 variables)</li>
     <li><strong>Integration:</strong> Combining charts with images and text</li>
@@ -50,7 +50,6 @@ chart2 = LineChart(:multi_series, df2, :sales_data;
     x_cols = [:Month],
     y_cols = [:Sales],
     color_cols = [:Year],
-    linetype_cols = [:Year],
     title = "Monthly Sales Comparison Across Years",
     x_label = "Month",
     y_label = "Sales (thousands)",
@@ -83,7 +82,6 @@ chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
     x_cols = [:Month],
     y_cols = [:Productivity],
     color_cols = [:Metric],
-    linetype_cols = [:Metric],
     filters = Dict{Symbol,Any}(:Department => "Engineering", :Quarter => "Q1"),
     title = "Department Productivity by Month",
     x_label = "Month",
@@ -120,7 +118,6 @@ chart5 = LineChart(:facet_wrap_example, facet_df, :facet_data;
     x_cols = [:Month],
     y_cols = [:Sales],
     color_cols = [:color, :Product],
-    linetype_cols = [:color],
     facet_cols = [:Product],
     default_facet_cols = :Product,
     title = "Sales by Product (Facet Wrap)",
@@ -158,7 +155,6 @@ chart6 = LineChart(:facet_grid_example, facet_grid_df, :facet_grid_data;
     x_cols = [:Month],
     y_cols = [:Sales],
     color_cols = [:color],
-    linetype_cols = [:color],
     facet_cols = [:Product, :Region],
     default_facet_cols = [:Product, :Region],
     title = "Sales by Product and Region (Facet Grid)",
@@ -167,7 +163,7 @@ chart6 = LineChart(:facet_grid_example, facet_grid_df, :facet_grid_data;
     notes = "Facet grid creates a 2D grid of subplots. First facet variable (Product) defines rows, second (Region) defines columns. Similar to ggplot2's facet_grid."
 )
 
-# Example 7: Dynamic Controls - Color, Linetype, and Faceting
+# Example 7: Dynamic Controls - Color, and Faceting
 # Create richer dataset with multiple categorical variables
 dynamic_df = DataFrame()
 stocks = ["AAPL", "GOOGL", "MSFT"]
@@ -194,7 +190,6 @@ chart7 = LineChart(:dynamic_controls, dynamic_df, :dynamic_data;
     x_cols = [:Month],
     y_cols = [:Return],
     color_cols = [:Stock, :Strategy, :Region],
-    linetype_cols = [:Stock, :Strategy, :Region],
     facet_cols = [:Stock, :Strategy, :Region],
     default_facet_cols = nothing,
     aggregator = "none",
@@ -225,7 +220,6 @@ chart8 = LineChart(:aggregation_demo, agg_df, :agg_data;
     x_cols = [:Month],
     y_cols = [:Sales],
     color_cols = [:Product],
-    linetype_cols = [:Product],
     aggregator = "mean",
     title = "Aggregation Demo - Multiple Observations per X",
     x_label = "Month",
@@ -249,7 +243,6 @@ chart9 = LineChart(:multi_dimensions, df_multi, :multi_data;
     x_cols = [:time_hours, :time_halfhours],
     y_cols = [:temperature_celsius, :temperature_fahrenheit, :humidity_percent, :pressure_hpa],
     color_cols = [:color],
-    linetype_cols = [:color],
     title = "Multi-Dimensional Weather Data - Dynamic X and Y Selection",
     notes = "Use the dropdowns to dynamically switch between different time scales (X) and measurements (Y). " *
            "This demonstrates how you can provide multiple options for both axes and let users explore different views of the same dataset."
@@ -261,7 +254,6 @@ conclusion = TextBlock("""
     <li><strong>Dynamic X and Y dimensions:</strong> Choose which variables to plot on X and Y axes from dropdowns</li>
     <li><strong>Time series support:</strong> Automatic date formatting and axis scaling</li>
     <li><strong>Dynamic color grouping:</strong> Choose which variable to color by from dropdown</li>
-    <li><strong>Dynamic linetype:</strong> Choose which variable controls line style (solid, dashed, dotted, etc.)</li>
     <li><strong>Aggregation:</strong> Handle multiple observations per x value with mean, median, count, min, max, or none</li>
     <li><strong>Interactive filters:</strong> Dropdown menus for dynamic data filtering</li>
     <li><strong>Dynamic faceting:</strong> Choose 0, 1, or 2 variables for faceting on the fly</li>
@@ -299,7 +291,7 @@ println("  • Multiple series with color grouping")
 println("  • Interactive filtered chart")
 println("  • Facet wrap (1 variable)")
 println("  • Facet grid (2 variables)")
-println("  • Dynamic controls (color, linetype, faceting)")
+println("  • Dynamic controls (color, faceting)")
 println("  • Aggregation demo (mean, median, count, min, max)")
 println("  • Dynamic X and Y dimension selection")
 println("  • Integration with images and text")

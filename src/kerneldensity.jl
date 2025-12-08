@@ -355,8 +355,8 @@ $options2                </select>
                 // Use Silverman's rule of thumb if bandwidth not specified
                 if (!bandwidth) {
                     const n = values.length;
-                    const std = Math.sqrt(values.reduce((sum, x, i, arr) => {
-                        const mean = arr.reduce((a, b) => a + b, 0) / n;
+                    const mean = values.reduce((a, b) => a + b, 0) / n;
+                    const std = Math.sqrt(values.reduce((sum, x) => {
                         return sum + Math.pow(x - mean, 2);
                     }, 0) / n);
                     bandwidth = 1.06 * std * Math.pow(n, -0.2);

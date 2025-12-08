@@ -7,7 +7,6 @@ struct LineChart <: JSPlotsType
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
                             color_cols::Vector{Symbol}=[:color],
-                            linetype_cols::Vector{Symbol}=color_cols,
                             filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -103,26 +102,9 @@ struct LineChart <: JSPlotsType
             error("None of the specified color_cols exist in the dataframe. Available columns: $(names(df))")
         end
 
-        # Build linetype maps for all possible linetype columns that exist
-        linetype_palette = ["solid", "dot", "dash", "longdash", "dashdot", "longdashdot"]
-        linetype_maps = Dict()
-        valid_linetype_cols = Symbol[]
-        for col in linetype_cols
-            if string(col) in available_cols
-                push!(valid_linetype_cols, col)
-                unique_vals = unique(df[!, col])
-                linetype_maps[string(col)] = Dict(
-                    string(key) => linetype_palette[(i - 1) % length(linetype_palette) + 1]
-                    for (i, key) in enumerate(unique_vals)
-                )
-            end
-        end
-        if isempty(valid_linetype_cols)
-            error("None of the specified linetype_cols exist in the dataframe. Available columns: $(names(df))")
-        end
-
-        # Build dropdowns HTML
-        dropdowns_html = ""
+        # Build dropdowns HTML (separate filters from other controls)
+        filter_dropdowns_html = ""
+        control_dropdowns_html = ""
 
         # X dimension dropdown
         if length(valid_x_cols) > 1
@@ -131,7 +113,7 @@ struct LineChart <: JSPlotsType
                 selected = (col == valid_x_cols[1]) ? " selected" : ""
                 x_options *= "                <option value=\"$col\"$selected>$col</option>\n"
             end
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="x_col_select_$chart_title">X dimension: </label>
                 <select id="x_col_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -147,7 +129,7 @@ struct LineChart <: JSPlotsType
                 selected = (col == valid_y_cols[1]) ? " selected" : ""
                 y_options *= "                <option value=\"$col\"$selected>$col</option>\n"
             end
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="y_col_select_$chart_title">Y dimension: </label>
                 <select id="y_col_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -156,7 +138,7 @@ struct LineChart <: JSPlotsType
             """
         end
 
-        # Build filter dropdowns
+        # Build filter dropdowns (multi-select)
         for col in keys(filters)
             default_val = filters[col]
             options_html = ""
@@ -164,10 +146,10 @@ struct LineChart <: JSPlotsType
                 selected = (opt == default_val) ? " selected" : ""
                 options_html *= "                <option value=\"$(opt)\"$selected>$(opt)</option>\n"
             end
-            dropdowns_html *= """
+            filter_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="$(col)_select">$(col): </label>
-                <select id="$(col)_select" onchange="updateChart_$chart_title()">
+                <select id="$(col)_select" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_$chart_title()">
     $options_html            </select>
             </div>
             """
@@ -180,27 +162,11 @@ struct LineChart <: JSPlotsType
                 selected = (col == valid_color_cols[1]) ? " selected" : ""
                 color_options *= "                <option value=\"$col\"$selected>$col</option>\n"
             end
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="color_col_select_$chart_title">Color by: </label>
                 <select id="color_col_select_$chart_title" onchange="updateChart_$chart_title()">
     $color_options            </select>
-            </div>
-            """
-        end
-
-        # Build linetype column dropdown
-        if length(valid_linetype_cols) > 1
-            linetype_options = ""
-            for col in valid_linetype_cols
-                selected = (col == valid_linetype_cols[1]) ? " selected" : ""
-                linetype_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            dropdowns_html *= """
-            <div style="margin: 10px;">
-                <label for="linetype_col_select_$chart_title">Line type by: </label>
-                <select id="linetype_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $linetype_options            </select>
             </div>
             """
         end
@@ -211,7 +177,7 @@ struct LineChart <: JSPlotsType
             selected = (agg == aggregator) ? " selected" : ""
             aggregator_options *= "                <option value=\"$agg\"$selected>$agg</option>\n"
         end
-        dropdowns_html *= """
+        control_dropdowns_html *= """
         <div style="margin: 10px;">
             <label for="aggregator_select_$chart_title">Aggregator: </label>
             <select id="aggregator_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -228,7 +194,7 @@ struct LineChart <: JSPlotsType
             facet1_options *= "                <option value=\"None\"$(default_facet1 == "None" ? " selected" : "")>None</option>\n"
             facet1_options *= "                <option value=\"$facet_col\"$(default_facet1 == string(facet_col) ? " selected" : "")>$facet_col</option>\n"
 
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="facet1_select_$chart_title">Facet by: </label>
                 <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -246,7 +212,7 @@ struct LineChart <: JSPlotsType
                 facet1_options *= "                <option value=\"$col\"$selected>$col</option>\n"
             end
 
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="facet1_select_$chart_title">Facet 1: </label>
                 <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -263,7 +229,7 @@ struct LineChart <: JSPlotsType
                 facet2_options *= "                <option value=\"$col\"$selected>$col</option>\n"
             end
 
-            dropdowns_html *= """
+            control_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="facet2_select_$chart_title">Facet 2: </label>
                 <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
@@ -278,7 +244,6 @@ struct LineChart <: JSPlotsType
         x_cols_js = "[" * join(["'$col'" for col in valid_x_cols], ", ") * "]"
         y_cols_js = "[" * join(["'$col'" for col in valid_y_cols], ", ") * "]"
         color_cols_js = "[" * join(["'$col'" for col in valid_color_cols], ", ") * "]"
-        linetype_cols_js = "[" * join(["'$col'" for col in valid_linetype_cols], ", ") * "]"
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([
@@ -286,17 +251,10 @@ struct LineChart <: JSPlotsType
             for (col, map) in color_maps
         ], ", ") * "}"
 
-        # Create linetype maps as nested JavaScript object
-        linetype_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in linetype_maps
-        ], ", ") * "}"
-
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
         default_color_col = string(valid_color_cols[1])
-        default_linetype_col = string(valid_linetype_cols[1])
 
         functional_html = """
         (function() {
@@ -305,13 +263,10 @@ struct LineChart <: JSPlotsType
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
-            const LINETYPE_COLS = $linetype_cols_js;
             const COLOR_MAPS = $color_maps_js;
-            const LINETYPE_MAPS = $linetype_maps_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
-            const DEFAULT_LINETYPE_COL = '$default_linetype_col';
             const X_LABEL = '$x_label';
             const Y_LABEL = '$y_label';
 
@@ -347,21 +302,18 @@ struct LineChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-                // Get current filter values
+                // Get current filter values (multiple selections)
                 const filters = {};
                 FILTER_COLS.forEach(col => {
                     const select = document.getElementById(col + '_select');
                     if (select) {
-                        filters[col] = select.value;
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
                     }
                 });
 
-                // Get current color and linetype columns
+                // Get current color column
                 const colorColSelect = document.getElementById('color_col_select_$chart_title');
                 const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
-
-                const linetypeColSelect = document.getElementById('linetype_col_select_$chart_title');
-                const LINETYPE_COL = linetypeColSelect ? linetypeColSelect.value : DEFAULT_LINETYPE_COL;
 
                 // Get current aggregator
                 const aggregatorSelect = document.getElementById('aggregator_select_$chart_title');
@@ -378,14 +330,14 @@ struct LineChart <: JSPlotsType
                 if (facet1) FACET_COLS.push(facet1);
                 if (facet2) FACET_COLS.push(facet2);
 
-                // Get color and linetype maps for current selections
+                // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-                const LINETYPE_MAP = LINETYPE_MAPS[LINETYPE_COL] || {};
 
-                // Filter data
+                // Filter data (support multiple selections per filter)
                 const filteredData = allData.filter(row => {
                     for (let col in filters) {
-                        if (String(row[col]) !== String(filters[col])) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
                             return false;
                         }
                     }
@@ -393,20 +345,17 @@ struct LineChart <: JSPlotsType
                 });
 
                 if (FACET_COLS.length === 0) {
-                    // No faceting - group by color and linetype
+                    // No faceting - group by color
                     const groupedData = {};
                     filteredData.forEach(row => {
                         const colorVal = String(row[COLOR_COL]);
-                        const linetypeVal = String(row[LINETYPE_COL]);
-                        const groupKey = colorVal + '|||' + linetypeVal;
-                        if (!groupedData[groupKey]) {
-                            groupedData[groupKey] = {
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
                                 data: [],
-                                color: colorVal,
-                                linetype: linetypeVal
+                                color: colorVal
                             };
                         }
-                        groupedData[groupKey].data.push(row);
+                        groupedData[colorVal].data.push(row);
                     });
 
                     const traces = [];
@@ -438,20 +387,15 @@ struct LineChart <: JSPlotsType
                             });
                         }
 
-                        const traceName = COLOR_COL === LINETYPE_COL ?
-                            group.color :
-                            group.color + ' (' + group.linetype + ')';
-
                         traces.push({
                             x: xValues,
                             y: yValues,
                             type: 'scatter',
                             mode: 'lines+markers',
-                            name: traceName,
+                            name: group.color,
                             line: {
                                 color: COLOR_MAP[group.color] || '#000000',
-                                width: $line_width,
-                                dash: LINETYPE_MAP[group.linetype] || 'solid'
+                                width: $line_width
                             },
                             marker: { size: $marker_size }
                         });
@@ -486,20 +430,17 @@ struct LineChart <: JSPlotsType
                     facetValues.forEach((facetVal, idx) => {
                         const facetData = filteredData.filter(row => row[facetCol] === facetVal);
 
-                        // Group by color and linetype within this facet
+                        // Group by color within this facet
                         const groupedData = {};
                         facetData.forEach(row => {
                             const colorVal = String(row[COLOR_COL]);
-                            const linetypeVal = String(row[LINETYPE_COL]);
-                            const groupKey = colorVal + '|||' + linetypeVal;
-                            if (!groupedData[groupKey]) {
-                                groupedData[groupKey] = {
+                            if (!groupedData[colorVal]) {
+                                groupedData[colorVal] = {
                                     data: [],
-                                    color: colorVal,
-                                    linetype: linetypeVal
+                                    color: colorVal
                                 };
                             }
-                            groupedData[groupKey].data.push(row);
+                            groupedData[colorVal].data.push(row);
                         });
 
                         const row = Math.floor(idx / nCols) + 1;
@@ -535,25 +476,21 @@ struct LineChart <: JSPlotsType
                                 });
                             }
 
-                            const traceName = COLOR_COL === LINETYPE_COL ?
-                                group.color :
-                                group.color + ' (' + group.linetype + ')';
-                            const legendGroup = traceName;
+                            const legendGroup = group.color;
 
                             traces.push({
                                 x: xValues,
                                 y: yValues,
                                 type: 'scatter',
                                 mode: 'lines+markers',
-                                name: traceName,
+                                name: group.color,
                                 legendgroup: legendGroup,
                                 showlegend: idx === 0,
                                 xaxis: xaxis,
                                 yaxis: yaxis,
                                 line: {
                                     color: COLOR_MAP[group.color] || '#000000',
-                                    width: $line_width,
-                                    dash: LINETYPE_MAP[group.linetype] || 'solid'
+                                    width: $line_width
                                 },
                                 marker: { size: $marker_size }
                             });
@@ -608,20 +545,17 @@ struct LineChart <: JSPlotsType
                                 row[facetRow] === rowVal && row[facetCol] === colVal
                             );
 
-                            // Group by color and linetype within this facet
+                            // Group by color within this facet
                             const groupedData = {};
                             facetData.forEach(row => {
                                 const colorVal = String(row[COLOR_COL]);
-                                const linetypeVal = String(row[LINETYPE_COL]);
-                                const groupKey = colorVal + '|||' + linetypeVal;
-                                if (!groupedData[groupKey]) {
-                                    groupedData[groupKey] = {
+                                if (!groupedData[colorVal]) {
+                                    groupedData[colorVal] = {
                                         data: [],
-                                        color: colorVal,
-                                        linetype: linetypeVal
+                                        color: colorVal
                                     };
                                 }
-                                groupedData[groupKey].data.push(row);
+                                groupedData[colorVal].data.push(row);
                             });
 
                             const idx = rowIdx * nCols + colIdx;
@@ -656,25 +590,21 @@ struct LineChart <: JSPlotsType
                                     });
                                 }
 
-                                const traceName = COLOR_COL === LINETYPE_COL ?
-                                    group.color :
-                                    group.color + ' (' + group.linetype + ')';
-                                const legendGroup = traceName;
+                                const legendGroup = group.color;
 
                                 traces.push({
                                     x: xValues,
                                     y: yValues,
                                     type: 'scatter',
                                     mode: 'lines+markers',
-                                    name: traceName,
+                                    name: group.color,
                                     legendgroup: legendGroup,
                                     showlegend: idx === 0,
                                     xaxis: xaxis,
                                     yaxis: yaxis,
                                     line: {
                                         color: COLOR_MAP[group.color] || '#000000',
-                                        width: $line_width,
-                                        dash: LINETYPE_MAP[group.linetype] || 'solid'
+                                        width: $line_width
                                     },
                                     marker: { size: $marker_size }
                                 });
@@ -744,9 +674,12 @@ struct LineChart <: JSPlotsType
         <h2>$title</h2>
         <p>$notes</p>
 
-        <!-- Controls -->
+        <!-- Filters (for data filtering) -->
+        $(filter_dropdowns_html != "" ? "<div id=\"filters\" style=\"margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filter_dropdowns_html\n        </div>" : "")
+
+        <!-- Controls (for data arrangement) -->
         <div id="controls">
-            $dropdowns_html
+            $control_dropdowns_html
         </div>
 
         <!-- Chart -->
