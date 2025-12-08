@@ -1,4 +1,3 @@
-
 struct LineChart <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
@@ -758,5 +757,5 @@ struct LineChart <: JSPlotsType
     end
 end
 
-
+dependencies(a::LineChart) = [a.data_label]
 

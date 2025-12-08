@@ -565,3 +565,5 @@ struct DistPlot <: JSPlotsType
         new(chart_title, data_label, functional_html, appearance_html)
     end
 end
+
+dependencies(a::DistPlot) = [a.data_label]

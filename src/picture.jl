@@ -244,3 +244,6 @@ function check_image_size(path::String, dataformat::Symbol)
         end
     end
 end
+
+dependencies(a::Picture) = []
+

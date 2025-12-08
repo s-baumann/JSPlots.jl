@@ -227,3 +227,6 @@ function html_escape(s::AbstractString)
     s = replace(s, "'" => "&#39;")
     return s
 end
+
+dependencies(a::Table) = []
+

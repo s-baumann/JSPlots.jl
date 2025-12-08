@@ -747,3 +747,5 @@ $options2                </select>
         new(chart_title, data_label, functional_html, appearance_html)
     end
 end
+
+dependencies(a::Scatter3D) = [a.data_label]

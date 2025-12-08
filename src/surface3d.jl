@@ -312,5 +312,5 @@ struct Surface3D <: JSPlotsType
     end
 end
 
-
+dependencies(a::Surface3D) = [a.data_label]
 

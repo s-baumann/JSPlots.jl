@@ -473,3 +473,5 @@ function detect_slider_type(df::DataFrame, col::Symbol)
 
     return :categorical
 end
+
+dependencies(a::ScatterPlot) = [a.data_label]

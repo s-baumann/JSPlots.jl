@@ -573,8 +573,10 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             mkpath(data_dir)
         end
 
+        files_to_do = intersect(keys(pt.dataframes), dependencies.(pt.pivot_tables))
         # Save all dataframes as separate files based on format
-        for (data_label, df) in pt.dataframes
+        for data_label in files_to_do
+            df = pt.dataframes[data_label]
             if pt.dataformat == :csv_external
                 file_path = joinpath(data_dir, "$(string(data_label)).csv")
                 CSV.write(file_path, df)

@@ -665,3 +665,5 @@ $options2                </select>
         new(chart_title, data_label, functional_html, appearance_html)
     end
 end
+
+dependencies(a::KernelDensity) = [a.data_label]

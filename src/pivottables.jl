@@ -105,3 +105,4 @@ struct PivotTable <: JSPlotsType
     end
 end
 
+dependencies(a::PivotTable) = [a.data_label]
