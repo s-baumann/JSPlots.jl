@@ -145,7 +145,6 @@ chart_trend = LineChart(:revenue_trend, detailed_sales, :detailed_sales;
     x_cols = [:Date],
     y_cols = [:Revenue],
     color_cols = [:Category],
-    linetype_cols = [:Category],
     title = "Daily Revenue by Category",
     x_label = "Date",
     y_label = "Revenue (\$)"

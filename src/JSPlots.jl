@@ -35,6 +35,6 @@ module JSPlots
     export Table
 
     include("make_html.jl")
-    export JSPlotPage, create_html
+    export JSPlotPage, Pages, LinkList, create_html
 
 end # module JSPlots

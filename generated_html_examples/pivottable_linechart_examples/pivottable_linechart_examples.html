@@ -394,13 +394,10 @@ $(function(){
     const X_COLS = ['x'];
     const Y_COLS = ['y'];
     const COLOR_COLS = ['color'];
-    const LINETYPE_COLS = ['color'];
     const COLOR_MAPS = {'color': {'B': '#EF553B', 'A': '#636efa'}};
-    const LINETYPE_MAPS = {'color': {'B': 'dot', 'A': 'solid'}};
     const DEFAULT_X_COL = 'x';
     const DEFAULT_Y_COL = 'y';
     const DEFAULT_COLOR_COL = 'color';
-    const DEFAULT_LINETYPE_COL = 'color';
     const X_LABEL = 'This is the x axis';
     const Y_LABEL = 'This is the y axis';
 
@@ -436,21 +433,18 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_pchart');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values
+        // Get current filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select');
             if (select) {
-                filters[col] = select.value;
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Get current color and linetype columns
+        // Get current color column
         const colorColSelect = document.getElementById('color_col_select_pchart');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
-
-        const linetypeColSelect = document.getElementById('linetype_col_select_pchart');
-        const LINETYPE_COL = linetypeColSelect ? linetypeColSelect.value : DEFAULT_LINETYPE_COL;
 
         // Get current aggregator
         const aggregatorSelect = document.getElementById('aggregator_select_pchart');
@@ -467,14 +461,14 @@ $(function(){
         if (facet1) FACET_COLS.push(facet1);
         if (facet2) FACET_COLS.push(facet2);
 
-        // Get color and linetype maps for current selections
+        // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const LINETYPE_MAP = LINETYPE_MAPS[LINETYPE_COL] || {};
 
-        // Filter data
+        // Filter data (support multiple selections per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                if (String(row[col]) !== String(filters[col])) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
                     return false;
                 }
             }
@@ -482,20 +476,17 @@ $(function(){
         });
 
         if (FACET_COLS.length === 0) {
-            // No faceting - group by color and linetype
+            // No faceting - group by color
             const groupedData = {};
             filteredData.forEach(row => {
                 const colorVal = String(row[COLOR_COL]);
-                const linetypeVal = String(row[LINETYPE_COL]);
-                const groupKey = colorVal + '|||' + linetypeVal;
-                if (!groupedData[groupKey]) {
-                    groupedData[groupKey] = {
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
                         data: [],
-                        color: colorVal,
-                        linetype: linetypeVal
+                        color: colorVal
                     };
                 }
-                groupedData[groupKey].data.push(row);
+                groupedData[colorVal].data.push(row);
             });
 
             const traces = [];
@@ -518,29 +509,36 @@ $(function(){
 
                     xValues = [];
                     yValues = [];
-                    Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
                         const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                         if (aggregated && aggregated.length > 0) {
-                            xValues.push(parseFloat(xVal));
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
                             yValues.push(aggregated[0]);
                         }
                     });
                 }
-
-                const traceName = COLOR_COL === LINETYPE_COL ?
-                    group.color :
-                    group.color + ' (' + group.linetype + ')';
 
                 traces.push({
                     x: xValues,
                     y: yValues,
                     type: 'scatter',
                     mode: 'lines+markers',
-                    name: traceName,
+                    name: group.color,
                     line: {
                         color: COLOR_MAP[group.color] || '#000000',
-                        width: 1,
-                        dash: LINETYPE_MAP[group.linetype] || 'solid'
+                        width: 1
                     },
                     marker: { size: 1 }
                 });
@@ -575,20 +573,17 @@ $(function(){
             facetValues.forEach((facetVal, idx) => {
                 const facetData = filteredData.filter(row => row[facetCol] === facetVal);
 
-                // Group by color and linetype within this facet
+                // Group by color within this facet
                 const groupedData = {};
                 facetData.forEach(row => {
                     const colorVal = String(row[COLOR_COL]);
-                    const linetypeVal = String(row[LINETYPE_COL]);
-                    const groupKey = colorVal + '|||' + linetypeVal;
-                    if (!groupedData[groupKey]) {
-                        groupedData[groupKey] = {
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
                             data: [],
-                            color: colorVal,
-                            linetype: linetypeVal
+                            color: colorVal
                         };
                     }
-                    groupedData[groupKey].data.push(row);
+                    groupedData[colorVal].data.push(row);
                 });
 
                 const row = Math.floor(idx / nCols) + 1;
@@ -615,34 +610,42 @@ $(function(){
 
                         xValues = [];
                         yValues = [];
-                        Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
                             const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                             if (aggregated && aggregated.length > 0) {
-                                xValues.push(parseFloat(xVal));
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
                                 yValues.push(aggregated[0]);
                             }
                         });
                     }
 
-                    const traceName = COLOR_COL === LINETYPE_COL ?
-                        group.color :
-                        group.color + ' (' + group.linetype + ')';
-                    const legendGroup = traceName;
+                    const legendGroup = group.color;
 
                     traces.push({
                         x: xValues,
                         y: yValues,
                         type: 'scatter',
                         mode: 'lines+markers',
-                        name: traceName,
+                        name: group.color,
                         legendgroup: legendGroup,
                         showlegend: idx === 0,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
                             color: COLOR_MAP[group.color] || '#000000',
-                            width: 1,
-                            dash: LINETYPE_MAP[group.linetype] || 'solid'
+                            width: 1
                         },
                         marker: { size: 1 }
                     });
@@ -697,20 +700,17 @@ $(function(){
                         row[facetRow] === rowVal && row[facetCol] === colVal
                     );
 
-                    // Group by color and linetype within this facet
+                    // Group by color within this facet
                     const groupedData = {};
                     facetData.forEach(row => {
                         const colorVal = String(row[COLOR_COL]);
-                        const linetypeVal = String(row[LINETYPE_COL]);
-                        const groupKey = colorVal + '|||' + linetypeVal;
-                        if (!groupedData[groupKey]) {
-                            groupedData[groupKey] = {
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
                                 data: [],
-                                color: colorVal,
-                                linetype: linetypeVal
+                                color: colorVal
                             };
                         }
-                        groupedData[groupKey].data.push(row);
+                        groupedData[colorVal].data.push(row);
                     });
 
                     const idx = rowIdx * nCols + colIdx;
@@ -736,34 +736,40 @@ $(function(){
 
                             xValues = [];
                             yValues = [];
-                            Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
                                 const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                                 if (aggregated && aggregated.length > 0) {
-                                    xValues.push(parseFloat(xVal));
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
                                     yValues.push(aggregated[0]);
                                 }
                             });
                         }
 
-                        const traceName = COLOR_COL === LINETYPE_COL ?
-                            group.color :
-                            group.color + ' (' + group.linetype + ')';
-                        const legendGroup = traceName;
+                        const legendGroup = group.color;
 
                         traces.push({
                             x: xValues,
                             y: yValues,
                             type: 'scatter',
                             mode: 'lines+markers',
-                            name: traceName,
+                            name: group.color,
                             legendgroup: legendGroup,
                             showlegend: idx === 0,
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
                                 color: COLOR_MAP[group.color] || '#000000',
-                                width: 1,
-                                dash: LINETYPE_MAP[group.linetype] || 'solid'
+                                width: 1
                             },
                             marker: { size: 1 }
                         });
@@ -868,6 +874,19 @@ $(function(){
     });
     // Load and parse CSV data using centralized parser
     loadDataset('subframe').then(function(data3d) {
+        window.allData_threeD = data3d;
+
+        $(function() {
+            
+
+            // Initial plot
+            updatePlotWithFilters_threeD();
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart threeD:', error);
+    });
+
+    function updatePlot_threeD(data3d) {
         // ========== 3D SURFACE PLOT CONFIGURATION ==========
         // Define your column names here
         const x = 'x';
@@ -875,79 +894,89 @@ $(function(){
         const z = 'z';
         const group = 'group';
         // ===================================================
-                
-                // Get unique groups
-                const uniqueGroups = [...new Set(data3d.map(row => row[group]))].sort();
-                
-                // Define a set of distinct color gradients
-                const colorGradients = [
-                    // Blue gradient
-                    [[0, 'rgb(8,48,107)'], [0.25, 'rgb(33,102,172)'], [0.5, 'rgb(67,147,195)'], [0.75, 'rgb(146,197,222)'], [1, 'rgb(209,229,240)']],
-                    // Red-Orange gradient
-                    [[0, 'rgb(127,0,0)'], [0.25, 'rgb(189,0,38)'], [0.5, 'rgb(227,74,51)'], [0.75, 'rgb(252,141,89)'], [1, 'rgb(253,204,138)']],
-                    // Green gradient
-                    [[0, 'rgb(0,68,27)'], [0.25, 'rgb(0,109,44)'], [0.5, 'rgb(35,139,69)'], [0.75, 'rgb(116,196,118)'], [1, 'rgb(199,233,192)']],
-                    // Purple gradient
-                    [[0, 'rgb(63,0,125)'], [0.25, 'rgb(106,81,163)'], [0.5, 'rgb(158,154,200)'], [0.75, 'rgb(188,189,220)'], [1, 'rgb(218,218,235)']],
-                    // Yellow-Orange gradient
-                    [[0, 'rgb(102,37,6)'], [0.25, 'rgb(153,52,4)'], [0.5, 'rgb(217,95,14)'], [0.75, 'rgb(254,153,41)'], [1, 'rgb(254,217,142)']],
-                    // Teal gradient
-                    [[0, 'rgb(1,70,54)'], [0.25, 'rgb(1,102,94)'], [0.5, 'rgb(2,129,138)'], [0.75, 'rgb(54,175,172)'], [1, 'rgb(178,226,226)']],
-                    // Pink-Magenta gradient
-                    [[0, 'rgb(73,0,106)'], [0.25, 'rgb(123,50,148)'], [0.5, 'rgb(194,165,207)'], [0.75, 'rgb(231,212,232)'], [1, 'rgb(247,242,247)']],
-                    // Brown gradient
-                    [[0, 'rgb(84,48,5)'], [0.25, 'rgb(140,81,10)'], [0.5, 'rgb(191,129,45)'], [0.75, 'rgb(223,194,125)'], [1, 'rgb(246,232,195)']],
-                ];
-                
-                // Function to create z matrix for a group
-                function createSurface(groupData, colorscale, name) {
-                    const xVals = [...new Set(groupData.map(row => row[x]))].sort((a,b) => a-b);
-                    const yVals = [...new Set(groupData.map(row => row[y]))].sort((a,b) => a-b);
-                    
-                    const zMatrix = [];
-                    for (let i = 0; i < yVals.length; i++) {
-                        zMatrix[i] = [];
-                        for (let j = 0; j < xVals.length; j++) {
-                            const point = groupData.find(row => row[x] === xVals[j] && row[y] === yVals[i]);
-                            zMatrix[i][j] = point ? point[z] : null;
-                        }
-                    }
-                    
-                    return {
-                        z: zMatrix,
-                        x: xVals,
-                        y: yVals,
-                        type: 'surface',
-                        name: name,
-                        colorscale: colorscale,
-                        showscale: false
-                    };
-                }
-            
-            // Create a surface for each group
-            const plotData = uniqueGroups.map((grp, index) => {
-                const groupData = data3d.filter(row => row[group] === grp);
-                const colorscale = colorGradients[index % colorGradients.length];
-                return createSurface(groupData, colorscale, `Group ${grp}`);
-            });
-            
-            const layout = {
-                title: 'threeD',
-                autosize: true,
-                height: 600,
-                scene: {
-                    xaxis: { title: 'X directions' },
-                    yaxis: { title: 'Y dim' },
-                    zaxis: { title: 'Z directions' }
-                },
-                showlegend: false,
-            };
-            
-        Plotly.newPlot('threeD', plotData, layout);
-    }).catch(function(error) {
-        console.error('Error loading data for chart threeD:', error);
-    });
 
+        // Get unique groups
+const uniqueGroups = [...new Set(data3d.map(row => row[group]))].sort();
+
+
+        // Define a set of distinct color gradients
+        const colorGradients = [
+            // Blue gradient
+            [[0, 'rgb(8,48,107)'], [0.25, 'rgb(33,102,172)'], [0.5, 'rgb(67,147,195)'], [0.75, 'rgb(146,197,222)'], [1, 'rgb(209,229,240)']],
+            // Red-Orange gradient
+            [[0, 'rgb(127,0,0)'], [0.25, 'rgb(189,0,38)'], [0.5, 'rgb(227,74,51)'], [0.75, 'rgb(252,141,89)'], [1, 'rgb(253,204,138)']],
+            // Green gradient
+            [[0, 'rgb(0,68,27)'], [0.25, 'rgb(0,109,44)'], [0.5, 'rgb(35,139,69)'], [0.75, 'rgb(116,196,118)'], [1, 'rgb(199,233,192)']],
+            // Purple gradient
+            [[0, 'rgb(63,0,125)'], [0.25, 'rgb(106,81,163)'], [0.5, 'rgb(158,154,200)'], [0.75, 'rgb(188,189,220)'], [1, 'rgb(218,218,235)']],
+            // Yellow-Orange gradient
+            [[0, 'rgb(102,37,6)'], [0.25, 'rgb(153,52,4)'], [0.5, 'rgb(217,95,14)'], [0.75, 'rgb(254,153,41)'], [1, 'rgb(254,217,142)']],
+            // Teal gradient
+            [[0, 'rgb(1,70,54)'], [0.25, 'rgb(1,102,94)'], [0.5, 'rgb(2,129,138)'], [0.75, 'rgb(54,175,172)'], [1, 'rgb(178,226,226)']],
+            // Pink-Magenta gradient
+            [[0, 'rgb(73,0,106)'], [0.25, 'rgb(123,50,148)'], [0.5, 'rgb(194,165,207)'], [0.75, 'rgb(231,212,232)'], [1, 'rgb(247,242,247)']],
+            // Brown gradient
+            [[0, 'rgb(84,48,5)'], [0.25, 'rgb(140,81,10)'], [0.5, 'rgb(191,129,45)'], [0.75, 'rgb(223,194,125)'], [1, 'rgb(246,232,195)']],
+        ];
+
+        // Function to create z matrix for a group
+        function createSurface(groupData, colorscale, name) {
+            const xVals = [...new Set(groupData.map(row => parseFloat(row[x])))].sort((a,b) => a-b);
+            const yVals = [...new Set(groupData.map(row => parseFloat(row[y])))].sort((a,b) => a-b);
+
+            const zMatrix = [];
+            for (let i = 0; i < yVals.length; i++) {
+                zMatrix[i] = [];
+                for (let j = 0; j < xVals.length; j++) {
+                    const point = groupData.find(row =>
+                        parseFloat(row[x]) === xVals[j] &&
+                        parseFloat(row[y]) === yVals[i]
+                    );
+                    zMatrix[i][j] = point ? parseFloat(point[z]) : null;
+                }
+            }
+
+            return {
+                z: zMatrix,
+                x: xVals,
+                y: yVals,
+                type: 'surface',
+                name: name,
+                colorscale: colorscale,
+                showscale: false
+            };
+        }
+
+        // Create a surface for each group
+const plotData = uniqueGroups.map((grp, index) => {
+    const groupData = data3d.filter(row => row[group] === grp);
+    const colorscale = colorGradients[index % colorGradients.length];
+    return createSurface(groupData, colorscale, `Group ${grp}`);
+});
+
+
+        const x_axis_label = 'X directions';
+        const y_axis_label = 'Y dim';
+        const z_axis_label = 'Z directions';
+
+        const layout = {
+            title: '3D Surface Chart of shapes',
+            autosize: true,
+            height: 600,
+            scene: {
+                xaxis: { title: x_axis_label },
+                yaxis: { title: y_axis_label },
+                zaxis: { title: z_axis_label }
+            },
+            showlegend: true,
+        };
+
+        Plotly.newPlot('threeD', plotData, layout);
+    }
+
+    function updatePlotWithFilters_threeD() {
+    updatePlot_threeD(window.allData_threeD);
+}
 
 
 
@@ -981,24 +1010,31 @@ $(function(){
 <h2>Line Chart with Filters</h2>
 <p>Interactive line chart with dropdown filters</p>
 
-<!-- Controls -->
-<div id="controls">
-            <div style="margin: 10px;">
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
+            <h4 style="margin-top: 0;">Filters</h4>
+                    <div style="margin: 10px;">
             <label for="categ22_select">categ22: </label>
-            <select id="categ22_select" onchange="updateChart_pchart()">
+            <select id="categ22_select" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_pchart()">
                 <option value="Category_A" selected>Category_A</option>
                 <option value="Category_B">Category_B</option>
             </select>
         </div>
                 <div style="margin: 10px;">
             <label for="categ_select">categ: </label>
-            <select id="categ_select" onchange="updateChart_pchart()">
+            <select id="categ_select" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_pchart()">
                 <option value="B">B</option>
                 <option value="A" selected>A</option>
                 <option value="C">C</option>
             </select>
         </div>
-            <div style="margin: 10px;">
+        
+        </div>
+
+<!-- Plot Attributes (x, y, color, aggregator) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
+            <h4 style="margin-top: 0;">Plot Attributes</h4>
+                <div style="margin: 10px;">
         <label for="aggregator_select_pchart">Aggregator: </label>
         <select id="aggregator_select_pchart" onchange="updateChart_pchart()">
                 <option value="none" selected>none</option>
@@ -1010,7 +1046,10 @@ $(function(){
         </select>
     </div>
     
-</div>
+        </div>
+
+<!-- Faceting -->
+
 
 <!-- Chart -->
 <div id="pchart"></div>
@@ -1024,7 +1063,10 @@ $(function(){
 <hr>
 <br>
 <h2>3D Surface Chart of shapes</h2>
-<p>This is a 3D surface chart.</p>       
+<p>This is a 3D surface chart.</p>
+
+
+
 <!-- Chart -->
 <div id="threeD"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: subframe.parquet</p><br>

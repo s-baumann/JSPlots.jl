@@ -167,6 +167,30 @@ $options2                </select>
         end
 
         # Generate bandwidth slider (placed below chart)
+        # Calculate automatic bandwidth using Silverman's rule to set appropriate slider range
+        all_values = Float64[]
+        val_cols_vec = value_cols isa AbstractVector ? value_cols : [value_cols]
+        for col in val_cols_vec
+            vals = df[!, col]
+            append!(all_values, filter(!isnan, float.(skipmissing(vals))))
+        end
+        n = length(all_values)
+        if n == 0
+            # No data - use default values
+            bandwidth_slider_max = 5.0
+            bandwidth_slider_step = 0.1
+        else
+            data_mean = sum(all_values) / n
+            data_std = sqrt(sum((all_values .- data_mean).^2) / n)
+            auto_bandwidth = 1.06 * data_std * n^(-0.2)
+
+            # Set slider max to 3x auto bandwidth for reasonable range
+            # Handle edge case where auto_bandwidth is 0 or very small
+            bandwidth_slider_max = max(round(3 * auto_bandwidth, digits=2), 0.1)
+            bandwidth_slider_step = round(bandwidth_slider_max / 50, digits=4)  # 50 steps
+            bandwidth_slider_step = max(bandwidth_slider_step, 0.001)  # Ensure step is not 0
+        end
+
         # Use bandwidth parameter as default, or 0 for auto
         bandwidth_default = bandwidth !== nothing ? bandwidth : 0.0
         bandwidth_slider_html = """
@@ -175,11 +199,11 @@ $options2                </select>
             <span id="$(chart_title)_bandwidth_label">$(bandwidth_default > 0 ? string(round(bandwidth_default, digits=2)) : "auto")</span>
             <input type="range" id="$(chart_title)_bandwidth_slider"
                    min="0"
-                   max="5"
-                   step="0.1"
+                   max="$(bandwidth_slider_max)"
+                   step="$(bandwidth_slider_step)"
                    value="$(bandwidth_default)"
                    style="width: 300px; margin-left: 10px;">
-            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto)</span>
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto, max ≈ $(round(bandwidth_slider_max, digits=1)))</span>
         </div>
         """
         bandwidth_slider_js = """
@@ -651,9 +675,14 @@ $options2                </select>
         <h2>$title</h2>
         <p>$notes</p>
 
-        $combined_controls_html
-        $sliders_html
-        $facet_dropdowns_html
+        <!-- Filters (for data filtering) -->
+        $(sliders_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $sliders_html\n        </div>" : "")
+
+        <!-- Plot Attributes (variable selection and grouping) -->
+        $(combined_controls_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $combined_controls_html\n        </div>" : "")
+
+        <!-- Faceting -->
+        $(facet_dropdowns_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $facet_dropdowns_html\n        </div>" : "")
 
         <!-- Chart -->
         <div id="$chart_title"></div>

@@ -745,3 +745,95 @@ page = JSPlotPage(
 
 create_html(page, "comprehensive/analysis.html")
 ```
+
+### Multi-Page Reports with Pages and LinkList
+
+The `Pages` struct allows you to create multi-page reports with a coverpage and navigation links.
+
+```julia
+using JSPlots, DataFrames, Dates
+
+# Create sample data
+dates = Date(2024, 1, 1):Day(1):Date(2024, 12, 31)
+sales_df = DataFrame(
+    Date = dates,
+    Revenue = cumsum(randn(length(dates)) .* 1000 .+ 50000),
+    Region = rand(["North", "South", "East", "West"], length(dates))
+)
+
+metrics_df = DataFrame(
+    Month = repeat(["Jan", "Feb", "Mar", "Apr", "May", "Jun"], 2),
+    Score = [85, 87, 89, 88, 90, 92, 91, 93, 95, 94, 96, 98],
+    Category = vcat(repeat(["Satisfaction"], 6), repeat(["Quality"], 6))
+)
+
+# Page 1: Sales Analysis
+revenue_chart = LineChart(:revenue, sales_df, :sales_data;
+    x_cols = [:Date],
+    y_cols = [:Revenue],
+    color_cols = [:Region],
+    title = "Revenue by Region"
+)
+
+page1 = JSPlotPage(
+    Dict(:sales_data => sales_df),
+    [TextBlock("<h2>Sales Performance</h2><p>Regional revenue trends.</p>"),
+     revenue_chart],
+    tab_title = "Sales",
+    page_header = "Sales Analysis"
+)
+
+# Page 2: Quality Metrics
+metrics_chart = LineChart(:metrics, metrics_df, :metrics_data;
+    x_cols = [:Month],
+    y_cols = [:Score],
+    color_cols = [:Category],
+    title = "Performance Metrics"
+)
+
+page2 = JSPlotPage(
+    Dict(:metrics_data => metrics_df),
+    [TextBlock("<h2>Quality Dashboard</h2><p>Track key metrics.</p>"),
+     metrics_chart],
+    tab_title = "Metrics",
+    page_header = "Quality Metrics"
+)
+
+# Coverpage with navigation links
+links = LinkList([
+    ("Sales Analysis", "page_1.html", "Revenue trends across regions"),
+    ("Quality Metrics", "page_2.html", "Customer satisfaction and quality scores")
+])
+
+coverpage = JSPlotPage(
+    Dict{Symbol,DataFrame}(),
+    [TextBlock("<h1>2024 Business Report</h1>"),
+     links],
+    tab_title = "Home"
+)
+
+# Create multi-page report
+# All pages will use parquet format (overrides individual page formats)
+# Data is shared across pages and saved only once
+report = Pages(coverpage, [page1, page2], dataformat = :parquet)
+create_html(report, "business_report.html")
+
+# Output structure (flat, single-level folder):
+# business_report/
+#   ├── index.html (coverpage with links)
+#   ├── page_1.html (sales analysis - at same level)
+#   ├── page_2.html (quality metrics - at same level)
+#   ├── data/
+#   │   ├── sales_data.parquet (shared across all pages)
+#   │   └── metrics_data.parquet (shared across all pages)
+#   ├── open.sh (Linux/Mac launcher - opens index.html)
+#   ├── open.bat (Windows launcher - opens index.html)
+#   └── README.md
+```
+
+**Key Features:**
+- **Flat Structure**: All HTML files at the same level (no nested folders per page)
+- **Shared Data**: Data sources used by multiple pages are saved only once in common data/ folder
+- **Format Override**: Specifying `dataformat` in `Pages` overrides all individual page formats
+- **Easy Navigation**: Use `LinkList` on the coverpage with simple relative links (e.g., "page_1.html")
+- **Launcher Scripts**: Generated scripts open the main page (coverpage) with proper browser permissions

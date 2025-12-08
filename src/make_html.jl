@@ -14,6 +14,57 @@ struct JSPlotPage
     end
 end
 
+struct Pages
+    coverpage::JSPlotPage
+    pages::Vector{JSPlotPage}
+    dataformat::Symbol
+
+    function Pages(coverpage::JSPlotPage, pages::Vector{JSPlotPage}; dataformat::Union{Nothing,Symbol}=nothing)
+        # If dataformat is specified, it overrides all page dataformats
+        if dataformat !== nothing
+            if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
+                error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
+            end
+            new(coverpage, pages, dataformat)
+        else
+            # Use the coverpage's dataformat as default
+            new(coverpage, pages, coverpage.dataformat)
+        end
+    end
+end
+
+struct LinkList <: JSPlotsType
+    lnks::Vector{Tuple{String,String,String}}
+    chart_title::Symbol
+    data_label::Symbol
+    functional_html::String
+    appearance_html::String
+
+    function LinkList(lnks::Vector{Tuple{String,String,String}}; chart_title::Symbol=:link_list)
+        # Generate HTML for the link list
+        links_html = "<ul>\n"
+        for (title, link, blurb) in lnks
+            links_html *= "    <li><strong><a href=\"$(link)\">$(title)</a></strong>: $(blurb)</li>\n"
+        end
+        links_html *= "</ul>"
+
+        appearance_html = """
+        <div style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
+            <h3>Pages</h3>
+            $links_html
+        </div>
+        """
+
+        # LinkList has no functional JS and no data
+        new(lnks, chart_title, :no_data, "", appearance_html)
+    end
+end
+
+# Dependencies method for LinkList (no data dependencies)
+dependencies(a::LinkList) = Symbol[]
+
+
+
 const DATASET_TEMPLATE = raw"""<script type="text/plain" id="___DDATA_LABEL___" data-format="___DATA_FORMAT___" data-src="___DATA_SRC___">___DATA1___</script>"""
 
 
@@ -573,8 +624,10 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             mkpath(data_dir)
         end
 
-        files_to_do = intersect(collect(keys(pt.dataframes)), reduce(vcat, dependencies.(pt.pivot_tables)))
-        Infiltrator.@infiltrate
+        # Get list of dataframes referenced by charts
+        referenced_data = reduce(vcat, dependencies.(pt.pivot_tables); init=Symbol[])
+        # If no charts reference any data, save all dataframes; otherwise only save referenced ones
+        files_to_do = isempty(referenced_data) ? collect(keys(pt.dataframes)) : intersect(collect(keys(pt.dataframes)), referenced_data)
         # Save all dataframes as separate files based on format
         for data_label in files_to_do
             df = pt.dataframes[data_label]
@@ -780,4 +833,219 @@ end
 function create_html(pt::Picture, outfile_path::String="pivottable.html")
     pge = JSPlotPage(Dict{Symbol,DataFrame}(), [pt])
     create_html(pge,outfile_path)
+end
+
+"""
+    generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol)
+
+Helper function to generate HTML content for a single page without creating folders.
+Returns the HTML string directly.
+"""
+function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol)
+    # Collect extra styles
+    extra_styles = ""
+    has_textblock = any(p -> isa(p, TextBlock), page.pivot_tables)
+    has_picture = any(p -> isa(p, Picture), page.pivot_tables)
+    has_table = any(p -> isa(p, Table), page.pivot_tables)
+
+    if has_textblock
+        extra_styles *= TEXTBLOCK_STYLE
+    end
+    if has_picture
+        extra_styles *= PICTURE_STYLE
+    end
+    if has_table
+        extra_styles *= TABLE_STYLE
+    end
+
+    # Generate datasets HTML
+    data_set_bit = isempty(dataframes) ? "" : reduce(*, [dataset_to_html(k, v, dataformat) for (k,v) in dataframes])
+
+    # Generate functional and appearance HTML for plots
+    functional_bit = ""
+    table_bit = ""
+
+    for (i, pti) in enumerate(page.pivot_tables)
+        sp = i == 1 ? "" : SEGMENT_SEPARATOR
+
+        if isa(pti, Picture)
+            # Pictures are embedded as base64 for simplicity in multi-page context
+            table_bit *= sp * generate_picture_html(pti, :csv_embedded, "")
+            table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+        elseif isa(pti, TextBlock)
+            if !isempty(pti.images)
+                table_bit *= sp * generate_textblock_html(pti, :csv_embedded, "")
+            else
+                table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
+            end
+        elseif isa(pti, Table)
+            functional_bit *= pti.functional_html
+            table_bit *= sp * pti.appearance_html
+            table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
+        elseif hasfield(typeof(pti), :data_label)
+            functional_bit *= pti.functional_html
+            table_bit *= sp * pti.appearance_html
+            table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, dataformat)
+        else
+            if hasfield(typeof(pti), :functional_html)
+                functional_bit *= pti.functional_html
+            end
+            table_bit *= sp * pti.appearance_html
+        end
+    end
+
+    # Build full page HTML
+    full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
+    full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
+    full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
+    full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => page.tab_title)
+    full_page_html = replace(full_page_html, "___PAGE_HEADER___" => page.page_header)
+    full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
+    full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+
+    return full_page_html
+end
+
+"""
+    save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
+
+Helper function to save a single DataFrame in the specified format.
+"""
+function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
+    if dataformat == :csv_external
+        file_path = joinpath(data_dir, "$(string(data_label)).csv")
+        CSV.write(file_path, df)
+        println("  Data saved to $file_path")
+    elseif dataformat == :json_external
+        file_path = joinpath(data_dir, "$(string(data_label)).json")
+        rows = []
+        for row in eachrow(df)
+            row_dict = Dict(String(col) => row[col] for col in names(df))
+            push!(rows, row_dict)
+        end
+        open(file_path, "w") do f
+            write(f, JSON.json(rows, 2))
+        end
+        println("  Data saved to $file_path")
+    elseif dataformat == :parquet
+        file_path = joinpath(data_dir, "$(string(data_label)).parquet")
+        con = DBInterface.connect(DuckDB.DB)
+
+        # Convert Symbol columns to String
+        df_converted = copy(df)
+        for col in names(df_converted)
+            col_type = eltype(df_converted[!, col])
+            if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
+                df_converted[!, col] = string.(df_converted[!, col])
+            end
+            if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
+                df_converted[!, col] = [ismissing(x) ? missing : x.utc_datetime for x in df_converted[!, col] ]
+            end
+        end
+
+        DuckDB.register_data_frame(con, df_converted, "temp_table")
+        DBInterface.execute(con, "COPY temp_table TO '$file_path' (FORMAT PARQUET)")
+        DBInterface.close!(con)
+        println("  Data saved to $file_path")
+    end
+end
+
+# Method for Pages - creates multiple HTML files with shared data in a flat structure
+function create_html(jsp::Pages, outfile_path::String="index.html")
+    # Extract directory and base name
+    original_dir = dirname(outfile_path)
+    original_name = basename(outfile_path)
+    name_without_ext = splitext(original_name)[1]
+
+    # Create project folder (flat structure: all HTML files at same level)
+    project_dir = isempty(original_dir) ? name_without_ext : joinpath(original_dir, name_without_ext)
+    if !isdir(project_dir)
+        mkpath(project_dir)
+    end
+
+    # Collect all unique dataframes across all pages
+    all_dataframes = Dict{Symbol, DataFrame}()
+    merge!(all_dataframes, jsp.coverpage.dataframes)
+    for page in jsp.pages
+        merge!(all_dataframes, page.dataframes)
+    end
+
+    # If using external data format, create data directory and save each datasource once
+    if jsp.dataformat in [:csv_external, :json_external, :parquet]
+        data_dir = joinpath(project_dir, "data")
+        if !isdir(data_dir)
+            mkpath(data_dir)
+        end
+
+        # Collect all data dependencies across all pages
+        all_dependencies = Set{Symbol}()
+        for pt in jsp.coverpage.pivot_tables
+            union!(all_dependencies, dependencies(pt))
+        end
+        for page in jsp.pages
+            for pt in page.pivot_tables
+                union!(all_dependencies, dependencies(pt))
+            end
+        end
+
+        # Save each unique datasource only once
+        for data_label in all_dependencies
+            if haskey(all_dataframes, data_label)
+                save_dataframe(data_label, all_dataframes[data_label], data_dir, jsp.dataformat)
+            end
+        end
+    end
+
+    # Generate coverpage HTML
+    coverpage_path = joinpath(project_dir, original_name)
+    coverpage_html = generate_page_html(jsp.coverpage, all_dataframes, jsp.dataformat)
+    open(coverpage_path, "w") do f
+        write(f, coverpage_html)
+    end
+    println("Created coverpage: $coverpage_path")
+
+    # Generate each subpage HTML
+    for (i, page) in enumerate(jsp.pages)
+        page_filename = "page_$(i).html"
+        page_path = joinpath(project_dir, page_filename)
+        page_html = generate_page_html(page, all_dataframes, jsp.dataformat)
+        open(page_path, "w") do f
+            write(f, page_html)
+        end
+        println("Created page $(i): $page_path")
+    end
+
+    # Generate launcher scripts at project root
+    bat_path = joinpath(project_dir, "open.bat")
+    sh_path = joinpath(project_dir, "open.sh")
+    readme_path = joinpath(project_dir, "README.md")
+
+    open(bat_path, "w") do f
+        write(f, generate_bat_launcher(original_name))
+    end
+
+    open(sh_path, "w") do f
+        write(f, generate_sh_launcher(original_name))
+    end
+
+    open(readme_path, "w") do f
+        write(f, generate_readme_content(original_name))
+    end
+
+    # Make shell script executable on Unix-like systems
+    try
+        chmod(sh_path, 0o755)
+    catch
+        # Silently fail on Windows
+    end
+
+    println("\nMulti-page project created:")
+    println("  Location: $project_dir")
+    println("  Main page: $original_name")
+    println("  Subpages: $(length(jsp.pages)) (page_1.html to page_$(length(jsp.pages)).html)")
+    if jsp.dataformat in [:csv_external, :json_external, :parquet]
+        println("  Data format: $(jsp.dataformat) (shared in data/ folder)")
+    else
+        println("  Data format: $(jsp.dataformat) (embedded in each HTML)")
+    end
 end

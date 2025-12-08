@@ -381,13 +381,10 @@ $(function(){
     const X_COLS = ['category'];
     const Y_COLS = ['value'];
     const COLOR_COLS = ['color'];
-    const LINETYPE_COLS = ['color'];
     const COLOR_MAPS = {'color': {'A': '#636efa'}};
-    const LINETYPE_MAPS = {'color': {'A': 'solid'}};
     const DEFAULT_X_COL = 'category';
     const DEFAULT_Y_COL = 'value';
     const DEFAULT_COLOR_COL = 'color';
-    const DEFAULT_LINETYPE_COL = 'color';
     const X_LABEL = 'Month';
     const Y_LABEL = 'Value';
 
@@ -423,21 +420,18 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_trend');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values
+        // Get current filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select');
             if (select) {
-                filters[col] = select.value;
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Get current color and linetype columns
+        // Get current color column
         const colorColSelect = document.getElementById('color_col_select_trend');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
-
-        const linetypeColSelect = document.getElementById('linetype_col_select_trend');
-        const LINETYPE_COL = linetypeColSelect ? linetypeColSelect.value : DEFAULT_LINETYPE_COL;
 
         // Get current aggregator
         const aggregatorSelect = document.getElementById('aggregator_select_trend');
@@ -454,14 +448,14 @@ $(function(){
         if (facet1) FACET_COLS.push(facet1);
         if (facet2) FACET_COLS.push(facet2);
 
-        // Get color and linetype maps for current selections
+        // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const LINETYPE_MAP = LINETYPE_MAPS[LINETYPE_COL] || {};
 
-        // Filter data
+        // Filter data (support multiple selections per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                if (String(row[col]) !== String(filters[col])) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
                     return false;
                 }
             }
@@ -469,20 +463,17 @@ $(function(){
         });
 
         if (FACET_COLS.length === 0) {
-            // No faceting - group by color and linetype
+            // No faceting - group by color
             const groupedData = {};
             filteredData.forEach(row => {
                 const colorVal = String(row[COLOR_COL]);
-                const linetypeVal = String(row[LINETYPE_COL]);
-                const groupKey = colorVal + '|||' + linetypeVal;
-                if (!groupedData[groupKey]) {
-                    groupedData[groupKey] = {
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
                         data: [],
-                        color: colorVal,
-                        linetype: linetypeVal
+                        color: colorVal
                     };
                 }
-                groupedData[groupKey].data.push(row);
+                groupedData[colorVal].data.push(row);
             });
 
             const traces = [];
@@ -505,29 +496,36 @@ $(function(){
 
                     xValues = [];
                     yValues = [];
-                    Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
                         const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                         if (aggregated && aggregated.length > 0) {
-                            xValues.push(parseFloat(xVal));
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
                             yValues.push(aggregated[0]);
                         }
                     });
                 }
-
-                const traceName = COLOR_COL === LINETYPE_COL ?
-                    group.color :
-                    group.color + ' (' + group.linetype + ')';
 
                 traces.push({
                     x: xValues,
                     y: yValues,
                     type: 'scatter',
                     mode: 'lines+markers',
-                    name: traceName,
+                    name: group.color,
                     line: {
                         color: COLOR_MAP[group.color] || '#000000',
-                        width: 1,
-                        dash: LINETYPE_MAP[group.linetype] || 'solid'
+                        width: 1
                     },
                     marker: { size: 1 }
                 });
@@ -562,20 +560,17 @@ $(function(){
             facetValues.forEach((facetVal, idx) => {
                 const facetData = filteredData.filter(row => row[facetCol] === facetVal);
 
-                // Group by color and linetype within this facet
+                // Group by color within this facet
                 const groupedData = {};
                 facetData.forEach(row => {
                     const colorVal = String(row[COLOR_COL]);
-                    const linetypeVal = String(row[LINETYPE_COL]);
-                    const groupKey = colorVal + '|||' + linetypeVal;
-                    if (!groupedData[groupKey]) {
-                        groupedData[groupKey] = {
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
                             data: [],
-                            color: colorVal,
-                            linetype: linetypeVal
+                            color: colorVal
                         };
                     }
-                    groupedData[groupKey].data.push(row);
+                    groupedData[colorVal].data.push(row);
                 });
 
                 const row = Math.floor(idx / nCols) + 1;
@@ -602,34 +597,42 @@ $(function(){
 
                         xValues = [];
                         yValues = [];
-                        Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
                             const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                             if (aggregated && aggregated.length > 0) {
-                                xValues.push(parseFloat(xVal));
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
                                 yValues.push(aggregated[0]);
                             }
                         });
                     }
 
-                    const traceName = COLOR_COL === LINETYPE_COL ?
-                        group.color :
-                        group.color + ' (' + group.linetype + ')';
-                    const legendGroup = traceName;
+                    const legendGroup = group.color;
 
                     traces.push({
                         x: xValues,
                         y: yValues,
                         type: 'scatter',
                         mode: 'lines+markers',
-                        name: traceName,
+                        name: group.color,
                         legendgroup: legendGroup,
                         showlegend: idx === 0,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
                             color: COLOR_MAP[group.color] || '#000000',
-                            width: 1,
-                            dash: LINETYPE_MAP[group.linetype] || 'solid'
+                            width: 1
                         },
                         marker: { size: 1 }
                     });
@@ -684,20 +687,17 @@ $(function(){
                         row[facetRow] === rowVal && row[facetCol] === colVal
                     );
 
-                    // Group by color and linetype within this facet
+                    // Group by color within this facet
                     const groupedData = {};
                     facetData.forEach(row => {
                         const colorVal = String(row[COLOR_COL]);
-                        const linetypeVal = String(row[LINETYPE_COL]);
-                        const groupKey = colorVal + '|||' + linetypeVal;
-                        if (!groupedData[groupKey]) {
-                            groupedData[groupKey] = {
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
                                 data: [],
-                                color: colorVal,
-                                linetype: linetypeVal
+                                color: colorVal
                             };
                         }
-                        groupedData[groupKey].data.push(row);
+                        groupedData[colorVal].data.push(row);
                     });
 
                     const idx = rowIdx * nCols + colIdx;
@@ -723,34 +723,40 @@ $(function(){
 
                             xValues = [];
                             yValues = [];
-                            Object.keys(xGroups).sort((a, b) => a - b).forEach(xVal => {
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
                                 const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
                                 if (aggregated && aggregated.length > 0) {
-                                    xValues.push(parseFloat(xVal));
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
                                     yValues.push(aggregated[0]);
                                 }
                             });
                         }
 
-                        const traceName = COLOR_COL === LINETYPE_COL ?
-                            group.color :
-                            group.color + ' (' + group.linetype + ')';
-                        const legendGroup = traceName;
+                        const legendGroup = group.color;
 
                         traces.push({
                             x: xValues,
                             y: yValues,
                             type: 'scatter',
                             mode: 'lines+markers',
-                            name: traceName,
+                            name: group.color,
                             legendgroup: legendGroup,
                             showlegend: idx === 0,
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
                                 color: COLOR_MAP[group.color] || '#000000',
-                                width: 1,
-                                dash: LINETYPE_MAP[group.linetype] || 'solid'
+                                width: 1
                             },
                             marker: { size: 1 }
                         });
@@ -873,7 +879,7 @@ Jun,67,A
 </svg>
 
     </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">jl_ODKhsJSFs1.svg</p><br>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">jl_aBY9w7sL0Z.svg</p><br>
 <hr>
 <br>
     <div class="picture-container">
@@ -894,7 +900,7 @@ Jun,67,A
 </svg>
 
     </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">jl_2LWt27wBaL.svg</p><br>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">jl_ElgzQzu9yJ.svg</p><br>
 <hr>
 <br>
     <div class="textblock-content">
@@ -908,9 +914,13 @@ Jun,67,A
 <h2>Monthly Trend</h2>
 <p></p>
 
-<!-- Controls -->
-<div id="controls">
-        <div style="margin: 10px;">
+<!-- Filters (for data filtering) -->
+
+
+<!-- Plot Attributes (x, y, color, aggregator) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
+            <h4 style="margin-top: 0;">Plot Attributes</h4>
+                <div style="margin: 10px;">
         <label for="aggregator_select_trend">Aggregator: </label>
         <select id="aggregator_select_trend" onchange="updateChart_trend()">
                 <option value="none" selected>none</option>
@@ -922,7 +932,10 @@ Jun,67,A
         </select>
     </div>
     
-</div>
+        </div>
+
+<!-- Faceting -->
+
 
 <!-- Chart -->
 <div id="trend"></div>

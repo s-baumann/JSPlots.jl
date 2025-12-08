@@ -18,6 +18,93 @@ Pages = ["api.md"]
 JSPlotPage
 ```
 
+A container for a single HTML page with plots and data.
+
+**Parameters:**
+- `dataframes::Dict{Symbol,DataFrame}`: Dictionary mapping data labels to DataFrames
+- `pivot_tables::Vector`: Vector of plot objects (charts, tables, text blocks, etc.)
+
+**Keyword Arguments:**
+- `tab_title::String`: Browser tab title (default: `"JSPlots.jl"`)
+- `page_header::String`: Main page heading (default: `""`)
+- `notes::String`: Page description or notes (default: `""`)
+- `dataformat::Symbol`: Data storage format - `:csv_embedded`, `:json_embedded`, `:csv_external`, `:json_external`, or `:parquet` (default: `:csv_embedded`)
+
+### Pages
+
+```@docs
+Pages
+```
+
+A container for multiple linked HTML pages with a coverpage, enabling multi-page reports with shared data.
+
+**Parameters:**
+- `coverpage::JSPlotPage`: The main landing page (index page) for the report
+- `pages::Vector{JSPlotPage}`: Vector of additional pages to include
+
+**Keyword Arguments:**
+- `dataformat::Union{Nothing,Symbol}`: Optional data format override that applies to all pages (default: `nothing`, uses coverpage format)
+
+**Features:**
+- Creates a flat project folder structure with all HTML files at the same level
+- Main page and numbered sub-pages (page_1.html, page_2.html, etc.) all in project root
+- Shared data sources are saved only once in a common data/ subfolder
+- Generates launcher scripts (open.sh, open.bat) at project root that open the coverpage
+- Users navigate to sub-pages through simple relative links (e.g., "page_1.html")
+- When `dataformat` is specified, it overrides all individual page dataformats
+- No nested folder structure per page - everything at the same level for simplicity
+
+**Example:**
+```julia
+# Create individual pages
+page1 = JSPlotPage(dfs, [chart1], tab_title="Revenue Analysis")
+page2 = JSPlotPage(dfs, [chart2], tab_title="Cost Analysis")
+
+# Create navigation links for coverpage
+links = LinkList([
+    ("Revenue", "page_1.html", "Revenue analysis details"),
+    ("Costs", "page_2.html", "Cost breakdown")
+])
+
+# Create coverpage with links
+coverpage = JSPlotPage(Dict(), [links], tab_title="Home")
+
+# Create multi-page report (data saved once as parquet)
+report = Pages(coverpage, [page1, page2], dataformat=:parquet)
+create_html(report, "report.html")
+```
+
+### LinkList
+
+```@docs
+LinkList
+```
+
+A styled list of hyperlinks for navigating between pages in a multi-page report.
+
+**Parameters:**
+- `lnks::Vector{Tuple{String,String,String}}`: Vector of link tuples, each containing:
+  - `page_title::String`: Display name for the link
+  - `link_url::String`: URL or path to the target page (e.g., "page_1.html")
+  - `blurb::String`: Description text explaining what the page contains
+
+**Keyword Arguments:**
+- `chart_title::Symbol`: Unique identifier (default: `:link_list`)
+
+**Features:**
+- Renders as a styled bulleted list with bold titles and descriptions
+- Works with the Pages struct to create navigable multi-page reports
+- Has no data dependencies (data_label is `:no_data`)
+
+**Example:**
+```julia
+links = LinkList([
+    ("Sales Dashboard", "page_1.html", "Quarterly sales analysis and trends"),
+    ("Customer Metrics", "page_2.html", "Customer satisfaction and retention"),
+    ("Financial Summary", "page_3.html", "Revenue, costs, and profit margins")
+])
+```
+
 ### Plot Types
 
 #### PivotTable

@@ -48,7 +48,6 @@ line_chart = LineChart(:timeseries, df, :df;
     x_cols = [:date],
     y_cols = [:value],
     color_cols = [:category],
-    linetype_cols = [:category],
     title = "Time Series Data",
     x_label = "Date",
     y_label = "Value"

@@ -83,7 +83,6 @@ using Dates
                 x_cols = [:x],
                 y_cols = [:y],
                 color_cols = [:category],
-                linetype_cols = [:category],
                 filters = Dict{Symbol,Any}(:category => "A"),
                 title = "Colored Chart"
             )
@@ -348,7 +347,7 @@ using Dates
             )
             chart = KernelDensity(:filtered_kde, df_filtered, :df_filtered;
                 value_cols = :value,
-                slider_col = [:age, :category]
+                filter_cols = [:age, :category]
             )
             @test occursin("age", chart.functional_html)
             @test occursin("category", chart.functional_html)
@@ -946,6 +945,275 @@ using Dates
                 @test occursin("line", content)
                 @test occursin("summary", content)
                 @test occursin("image", content)
+            end
+        end
+    end
+
+    @testset "LinkList" begin
+        @testset "Basic creation" begin
+            links = LinkList([
+                ("Page 1", "page1.html", "First page description"),
+                ("Page 2", "page2.html", "Second page description")
+            ])
+            @test links.chart_title == :link_list
+            @test occursin("<ul>", links.appearance_html)
+            @test occursin("Page 1", links.appearance_html)
+            @test occursin("page1.html", links.appearance_html)
+            @test occursin("First page description", links.appearance_html)
+            @test links.functional_html == ""
+        end
+
+        @testset "Custom chart title" begin
+            links = LinkList(
+                [("Test", "test.html", "Description")],
+                chart_title = :custom_links
+            )
+            @test links.chart_title == :custom_links
+        end
+
+        @testset "Multiple links" begin
+            link_data = [
+                ("Analysis 1", "analysis1.html", "Revenue analysis"),
+                ("Analysis 2", "analysis2.html", "Cost analysis"),
+                ("Analysis 3", "analysis3.html", "Profit analysis")
+            ]
+            links = LinkList(link_data)
+
+            @test occursin("Analysis 1", links.appearance_html)
+            @test occursin("Analysis 2", links.appearance_html)
+            @test occursin("Analysis 3", links.appearance_html)
+            @test occursin("analysis1.html", links.appearance_html)
+            @test occursin("analysis2.html", links.appearance_html)
+            @test occursin("analysis3.html", links.appearance_html)
+        end
+
+        @testset "Links in HTML output" begin
+            mktempdir() do tmpdir
+                links = LinkList([("Test Page", "test.html", "Test description")])
+                page = JSPlotPage(Dict{Symbol,DataFrame}(), [links])
+                outfile = joinpath(tmpdir, "links_test.html")
+                create_html(page, outfile)
+
+                content = read(outfile, String)
+                @test occursin("Test Page", content)
+                @test occursin("test.html", content)
+                @test occursin("Test description", content)
+            end
+        end
+
+        @testset "Dependencies" begin
+            links = LinkList([("Page", "page.html", "Description")])
+            @test dependencies(links) == Symbol[]
+        end
+    end
+
+    @testset "Pages" begin
+        # Create test data and pages
+        test_data = DataFrame(x = 1:10, y = rand(10), category = repeat(["A", "B"], 5))
+
+        page1 = JSPlotPage(
+            Dict{Symbol,DataFrame}(:data1 => test_data),
+            [TextBlock("<h2>Page 1</h2>")],
+            tab_title = "First Page"
+        )
+
+        page2 = JSPlotPage(
+            Dict{Symbol,DataFrame}(:data2 => test_data),
+            [TextBlock("<h2>Page 2</h2>")],
+            tab_title = "Second Page"
+        )
+
+        @testset "Basic creation" begin
+            coverpage = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [TextBlock("<h1>Cover</h1>")],
+                tab_title = "Cover"
+            )
+
+            pages = Pages(coverpage, [page1, page2])
+            @test pages.coverpage.tab_title == "Cover"
+            @test length(pages.pages) == 2
+            @test pages.dataformat == :csv_embedded  # Default from coverpage
+        end
+
+        @testset "With explicit dataformat override" begin
+            coverpage = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [TextBlock("<h1>Cover</h1>")],
+                dataformat = :csv_embedded
+            )
+
+            # Override with parquet
+            pages = Pages(coverpage, [page1, page2], dataformat = :parquet)
+            @test pages.dataformat == :parquet
+        end
+
+        @testset "Invalid dataformat" begin
+            coverpage = JSPlotPage(Dict{Symbol,DataFrame}(), [TextBlock("<h1>Cover</h1>")])
+            @test_throws ErrorException Pages(coverpage, [page1], dataformat = :invalid)
+        end
+
+        @testset "Multi-page HTML generation" begin
+            mktempdir() do tmpdir
+                # Create pages with different content
+                df1 = DataFrame(x = 1:5, y = rand(5), color = repeat(["Red"], 5))
+                df2 = DataFrame(a = 1:5, b = rand(5), color = repeat(["Blue"], 5))
+
+                chart1 = LineChart(:chart1, df1, :data1; x_cols=[:x], y_cols=[:y])
+                chart2 = LineChart(:chart2, df2, :data2; x_cols=[:a], y_cols=[:b])
+
+                page1 = JSPlotPage(
+                    Dict{Symbol,DataFrame}(:data1 => df1),
+                    [chart1],
+                    tab_title = "Revenue",
+                    page_header = "Revenue Analysis"
+                )
+
+                page2 = JSPlotPage(
+                    Dict{Symbol,DataFrame}(:data2 => df2),
+                    [chart2],
+                    tab_title = "Costs",
+                    page_header = "Cost Analysis"
+                )
+
+                links = LinkList([
+                    ("Revenue", "page_1.html", "Revenue analysis page"),
+                    ("Costs", "page_2.html", "Cost analysis page")
+                ])
+
+                coverpage = JSPlotPage(
+                    Dict{Symbol,DataFrame}(),
+                    [TextBlock("<h1>Annual Report</h1>"), links],
+                    tab_title = "Home"
+                )
+
+                pages = Pages(coverpage, [page1, page2], dataformat = :parquet)
+                outfile = joinpath(tmpdir, "index.html")
+                create_html(pages, outfile)
+
+                # Check flat project structure (all files at same level)
+                project_dir = joinpath(tmpdir, "index")
+                @test isdir(project_dir)
+
+                # Check main page exists at project root
+                @test isfile(joinpath(project_dir, "index.html"))
+
+                # Check individual pages exist at same level
+                @test isfile(joinpath(project_dir, "page_1.html"))
+                @test isfile(joinpath(project_dir, "page_2.html"))
+
+                # Check data directory and data files
+                data_dir = joinpath(project_dir, "data")
+                @test isdir(data_dir)
+                @test isfile(joinpath(data_dir, "data1.parquet"))
+                @test isfile(joinpath(data_dir, "data2.parquet"))
+
+                # Check launcher scripts at project root
+                @test isfile(joinpath(project_dir, "open.sh"))
+                @test isfile(joinpath(project_dir, "open.bat"))
+                @test isfile(joinpath(project_dir, "README.md"))
+
+                # Check coverpage content
+                coverpage_content = read(joinpath(project_dir, "index.html"), String)
+                @test occursin("Annual Report", coverpage_content)
+                @test occursin("page_1.html", coverpage_content)
+                @test occursin("page_2.html", coverpage_content)
+                @test occursin("Revenue analysis page", coverpage_content)
+
+                # Check page 1 content
+                page1_content = read(joinpath(project_dir, "page_1.html"), String)
+                @test occursin("Revenue Analysis", page1_content)
+                @test occursin("chart1", page1_content)
+
+                # Check page 2 content
+                page2_content = read(joinpath(project_dir, "page_2.html"), String)
+                @test occursin("Cost Analysis", page2_content)
+                @test occursin("chart2", page2_content)
+
+                # Verify flat structure (no nested page folders)
+                @test !isdir(joinpath(project_dir, "page_1"))
+                @test !isdir(joinpath(project_dir, "page_2"))
+            end
+        end
+
+        @testset "Shared data is saved only once" begin
+            mktempdir() do tmpdir
+                # Both pages use the same data
+                shared_df = DataFrame(x = 1:100, y = rand(100), category = rand(["A", "B"], 100))
+
+                chart1 = LineChart(:c1, shared_df, :shared_data; x_cols=[:x], y_cols=[:y])
+                chart2 = LineChart(:c2, shared_df, :shared_data; x_cols=[:x], y_cols=[:y])
+
+                page1 = JSPlotPage(Dict(:shared_data => shared_df), [chart1], tab_title="P1")
+                page2 = JSPlotPage(Dict(:shared_data => shared_df), [chart2], tab_title="P2")
+
+                coverpage = JSPlotPage(Dict{Symbol,DataFrame}(), [TextBlock("<h1>Test</h1>")])
+                pages = Pages(coverpage, [page1, page2], dataformat = :csv_external)
+
+                outfile = joinpath(tmpdir, "shared.html")
+                create_html(pages, outfile)
+
+                # Check that data file exists only once
+                data_dir = joinpath(tmpdir, "shared", "data")
+                @test isdir(data_dir)
+                data_files = readdir(data_dir)
+                @test length(filter(f -> contains(f, "shared_data"), data_files)) == 1
+            end
+        end
+
+        @testset "Pages with different dataformats use override" begin
+            mktempdir() do tmpdir
+                # Create pages with different embedded formats
+                page1 = JSPlotPage(
+                    Dict(:data => test_data),
+                    [TextBlock("<h2>P1</h2>")],
+                    dataformat = :csv_embedded  # This will be overridden
+                )
+
+                page2 = JSPlotPage(
+                    Dict(:data => test_data),
+                    [TextBlock("<h2>P2</h2>")],
+                    dataformat = :json_embedded  # This will be overridden
+                )
+
+                coverpage = JSPlotPage(
+                    Dict{Symbol,DataFrame}(),
+                    [TextBlock("<h1>Cover</h1>")],
+                    dataformat = :csv_embedded
+                )
+
+                # Override all with JSON external
+                pages = Pages(coverpage, [page1, page2], dataformat = :json_external)
+                outfile = joinpath(tmpdir, "override.html")
+                create_html(pages, outfile)
+
+                # All should use JSON external
+                data_dir = joinpath(tmpdir, "override", "data")
+                @test isdir(data_dir)
+                @test isfile(joinpath(data_dir, "data.json"))
+                @test !isfile(joinpath(data_dir, "data.csv"))
+            end
+        end
+
+        @testset "Empty pages list" begin
+            mktempdir() do tmpdir
+                coverpage = JSPlotPage(
+                    Dict{Symbol,DataFrame}(),
+                    [TextBlock("<h1>Only Cover</h1>")],
+                    tab_title = "Cover Only"
+                )
+
+                # Pages with empty pages list
+                pages = Pages(coverpage, JSPlotPage[])
+                outfile = joinpath(tmpdir, "empty_pages.html")
+                create_html(pages, outfile)
+
+                project_dir = joinpath(tmpdir, "empty_pages")
+                @test isdir(project_dir)
+                @test isfile(joinpath(project_dir, "empty_pages.html"))
+                # No additional page files should exist
+                html_files = filter(f -> endswith(f, ".html"), readdir(project_dir))
+                @test length(html_files) == 1  # Only the main file
             end
         end
     end

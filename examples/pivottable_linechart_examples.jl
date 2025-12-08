@@ -54,7 +54,7 @@ sf3[!, :z] = cos.(sqrt.(sf3.x .^ 2 .+  sf3.y .^ 0.5)) .+ 1.0
 sf4[!, :z] = sqrt.(sf4.x) .- sqrt.(sf4.y)
 subframe = reduce(vcat, [subframe, sf2, sf3, sf4])
 
-pt3 = Chart3d(:threeD, :subframe;
+pt3 = Surface3D(:threeD, subframe, :subframe;
         x_col = :x,
         y_col = :y,
         z_col = :z,

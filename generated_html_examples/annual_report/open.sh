@@ -3,7 +3,7 @@
 # Tries browsers in order: Brave, Chrome, Firefox, then system default
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-HTML_FILE="$SCRIPT_DIR/textblock_with_images_external"
+HTML_FILE="$SCRIPT_DIR/annual_report.html"
 
 # Create a temporary user data directory for Chromium-based browsers
 TEMP_USER_DIR="$(mktemp -d)"

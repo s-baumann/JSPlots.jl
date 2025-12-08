@@ -455,7 +455,9 @@ struct DistPlot <: JSPlotsType
             ""
         end
 
-        sliders_html = toggle_buttons_html * combined_dropdown_html * sliders_html
+        # Separate filters from plot attributes
+        filter_sliders_html = sliders_html
+        plot_attributes_html = toggle_buttons_html * combined_dropdown_html
 
         # Generate bins slider (placed below chart)
         bins_slider_html = """
@@ -553,7 +555,11 @@ struct DistPlot <: JSPlotsType
         <h2>$title</h2>
         <p>$notes</p>
 
-        $sliders_html
+        <!-- Filters (for data filtering) -->
+        $(filter_sliders_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filter_sliders_html\n        </div>" : "")
+
+        <!-- Plot Attributes (variable selection, grouping, and display options) -->
+        $(plot_attributes_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $plot_attributes_html\n        </div>" : "")
 
         <!-- Chart -->
         <div id="$chart_title"></div>

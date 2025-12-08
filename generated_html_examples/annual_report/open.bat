@@ -2,7 +2,7 @@
 REM JSPlots Launcher Script for Windows
 REM Tries browsers in order: Brave, Chrome, Firefox, then system default
 
-set "HTML_FILE=%~dp0textblock_with_images_external"
+set "HTML_FILE=%~dp0annual_report.html"
 
 REM Try Brave Browser
 where brave.exe >nul 2>&1
