@@ -604,6 +604,10 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                     if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
                         df_converted[!, col] = string.(df_converted[!, col])
                     end
+                    # Check if the column type is ZonedDateTime or Union{Missing, ZonedDateTime} or similar
+                    if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
+                        df_converted[!, col] = [ismissing(x) ? missing : x.utc_datetime for x in df_converted[!, col] ]
+                    end
                 end
 
                 # Register the DataFrame with DuckDB
