@@ -573,7 +573,8 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             mkpath(data_dir)
         end
 
-        files_to_do = intersect(keys(pt.dataframes), dependencies.(pt.pivot_tables))
+        files_to_do = intersect(collect(keys(pt.dataframes)), reduce(vcat, dependencies.(pt.pivot_tables)))
+        Infiltrator.@infiltrate
         # Save all dataframes as separate files based on format
         for data_label in files_to_do
             df = pt.dataframes[data_label]

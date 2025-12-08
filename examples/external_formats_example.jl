@@ -62,12 +62,8 @@ stock_data = DataFrame(
     volume = rand(273) .* 1_000_000
 )
 
-scatter_chart = ScatterPlot(:stock_scatter, stock_data, :stock_data;
-    x_cols = [:volume],
-    y_cols = [:price],
+scatter_chart = ScatterPlot(:stock_scatter, stock_data, :stock_data, [:volume, :price];
     color_cols = [:symbol],
-    pointtype_cols = [:symbol],
-    pointsize_cols = [:symbol],
     title = "Stock Price vs Volume"
 )
 
