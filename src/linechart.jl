@@ -8,7 +8,7 @@ struct LineChart <: JSPlotsType
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
                             color_cols::Vector{Symbol}=[:color],
-                            linetype_cols::Vector{Symbol}=[:color],
+                            linetype_cols::Vector{Symbol}=color_cols,
                             filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,

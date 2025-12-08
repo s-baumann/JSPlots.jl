@@ -60,7 +60,7 @@ df3 = DataFrame(
 
 distplot3 = DistPlot(:filtered_dist, df3, :df3;
     value_cols = :score,
-    slider_col = [:age, :department],
+    filter_cols = [:age, :department],
     histogram_bins = 40,
     title = "Score Distribution with Interactive Filters",
     value_label = "Test Score",

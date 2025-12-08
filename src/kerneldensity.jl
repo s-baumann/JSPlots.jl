@@ -7,7 +7,7 @@ struct KernelDensity <: JSPlotsType
     function KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                           value_cols::Union{Symbol,Vector{Symbol}}=:value,
                           group_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
-                          slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                          filter_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           bandwidth::Union{Float64,Nothing}=nothing,
@@ -69,13 +69,13 @@ struct KernelDensity <: JSPlotsType
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize slider_col to always be a vector
-        slider_cols = if slider_col === nothing
+        # Normalize filter_cols to always be a vector
+        slider_cols = if filter_cols === nothing
             Symbol[]
-        elseif slider_col isa Symbol
-            [slider_col]
+        elseif filter_cols isa Symbol
+            [filter_cols]
         else
-            slider_col
+            filter_cols
         end
 
         # Facet dropdowns

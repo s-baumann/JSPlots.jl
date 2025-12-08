@@ -62,7 +62,7 @@ df3 = DataFrame(
 kde3 = KernelDensity(:filtered_kde, df3, :df3;
     value_cols = :score,
     group_cols = :department,
-    slider_col = [:age, :region],
+    filter_cols = [:age, :region],
     title = "Score Distribution by Department with Filters",
     value_label = "Test Score",
     notes = "Use age range slider and region multi-select to filter data dynamically and see how distributions change"
@@ -190,7 +190,7 @@ df9 = DataFrame(
 kde9 = KernelDensity(:comprehensive_kde, df9, :df9;
     value_cols = [:measurement, :score],
     group_cols = [:department, :experience_level],
-    slider_col = [:age, :region],
+    filter_cols = [:age, :region],
     facet_cols = [:project_type],
     default_facet_cols = :project_type,
     density_opacity = 0.6,
@@ -245,3 +245,5 @@ println("  • Bimodal distribution detection")
 println("  • Custom bandwidth control")
 println("  • Multiple value and group columns with dropdowns and bandwidth input")
 println("  • Comprehensive example with all features combined")
+
+

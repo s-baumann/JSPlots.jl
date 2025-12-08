@@ -7,7 +7,7 @@ struct DistPlot <: JSPlotsType
     function DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_cols::Union{Symbol,Vector{Symbol}}=:value,
                       group_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
-                      slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                      filter_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
                       show_histogram::Bool=true,
                       show_box::Bool=true,
                       show_rug::Bool=true,
@@ -18,13 +18,13 @@ struct DistPlot <: JSPlotsType
                       value_label::String="",
                       notes::String="")
         
-        # Normalize slider_col to always be a vector
-        slider_cols = if slider_col === nothing
+        # Normalize filter_cols to always be a vector
+        slider_cols = if filter_cols === nothing
             Symbol[]
-        elseif slider_col isa Symbol
-            [slider_col]
+        elseif filter_cols isa Symbol
+            [filter_cols]
         else
-            slider_col
+            filter_cols
         end
 
         # Normalize value_cols and group_cols
