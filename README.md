@@ -33,44 +33,6 @@ page = JSPlotPage(Dict(:mydata => df), [chart])
 create_html(page, "dashboard.html")
 ```
 
-## 📚 Documentation
-
-**[View the Complete Interactive Documentation](generated_html_examples/annual_report/annual_report.html)** - A comprehensive, multi-page report demonstrating JSPlots capabilities!
-
-The documentation includes:
-- **Revenue Analysis** - Financial performance and revenue trends across regions
-- **Metrics Dashboard** - Key business metrics including customer satisfaction and quality scores
-- **Regional Analysis** - Q4 2024 regional performance breakdown with distribution analysis
-
-To build the documentation locally:
-```julia
-julia> include("examples/pages_examples.jl")
-```
-
-Then open `generated_html_examples/annual_report/annual_report.html` in your browser.
-
-### Individual Examples
-
-Each plot type has its own example file that can be run standalone:
-- **textblock_examples.jl** - Rich text, images, and HTML formatting
-- **linechart_examples.jl** - Time series, faceting, aggregation, and dynamic controls
-
-## Features
-
-- **📊 Rich Visualizations**: Line charts, scatter plots, 3D plots, distributions, pivot tables
-- **🎨 Interactive**: Filters, dynamic controls, faceting, drag-and-drop pivot tables
-- **⚡ Performant**: Efficient data formats (Parquet, JSON, CSV), optimized for 100,000+ rows
-- **🚀 Easy to Use**: Simple API, works with DataFrames.jl, no JavaScript required
-- **📦 Standalone Output**: Self-contained HTML files that work anywhere
-- **📄 Multi-Page Reports**: Create comprehensive documentation sites with linked pages
-
-## Installation
-
-```julia
-using Pkg
-Pkg.add("JSPlots")
-```
-
 ## Plot Types
 
 - **LineChart** - Time series and trend visualization with faceting
@@ -95,14 +57,7 @@ julia examples/pivottable_examples.jl
 # etc.
 ```
 
-Or generate the complete documentation site:
-
-```bash
-julia examples/pages_examples.jl
-```
-
 ## About
 
-The pivot table functionality wraps [PivotTable.js](https://pivottable.js.org/), similar to the [Python pivottablejs module](https://pypi.org/project/pivottablejs/). Plotly visualizations use [Plotly.js](https://plotly.com/javascript/).
+The pivot table functionality wraps [PivotTable.js](https://pivottable.js.org/), similar to the [Python pivottablejs module](https://pypi.org/project/pivottablejs/). Plotly visualizations use [Plotly.js](https://plotly.com/javascript/). Credit to Claude code for doing all of the testing, documentation and a couple of the chart types.
 
-JSPlots allows you to combine multiple charts and tables on a single page, sharing or separating data sources as needed. Perfect for creating interactive reports, dashboards, and documentation.

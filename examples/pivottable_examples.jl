@@ -241,7 +241,7 @@ page = JSPlotPage(
     ),
     [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, linechart, surface3d, conclusion],
     tab_title = "PivotTable Examples",
-    dataformat = :parquet
+    dataformat = :csv_embedded
 )
 
 create_html(page, "generated_html_examples/pivottable_examples.html")

@@ -146,7 +146,7 @@ data_dict = Dict{Symbol,DataFrame}(
 page = JSPlotPage(
     data_dict,
     [scatter1, scatter2, scatter3, scatter4, scatter5, scatter6];
-    dataformat = :parquet
+    dataformat = :csv_embedded
 )
 
 create_html(page, "generated_html_examples/scatterplot_examples.html")
