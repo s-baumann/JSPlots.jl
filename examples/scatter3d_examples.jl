@@ -9,10 +9,10 @@ header = TextBlock("""
 <ul>
     <li><strong>Dimension selection:</strong> Choose which variables to display on x, y, and z axes</li>
     <li><strong>Eigenvector visualization:</strong> Show principal components (PC1, PC2, PC3) to understand data structure</li>
-    <li><strong>Color and point type:</strong> Customize visualization by category</li>
-    <li><strong>Filtering:</strong> Filter data with interactive sliders</li>
+    <li><strong>Color coding:</strong> Customize visualization by category</li>
+    <li><strong>Filtering:</strong> Filter data with interactive sliders (shown in gray "Filters" box)</li>
     <li><strong>Faceting:</strong> Create multiple plots by categorical variables (facet wrap or grid)</li>
-    <li><strong>Camera control:</strong> Shared camera mode synchronizes rotation across all faceted plots</li>
+    <li><strong>Synchronized camera:</strong> When using facets, camera rotation is automatically synchronized across all plots</li>
     <li><strong>Interactive 3D controls:</strong> Rotate, zoom, and pan to explore from all angles</li>
 </ul>
 <p><em>Click and drag to rotate the 3D plots. Use scroll wheel to zoom!</em></p>
@@ -165,15 +165,41 @@ chart5 = Scatter3D(:timeseries_scatter, df5, :df5, [:x, :y, :z];
     notes = "A spiral trajectory through 3D space - filter by time to see different segments"
 )
 
-# Example 6: Comprehensive - All Features
+# Example 6: Faceting with Synchronized Camera
 example6_text = TextBlock("""
-<h2>Example 6: Comprehensive Example</h2>
+<h2>Example 6: Faceting with Synchronized Camera</h2>
+<p>When using facets, the camera view is automatically synchronized across all plots.
+Rotating one plot rotates them all - perfect for comparing similar data across categories from the same perspective!</p>
+""")
+
+n = 300
+df6 = DataFrame(
+    x = vcat([randn(n÷3) .+ i for i in [-2, 0, 2]]...),
+    y = vcat([randn(n÷3) .+ i for i in [2, 0, -2]]...),
+    z = randn(n),
+    experiment = vcat(fill("Exp 1", n÷3), fill("Exp 2", n÷3), fill("Exp 3", n÷3)),
+    condition = rand(["Control", "Treatment"], n)
+)
+
+chart6 = Scatter3D(:faceted_scatter, df6, :df6, [:x, :y, :z];
+    color_cols = [:condition],
+    facet_cols = :experiment,
+    default_facet_cols = :experiment,
+    show_eigenvectors = true,
+    marker_size = 5,
+    title = "Faceted 3D Scatter with Synchronized Camera",
+    notes = "Camera rotation is automatically synchronized across all faceted plots"
+)
+
+# Example 7: Comprehensive - All Features
+example7_text = TextBlock("""
+<h2>Example 7: Comprehensive Example</h2>
 <p>This example demonstrates all features together: multiple dimensions for axis selection, multiple color options,
-filtering by continuous and categorical variables, and eigenvector visualization. Try different combinations!</p>
+filtering by continuous and categorical variables, faceting, and eigenvector visualization. Try different combinations!</p>
 """)
 
 n = 500
-df6 = DataFrame(
+df7 = DataFrame(
     measurement1 = randn(n) .* 2,
     measurement2 = randn(n) .* 1.5 .+ randn(n) .* 0.3,
     measurement3 = randn(n) .+ 1,
@@ -186,29 +212,33 @@ df6 = DataFrame(
     quality = rand(["High", "Medium", "Low"], n)
 )
 
-chart6 = Scatter3D(:comprehensive_scatter, df6, :df6,
+chart7 = Scatter3D(:comprehensive_scatter, df7, :df7,
     [:measurement1, :measurement2, :measurement3, :measurement4, :measurement5];
     color_cols = [:experiment, :quality, :location],
     slider_col = [:temperature, :pressure, :location],
+    facet_cols = [:experiment, :quality],
     show_eigenvectors = true,
     marker_size = 4,
     marker_opacity = 0.6,
     title = "Comprehensive 3D Scatter Example",
-    notes = "All features demonstrated: dimension selection, color options, filtering, and eigenvectors"
+    notes = "All features: dimension selection, color options, filtering, faceting, and eigenvectors"
 )
 
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Interactive 3D controls:</strong> Click and drag to rotate, scroll to zoom, shift+drag to pan</li>
+    <li><strong>Organized UI:</strong> Controls are organized in sections - Filters (gray), Plot Attributes (blue), and Faceting (orange)</li>
     <li><strong>Dimension selection:</strong> Choose which variables to display on x, y, and z axes (dropdowns appear when 2+ dimensions available)</li>
     <li><strong>Eigenvector visualization:</strong> Toggle principal components on/off to understand data structure</li>
     <li><strong>PC1 (Red):</strong> Direction of maximum variance</li>
     <li><strong>PC2 (Green):</strong> Second direction of maximum variance (orthogonal to PC1)</li>
     <li><strong>PC3 (Blue):</strong> Third direction of maximum variance (orthogonal to PC1 and PC2)</li>
-    <li><strong>Color and point type selection:</strong> Switch between different categorical variables for coloring</li>
+    <li><strong>Color selection:</strong> Switch between different categorical variables for coloring</li>
     <li><strong>Data filtering:</strong> Interactive sliders for continuous variables and multi-select for categorical variables</li>
-    <li><strong>Dynamic updates:</strong> Eigenvectors recalculate when you filter data, showing principal components of the filtered subset</li>
+    <li><strong>Faceting:</strong> Split your data into multiple plots by categorical variables (facet wrap or grid)</li>
+    <li><strong>Camera synchronization:</strong> When faceting is enabled, camera rotation is automatically synchronized across all plots</li>
+    <li><strong>Dynamic updates:</strong> All settings update immediately - eigenvectors recalculate when you change any setting</li>
     <li><strong>Scientific applications:</strong> Perfect for clustering visualization, dimensionality reduction, multivariate analysis, and exploratory data analysis</li>
 </ul>
 <p><strong>Tip:</strong> Hover over points to see exact coordinates! Eigenvectors are scaled for visibility.</p>
@@ -223,7 +253,8 @@ page = JSPlotPage(
         :df3 => df3,
         :df4 => df4,
         :df5 => df5,
-        :df6 => df6
+        :df6 => df6,
+        :df7 => df7
     ),
     [header,
      example1_text, chart1,
@@ -232,6 +263,7 @@ page = JSPlotPage(
      example4_text, chart4,
      example5_text, chart5,
      example6_text, chart6,
+     example7_text, chart7,
      conclusion],
     tab_title = "3D Scatter Plot Examples"
 )
@@ -248,5 +280,6 @@ println("  • Multiple dimensions with axis selection")
 println("  • Filtering with sliders (continuous and categorical)")
 println("  • Clustering visualization")
 println("  • Time series in 3D space")
+println("  • Faceting with synchronized camera rotation")
 println("  • Comprehensive example with all features")
 println("  • Eigenvector visualization for understanding data structure")

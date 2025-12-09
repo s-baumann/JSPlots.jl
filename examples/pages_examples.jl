@@ -34,8 +34,6 @@ revenue_chart = LineChart(:revenue_trend, df_sales, :sales_data;
     color_cols = [:Region],
     filters = Dict{Symbol,Any}(:Product => "Product A"),
     title = "Revenue and Costs by Region",
-    x_label = "Date",
-    y_label = "Amount (\$)",
     notes = "Track revenue and costs across different regions"
 )
 
@@ -65,8 +63,6 @@ metrics_chart = LineChart(:metrics_trend, df_metrics, :metrics_data;
     y_cols = [:Metric],
     color_cols = [:Category],
     title = "Key Business Metrics - 2024",
-    x_label = "Month",
-    y_label = "Metric Value",
     notes = "Tracking customer satisfaction, sales volume, and quality scores"
 )
 
@@ -97,7 +93,6 @@ regional_kde = KernelDensity(:regional_distribution, df_regional, :sales_data;
     value_cols = [:Revenue],
     group_cols = [:Region],
     title = "Revenue Distribution by Region - Q4 2024",
-    value_label = "Daily Revenue (\$)",
     notes = "Kernel density plot showing revenue distribution patterns across regions"
 )
 

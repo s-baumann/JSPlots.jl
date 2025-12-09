@@ -38,9 +38,6 @@ chart1 = Surface3D(:basic_surface, surface_df, :surface_data;
     z_col = :z,
     group_col = :group,
     title = "3D Surface: sin(√(x² + y²))",
-    x_label = "X",
-    y_label = "Y",
-    z_label = "Z",
     notes = "Classic ripple pattern - demonstrates basic 3D surface visualization"
 )
 
@@ -74,9 +71,6 @@ chart2 = Surface3D(:multi_surfaces, multi_surface_df, :multi_data;
     z_col = :z,
     group_col = :function_type,
     title = "Multiple 3D Surfaces Comparison",
-    x_label = "X Axis",
-    y_label = "Y Axis",
-    z_label = "Height",
     notes = "Three different functions shown as separate colored surfaces"
 )
 
@@ -126,9 +120,6 @@ chart3 = Surface3D(:filtered_surface, filtered_df, :filtered_data;
     group_col = :group,
     slider_col = [:distance, :region],
     title = "3D Surface with Filtering",
-    x_label = "X Position",
-    y_label = "Y Position",
-    z_label = "Amplitude",
     notes = "Use the sliders to filter by distance from origin or region (quadrant)"
 )
 
@@ -185,9 +176,6 @@ chart4 = Surface3D(:shape_family, shape_df, :shape_data;
     group_col = :shape,
     slider_col = :shapefamily,
     title = "Shape Family Explorer",
-    x_label = "X",
-    y_label = "Y",
-    z_label = "Z",
     notes = "Filter by shape family to switch between trigonometric and polynomial functions"
 )
 
@@ -220,9 +208,6 @@ chart5 = Surface3D(:wave_interference, wave_df, :wave_data;
     z_col = :z,
     group_col = :group,
     title = "Wave Interference Pattern",
-    x_label = "X Position",
-    y_label = "Y Position",
-    z_label = "Amplitude",
     notes = "Interference pattern from two wave sources - great for physics simulations"
 )
 

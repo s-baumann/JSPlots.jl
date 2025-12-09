@@ -12,8 +12,6 @@ struct LineChart <: JSPlotsType
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             aggregator::String="none",
                             title::String="Line Chart",
-                            x_label::String="",
-                            y_label::String="",
                             line_width::Int=1,
                             marker_size::Int=1,
                             notes::String="")
@@ -148,8 +146,6 @@ struct LineChart <: JSPlotsType
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
-            const X_LABEL = '$x_label';
-            const Y_LABEL = '$y_label';
 
             let allData = [];
 
@@ -295,8 +291,8 @@ struct LineChart <: JSPlotsType
                     }
 
                     const layout = {
-                        xaxis: { title: X_LABEL || X_COL },
-                        yaxis: { title: Y_LABEL || Y_COL },
+                        xaxis: { title: X_COL },
+                        yaxis: { title: Y_COL },
                         hovermode: 'closest',
                         showlegend: true
                     };
@@ -403,11 +399,11 @@ struct LineChart <: JSPlotsType
 
                         // Add axis configuration
                         layout[xaxis] = {
-                            title: row === nRows ? (X_LABEL || X_COL) : '',
+                            title: row === nRows ? X_COL : '',
                             anchor: yaxis
                         };
                         layout[yaxis] = {
-                            title: col === 1 ? (Y_LABEL || Y_COL) : '',
+                            title: col === 1 ? Y_COL : '',
                             anchor: xaxis
                         };
 
@@ -527,11 +523,11 @@ struct LineChart <: JSPlotsType
 
                             // Add axis configuration
                             layout[xaxis] = {
-                                title: rowIdx === nRows - 1 ? (X_LABEL || X_COL) : '',
+                                title: rowIdx === nRows - 1 ? X_COL : '',
                                 anchor: yaxis
                             };
                             layout[yaxis] = {
-                                title: colIdx === 0 ? (Y_LABEL || Y_COL) : '',
+                                title: colIdx === 0 ? Y_COL : '',
                                 anchor: xaxis
                             };
 

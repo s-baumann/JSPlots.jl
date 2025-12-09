@@ -118,8 +118,6 @@ line_plot = LineChart(:example_chart, df, :df;
     y_cols = [:y],
     color_cols = [:color],
     title = "Sample Data",
-    x_label = "Time",
-    y_label = "Value"
 )
 
 intro_text = TextBlock("""

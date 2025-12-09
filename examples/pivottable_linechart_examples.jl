@@ -60,9 +60,6 @@ pt3 = Surface3D(:threeD, subframe, :subframe;
         z_col = :z,
         group_col = :group,
         title = "3D Surface Chart of shapes",
-        x_label = "X directions",
-        y_label = "Y dim",
-        z_label = "Z directions",
         notes = "This is a 3D surface chart."
     )
 
@@ -92,8 +89,6 @@ pt00 = LineChart(:pchart, df, :df;
             color_cols=[:color],
             filters=Dict(:categ => :A, :categ22 => "Category_A"),
             title="Line Chart with Filters",
-            x_label="This is the x axis",
-            y_label="This is the y axis",
             notes="Interactive line chart with dropdown filters")
 
 conclusion = TextBlock("""

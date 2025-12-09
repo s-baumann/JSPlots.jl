@@ -26,7 +26,6 @@ df1 = DataFrame(
 kde1 = KernelDensity(:simple_kde, df1, :df1;
     value_cols = :value,
     title = "Simple Kernel Density",
-    value_label = "Values",
     notes = "Basic kernel density estimation for a normal distribution"
 )
 
@@ -45,7 +44,6 @@ kde2 = KernelDensity(:multi_group_kde, df2, :df2;
     value_cols = :value,
     group_cols = :group,
     title = "Treatment Comparison - Overlapping Densities",
-    value_label = "Response Value",
     density_opacity = 0.5,
     notes = "Compare distributions with overlapping density curves. Transparency allows visibility of all groups."
 )
@@ -64,7 +62,6 @@ kde3 = KernelDensity(:filtered_kde, df3, :df3;
     group_cols = :department,
     filter_cols = [:age, :region],
     title = "Score Distribution by Department with Filters",
-    value_label = "Test Score",
     notes = "Use age range slider and region multi-select to filter data dynamically and see how distributions change"
 )
 
@@ -86,7 +83,6 @@ kde4 = KernelDensity(:facet_one_kde, df4, :df4;
     facet_cols = :phase,
     default_facet_cols = :phase,
     title = "Faceted Kernel Density - Single Variable",
-    value_label = "Measurement",
     notes = "Faceting by phase shows separate density plots for each phase, with categories overlaid within each facet"
 )
 
@@ -108,7 +104,6 @@ kde5 = KernelDensity(:facet_grid_kde, df5, :df5;
     facet_cols = [:treatment, :timepoint],
     default_facet_cols = [:treatment, :timepoint],
     title = "Faceted Grid - Two Variables",
-    value_label = "Clinical Measurement",
     fill_density = true,
     notes = "Two-way faceting creates a grid showing all combinations of treatment and timepoint"
 )
@@ -126,7 +121,6 @@ df6 = DataFrame(
 kde6 = KernelDensity(:bimodal_kde, df6, :df6;
     value_cols = :value,
     title = "Bimodal Distribution Detection",
-    value_label = "Values",
     fill_density = true,
     notes = "Kernel density estimation excels at revealing complex distribution shapes like bimodality"
 )
@@ -148,7 +142,6 @@ kde7 = KernelDensity(:custom_bandwidth_kde, df7, :df7;
     bandwidth = 2.0,
     density_opacity = 0.7,
     title = "Custom Bandwidth Setting",
-    value_label = "Measurement",
     notes = "Bandwidth controls smoothness: smaller values show more detail, larger values create smoother curves"
 )
 

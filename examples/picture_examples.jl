@@ -80,8 +80,6 @@ line_chart = LineChart(:trend, df, :df;
     y_cols = [:value],
     color_cols = [:color],
     title = "Monthly Trend",
-    x_label = "Month",
-    y_label = "Value"
 )
 
 mixed_text = TextBlock("""

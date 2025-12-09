@@ -30,8 +30,6 @@ chart1 = LineChart(:revenue_trend, df1, :revenue_data;
     y_cols = [:Revenue],
     color_cols = [:color],
     title = "Daily Revenue Trend - H1 2024",
-    x_label = "Date",
-    y_label = "Revenue (\$)",
     notes = "Basic time series showing 6-month revenue trend"
 )
 
@@ -51,8 +49,6 @@ chart2 = LineChart(:multi_series, df2, :sales_data;
     y_cols = [:Sales],
     color_cols = [:Year],
     title = "Monthly Sales Comparison Across Years",
-    x_label = "Month",
-    y_label = "Sales (thousands)",
     notes = "Multiple series chart demonstrating color dimension to compare years"
 )
 
@@ -84,8 +80,6 @@ chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
     color_cols = [:Metric],
     filters = Dict{Symbol,Any}(:Department => "Engineering", :Quarter => "Q1"),
     title = "Department Productivity by Month",
-    x_label = "Month",
-    y_label = "Productivity Score",
     notes = "Interactive filters allow you to select different departments and quarters"
 )
 
@@ -121,8 +115,6 @@ chart5 = LineChart(:facet_wrap_example, facet_df, :facet_data;
     facet_cols = [:Product],
     default_facet_cols = :Product,
     title = "Sales by Product (Facet Wrap)",
-    x_label = "Month",
-    y_label = "Sales",
     notes = "Facet wrap creates a grid of subplots, one for each product. Similar to ggplot2's facet_wrap."
 )
 
@@ -158,8 +150,6 @@ chart6 = LineChart(:facet_grid_example, facet_grid_df, :facet_grid_data;
     facet_cols = [:Product, :Region],
     default_facet_cols = [:Product, :Region],
     title = "Sales by Product and Region (Facet Grid)",
-    x_label = "Month",
-    y_label = "Sales",
     notes = "Facet grid creates a 2D grid of subplots. First facet variable (Product) defines rows, second (Region) defines columns. Similar to ggplot2's facet_grid."
 )
 
@@ -194,8 +184,6 @@ chart7 = LineChart(:dynamic_controls, dynamic_df, :dynamic_data;
     default_facet_cols = nothing,
     aggregator = "none",
     title = "Dynamic Controls Demo - Stock Returns",
-    x_label = "Month",
-    y_label = "Return (%)",
     notes = "Use the dropdown menus to dynamically change: (1) Color by, (2) Line type by, (3) Aggregator, (4) Facet 1, (5) Facet 2."
 )
 
@@ -222,8 +210,6 @@ chart8 = LineChart(:aggregation_demo, agg_df, :agg_data;
     color_cols = [:Product],
     aggregator = "mean",
     title = "Aggregation Demo - Multiple Observations per X",
-    x_label = "Month",
-    y_label = "Sales",
     notes = "This dataset has 5 observations per month. Use the Aggregator dropdown to switch between: none (all points), mean, median, count, min, max."
 )
 
