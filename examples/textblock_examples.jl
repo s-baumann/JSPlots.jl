@@ -68,7 +68,7 @@ company_header = TextBlock("""
         {{IMAGE:logo}}
     </div>
 </div>
-""", Dict("logo" => "examples/pictures/images.jpeg"))
+""", Dict("logo" => joinpath(dirname(@__FILE__),"pictures", "images.jpeg")))
 
 # Example 5: Text with Multiple Images
 multi_image_content = TextBlock("""
@@ -88,8 +88,8 @@ multi_image_content = TextBlock("""
     </div>
 </div>
 """, Dict(
-    "product_a" => "examples/pictures/images.jpeg",
-    "product_b" => "examples/pictures/images.jpeg"
+    "product_a" => joinpath(dirname(@__FILE__),"pictures", "images.jpeg"),
+    "product_b" => joinpath(dirname(@__FILE__),"pictures", "images.jpeg")
 ))
 
 # Example 6: Simple Image in Text
@@ -104,7 +104,7 @@ simple_image = TextBlock("""
         <p>As the face of our brand, Tux appears in all our marketing materials and serves as a constant reminder of our commitment to excellence and community.</p>
     </div>
 </div>
-""", Dict("mascot" => "examples/pictures/images.jpeg"))
+""", Dict("mascot" => joinpath(dirname(@__FILE__),"pictures", "images.jpeg")))
 
 # Example 7: Combining text blocks with actual plots
 df = DataFrame(

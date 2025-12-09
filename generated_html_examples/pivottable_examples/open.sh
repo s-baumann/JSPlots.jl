@@ -3,7 +3,7 @@
 # Tries browsers in order: Brave, Chrome, Firefox, then system default
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-HTML_FILE="$SCRIPT_DIR/pivottable_linechart_examples.html"
+HTML_FILE="$SCRIPT_DIR/pivottable_examples.html"
 
 # Create a temporary user data directory for Chromium-based browsers
 TEMP_USER_DIR="$(mktemp -d)"

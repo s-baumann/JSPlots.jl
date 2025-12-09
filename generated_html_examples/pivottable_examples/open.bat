@@ -2,7 +2,7 @@
 REM JSPlots Launcher Script for Windows
 REM Tries browsers in order: Brave, Chrome, Firefox, then system default
 
-set "HTML_FILE=%~dp0pivottable_linechart_examples.html"
+set "HTML_FILE=%~dp0pivottable_examples.html"
 
 REM Try Brave Browser
 where brave.exe >nul 2>&1

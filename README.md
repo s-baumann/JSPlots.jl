@@ -35,25 +35,25 @@ create_html(page, "dashboard.html")
 
 ## 📚 Documentation
 
-**[View the Complete Interactive Documentation](generated_html_examples/jsplots_documentation/jsplots_documentation.html)** - A comprehensive, example-driven guide built with JSPlots itself!
+**[View the Complete Interactive Documentation](generated_html_examples/annual_report/annual_report.html)** - A comprehensive, multi-page report demonstrating JSPlots capabilities!
 
 The documentation includes:
-- **Getting Started** - Introduction to JSPlots and TextBlocks
-- **Data Formats Guide** - Choosing between JSON, Parquet, and CSV
-- **Plot Type Examples** - Detailed examples for each visualization type:
-  - LineChart - Time series, faceting, aggregation
-  - ScatterPlot - Marginal distributions, multi-dimensional exploration
-  - PivotTable - Interactive drag-and-drop data exploration
-  - KernelDensity - Distribution comparisons
-  - 3D Plots - Scatter3D and Surface3D
-  - And more!
+- **Revenue Analysis** - Financial performance and revenue trends across regions
+- **Metrics Dashboard** - Key business metrics including customer satisfaction and quality scores
+- **Regional Analysis** - Q4 2024 regional performance breakdown with distribution analysis
 
 To build the documentation locally:
 ```julia
 julia> include("examples/pages_examples.jl")
 ```
 
-Then open `generated_html_examples/jsplots_documentation/jsplots_documentation.html` in your browser.
+Then open `generated_html_examples/annual_report/annual_report.html` in your browser.
+
+### Individual Examples
+
+Each plot type has its own example file that can be run standalone:
+- **textblock_examples.jl** - Rich text, images, and HTML formatting
+- **linechart_examples.jl** - Time series, faceting, aggregation, and dynamic controls
 
 ## Features
 

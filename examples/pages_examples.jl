@@ -1,6 +1,11 @@
 using JSPlots, DataFrames, Dates
 
-println("Creating Pages (multi-page) example...")
+println("Creating Pages (multi-page) examples...")
+
+# ==============================================================================
+# Example 1: Manual LinkList Construction
+# ==============================================================================
+println("\n=== Example 1: Manual LinkList Construction ===")
 
 # Create sample data that will be shared across pages
 dates = Date(2024, 1, 1):Day(1):Date(2024, 12, 31)
@@ -116,8 +121,8 @@ page3 = JSPlotPage(
     notes = "Q4 2024 regional analysis"
 )
 
-# Create the coverpage with a LinkList
-println("  Creating coverpage with navigation links...")
+# Create the coverpage with a manual LinkList
+println("  Creating coverpage with manual navigation links...")
 links = LinkList([
     ("Revenue Analysis", "page_1.html", "Financial performance and revenue trends across regions"),
     ("Metrics Dashboard", "page_2.html", "Key business metrics including customer satisfaction and quality scores"),
@@ -137,9 +142,12 @@ coverpage_header = TextBlock("""
 </ol>
 
 <p>Use the links below to navigate to each section. All pages share the same data sources, loaded efficiently for fast browsing.</p>
+
+<h3>Example Type</h3>
+<p><strong>Manual LinkList Construction:</strong> This example demonstrates manually creating a LinkList and adding it to the coverpage. This gives you full control over link text and descriptions.</p>
 """)
 
-coverpage = JSPlotPage(
+coverpage1 = JSPlotPage(
     Dict{Symbol,DataFrame}(),  # No data needed on coverpage
     [coverpage_header, links],
     tab_title = "2024 Business Report",
@@ -148,28 +156,142 @@ coverpage = JSPlotPage(
 )
 
 # Create the multi-page structure with shared data
-println("  Creating multi-page report...")
-report = Pages(
-    coverpage,
+println("  Creating multi-page report (manual LinkList)...")
+report1 = Pages(
+    coverpage1,
     [page1, page2, page3],
     dataformat = :parquet  # Override all pages to use parquet format
 )
 
-# Generate the HTML output
-output_dir = "generated_html_examples"
-if !isdir(output_dir)
-    mkpath(output_dir)
-end
+create_html(report1, joinpath("generated_html_examples", "annual_report.html"))
 
-create_html(report, joinpath(output_dir, "annual_report.html"))
+println("\n" * "="^60)
+println("Manual LinkList example complete!")
+println("="^60)
+println("Output location: generated_html_examples/annual_report/")
+println("  - annual_report.html (main/cover page)")
+println("  - page_1.html (Revenue Analysis)")
+println("  - page_2.html (Metrics Dashboard)")
+println("  - page_3.html (Regional Analysis)")
+println("  - data/ (shared Parquet files)")
 
-println("\nPages example complete!")
-println("Output location: $output_dir/annual_report/")
-println("  Structure (flat, all files at same level):")
-println("    - annual_report.html (main/cover page)")
-println("    - page_1.html (Revenue Analysis)")
-println("    - page_2.html (Metrics Dashboard)")
-println("    - page_3.html (Regional Analysis)")
-println("    - data/ (shared Parquet files)")
-println("    - open.sh, open.bat, README.md")
-println("\nOpen with: cd $output_dir/annual_report && ./open.sh (Linux/Mac) or open.bat (Windows)")
+# ==============================================================================
+# Example 2: Easy Constructor with Auto-Generated LinkList
+# ==============================================================================
+println("\n=== Example 2: Easy Constructor (Auto-Generated LinkList) ===")
+
+# Create simpler data for the second example
+dates2 = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
+df_sales2 = DataFrame(
+    Date = dates2,
+    Revenue = cumsum(randn(length(dates2)) .* 1000 .+ 50000),
+    Region = rand(["North", "South", "East", "West"], length(dates2)),
+    Product = rand(["Product A", "Product B", "Product C"], length(dates2))
+)
+
+df_metrics2 = DataFrame(
+    Month = repeat(["Jan", "Feb", "Mar", "Apr", "May", "Jun"], 2),
+    Score = vcat(
+        [85, 87, 89, 88, 90, 92],  # Customer Satisfaction
+        [120, 135, 150, 145, 160, 175]  # Sales Volume
+    ),
+    Metric = vcat(
+        repeat(["Customer Satisfaction"], 6),
+        repeat(["Sales Volume"], 6)
+    )
+)
+
+# Page A: Revenue Analysis
+println("  Creating Page A: Revenue Analysis...")
+revenue_chart2 = LineChart(:revenue_trend_h1, df_sales2, :sales_data2;
+    x_cols = [:Date],
+    y_cols = [:Revenue],
+    color_cols = [:Region],
+    title = "Revenue Trends by Region",
+    notes = "Track revenue performance across different regions"
+)
+
+revenue_text2 = TextBlock("""
+<h2>Revenue Analysis</h2>
+<p>This page shows revenue trends across regions for the first half of 2024.</p>
+""")
+
+pageA = JSPlotPage(
+    Dict(:sales_data2 => df_sales2),
+    [revenue_text2, revenue_chart2],
+    tab_title = "Revenue Analysis",
+    page_header = "Financial Performance",
+    notes = "Detailed breakdown of revenue streams by region"
+)
+
+# Page B: Metrics Dashboard
+println("  Creating Page B: Metrics Dashboard...")
+metrics_chart2 = LineChart(:metrics_h1, df_metrics2, :metrics_data2;
+    x_cols = [:Month],
+    y_cols = [:Score],
+    color_cols = [:Metric],
+    title = "Key Business Metrics",
+    notes = "Tracking customer satisfaction and sales volume"
+)
+
+metrics_text2 = TextBlock("""
+<h2>Business Metrics Dashboard</h2>
+<p>This dashboard tracks critical business metrics throughout H1 2024, including customer satisfaction and sales volume.</p>
+""")
+
+pageB = JSPlotPage(
+    Dict(:metrics_data2 => df_metrics2),
+    [metrics_text2, metrics_chart2],
+    tab_title = "Metrics Dashboard",
+    page_header = "Business Metrics",
+    notes = "Key performance indicators for H1 2024"
+)
+
+# Create coverpage content (WITHOUT manually creating LinkList!)
+# The easy constructor will automatically create the LinkList from the pages
+coverpage_header2 = TextBlock("""
+<h1>H1 2024 Business Report</h1>
+<p>Welcome to the first half 2024 Business Performance Report.</p>
+
+<h2>What's New in This Example</h2>
+<p>This example demonstrates the <strong>Easy Pages Constructor</strong> feature. You don't need to manually create a LinkList! Just provide your coverpage content and pages, and the LinkList is automatically generated from the page metadata.</p>
+
+<h2>Report Sections</h2>
+<p>Click on the links below to navigate through the report:</p>
+""")
+
+# Use the EASY constructor - just provide content and pages!
+# The LinkList will be automatically created and appended
+println("  Creating multi-page report with easy constructor...")
+report2 = Pages(
+    [coverpage_header2],  # Just provide the coverpage content
+    [pageA, pageB],      # Provide the pages
+    tab_title = "H1 2024 Report",
+    page_header = "Business Report - H1 2024",
+    dataformat = :parquet
+)
+
+create_html(report2, joinpath("generated_html_examples", "easy_report.html"))
+
+println("\n" * "="^60)
+println("Easy constructor example complete!")
+println("="^60)
+println("Output location: generated_html_examples/easy_report/")
+println("  - easy_report.html (coverpage with auto-generated links)")
+println("  - page_1.html (Revenue Analysis)")
+println("  - page_2.html (Metrics Dashboard)")
+
+println("\n" * "="^70)
+println("Pages examples complete!")
+println("="^70)
+println("\nTwo examples created:")
+println("\n1. Manual LinkList Construction:")
+println("   - $output_dir/annual_report/annual_report.html")
+println("   - Full control over link descriptions")
+println("   - 3 pages with detailed business metrics")
+println("\n2. Easy Constructor:")
+println("   - $output_dir/easy_report/easy_report.html")
+println("   - Auto-generates LinkList from page metadata")
+println("   - 2 pages with simpler H1 2024 business metrics")
+println("\nOpen with: cd $output_dir/annual_report && ./open.sh (Linux/Mac)")
+println("       or: cd $output_dir/easy_report && ./open.sh (Linux/Mac)")

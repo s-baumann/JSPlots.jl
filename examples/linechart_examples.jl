@@ -84,7 +84,7 @@ chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
 )
 
 # Example 4: Combined with Image
-example_image = joinpath(@__DIR__, "pictures", "images.jpeg")
+example_image = joinpath(dirname(@__FILE__),"pictures", "images.jpeg")
 pic = Picture(:example_visual, example_image;
              notes = "Example visualization image")
 

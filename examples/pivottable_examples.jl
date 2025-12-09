@@ -12,6 +12,7 @@ header = TextBlock("""
     <li><strong>Different renderers:</strong> Table, Bar Chart, Line Chart, and more</li>
     <li><strong>Data filtering:</strong> Inclusions and exclusions to focus on specific data</li>
     <li><strong>Aggregations:</strong> Sum, Average, Count, and other aggregation functions</li>
+    <li><strong>Combined with other plots:</strong> Mix PivotTables with LineCharts and 3D plots</li>
 </ul>
 <p><em>Tip: Drag and drop fields between Rows, Columns, and Values to reorganize!</em></p>
 """)
@@ -129,80 +130,86 @@ pivot6 = PivotTable(:transaction_analysis, :transaction_data;
     notes = "Count aggregation - showing transaction counts rather than sums or averages"
 )
 
-# Example 7: Stock Market Returns Analysis
-# Generate stock data with ~100 days per stock and ~50 stocks
-tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "BAC", "WFC",
-           "XOM", "CVX", "PFE", "JNJ", "UNH", "V", "MA", "DIS", "NFLX", "CMCSA",
-           "INTC", "CSCO", "ORCL", "IBM", "CRM", "ADBE", "PYPL", "QCOM", "TXN", "AMD",
-           "BA", "CAT", "GE", "MMM", "HON", "UPS", "FDX", "WMT", "HD", "MCD",
-           "NKE", "SBUX", "KO", "PEP", "PG", "CL", "EL", "CLX", "KMB", "CHD"]
+# Example 7: Stock Returns with Correlation Matrix
+stockReturns = DataFrame(
+    Symbol = ["RTX", "RTX", "RTX", "GOOG", "GOOG", "GOOG", "MSFT", "MSFT", "MSFT"],
+    Date = Date.(["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-01", "2023-01-02", "2023-01-03", "2023-01-01", "2023-01-02", "2023-01-03"]),
+    Return = [10.01, -10.005, -0.5, 1.0, 0.01, -0.003, 0.008, 0.004, -0.002]
+)
 
-countries = ["USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA",
-             "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA",
-             "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA",
-             "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA",
-             "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA", "USA"]
+correlations = DataFrame(
+    Symbol1 = ["RTX", "RTX", "GOOG", "RTX", "GOOG", "MSFT", "GOOG", "MSFT", "MSFT",],
+    Symbol2 = ["GOOG", "MSFT", "MSFT", "RTX", "GOOG", "MSFT", "RTX", "RTX", "GOOG",],
+    Correlation = [-0.85, -0.75, 0.80, 1.0, 1.0, 1.0, -0.85, -0.75, 0.80]
+)
 
-gics_codes = ["45202030", "45103010", "50203010", "25504010", "50203010", "45102010", "45301020",
-              "40101010", "40101010", "40101010", "10102010", "10102010", "35202010", "35201010",
-              "35102010", "20301010", "20301010", "25301020", "50202010", "50202020",
-              "45301020", "45201020", "45103020", "45103010", "45103010", "45103010", "20301010",
-              "45301020", "45301020", "45301020", "20101010", "20104010", "20105010", "20105020",
-              "20106020", "20303010", "20303010", "25502010", "25504020", "25301030",
-              "25302010", "25301030", "30201030", "30201030", "30302010", "30302010", "30302010",
-              "30302010", "30302010", "30302010"]
-
-industry_names = ["Technology Hardware", "Software", "Interactive Media", "Internet & Direct Marketing",
-                  "Interactive Media", "Automobile Manufacturers", "Semiconductors", "Diversified Banks",
-                  "Diversified Banks", "Diversified Banks", "Oil & Gas Exploration", "Oil & Gas Exploration",
-                  "Pharmaceuticals", "Pharmaceuticals", "Health Care Providers", "Transaction Processing",
-                  "Transaction Processing", "Broadcasting", "Movies & Entertainment", "Cable & Satellite",
-                  "Semiconductors", "Communications Equipment", "Systems Software", "Software", "Software",
-                  "Software", "Transaction Processing", "Semiconductors", "Semiconductors", "Semiconductors",
-                  "Aerospace & Defense", "Construction Machinery", "Industrial Conglomerates", "Industrial Conglomerates",
-                  "Industrial Machinery", "Air Freight & Logistics", "Air Freight & Logistics", "Hypermarkets",
-                  "Home Improvement Retail", "Restaurants", "Footwear", "Restaurants", "Soft Drinks",
-                  "Soft Drinks", "Personal Products", "Personal Products", "Personal Products", "Personal Products",
-                  "Personal Products", "Personal Products"]
-
-# Generate 100 days of data
-start_date = Date(2024, 1, 1)
-dates = [start_date + Day(i) for i in 0:99]
-
-# Create stock returns data
-stock_data_rows = []
-for (i, ticker) in enumerate(tickers)
-    for date in dates
-        # Generate realistic returns (daily returns typically -3% to +3%)
-        daily_return = randn() * 0.015  # ~1.5% daily volatility
-        # Volume varies by stock and day
-        base_volume = 10_000_000 + i * 500_000
-        volume = round(Int, base_volume * (1 + 0.3 * randn()))
-
-        push!(stock_data_rows, (
-            Date = date,
-            Return = round(daily_return * 100, digits=2),  # Convert to percentage
-            Volume = max(1_000_000, volume),  # Ensure minimum volume
-            Ticker = ticker,
-            Country = countries[i],
-            GICS_Code = gics_codes[i],
-            Industry = industry_names[i]
-        ))
-    end
-end
-
-stock_returns_df = DataFrame(stock_data_rows)
-
-pivot7 = PivotTable(:stock_returns_analysis, :stock_returns_data;
-    rows = [:Industry],
-    cols = [:Ticker],
+pivot7 = PivotTable(:Returns_Over_Last_Few_Days, :stockReturns;
+    rows = [:Symbol],
+    cols = [:Date],
     vals = :Return,
+    exclusions = Dict(:Symbol => [:MSFT]),
     aggregatorName = :Average,
     rendererName = :Heatmap,
-    colour_map = Dict{Float64,String}([-3.0, -1.0, 0.0, 1.0, 3.0] .=>
-                                      ["#d73027", "#fee08b", "#ffffbf", "#d9ef8b", "#1a9850"]),
-    notes = "Stock returns analysis - drag GICS_Code, Country, or Date to rows/columns to reorganize. Green = positive returns, Red = negative returns"
+    notes = "Stock returns heatmap with MSFT excluded"
 )
+
+pivot8 = PivotTable(:Correlation_Matrix, :correlations;
+    rows = [:Symbol1],
+    cols = [:Symbol2],
+    vals = :Correlation,
+    colour_map = Dict{Float64,String}([-1.0, 0.0, 1.0] .=> ["#FF4545", "#ffffff", "#4F92FF"]),
+    aggregatorName = :Average,
+    rendererName = :Heatmap,
+    notes = "Correlation matrix with custom red-white-blue color scale"
+)
+
+# Example 8: Combined with LineChart
+df_line = DataFrame(
+    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
+    x = 1:10,
+    y = rand(10),
+    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
+)
+df_line[!, :categ] .=  [ :B, :B, :B, :B, :B, :A, :A, :A, :A, :C]
+df_line[!, :categ22] .= "Category_A"
+
+df_line2 = DataFrame(
+    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
+    x = 1:10,
+    y = rand(10),
+    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
+)
+df_line2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
+df_line2[!, :categ22] .= "Category_B"
+df_combined = vcat(df_line, df_line2)
+
+linechart = LineChart(:pchart, df_combined, :df_combined;
+            x_cols=[:x],
+            y_cols=[:y],
+            color_cols=[:color],
+            filters=Dict(:categ => :A, :categ22 => "Category_A"),
+            title="Line Chart with Filters",
+            notes="Interactive line chart with dropdown filters - combine with PivotTables!")
+
+# Example 9: Combined with 3D Surface
+subframe = allcombinations(DataFrame, x = collect(1:6), y = collect(1:6)); subframe[!, :group] .= "A";
+sf2 = deepcopy(subframe); sf2[!, :group] .= "B"
+sf3 = deepcopy(subframe); sf3[!, :group] .= "C"
+sf4 = deepcopy(subframe); sf4[!, :group] .= "D"
+subframe[!, :z] = cos.(sqrt.(subframe.x .^ 2 .+  subframe.y .^ 2))
+sf2[!, :z] = cos.(sqrt.(sf2.x .^ 2 .+  sf2.y .^ 1)) .- 1.0
+sf3[!, :z] = cos.(sqrt.(sf3.x .^ 2 .+  sf3.y .^ 0.5)) .+ 1.0
+sf4[!, :z] = sqrt.(sf4.x) .- sqrt.(sf4.y)
+subframe = reduce(vcat, [subframe, sf2, sf3, sf4])
+
+surface3d = Surface3D(:threeD, subframe, :subframe;
+        x_col = :x,
+        y_col = :y,
+        z_col = :z,
+        group_col = :group,
+        title = "3D Surface Chart",
+        notes = "3D surface visualization grouped by mathematical functions"
+    )
 
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
@@ -213,6 +220,7 @@ conclusion = TextBlock("""
     <li><strong>Aggregation functions:</strong> Sum, Average, Count, Median, Min, Max, etc.</li>
     <li><strong>Data filtering:</strong> Include or exclude specific values</li>
     <li><strong>Multi-level grouping:</strong> Use multiple row or column dimensions</li>
+    <li><strong>Integration:</strong> Combine PivotTables with LineCharts, 3D plots, and more</li>
 </ul>
 <p><strong>Tip:</strong> Try dragging unused fields from the top into Rows or Columns!</p>
 """)
@@ -226,10 +234,14 @@ page = JSPlotPage(
         :customer_data => customer_df,
         :survey_data => survey_df,
         :transaction_data => transactions_df,
-        :stock_returns_data => stock_returns_df
+        :stockReturns => stockReturns,
+        :correlations => correlations,
+        :df_combined => df_combined,
+        :subframe => subframe
     ),
-    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, conclusion],
-    tab_title = "PivotTable Examples"
+    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, linechart, surface3d, conclusion],
+    tab_title = "PivotTable Examples",
+    dataformat = :parquet
 )
 
 create_html(page, "generated_html_examples/pivottable_examples.html")
@@ -244,4 +256,5 @@ println("  • Custom color scale heatmaps")
 println("  • Different renderers (Table, Bar Chart)")
 println("  • Data filtering with exclusions and inclusions")
 println("  • Count aggregation")
-println("  • Stock market returns analysis (50 stocks × 100 days = 5,000 rows)")
+println("  • Stock returns and correlation matrices")
+println("  • Combined with LineChart and 3D Surface plots")
