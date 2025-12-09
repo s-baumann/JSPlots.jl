@@ -5,12 +5,13 @@ struct JSPlotPage
     tab_title::String
     page_header::String
     notes::String
+    page_description::String
     dataformat::Symbol
-    function JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
-        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
+    function JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", page_description::String="", dataformat::Symbol=:csv_embedded)
+        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_embedded, :parquet])
             error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
         end
-        new(dataframes, pivot_tables, tab_title, page_header, notes, dataformat)
+        new(dataframes, pivot_tables, tab_title, page_header, notes, page_description, dataformat)
     end
 end
 
@@ -20,15 +21,65 @@ struct Pages
     dataformat::Symbol
 
     function Pages(coverpage::JSPlotPage, pages::Vector{JSPlotPage}; dataformat::Union{Nothing,Symbol}=nothing)
+        # Auto-generate LinkList from page metadata and insert into coverpage
+        links = Tuple{String,String,String}[]
+        for (i, page) in enumerate(pages)
+            title = page.tab_title
+            filename = "page_$(i).html"
+            description = page.page_description
+            push!(links, (title, filename, description))
+        end
+
+        # Create LinkList
+        linklist = LinkList(links)
+
+        # Insert LinkList into coverpage pivot_tables at the position where {{LINKLIST}} placeholder exists
+        new_pivot_tables = []
+        linklist_inserted = false
+
+        for item in coverpage.pivot_tables
+            if isa(item, TextBlock)
+                # Check if this TextBlock contains the {{LINKLIST}} placeholder
+                if occursin("{{LINKLIST}}", item.appearance_html)
+                    # Remove the placeholder and insert the LinkList
+                    cleaned_html = replace(item.appearance_html, "{{LINKLIST}}" => "")
+                    cleaned_textblock = TextBlock(cleaned_html)
+                    push!(new_pivot_tables, cleaned_textblock)
+                    push!(new_pivot_tables, linklist)
+                    linklist_inserted = true
+                else
+                    push!(new_pivot_tables, item)
+                end
+            else
+                push!(new_pivot_tables, item)
+            end
+        end
+
+        # If {{LINKLIST}} wasn't found, append it to the end
+        if !linklist_inserted
+            push!(new_pivot_tables, linklist)
+        end
+
+        # Create modified coverpage with the LinkList inserted
+        modified_coverpage = JSPlotPage(
+            coverpage.dataframes,
+            new_pivot_tables,
+            tab_title = coverpage.tab_title,
+            page_header = coverpage.page_header,
+            notes = coverpage.notes,
+            page_description = coverpage.page_description,
+            dataformat = coverpage.dataformat
+        )
+
         # If dataformat is specified, it overrides all page dataformats
         if dataformat !== nothing
             if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
                 error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
             end
-            new(coverpage, pages, dataformat)
+            new(modified_coverpage, pages, dataformat)
         else
             # Use the coverpage's dataformat as default
-            new(coverpage, pages, coverpage.dataformat)
+            new(modified_coverpage, pages, modified_coverpage.dataformat)
         end
     end
 end
