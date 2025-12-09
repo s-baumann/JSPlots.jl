@@ -6,7 +6,7 @@ struct LineChart <: JSPlotsType
     function LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
-                            color_cols::Vector{Symbol}=[:color],
+                            color_cols::Vector{Symbol}=Symbol[],
                             filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -96,9 +96,7 @@ struct LineChart <: JSPlotsType
                 )
             end
         end
-        if isempty(valid_color_cols)
-            error("None of the specified color_cols exist in the dataframe. Available columns: $(names(df))")
-        end
+        # If no color columns specified or valid, we'll use a default black color for all lines
 
         # Build filter dropdowns (multi-select)
         filter_dropdowns_html = ""
@@ -133,7 +131,7 @@ struct LineChart <: JSPlotsType
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
-        default_color_col = string(valid_color_cols[1])
+        default_color_col = isempty(valid_color_cols) ? "__no_color__" : string(valid_color_cols[1])
 
         functional_html = """
         (function() {
@@ -225,7 +223,7 @@ struct LineChart <: JSPlotsType
                     // No faceting - group by color
                     const groupedData = {};
                     filteredData.forEach(row => {
-                        const colorVal = String(row[COLOR_COL]);
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
                         if (!groupedData[colorVal]) {
                             groupedData[colorVal] = {
                                 data: [],
@@ -322,7 +320,7 @@ struct LineChart <: JSPlotsType
                         // Group by color within this facet
                         const groupedData = {};
                         facetData.forEach(row => {
-                            const colorVal = String(row[COLOR_COL]);
+                            const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
                             if (!groupedData[colorVal]) {
                                 groupedData[colorVal] = {
                                     data: [],
@@ -449,7 +447,7 @@ struct LineChart <: JSPlotsType
                             // Group by color within this facet
                             const groupedData = {};
                             facetData.forEach(row => {
-                                const colorVal = String(row[COLOR_COL]);
+                                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
                                 if (!groupedData[colorVal]) {
                                     groupedData[colorVal] = {
                                         data: [],
