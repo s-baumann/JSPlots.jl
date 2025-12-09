@@ -26,7 +26,6 @@ df1 = DataFrame(
 distplot1 = DistPlot(:simple_dist, df1, :df1;
     value_cols = :value,
     title = "Simple Distribution Plot",
-    value_label = "Values",
     show_controls = true,
     notes = "Basic distribution showing histogram, box plot, and rug plot for a normal distribution"
 )
@@ -46,7 +45,6 @@ distplot2 = DistPlot(:multi_group_dist, df2, :df2;
     value_cols = :value,
     group_cols = :group,
     title = "Treatment Effect Comparison",
-    value_label = "Response Value",
     notes = "Compare distributions across different treatment groups using group_cols"
 )
 
@@ -63,7 +61,6 @@ distplot3 = DistPlot(:filtered_dist, df3, :df3;
     filter_cols = [:age, :department],
     histogram_bins = 40,
     title = "Score Distribution with Interactive Filters",
-    value_label = "Test Score",
     notes = "Use age range slider and department multi-select to filter data dynamically"
 )
 
@@ -108,7 +105,6 @@ distplot5 = DistPlot(:custom_appearance, df5, :df5;
     box_opacity = 0.8,
     histogram_bins = 30,
     title = "Customized DistPlot - Longitudinal Study",
-    value_label = "Clinical Measurement",
     notes = "Demonstrates customization options: rug plot hidden, increased box opacity, custom bin count"
 )
 

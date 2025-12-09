@@ -49,8 +49,6 @@ line_chart = LineChart(:timeseries, df, :df;
     y_cols = [:value],
     color_cols = [:category],
     title = "Time Series Data",
-    x_label = "Date",
-    y_label = "Value"
 )
 
 # Create stock data for scatter plot

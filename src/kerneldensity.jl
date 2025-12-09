@@ -14,7 +14,6 @@ struct KernelDensity <: JSPlotsType
                           density_opacity::Float64=0.6,
                           fill_density::Bool=true,
                           title::String="Kernel Density Plot",
-                          value_label::String="",
                           notes::String="")
 
         all_cols = names(df)
@@ -485,14 +484,13 @@ $options2                </select>
             function renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH) {
                 const traces = createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH);
 
-                const valueLabel = $(value_label != "" ? "'$value_label'" : "VALUE_COL");
                 Plotly.newPlot('$chart_title', traces, {
                     title: '$title',
                     showlegend: GROUP_COL !== null,
                     autosize: true,
                     hovermode: 'closest',
                     xaxis: {
-                        title: valueLabel,
+                        title: VALUE_COL,
                         showgrid: true,
                         zeroline: true
                     },
@@ -519,7 +517,6 @@ $options2                </select>
                     traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, xaxis, yaxis, idx === 0));
                 });
 
-                const valueLabel = $(value_label != "" ? "'$value_label'" : "VALUE_COL");
                 const layout = {
                     title: '$title',
                     showlegend: GROUP_COL !== null,
@@ -539,7 +536,7 @@ $options2                </select>
 
                 facetValues.forEach((val, idx) => {
                     const ax = idx === 0 ? '' : (idx + 1);
-                    layout['xaxis' + ax] = {title: valueLabel};
+                    layout['xaxis' + ax] = {title: VALUE_COL};
                     layout['yaxis' + ax] = {title: 'Density'};
                 });
 
@@ -568,7 +565,6 @@ $options2                </select>
                     });
                 });
 
-                const valueLabel = $(value_label != "" ? "'$value_label'" : "VALUE_COL");
                 const layout = {
                     title: '$title',
                     showlegend: GROUP_COL !== null,
@@ -603,7 +599,7 @@ $options2                </select>
                     facet2Values.forEach((v2, colIdx) => {
                         const idx = rowIdx * cols + colIdx;
                         const ax = idx === 0 ? '' : (idx + 1);
-                        layout['xaxis' + ax] = {title: valueLabel};
+                        layout['xaxis' + ax] = {title: VALUE_COL};
                         layout['yaxis' + ax] = {title: 'Density'};
                     });
                 });

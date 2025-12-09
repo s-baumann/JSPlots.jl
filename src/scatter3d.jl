@@ -16,6 +16,9 @@ struct Scatter3D <: JSPlotsType
                           title::String="3D Scatter Plot",
                           notes::String="")
 
+        # Sanitize chart_title for use in JavaScript function names
+        chart_title_safe = sanitize_chart_title(chart_title)
+
         all_cols = names(df)
 
         # Validate dimensions
@@ -91,45 +94,43 @@ $options                </select>
             """
         end
 
-        # Build all dropdowns
-        dropdowns_html = """
+        # Build plot attributes section
+        plot_attributes_html = """
         <div style="margin: 10px 0; display: flex; gap: 10px; align-items: center;">
-            <button id="$(chart_title)_eigenvector_toggle" style="padding: 5px 15px; cursor: pointer;">
+            <button id="$(chart_title_safe)_eigenvector_toggle" style="padding: 5px 15px; cursor: pointer;">
                 $(show_eigenvectors ? "Hide" : "Show") Eigenvectors
-            </button>
-            <button id="$(chart_title)_camera_toggle" style="padding: 5px 15px; cursor: pointer;">
-                Camera: $(shared_camera ? "Shared" : "Individual")
             </button>
         </div>
         """
 
         # X, Y, Z dropdowns (on same line if any has multiple options)
-        xyz_html = build_dropdown("$(chart_title)_x_col_select", "X", dimensions, default_x_col, "updateChart_$(chart_title)()") *
-                   build_dropdown("$(chart_title)_y_col_select", "Y", dimensions, default_y_col, "updateChart_$(chart_title)()") *
-                   build_dropdown("$(chart_title)_z_col_select", "Z", dimensions, default_z_col, "updateChart_$(chart_title)()")
+        xyz_html = build_dropdown("$(chart_title_safe)_x_col_select", "X", dimensions, default_x_col, "updatePlotWithFilters_$(chart_title_safe)()") *
+                   build_dropdown("$(chart_title_safe)_y_col_select", "Y", dimensions, default_y_col, "updatePlotWithFilters_$(chart_title_safe)()") *
+                   build_dropdown("$(chart_title_safe)_z_col_select", "Z", dimensions, default_z_col, "updatePlotWithFilters_$(chart_title_safe)()")
         if !isempty(xyz_html)
-            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
 $xyz_html        </div>
 """
         end
 
-        # Style dropdown (color and point type)
-        style_html = build_dropdown("$(chart_title)_color_col_select", "Color/Point type", valid_color_cols, default_color_col, "updateChart_$(chart_title)()")
+        # Style dropdown (color only)
+        style_html = build_dropdown("$(chart_title_safe)_color_col_select", "Color", valid_color_cols, default_color_col, "updatePlotWithFilters_$(chart_title_safe)()")
         if !isempty(style_html)
-            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
 $style_html        </div>
 """
         end
 
-        # Facet dropdowns
+        # Build faceting section separately
+        faceting_html = ""
         if length(facet_choices) == 1
             facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
             options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
                      "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
-            dropdowns_html *= """
+            faceting_html = """
             <div style="margin: 10px 0;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="facet1_select_$(chart_title_safe)">Facet by: </label>
+                <select id="facet1_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options                </select>
             </div>
             """
@@ -144,16 +145,16 @@ $options                </select>
                       join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
                            for col in facet_choices], "\n")
 
-            dropdowns_html *= """
+            faceting_html = """
             <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$chart_title">Facet 1:</label>
-                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+                    <label for="facet1_select_$(chart_title_safe)">Facet 1:</label>
+                    <select id="facet1_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options1                </select>
                 </div>
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$chart_title">Facet 2:</label>
-                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
+                    <label for="facet2_select_$(chart_title_safe)">Facet 2:</label>
+                    <select id="facet2_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options2                </select>
                 </div>
             </div>
@@ -166,7 +167,7 @@ $options2                </select>
 
         for col in slider_cols
             slider_type = detect_slider_type(df, col)
-            slider_id = "$(chart_title)_$(col)_slider"
+            slider_id = "$(chart_title_safe)_$(col)_slider"
 
             if slider_type == :categorical
                 unique_vals = sort(unique(skipmissing(df[!, col])))
@@ -180,7 +181,7 @@ $options2                </select>
                     <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
                 </div>
                 """
-                slider_init_js *= "                    document.getElementById('$slider_id').addEventListener('change', () => updatePlotWithFilters_$(chart_title)());\n"
+                slider_init_js *= "                    document.getElementById('$slider_id').addEventListener('change', () => updatePlotWithFilters_$(chart_title_safe)());\n"
             elseif slider_type == :continuous
                 min_val, max_val = extrema(skipmissing(df[!, col]))
                 sliders_html *= """
@@ -195,7 +196,7 @@ $options2                </select>
                         range: true, min: $min_val, max: $max_val, step: $(abs(max_val - min_val) / 1000),
                         values: [$min_val, $max_val],
                         slide: (e, ui) => \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2)),
-                        change: () => updatePlotWithFilters_$(chart_title)()
+                        change: () => updatePlotWithFilters_$(chart_title_safe)()
                     });
                 """
             elseif slider_type == :date
@@ -214,7 +215,7 @@ $options2                </select>
                         range: true, min: 0, max: $(length(unique_dates)-1), step: 1,
                         values: [0, $(length(unique_dates)-1)],
                         slide: (e, ui) => \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]),
-                        change: () => updatePlotWithFilters_$(chart_title)()
+                        change: () => updatePlotWithFilters_$(chart_title_safe)()
                     });
                 """
             end
@@ -225,7 +226,7 @@ $options2                </select>
             filter_checks = String[]
             for col in slider_cols
                 slider_type = detect_slider_type(df, col)
-                slider_id = "$(chart_title)_$(col)_slider"
+                slider_id = "$(chart_title_safe)_$(col)_slider"
 
                 if slider_type == :categorical
                     push!(filter_checks, "const $(col)_selected = Array.from(document.getElementById('$slider_id').selectedOptions).map(opt => opt.value);\n" *
@@ -246,50 +247,35 @@ $options2                </select>
                 end
             end
             """
-                function updatePlotWithFilters_$(chart_title)() {
-                    const filteredData = window.allData_$(chart_title).filter(row => {
+                window.updatePlotWithFilters_$(chart_title_safe) = function() {
+                    const filteredData = window.allData_$(chart_title_safe).filter(row => {
                         $(join(filter_checks, "\n                        "))
                         return true;
                     });
-                    updateChart_$(chart_title)(filteredData);
-                }
+                    updateChart_$(chart_title_safe)(filteredData);
+                };
             """
         else
-            "function updatePlotWithFilters_$(chart_title)() { updateChart_$(chart_title)(window.allData_$(chart_title)); }"
+            "window.updatePlotWithFilters_$(chart_title_safe) = function() { updateChart_$(chart_title_safe)(window.allData_$(chart_title_safe)); };"
         end
-
-        point_symbols = ["circle", "square", "diamond", "cross", "x", "triangle-up",
-                        "triangle-down", "pentagon", "hexagon", "star"]
 
         functional_html = """
             (function() {
-            window.showEigenvectors_$(chart_title) = $(show_eigenvectors ? "true" : "false");
-            window.sharedCamera_$(chart_title) = $(shared_camera ? "true" : "false");
-            window.currentCamera_$(chart_title) = null;
-            const POINT_SYMBOLS = $(JSON.json(point_symbols));
+            window.showEigenvectors_$(chart_title_safe) = $(show_eigenvectors ? "true" : "false");
+            window.sharedCamera_$(chart_title_safe) = true; // Always use shared camera
+            window.currentCamera_$(chart_title_safe) = null;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_Z_COL = '$default_z_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
-            const buildSymbolMap = (data, col) => {
-                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
-                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
-            };
 
             // Eigenvector toggle
-            document.getElementById('$(chart_title)_eigenvector_toggle').addEventListener('click', function() {
-                window.showEigenvectors_$(chart_title) = !window.showEigenvectors_$(chart_title);
-                this.textContent = window.showEigenvectors_$(chart_title) ? 'Hide Eigenvectors' : 'Show Eigenvectors';
-                updatePlotWithFilters_$(chart_title)();
-            });
-
-            // Camera toggle
-            document.getElementById('$(chart_title)_camera_toggle').addEventListener('click', function() {
-                window.sharedCamera_$(chart_title) = !window.sharedCamera_$(chart_title);
-                this.textContent = 'Camera: ' + (window.sharedCamera_$(chart_title) ? 'Shared' : 'Individual');
-                updatePlotWithFilters_$(chart_title)();
+            document.getElementById('$(chart_title_safe)_eigenvector_toggle').addEventListener('click', function() {
+                window.showEigenvectors_$(chart_title_safe) = !window.showEigenvectors_$(chart_title_safe);
+                this.textContent = window.showEigenvectors_$(chart_title_safe) ? 'Hide Eigenvectors' : 'Show Eigenvectors';
+                updatePlotWithFilters_$(chart_title_safe)();
             });
 
             function computeEigenvectors(data, X_COL, Y_COL, Z_COL) {
@@ -393,30 +379,29 @@ $options2                </select>
                 return traces;
             }
 
-            function updateChart_$(chart_title)(dataOverride) {
-                const data = dataOverride || window.allData_$(chart_title);
-                const X_COL = getCol('$(chart_title)_x_col_select', DEFAULT_X_COL);
-                const Y_COL = getCol('$(chart_title)_y_col_select', DEFAULT_Y_COL);
-                const Z_COL = getCol('$(chart_title)_z_col_select', DEFAULT_Z_COL);
-                const COLOR_COL = getCol('$(chart_title)_color_col_select', DEFAULT_COLOR_COL);
+            function updateChart_$(chart_title_safe)(dataOverride) {
+                const data = dataOverride || window.allData_$(chart_title_safe);
+                const X_COL = getCol('$(chart_title_safe)_x_col_select', DEFAULT_X_COL);
+                const Y_COL = getCol('$(chart_title_safe)_y_col_select', DEFAULT_Y_COL);
+                const Z_COL = getCol('$(chart_title_safe)_z_col_select', DEFAULT_Z_COL);
+                const COLOR_COL = getCol('$(chart_title_safe)_color_col_select', DEFAULT_COLOR_COL);
 
                 // Get facet selections
-                const FACET1_COL = getCol('facet1_select_$chart_title', 'None');
-                const FACET2_COL = getCol('facet2_select_$chart_title', 'None');
+                const FACET1_COL = getCol('facet1_select_$(chart_title_safe)', 'None');
+                const FACET2_COL = getCol('facet2_select_$(chart_title_safe)', 'None');
 
                 if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-                    renderNoFacets_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+                    renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL);
                 } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-                    renderFacetWrap_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
                 } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-                    renderFacetGrid_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+                    renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
                 } else {
-                    renderFacetWrap_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
                 }
             }
 
-            function renderNoFacets_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
-                const symbolMap = buildSymbolMap(data, COLOR_COL);
+            function renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
                 const groups = {};
                 data.forEach(row => {
                     const key = row[COLOR_COL];
@@ -433,12 +418,11 @@ $options2                </select>
                     type: 'scatter3d',
                     marker: {
                         size: $marker_size,
-                        opacity: $marker_opacity,
-                        symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+                        opacity: $marker_opacity
                     }
                 }));
 
-                if (window.showEigenvectors_$(chart_title) && data.length > 3) {
+                if (window.showEigenvectors_$(chart_title_safe) && data.length > 3) {
                     const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, 'scene'));
                 }
@@ -451,29 +435,28 @@ $options2                </select>
                         xaxis: { title: X_COL },
                         yaxis: { title: Y_COL },
                         zaxis: { title: Z_COL },
-                        camera: window.currentCamera_$(chart_title) || undefined
+                        camera: window.currentCamera_$(chart_title_safe) || undefined
                     },
                     margin: { t: 50, r: 50, b: 50, l: 50 }
                 };
 
-                Plotly.react('$chart_title', traces, layout, {responsive: true});
+                Plotly.react('$(chart_title_safe)', traces, layout, {responsive: true});
 
                 // Store current camera
-                const plotDiv = document.getElementById('$chart_title');
+                const plotDiv = document.getElementById('$(chart_title_safe)');
                 plotDiv.on('plotly_relayout', (eventData) => {
                     if (eventData['scene.camera']) {
-                        window.currentCamera_$(chart_title) = eventData['scene.camera'];
+                        window.currentCamera_$(chart_title_safe) = eventData['scene.camera'];
                     }
                 });
             }
 
-            function renderFacetWrap_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+            function renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
                 const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
                 const nFacets = facetValues.length;
                 const cols = Math.ceil(Math.sqrt(nFacets));
                 const rows = Math.ceil(nFacets / cols);
 
-                const symbolMap = buildSymbolMap(data, COLOR_COL);
                 const traces = [];
 
                 facetValues.forEach((facetVal, idx) => {
@@ -500,13 +483,12 @@ $options2                </select>
                             type: 'scatter3d',
                             marker: {
                                 size: $marker_size,
-                                opacity: $marker_opacity,
-                                symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+                                opacity: $marker_opacity
                             }
                         });
                     });
 
-                    if (window.showEigenvectors_$(chart_title) && facetData.length > 3) {
+                    if (window.showEigenvectors_$(chart_title_safe) && facetData.length > 3) {
                         const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
                         traces.push(...createEigenvectorTraces(eigData, sceneId));
                     }
@@ -533,7 +515,7 @@ $options2                </select>
                         xaxis: { title: X_COL },
                         yaxis: { title: Y_COL },
                         zaxis: { title: Z_COL },
-                        camera: window.sharedCamera_$(chart_title) ? (window.currentCamera_$(chart_title) || undefined) : undefined
+                        camera: window.sharedCamera_$(chart_title_safe) ? (window.currentCamera_$(chart_title_safe) || undefined) : undefined
                     };
 
                     layout.annotations.push({
@@ -548,25 +530,32 @@ $options2                </select>
                     });
                 });
 
-                Plotly.react('$chart_title', traces, layout, {responsive: true});
+                Plotly.react('$(chart_title_safe)', traces, layout, {responsive: true});
 
                 // Setup camera sync if shared
-                if (window.sharedCamera_$(chart_title)) {
-                    const plotDiv = document.getElementById('$chart_title');
+                if (window.sharedCamera_$(chart_title_safe)) {
+                    const plotDiv = document.getElementById('$(chart_title_safe)');
+                    let isUpdating = false; // Prevent infinite loop
+
                     plotDiv.on('plotly_relayout', (eventData) => {
+                        if (isUpdating) return; // Ignore events triggered by our own updates
+
                         // Find which scene was updated
                         for (let key in eventData) {
                             if (key.endsWith('.camera')) {
                                 const newCamera = eventData[key];
-                                window.currentCamera_$(chart_title) = newCamera;
+                                window.currentCamera_$(chart_title_safe) = newCamera;
 
                                 // Apply to all scenes
+                                isUpdating = true;
                                 const updates = {};
                                 facetValues.forEach((val, idx) => {
                                     const sceneKey = idx === 0 ? 'scene' : 'scene' + (idx + 1);
                                     updates[sceneKey + '.camera'] = newCamera;
                                 });
-                                Plotly.relayout(plotDiv, updates);
+                                Plotly.relayout(plotDiv, updates).then(() => {
+                                    isUpdating = false;
+                                });
                                 break;
                             }
                         }
@@ -574,13 +563,12 @@ $options2                </select>
                 }
             }
 
-            function renderFacetGrid_$(chart_title)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+            function renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
                 const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
                 const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
                 const rows = facet1Values.length;
                 const cols = facet2Values.length;
 
-                const symbolMap = buildSymbolMap(data, COLOR_COL);
                 const traces = [];
 
                 facet1Values.forEach((facet1Val, rowIdx) => {
@@ -611,13 +599,12 @@ $options2                </select>
                                 type: 'scatter3d',
                                 marker: {
                                     size: $marker_size,
-                                    opacity: $marker_opacity,
-                                    symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+                                    opacity: $marker_opacity
                                 }
                             });
                         });
 
-                        if (window.showEigenvectors_$(chart_title) && facetData.length > 3) {
+                        if (window.showEigenvectors_$(chart_title_safe) && facetData.length > 3) {
                             const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
                             traces.push(...createEigenvectorTraces(eigData, sceneId));
                         }
@@ -648,7 +635,7 @@ $options2                </select>
                             xaxis: { title: X_COL },
                             yaxis: { title: Y_COL },
                             zaxis: { title: Z_COL },
-                            camera: window.sharedCamera_$(chart_title) ? (window.currentCamera_$(chart_title) || undefined) : undefined
+                            camera: window.sharedCamera_$(chart_title_safe) ? (window.currentCamera_$(chart_title_safe) || undefined) : undefined
                         };
 
                         // Column header
@@ -682,19 +669,24 @@ $options2                </select>
                     });
                 });
 
-                Plotly.react('$chart_title', traces, layout, {responsive: true});
+                Plotly.react('$(chart_title_safe)', traces, layout, {responsive: true});
 
                 // Setup camera sync if shared
-                if (window.sharedCamera_$(chart_title)) {
-                    const plotDiv = document.getElementById('$chart_title');
+                if (window.sharedCamera_$(chart_title_safe)) {
+                    const plotDiv = document.getElementById('$(chart_title_safe)');
+                    let isUpdating = false; // Prevent infinite loop
+
                     plotDiv.on('plotly_relayout', (eventData) => {
+                        if (isUpdating) return; // Ignore events triggered by our own updates
+
                         // Find which scene was updated
                         for (let key in eventData) {
                             if (key.endsWith('.camera')) {
                                 const newCamera = eventData[key];
-                                window.currentCamera_$(chart_title) = newCamera;
+                                window.currentCamera_$(chart_title_safe) = newCamera;
 
                                 // Apply to all scenes
+                                isUpdating = true;
                                 const updates = {};
                                 let sceneCount = 0;
                                 facet1Values.forEach((f1, r) => {
@@ -707,7 +699,9 @@ $options2                </select>
                                         }
                                     });
                                 });
-                                Plotly.relayout(plotDiv, updates);
+                                Plotly.relayout(plotDiv, updates).then(() => {
+                                    isUpdating = false;
+                                });
                                 break;
                             }
                         }
@@ -718,13 +712,13 @@ $options2                </select>
             $filter_logic_js
 
             loadDataset('$data_label').then(function(data) {
-                window.allData_$(chart_title) = data;
+                window.allData_$(chart_title_safe) = data;
 
                 \$(function() {
                     $slider_init_js
 
                     // Initial plot
-                    updatePlotWithFilters_$(chart_title)();
+                    updatePlotWithFilters_$(chart_title_safe)();
                 });
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
@@ -733,15 +727,25 @@ $options2                </select>
             })();
         """
 
+        # Organize controls into sections
+        filters_html = sliders_html
+        # plot_attributes_html and faceting_html already built above
+
         appearance_html = """
         <h2>$title</h2>
         <p>$notes</p>
 
-        $dropdowns_html
-        $sliders_html
+        <!-- Filters (for data filtering) -->
+        $(filters_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filters_html\n        </div>" : "")
+
+        <!-- Plot Attributes -->
+        $(plot_attributes_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $plot_attributes_html\n        </div>" : "")
+
+        <!-- Faceting -->
+        $(faceting_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $faceting_html\n        </div>" : "")
 
         <!-- Chart -->
-        <div id="$chart_title"></div>
+        <div id="$(chart_title_safe)"></div>
         """
 
         new(chart_title, data_label, functional_html, appearance_html)

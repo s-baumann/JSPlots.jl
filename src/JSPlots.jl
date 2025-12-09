@@ -4,6 +4,17 @@ module JSPlots
 
     abstract type JSPlotsType end
 
+    # Helper function to sanitize chart titles for use in JavaScript function names
+    # Replaces spaces and other problematic characters with underscores
+    function sanitize_chart_title(title::Symbol)
+        str = string(title)
+        # Replace spaces, hyphens, and other special chars with underscores
+        sanitized = replace(str, r"[\s\-\.:]" => "_")
+        return Symbol(sanitized)
+    end
+
+    export sanitize_chart_title
+
     include("pivottables.jl")
     export PivotTable
 
@@ -34,7 +45,13 @@ module JSPlots
     include("table.jl")
     export Table
 
+    include("LinkList.jl")
+    export LinkList
+
+    include("Pages.jl")
+    export JSPlotPage, Pages
+
     include("make_html.jl")
-    export JSPlotPage, Pages, LinkList, create_html
+    export create_html
 
 end # module JSPlots

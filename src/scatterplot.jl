@@ -83,70 +83,6 @@ $options                </select>
             """
         end
 
-        # Build all dropdowns
-        dropdowns_html = """
-        <div style="margin: 10px 0;">
-            <button id="$(chart_title)_density_toggle" style="padding: 5px 15px; cursor: pointer;">
-                $(show_density ? "Hide" : "Show") Density Contours
-            </button>
-        </div>
-        """
-
-        # X and Y dropdowns (on same line if either has multiple options)
-        xy_html = build_dropdown("x_col_select", "X", valid_x_cols, chart_title, default_x_col) *
-                  build_dropdown("y_col_select", "Y", valid_y_cols, chart_title, default_y_col)
-        if !isempty(xy_html)
-            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-$xy_html        </div>
-"""
-        end
-
-        # Style dropdown (color only - point type is always linked to color)
-        style_html = build_dropdown("color_col_select", "Color/Point type", valid_color_cols, chart_title, default_color_col)
-        if !isempty(style_html)
-            dropdowns_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-$style_html        </div>
-"""
-        end
-
-        # Facet dropdowns
-        if length(facet_choices) == 1
-            facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
-            options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                     "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
-            dropdowns_html *= """
-            <div style="margin: 10px 0;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options                </select>
-            </div>
-            """
-        elseif length(facet_choices) >= 2
-            facet1_default = length(default_facet_array) >= 1 ? default_facet_array[1] : "None"
-            facet2_default = length(default_facet_array) >= 2 ? default_facet_array[2] : "None"
-
-            options1 = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet1_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
-            options2 = "                <option value=\"None\"$((facet2_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
-
-            dropdowns_html *= """
-            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$chart_title">Facet 1:</label>
-                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options1                </select>
-                </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$chart_title">Facet 2:</label>
-                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-$options2                </select>
-                </div>
-            </div>
-            """
-        end
 
         # Generate sliders
         sliders_html = ""
@@ -447,12 +383,90 @@ $slider_init_js                    updatePlotWithFilters_$(chart_title)();
             })();
         """
 
+        # Separate controls into filters, plot attributes, and faceting
+        filters_html = sliders_html
+
+        # Separate plot attributes from faceting
+        plot_attributes_html = ""
+        faceting_html = ""
+
+        # Build plot attributes section (density toggle, X/Y selectors, color selector)
+        plot_attributes_html = """
+        <div style="margin: 10px 0;">
+            <button id="$(chart_title)_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+                $(show_density ? "Hide" : "Show") Density Contours
+            </button>
+        </div>
+        """
+
+        # X and Y dropdowns (on same line if either has multiple options)
+        xy_html = build_dropdown("x_col_select", "X", valid_x_cols, chart_title, default_x_col) *
+                  build_dropdown("y_col_select", "Y", valid_y_cols, chart_title, default_y_col)
+        if !isempty(xy_html)
+            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+$xy_html        </div>
+"""
+        end
+
+        # Style dropdown (color/point type)
+        style_html = build_dropdown("color_col_select", "Color/Point type", valid_color_cols, chart_title, default_color_col)
+        if !isempty(style_html)
+            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+$style_html        </div>
+"""
+        end
+
+        # Build faceting section
+        if length(facet_choices) == 1
+            facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
+            options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
+                     "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
+            faceting_html = """
+            <div style="margin: 10px 0;">
+                <label for="facet1_select_$chart_title">Facet by: </label>
+                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+$options                </select>
+            </div>
+            """
+        elseif length(facet_choices) >= 2
+            facet1_default = length(default_facet_array) >= 1 ? default_facet_array[1] : "None"
+            facet2_default = length(default_facet_array) >= 2 ? default_facet_array[2] : "None"
+
+            options1 = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
+                      join(["                <option value=\"$col\"$((col == facet1_default) ? " selected" : "")>$col</option>"
+                           for col in facet_choices], "\n")
+            options2 = "                <option value=\"None\"$((facet2_default == "None") ? " selected" : "")>None</option>\n" *
+                      join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
+                           for col in facet_choices], "\n")
+
+            faceting_html = """
+            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet1_select_$chart_title">Facet 1:</label>
+                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+$options1                </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="facet2_select_$chart_title">Facet 2:</label>
+                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
+$options2                </select>
+                </div>
+            </div>
+            """
+        end
+
         appearance_html = """
         <h2>$title</h2>
         <p>$notes</p>
 
-        $sliders_html
-        $dropdowns_html
+        <!-- Filters (for data filtering) -->
+        $(filters_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filters_html\n        </div>" : "")
+
+        <!-- Plot Attributes -->
+        $(plot_attributes_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $plot_attributes_html\n        </div>" : "")
+
+        <!-- Faceting -->
+        $(faceting_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $faceting_html\n        </div>" : "")
 
         <!-- Chart -->
         <div id="$chart_title"></div>

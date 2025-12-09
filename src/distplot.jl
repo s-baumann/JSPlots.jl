@@ -15,7 +15,6 @@ struct DistPlot <: JSPlotsType
                       box_opacity::Float64=0.7,
                       show_controls::Bool=false,
                       title::String="Distribution Plot",
-                      value_label::String="",
                       notes::String="")
         
         # Normalize filter_cols to always be a vector
@@ -389,7 +388,6 @@ struct DistPlot <: JSPlotsType
         
         # Layout configuration for distribution plot
         layout_js = """
-            var valueLabel = $(value_label != "" ? "'$value_label'" : "currentValueCol");
             var layout = {
                 title: '$title',
                 showlegend: currentGroupCol !== null,
@@ -401,7 +399,7 @@ struct DistPlot <: JSPlotsType
                     roworder: 'top to bottom'
                 },
                 xaxis: {
-                    title: valueLabel,
+                    title: currentValueCol,
                     domain: [0, 1],
                     showgrid: true,
                     zeroline: true
