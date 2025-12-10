@@ -207,6 +207,80 @@ Distribution visualization combining histogram, box plot, and rug plot.
 - `value_label`: Value axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
+### 3D Plots
+
+#### Surface3D
+
+```@docs
+Surface3D
+```
+
+Three-dimensional surface plot visualization using Plotly.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `x_col::Symbol`: Column for x-axis values (default: `:x`)
+- `y_col::Symbol`: Column for y-axis values (default: `:y`)
+- `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
+- `group_col`: Column for grouping multiple surfaces (default: `nothing`)
+- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `height::Int`: Plot height in pixels (default: `600`)
+- `title`: Chart title (default: `"3D Chart"`)
+- `notes`: Descriptive text shown below the chart (default: `""`)
+
+**Example:**
+```julia
+surf = Surface3D(:surface_chart, df, :data,
+    x_col=:x,
+    y_col=:y,
+    z_col=:z,
+    group_col=:category,
+    title="3D Surface Plot"
+)
+```
+
+#### Scatter3D
+
+```@docs
+Scatter3D
+```
+
+Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+- `dimensions::Vector{Symbol}`: Vector of at least 3 dimension columns for x, y, and z axes
+
+**Keyword Arguments:**
+- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
+- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
+- `shared_camera::Bool`: Synchronize camera view across facets (default: `true`)
+- `marker_size::Int`: Size of scatter points (default: `4`)
+- `marker_opacity::Float64`: Transparency of points (default: `0.6`)
+- `title`: Chart title (default: `"3D Scatter Plot"`)
+- `notes`: Descriptive text shown below the chart (default: `""`)
+
+**Example:**
+```julia
+scatter = Scatter3D(:scatter_3d, df, :data, [:x, :y, :z],
+    color_cols=[:category],
+    show_eigenvectors=true,
+    marker_size=6,
+    title="3D Point Cloud"
+)
+```
+
+### Tables and Data Display
+
 #### Picture
 
 ```@docs

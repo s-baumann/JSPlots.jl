@@ -1,3 +1,36 @@
+"""
+    Scatter3D(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol}; kwargs...)
+
+Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+- `dimensions::Vector{Symbol}`: Vector of at least 3 dimension columns for x, y, and z axes
+
+# Keyword Arguments
+- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
+- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
+- `shared_camera::Bool`: Synchronize camera view across facets (default: `true`)
+- `marker_size::Int`: Size of scatter points (default: `4`)
+- `marker_opacity::Float64`: Transparency of points (default: `0.6`)
+- `title::String`: Chart title (default: `"3D Scatter Plot"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+scatter = Scatter3D(:scatter_3d, df, :data, [:x, :y, :z],
+    color_cols=[:category],
+    show_eigenvectors=true,
+    marker_size=6,
+    title="3D Point Cloud"
+)
+```
+"""
 struct Scatter3D <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

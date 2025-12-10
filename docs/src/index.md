@@ -1,6 +1,6 @@
 # JSPlots.jl
 
-*Interactive JavaScript-based visualizations in Julia.*
+*Interactive JavaScript-based visualizations build in Julia.*
 
 JSPlots is a Julia package for creating interactive JavaScript-based visualizations. It includes support for pivot tables (via PivotTableJS), line charts, 3D charts, scatter plots, and distribution plots using Plotly.js. You can embed your data into HTML pages and visualize them interactively.
 
@@ -9,9 +9,8 @@ JSPlots is a Julia package for creating interactive JavaScript-based visualizati
 - **Interactive Pivot Tables**: Wrapper over PivotTableJS with drag-and-drop interface
 - **Multiple Plot Types**: Line charts, 3D surface plots, scatter plots, and distribution plots
 - **Flexible Data Embedding**: Support for CSV, JSON, and Parquet formats (embedded or external)
-- **Single File Output**: Create standalone HTML files with all dependencies embedded
+- **Single File Output**: Create standalone HTML files with all dependencies embedded.
 - **Multi-Chart Pages**: Combine multiple charts and tables on a single page
-- **Custom Styling**: Configurable color maps for heatmaps and customizable plot appearance
 
 ## Installation
 
@@ -22,7 +21,7 @@ Pkg.add("JSPlots")
 
 ## Quick Start
 
-Here's a simple example to get you started:
+Here's a simple example:
 
 ```julia
 using JSPlots, DataFrames, Dates
@@ -52,14 +51,15 @@ create_html(chart, df, "temperature.html")
 
 JSPlots provides multiple visualization types:
 
-1. **[PivotTable](@ref)**: Interactive pivot tables with drag-and-drop functionality
-2. **[LineChart](@ref)**: Time series and sequential data visualization
-3. **3D Plots**: Three-dimensional surface plots (Surface3D) and 3D scatter plots (Scatter3D)
-4. **[ScatterPlot](@ref)**: Scatter plots with marginal distributions and interactive filtering
-5. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot
-6. **[Picture](@ref)**: Display static images and plots from other Julia plotting libraries
-7. **[Table](@ref)**: Display DataFrames as HTML tables with CSV download capability
-8. **[TextBlock](@ref)**: HTML text blocks for annotations and documentation
+1. **[PivotTable](@ref)**: Interactive pivot tables with drag-and-drop functionality;
+2. **[LineChart](@ref)**: Time series and sequential data visualization;
+3. **[Scatter3D](@ref)**: A 3D scatter plot;
+4. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
+5. **[ScatterPlot](@ref)**: Scatter plots with marginal distributions and interactive filtering;
+6. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot;
+7. **[Picture](@ref)**: Display static images and plots from other Julia plotting libraries;
+8. **[Table](@ref)**: Display DataFrames as HTML tables with CSV download capability;
+9. **[TextBlock](@ref)**: HTML text blocks for annotations and documentation.
 
 ## Data Format Options
 

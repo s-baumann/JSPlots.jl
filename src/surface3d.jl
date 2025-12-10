@@ -1,4 +1,34 @@
+"""
+    Surface3D(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
 
+Three-dimensional surface plot visualization using Plotly.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+# Keyword Arguments
+- `x_col::Symbol`: Column for x-axis values (default: `:x`)
+- `y_col::Symbol`: Column for y-axis values (default: `:y`)
+- `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
+- `group_col`: Column for grouping multiple surfaces (default: `nothing`)
+- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `height::Int`: Plot height in pixels (default: `600`)
+- `title::String`: Chart title (default: `"3D Chart"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+surf = Surface3D(:surface_chart, df, :data,
+    x_col=:x,
+    y_col=:y,
+    z_col=:z,
+    group_col=:category,
+    title="3D Surface Plot"
+)
+```
+"""
 struct Surface3D <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
