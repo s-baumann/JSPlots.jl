@@ -4,6 +4,7 @@ makedocs(
     format = Documenter.HTML(),
     sitename = "JSPlots",
     modules = [JSPlots],
+    checkdocs = :exports,  # Only check exported functions, not internal helpers
     pages = Any[
         "Introduction" => "index.md",
         "Examples" => "examples.md",

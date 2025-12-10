@@ -382,6 +382,12 @@ Data is saved as separate Parquet files in a `data/` subdirectory. Most efficien
 
 ## Utility Functions
 
+### sanitize_filename
+
+```@docs
+sanitize_filename
+```
+
 ### Data Format Conversion
 
 JSPlots internally handles conversion between Julia DataFrames and JavaScript-compatible formats (CSV, JSON, Parquet).

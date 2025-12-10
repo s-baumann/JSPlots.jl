@@ -50,11 +50,11 @@ create_html(chart, df, "temperature.html")
 
 ## Plot Types
 
-JSPlots provides eight different visualization types:
+JSPlots provides multiple visualization types:
 
 1. **[PivotTable](@ref)**: Interactive pivot tables with drag-and-drop functionality
 2. **[LineChart](@ref)**: Time series and sequential data visualization
-3. **[Chart3d](@ref)**: Three-dimensional surface plots
+3. **3D Plots**: Three-dimensional surface plots (Surface3D) and 3D scatter plots (Scatter3D)
 4. **[ScatterPlot](@ref)**: Scatter plots with marginal distributions and interactive filtering
 5. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot
 6. **[Picture](@ref)**: Display static images and plots from other Julia plotting libraries
@@ -71,7 +71,7 @@ JSPlots supports five different data embedding formats:
 - **`:json_external`**: Data saved as separate JSON files
 - **`:parquet`**: Data saved as separate Parquet files (most efficient for large datasets)
 
-See the [Data Formats](@ref) section for detailed information on choosing the right format.
+See the [API documentation](api.md#Data-Format-Options) for detailed information on choosing the right format.
 
 ## Creating Multi-Chart Pages
 
