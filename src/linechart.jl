@@ -1,3 +1,36 @@
+"""
+    LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
+
+Time series or sequential data visualization with interactive filtering.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+# Keyword Arguments
+- `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
+- `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
+- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `Symbol[]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `aggregator::String`: Aggregation function - "none", "mean", "median", "count", "min", or "max" (default: `"none"`)
+- `title::String`: Chart title (default: `"Line Chart"`)
+- `line_width::Int`: Width of lines (default: `1`)
+- `marker_size::Int`: Size of markers (default: `1`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+lc = LineChart(:sales_chart, df, :sales_data,
+    x_cols=[:date],
+    y_cols=[:revenue],
+    color_cols=[:region],
+    title="Sales Over Time"
+)
+```
+"""
 struct LineChart <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

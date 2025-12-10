@@ -56,6 +56,39 @@ end
 
 
 
+"""
+    PivotTable(chart_title::Symbol, data_label::Symbol; kwargs...)
+
+Interactive pivot table with drag-and-drop functionality using PivotTable.js.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+# Keyword Arguments
+- `rows`: Column(s) to use as rows (default: `missing`)
+- `cols`: Column(s) to use as columns (default: `missing`)
+- `vals`: Column to aggregate (default: `missing`)
+- `inclusions`: Dict of values to include in filtering (default: `missing`)
+- `exclusions`: Dict of values to exclude from filtering (default: `missing`)
+- `colour_map`: Custom color mapping for heatmaps (default: standard gradient)
+- `aggregatorName::Symbol`: Aggregation function like `:Sum`, `:Average`, `:Count` (default: `:Average`)
+- `extrapolate_colours::Bool`: Whether to extrapolate color scale (default: `false`)
+- `rendererName::Symbol`: Renderer type like `:Table`, `:Heatmap`, `:Bar Chart` (default: `:Heatmap`)
+- `rendererOptions`: Custom renderer options (default: `missing`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+pt = PivotTable(:pivot_chart, :data,
+    rows=[:region],
+    cols=[:year],
+    vals=:sales,
+    aggregatorName=:Sum,
+    rendererName=:Heatmap
+)
+```
+"""
 struct PivotTable <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

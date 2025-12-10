@@ -122,11 +122,13 @@ page3 = JSPlotPage(
 )
 
 # Create the coverpage with a manual LinkList
+# IMPORTANT: When manually creating LinkList, use sanitize_filename() to ensure
+# the link URLs match the actual filenames that will be generated!
 println("  Creating coverpage with manual navigation links...")
 links = LinkList([
-    ("Revenue Analysis", "page_1.html", "Financial performance and revenue trends across regions"),
-    ("Metrics Dashboard", "page_2.html", "Key business metrics including customer satisfaction and quality scores"),
-    ("Regional Analysis", "page_3.html", "Q4 2024 regional performance breakdown with distribution analysis")
+    ("Revenue Analysis", "$(sanitize_filename("Revenue Analysis")).html", "Financial performance and revenue trends across regions"),
+    ("Metrics Dashboard", "$(sanitize_filename("Metrics Dashboard")).html", "Key business metrics including customer satisfaction and quality scores"),
+    ("Regional Analysis", "$(sanitize_filename("Regional Analysis")).html", "Q4 2024 regional performance breakdown with distribution analysis")
 ])
 
 coverpage_header = TextBlock("""
@@ -170,9 +172,9 @@ println("Manual LinkList example complete!")
 println("="^60)
 println("Output location: generated_html_examples/annual_report/")
 println("  - annual_report.html (main/cover page)")
-println("  - page_1.html (Revenue Analysis)")
-println("  - page_2.html (Metrics Dashboard)")
-println("  - page_3.html (Regional Analysis)")
+println("  - revenue_analysis.html (Revenue Analysis)")
+println("  - metrics_dashboard.html (Metrics Dashboard)")
+println("  - regional_analysis.html (Regional Analysis)")
 println("  - data/ (shared Parquet files)")
 
 # ==============================================================================
@@ -278,8 +280,8 @@ println("Easy constructor example complete!")
 println("="^60)
 println("Output location: generated_html_examples/easy_report/")
 println("  - easy_report.html (coverpage with auto-generated links)")
-println("  - page_1.html (Revenue Analysis)")
-println("  - page_2.html (Metrics Dashboard)")
+println("  - revenue_analysis.html (Revenue Analysis)")
+println("  - metrics_dashboard.html (Metrics Dashboard)")
 
 println("\n" * "="^70)
 println("Pages examples complete!")

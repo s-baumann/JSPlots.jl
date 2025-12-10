@@ -1,4 +1,25 @@
+"""
+    LinkList(lnks::Vector{Tuple{String,String,String}}; chart_title=:link_list)
 
+A styled list of hyperlinks for navigating between pages in a multi-page report.
+
+# Arguments
+- `lnks::Vector{Tuple{String,String,String}}`: Vector of link tuples, each containing:
+  - `page_title::String`: Display name for the link
+  - `link_url::String`: URL or path to the target page (e.g., "page_1.html")
+  - `blurb::String`: Description text explaining what the page contains
+
+# Keyword Arguments
+- `chart_title::Symbol`: Unique identifier (default: `:link_list`)
+
+# Examples
+```julia
+links = LinkList([
+    ("Sales Dashboard", "page_1.html", "Quarterly sales analysis and trends"),
+    ("Customer Metrics", "page_2.html", "Customer satisfaction and retention")
+])
+```
+"""
 struct LinkList <: JSPlotsType
     lnks::Vector{Tuple{String,String,String}}
     chart_title::Symbol

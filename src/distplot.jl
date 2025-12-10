@@ -1,3 +1,36 @@
+"""
+    DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
+
+Distribution visualization combining histogram, box plot, and rug plot.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+# Keyword Arguments
+- `value_cols`: Column(s) containing values to plot (default: `:value`)
+- `group_cols`: Column(s) for group comparison (default: `nothing`)
+- `filter_cols`: Column(s) for filter sliders (default: `nothing`)
+- `show_histogram::Bool`: Display histogram (default: `true`)
+- `show_box::Bool`: Display box plot (default: `true`)
+- `show_rug::Bool`: Display rug plot (default: `true`)
+- `histogram_bins::Int`: Number of histogram bins (default: `30`)
+- `box_opacity::Float64`: Transparency of box plot (default: `0.7`)
+- `show_controls::Bool`: Show control panel (default: `false`)
+- `title::String`: Chart title (default: `"Distribution Plot"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+dp = DistPlot(:dist_chart, df, :data,
+    value_cols=:age,
+    group_cols=:gender,
+    histogram_bins=20,
+    title="Age Distribution"
+)
+```
+"""
 struct DistPlot <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

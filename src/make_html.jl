@@ -515,6 +515,33 @@ function generate_picture_attribution(image_path::String)
     return """<p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">$filename</p>"""
 end
 
+"""
+    create_html(obj, [df], outfile_path::String)
+
+Creates an HTML file from a JSPlotPage, Pages, or a single plot.
+
+# Arguments
+- `obj`: A JSPlotPage, Pages object, or a single plot (PivotTable, LineChart, etc.)
+- `df`: DataFrame (required for single plots that need data)
+- `outfile_path::String`: Path where the HTML file will be saved (default: `"pivottable.html"`)
+
+# Single Plot Usage
+```julia
+create_html(plot, dataframe, "output.html")
+```
+
+# JSPlotPage Usage
+```julia
+page = JSPlotPage(dataframes_dict, plots_array)
+create_html(page, "output.html")
+```
+
+# Pages (Multi-page) Usage
+```julia
+report = Pages(coverpage, [page1, page2])
+create_html(report, "index.html")
+```
+"""
 function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
     # Collect extra styles needed for TextBlock, Picture, and Table
     extra_styles = ""
@@ -937,15 +964,18 @@ function create_html(jsp::Pages, outfile_path::String="index.html")
     end
     println("Created coverpage: $coverpage_path")
 
-    # Generate each subpage HTML
+    # Generate each subpage HTML using sanitized tab_title
+    # Note: We need to use the same sanitize_filename function used in Pages.jl
+    # to ensure links match filenames
     for (i, page) in enumerate(jsp.pages)
-        page_filename = "page_$(i).html"
+        sanitized_name = sanitize_filename(page.tab_title)
+        page_filename = "$(sanitized_name).html"
         page_path = joinpath(project_dir, page_filename)
         page_html = generate_page_html(page, all_dataframes, jsp.dataformat)
         open(page_path, "w") do f
             write(f, page_html)
         end
-        println("Created page $(i): $page_path")
+        println("Created page '$(page.tab_title)': $page_path")
     end
 
     # Generate launcher scripts at project root
@@ -975,7 +1005,11 @@ function create_html(jsp::Pages, outfile_path::String="index.html")
     println("\nMulti-page project created:")
     println("  Location: $project_dir")
     println("  Main page: $original_name")
-    println("  Subpages: $(length(jsp.pages)) (page_1.html to page_$(length(jsp.pages)).html)")
+    println("  Subpages: $(length(jsp.pages))")
+    for page in jsp.pages
+        sanitized_name = sanitize_filename(page.tab_title)
+        println("    - $(page.tab_title): $(sanitized_name).html")
+    end
     if jsp.dataformat in [:csv_external, :json_external, :parquet]
         println("  Data format: $(jsp.dataformat) (shared in data/ folder)")
     else

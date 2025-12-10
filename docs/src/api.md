@@ -155,29 +155,6 @@ Time series or sequential data visualization with interactive filtering.
 - `y_label`: Y-axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### Chart3d
-
-```@docs
-Chart3d
-```
-
-Three-dimensional surface plot visualization.
-
-**Parameters:**
-- `chart_title::Symbol`: Unique identifier for this chart
-- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
-
-**Keyword Arguments:**
-- `x_col::Symbol`: Column for x-axis values
-- `y_col::Symbol`: Column for y-axis values
-- `z_col::Symbol`: Column for z-axis (height) values
-- `group_col`: Column for grouping multiple surfaces (default: `missing`)
-- `title`: Chart title (default: `""`)
-- `x_label`: X-axis label (default: `""`)
-- `y_label`: Y-axis label (default: `""`)
-- `z_label`: Z-axis label (default: `""`)
-- `notes`: Descriptive text shown below the chart (default: `""`)
-
 #### ScatterPlot
 
 ```@docs

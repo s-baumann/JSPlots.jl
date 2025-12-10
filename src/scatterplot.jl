@@ -1,3 +1,34 @@
+"""
+    ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol}; kwargs...)
+
+Scatter plot with optional marginal distributions and interactive filtering.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+- `dimensions::Vector{Symbol}`: Vector of dimension columns for x and y axes
+
+# Keyword Arguments
+- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
+- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `show_density::Bool`: Show marginal density plots (default: `true`)
+- `marker_size::Int`: Size of scatter points (default: `4`)
+- `marker_opacity::Float64`: Transparency of points (default: `0.6`)
+- `title::String`: Chart title (default: `"Scatter Plot"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+sp = ScatterPlot(:scatter_chart, df, :data, [:x, :y],
+    color_cols=[:category],
+    marker_size=6,
+    title="X vs Y"
+)
+```
+"""
 struct ScatterPlot <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

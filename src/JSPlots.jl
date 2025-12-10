@@ -49,7 +49,7 @@ module JSPlots
     export LinkList
 
     include("Pages.jl")
-    export JSPlotPage, Pages
+    export JSPlotPage, Pages, sanitize_filename
 
     include("make_html.jl")
     export create_html

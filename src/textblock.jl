@@ -101,6 +101,41 @@ const TEXTBLOCK_STYLE = raw"""
 """
 
 
+"""
+    TextBlock(html_content::String, images::Dict{String, String}=Dict{String, String}())
+
+HTML text block for adding formatted text and tables to plot pages.
+
+# Arguments
+- `html_content::String`: HTML content to display
+- `images::Dict{String, String}`: Optional dictionary mapping image IDs to file paths (default: empty)
+
+# Supported HTML Elements
+- Headings: `<h1>` through `<h6>`
+- Paragraphs: `<p>`
+- Lists: `<ul>`, `<ol>`, `<li>`
+- Tables: `<table>`, `<tr>`, `<td>`, `<th>`
+- Text formatting: `<strong>`, `<em>`, `<code>`, `<pre>`
+- Links: `<a>`
+- Blockquotes: `<blockquote>`
+- Divisions: `<div>`, `<span>`
+
+# Image Embedding
+Images can be embedded using the syntax `{{IMAGE:image_id}}` in the HTML content,
+where `image_id` corresponds to a key in the images dictionary.
+
+# Examples
+```julia
+# Simple text block
+tb = TextBlock("<h2>Analysis Results</h2><p>The data shows...</p>")
+
+# Text block with embedded image
+tb = TextBlock(
+    "<h2>Plot</h2><p>{{IMAGE:plot1}}</p>",
+    Dict("plot1" => "path/to/image.png")
+)
+```
+"""
 struct TextBlock <: JSPlotsType
     html_content::String
     images::Dict{String, String}  # Map image IDs to file paths
