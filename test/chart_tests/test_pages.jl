@@ -71,9 +71,10 @@ using DataFrames
                 page_header = "Cost Analysis"
             )
 
+            # Use sanitize_filename to create links that match the actual filenames
             links = LinkList([
-                ("Revenue", "page_1.html", "Revenue analysis page"),
-                ("Costs", "page_2.html", "Cost analysis page")
+                ("Revenue", "$(sanitize_filename("Revenue")).html", "Revenue analysis page"),
+                ("Costs", "$(sanitize_filename("Costs")).html", "Cost analysis page")
             ])
 
             coverpage = JSPlotPage(
@@ -93,9 +94,9 @@ using DataFrames
             # Check main page exists at project root
             @test isfile(joinpath(project_dir, "index.html"))
 
-            # Check individual pages exist at same level
-            @test isfile(joinpath(project_dir, "page_1.html"))
-            @test isfile(joinpath(project_dir, "page_2.html"))
+            # Check individual pages exist at same level (named after tab_title)
+            @test isfile(joinpath(project_dir, "revenue.html"))
+            @test isfile(joinpath(project_dir, "costs.html"))
 
             # Check data directory and data files
             data_dir = joinpath(project_dir, "data")
@@ -111,23 +112,23 @@ using DataFrames
             # Check coverpage content
             coverpage_content = read(joinpath(project_dir, "index.html"), String)
             @test occursin("Annual Report", coverpage_content)
-            @test occursin("page_1.html", coverpage_content)
-            @test occursin("page_2.html", coverpage_content)
+            @test occursin("revenue.html", coverpage_content)
+            @test occursin("costs.html", coverpage_content)
             @test occursin("Revenue analysis page", coverpage_content)
 
-            # Check page 1 content
-            page1_content = read(joinpath(project_dir, "page_1.html"), String)
+            # Check page 1 content (revenue.html)
+            page1_content = read(joinpath(project_dir, "revenue.html"), String)
             @test occursin("Revenue Analysis", page1_content)
             @test occursin("chart1", page1_content)
 
-            # Check page 2 content
-            page2_content = read(joinpath(project_dir, "page_2.html"), String)
+            # Check page 2 content (costs.html)
+            page2_content = read(joinpath(project_dir, "costs.html"), String)
             @test occursin("Cost Analysis", page2_content)
             @test occursin("chart2", page2_content)
 
             # Verify flat structure (no nested page folders)
-            @test !isdir(joinpath(project_dir, "page_1"))
-            @test !isdir(joinpath(project_dir, "page_2"))
+            @test !isdir(joinpath(project_dir, "revenue"))
+            @test !isdir(joinpath(project_dir, "costs"))
         end
     end
 
