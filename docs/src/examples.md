@@ -239,6 +239,175 @@ chart = LineChart(:filtered_chart, df, :df;
 )
 ```
 
+## AreaChart Examples
+
+### Basic Stacked Area Chart with Dates
+
+```julia
+using JSPlots, DataFrames, Dates
+
+# Create time series data
+dates = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
+df = DataFrame(
+    Date = repeat(dates, 4),
+    Sales = abs.(rand(length(dates) * 4) .* 10000 .+ 20000),
+    Region = repeat(["North", "South", "East", "West"], inner=length(dates))
+)
+
+# Stacked area chart shows cumulative sales
+chart = AreaChart(:regional_sales, df, :sales_data;
+    x_cols = [:Date],
+    y_cols = [:Sales],
+    group_cols = [:Region],
+    stack_mode = "stack",
+    title = "Regional Sales Over Time (Stacked)"
+)
+
+create_html(chart, df, "stacked_area.html")
+```
+
+### Unstacked Areas with Transparency
+
+```julia
+# Create overlapping areas to compare trends
+df = DataFrame(
+    Time = repeat(1:24, 3),
+    Value = vcat(
+        50 .+ 10 .* sin.(2π .* (1:24) ./ 24) .+ randn(24),
+        45 .+ 8 .* sin.(2π .* (1:24) ./ 24 .+ π/3) .+ randn(24),
+        55 .+ 12 .* sin.(2π .* (1:24) ./ 24 .+ 2π/3) .+ randn(24)
+    ),
+    Product = repeat(["Product A", "Product B", "Product C"], inner=24)
+)
+
+chart = AreaChart(:product_comparison, df, :product_data;
+    x_cols = [:Time],
+    y_cols = [:Value],
+    group_cols = [:Product],
+    stack_mode = "unstack",
+    fill_opacity = 0.4,
+    title = "Product Values Comparison (Overlapping)"
+)
+```
+
+### Normalized Stacking (Percentage View)
+
+```julia
+# Market share that always totals 100%
+df = DataFrame(
+    Quarter = repeat(1:8, 4),
+    MarketShare = abs.(randn(32) .* 5 .+ 20),
+    Company = repeat(["Alpha", "Beta", "Gamma", "Delta"], inner=8)
+)
+
+chart = AreaChart(:market_share, df, :market_data;
+    x_cols = [:Quarter],
+    y_cols = [:MarketShare],
+    group_cols = [:Company],
+    stack_mode = "normalised_stack",
+    title = "Market Share Distribution (%)",
+    notes = "Normalized stacking shows relative proportions"
+)
+```
+
+### Discrete Areas (Categorical X-axis)
+
+```julia
+# When x is categorical, creates stacked bars automatically
+df = DataFrame(
+    Department = repeat(["Engineering", "Sales", "Marketing", "Operations"], inner=3),
+    Headcount = rand(10:40, 12),
+    Team = repeat(["Team A", "Team B", "Team C"], 4)
+)
+
+chart = AreaChart(:headcount_by_dept, df, :headcount_data;
+    x_cols = [:Department],
+    y_cols = [:Headcount],
+    group_cols = [:Team],
+    stack_mode = "stack",
+    title = "Headcount by Department and Team"
+)
+```
+
+### With Interactive Filters and Faceting
+
+```julia
+# Create rich dataset with multiple grouping options
+years = ["2022", "2023", "2024"]
+channels = ["Online", "Retail", "Wholesale"]
+regions = ["North", "South"]
+dates = Date(2024, 1, 1):Week(1):Date(2024, 12, 31)
+
+df = DataFrame()
+for year in years, channel in channels, region in regions, date in dates
+    push!(df, (
+        Date = date,
+        Revenue = abs(randn() * 20000 + 100000),
+        Channel = channel,
+        Region = region,
+        Year = year
+    ))
+end
+
+chart = AreaChart(:revenue_analysis, df, :revenue_data;
+    x_cols = [:Date],
+    y_cols = [:Revenue],
+    group_cols = [:Channel],
+    filters = Dict{Symbol,Any}(:Year => "2024", :Region => "North"),
+    facet_cols = [:Region],
+    stack_mode = "stack",
+    title = "Revenue by Channel",
+    notes = "Use filters to explore different years and regions"
+)
+```
+
+### Comparing Stack Modes
+
+```julia
+# Same data, different stack modes
+df = DataFrame(
+    Time = repeat(1:20, 3),
+    Value = abs.(randn(60) .* 3 .+ 10),
+    Category = repeat(["Cat 1", "Cat 2", "Cat 3"], inner=20)
+)
+
+# Unstack: see individual trends
+unstack = AreaChart(:unstack, df, :data;
+    x_cols = [:Time],
+    y_cols = [:Value],
+    group_cols = [:Category],
+    stack_mode = "unstack",
+    fill_opacity = 0.5,
+    title = "Unstack: Individual Trends Visible"
+)
+
+# Stack: see cumulative total
+stack = AreaChart(:stack, df, :data;
+    x_cols = [:Time],
+    y_cols = [:Value],
+    group_cols = [:Category],
+    stack_mode = "stack",
+    title = "Stack: Cumulative Values"
+)
+
+# Normalized: see relative proportions
+normalized = AreaChart(:normalized, df, :data;
+    x_cols = [:Time],
+    y_cols = [:Value],
+    group_cols = [:Category],
+    stack_mode = "normalised_stack",
+    title = "Normalized: Relative Proportions (%)"
+)
+
+# Display all three on one page
+page = JSPlotPage(
+    Dict(:data => df),
+    [TextBlock("<h1>Stack Mode Comparison</h1>"),
+     unstack, stack, normalized],
+    tab_title = "Area Chart Modes"
+)
+```
+
 ## Chart3d Examples
 
 ### Single Surface

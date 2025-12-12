@@ -13,6 +13,10 @@ using Dates
         include("chart_tests/test_linechart.jl")
     end
 
+    @testset "AreaChart Tests" begin
+        include("chart_tests/test_areachart.jl")
+    end
+
     @testset "Surface3D Tests" begin
         include("chart_tests/test_surface3d.jl")
     end

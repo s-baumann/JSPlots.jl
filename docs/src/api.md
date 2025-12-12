@@ -155,6 +155,90 @@ Time series or sequential data visualization with interactive filtering.
 - `y_label`: Y-axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
+#### AreaChart
+
+```@docs
+AreaChart
+```
+
+Area chart visualization with support for stacking modes and interactive controls. Automatically adapts between continuous areas (for dates/numeric x values) and stacked bars (for categorical x values).
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
+- `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
+- `group_cols::Vector{Symbol}`: Columns available for grouping/coloring areas (default: `Symbol[]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `stack_mode::String`: Stacking mode - `"unstack"`, `"stack"`, or `"normalised_stack"` (default: `"stack"`)
+- `title::String`: Chart title (default: `"Area Chart"`)
+- `fill_opacity::Float64`: Opacity of filled areas, 0.0-1.0 (default: `0.6`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+**Stacking Modes:**
+- `"unstack"`: Areas are overlaid with transparency, allowing all to be visible simultaneously. Best for comparing individual trends.
+- `"stack"`: Areas are stacked on top of each other, showing cumulative values. Best for showing total and component contributions.
+- `"normalised_stack"`: Areas are stacked and normalized to 100%, showing relative proportions over time.
+
+**Automatic Discrete/Continuous Detection:**
+- **Continuous x values** (dates, floats, large numeric ranges): Creates smooth filled areas
+- **Discrete x values** (strings, integers with <20 unique values): Creates stacked bars
+
+**Features:**
+- Dynamic x/y axis selection via dropdown menus
+- Multiple grouping variable options for color/stacking
+- Interactive filters with multi-select support
+- Faceting support (1D facet wrap and 2D facet grid)
+- Proper date handling with automatic formatting
+- Group ordering preserved by first appearance in data
+
+**Example:**
+```julia
+# Continuous area chart with dates
+dates = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
+df = DataFrame(
+    Date = repeat(dates, 4),
+    Sales = rand(length(dates) * 4) .* 10000,
+    Region = repeat(["North", "South", "East", "West"], inner=length(dates))
+)
+
+area = AreaChart(:sales_chart, df, :sales_data,
+    x_cols=[:Date],
+    y_cols=[:Sales],
+    group_cols=[:Region],
+    stack_mode="stack",
+    title="Regional Sales Over Time"
+)
+
+# Normalized stacking for proportions
+area_norm = AreaChart(:market_share, df, :market_data,
+    x_cols=[:Quarter],
+    y_cols=[:MarketShare],
+    group_cols=[:Category],
+    stack_mode="normalised_stack",
+    title="Market Share Distribution"
+)
+
+# Discrete (bar-style) for categorical x
+df_cat = DataFrame(
+    Department = repeat(["Eng", "Sales", "Marketing"], inner=3),
+    Headcount = rand(1:30, 9),
+    Team = repeat(["A", "B", "C"], 3)
+)
+
+area_bars = AreaChart(:headcount, df_cat, :headcount_data,
+    x_cols=[:Department],
+    y_cols=[:Headcount],
+    group_cols=[:Team],
+    stack_mode="stack"
+)
+```
+
 #### ScatterPlot
 
 ```@docs

@@ -21,6 +21,9 @@ module JSPlots
     include("linechart.jl")
     export LineChart
 
+    include("areachart.jl")
+    export AreaChart
+
     include("surface3d.jl")
     export Surface3D
 
