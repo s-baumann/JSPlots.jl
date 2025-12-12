@@ -53,13 +53,14 @@ JSPlots provides multiple visualization types:
 
 1. **[PivotTable](@ref)**: Interactive pivot tables with drag-and-drop functionality;
 2. **[LineChart](@ref)**: Time series and sequential data visualization;
-3. **[Scatter3D](@ref)**: A 3D scatter plot;
-4. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
-5. **[ScatterPlot](@ref)**: Scatter plots with marginal distributions and interactive filtering;
-6. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot;
-7. **[Picture](@ref)**: Display static images and plots from other Julia plotting libraries;
-8. **[Table](@ref)**: Display DataFrames as HTML tables with CSV download capability;
-9. **[TextBlock](@ref)**: HTML text blocks for annotations and documentation.
+3. **[AreaChart](@ref)**: A Barchart (for discrete x domain) or Area chart (for continuous x domain);
+4. **[Scatter3D](@ref)**: A 3D scatter plot;
+5. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
+6. **[ScatterPlot](@ref)**: Scatter plots with marginal distributions and interactive filtering;
+7. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot;
+8. **[Picture](@ref)**: Display static images and plots from other Julia plotting libraries;
+9. **[Table](@ref)**: Display DataFrames as HTML tables with CSV download capability;
+10. **[TextBlock](@ref)**: HTML text blocks for annotations and documentation.
 
 ## Data Format Options
 
