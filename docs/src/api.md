@@ -393,14 +393,67 @@ Three-dimensional scatter plot with automatically fitted surfaces for each group
 - `title::String`: Chart title (default: `"3D Scatter with Surfaces"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
 
-**Surface Fitting:**
-The default surface fitter uses kernel-based smoothing (Gaussian kernel) to fit non-parametric surfaces through point clouds. You can provide a custom fitter function with signature:
+**Surface Fitting Algorithm:**
+
+ScatterSurface3D fits smooth surfaces through 3D point clouds using kernel-based non-parametric regression. Two fitting methods are available: L2 minimization (weighted mean) and L1 minimization (weighted median).
+
+**L2 Minimization (Nadaraya-Watson Estimator):**
+
+The default L2 fitter implements the Nadaraya-Watson kernel regression estimator (Nadaraya, 1964; Watson, 1964), which estimates the surface height at each grid point (xᵢ, yⱼ) as a locally weighted average:
+
+```
+ẑ(xᵢ, yⱼ) = Σₖ wₖ(xᵢ, yⱼ) · zₖ / Σₖ wₖ(xᵢ, yⱼ)
+```
+
+where the weights are computed using a Gaussian (radial basis function) kernel:
+
+```
+wₖ(xᵢ, yⱼ) = exp(-dₖ² / (2h²))
+dₖ² = (xₖ - xᵢ)² + (yₖ - yⱼ)²
+```
+
+Here, h is the smoothing parameter (bandwidth) that controls the kernel width. Smaller values produce surfaces that follow the data more closely, while larger values produce smoother surfaces.
+
+**L1 Minimization (Weighted Median):**
+
+The L1 fitter uses a weighted median instead of weighted mean, making it robust to outliers (Eddy, 1977; Härdle & Steiger, 1995). For each grid point, the surface height is estimated as:
+
+```
+ẑ(xᵢ, yⱼ) = weighted_median({z₁, z₂, ..., zₙ}, {w₁, w₂, ..., wₙ})
+```
+
+where the weighted median is the value at which the cumulative sum of weights reaches 50% of the total weight. The same Gaussian kernel is used for computing weights.
+
+**Grid Construction:**
+
+Surfaces are evaluated on a regular 20×20 grid spanning the data range with a 10% extension beyond the observed min/max values in each dimension to ensure complete coverage.
+
+**Default Smoothing Parameter Selection:**
+
+When `default_smoothing` is not specified, the system selects the median value from the provided `smoothing_params` vector. This provides a balanced default that works well for most datasets. Users can override this by providing a `Dict{String, Float64}` mapping each group name to its optimal smoothing parameter.
+
+For optimal bandwidth selection in practice, consider:
+- **Cross-validation:** Leave-one-out or k-fold CV to minimize prediction error (Härdle et al., 2004)
+- **Visual inspection:** Use the interactive smoothing slider to find the best visual fit
+- **Rule of thumb:** Start with h ≈ 0.1-1.0 times the data range, adjusting based on data density
+
+**Custom Surface Fitters:**
+
+You can provide a custom fitter function with signature:
 ```julia
 function custom_fitter(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64},
                       smoothing_param::Float64)
     # Return: (x_grid::Vector, y_grid::Vector, z_grid::Matrix)
 end
 ```
+
+**References:**
+
+- Nadaraya, E. A. (1964). "On Estimating Regression". *Theory of Probability & Its Applications*, 9(1), 141-142.
+- Watson, G. S. (1964). "Smooth Regression Analysis". *Sankhyā: The Indian Journal of Statistics, Series A*, 26(4), 359-372.
+- Eddy, W. F. (1977). "A New Convex Hull Algorithm for Planar Sets". *ACM Transactions on Mathematical Software*, 3(4), 398-403.
+- Härdle, W., & Steiger, W. (1995). "Algorithm AS 296: Optimal Median Smoothing". *Journal of the Royal Statistical Society. Series C (Applied Statistics)*, 44(2), 258-264.
+- Härdle, W., Müller, M., Sperlich, S., & Werwatz, A. (2004). *Nonparametric and Semiparametric Models*. Springer.
 
 **Interactive Controls:**
 - **Global toggles:** Show/hide all surfaces or all points independently

@@ -35,16 +35,29 @@ create_html(page, "dashboard.html")
 
 ## Plot Types
 
-- **LineChart** - Time series and trend visualization with faceting
-- **ScatterPlot** - 2D scatter plots with marginal distributions
+#### Tabular Data and Text
 - **PivotTable** - Interactive drag-and-drop pivot tables (via PivotTable.js)
-- **KernelDensity** - Smooth density estimation for distributions
-- **DistPlot** - Histograms and distribution plots
-- **Scatter3D** - Three-dimensional scatter plots
-- **Surface3D** - 3D surface plots
-- **Table** - Interactive data tables
-- **Picture** - Embed images
-- **TextBlock** - Rich text and HTML content
+- **Table** - Interactive data tables with CSV download capability
+- **TextBlock** - Rich text and HTML content for annotations
+- **LinkList** - Styled lists of hyperlinks for multi-page navigation
+
+#### 2D Plotting
+- **LineChart** - Time series and trend visualization with faceting
+- **AreaChart** - Stacked area charts or bar charts (auto-detects continuous vs discrete x-axis)
+- **ScatterPlot** - 2D scatter plots with marginal distributions
+
+#### Distributional Plots
+- **DistPlot** - Distribution visualization combining histogram, box plot, and rug plot
+- **KernelDensity** - Smooth kernel density estimation for distributions
+
+#### Three-Dimensional Plots
+- **Scatter3D** - 3D scatter plots with PCA eigenvectors
+- **Surface3D** - 3D surface visualization
+- **ScatterSurface3D** - 3D scatter plots with fitted surfaces (L1/L2 minimization)
+
+#### Plots from Other Julia Packages
+- **Picture** - Display static images or plots from VegaLite.jl, Plots.jl, Makie.jl
+- **Slides** - Slideshows and animations from sequences of images or generated plots
 
 ## Examples
 

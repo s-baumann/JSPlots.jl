@@ -228,7 +228,7 @@ using Statistics
         @test occursin("setYRange_js_test", chart.functional_html)
 
         # Check for data structures
-        @test occursin("surfacesData_js_test", chart.functional_html)
+        @test occursin("surfacesDataL2_js_test", chart.functional_html)
         @test occursin("groupLevels_js_test", chart.functional_html)
         @test occursin("smoothingParams_js_test", chart.functional_html)
     end
@@ -446,5 +446,190 @@ using Statistics
             height=800)
 
         @test occursin("800px", chart.appearance_html)
+    end
+
+    @testset "Multiple grouping schemes" begin
+        df = DataFrame(
+            x = randn(50),
+            y = randn(50),
+            z = randn(50),
+            industry = repeat(["Tech", "Finance"], 25),
+            country = repeat(["USA", "UK", "Germany"], 17)[1:50]
+        )
+
+        chart = ScatterSurface3D(:multi_grouping, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            grouping_schemes=Dict(
+                "Industry" => [:industry],
+                "Country" => [:country]
+            ),
+            smoothing_params=[0.5, 1.0, 2.0])
+
+        @test chart.chart_title == :multi_grouping
+        @test occursin("Grouping Scheme", chart.appearance_html)
+        @test occursin("Industry", chart.appearance_html)
+        @test occursin("Country", chart.appearance_html)
+        @test occursin("changeScheme_multi_grouping", chart.functional_html)
+        @test occursin("allSchemes_multi_grouping", chart.functional_html)
+    end
+
+    @testset "Multiple grouping schemes with default smoothing" begin
+        df = generate_test_data(30)
+        df.region = repeat(["North", "South", "East"], 20)
+
+        chart = ScatterSurface3D(:multi_scheme_smooth, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            grouping_schemes=Dict(
+                "Group" => [:group],
+                "Region" => [:region]
+            ),
+            smoothing_params=[0.5, 1.0, 2.0],
+            default_smoothing=Dict(
+                "A" => 1.0,
+                "B" => 0.5,
+                "North" => 2.0,
+                "South" => 1.0,
+                "East" => 1.5
+            ))
+
+        @test occursin("defaultSmoothing", chart.functional_html)
+        @test occursin("\"A\"", chart.functional_html)
+        @test occursin("\"North\"", chart.functional_html)
+    end
+
+    @testset "Grouping scheme selector HTML" begin
+        df = generate_test_data(20)
+        df.category = repeat(["X", "Y"], 10)
+
+        chart = ScatterSurface3D(:scheme_selector, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            grouping_schemes=Dict(
+                "By Group" => [:group],
+                "By Category" => [:category]
+            ))
+
+        @test occursin("scheme_selector_scheme_selector", chart.appearance_html)
+        @test occursin("option value=\"By Group\"", chart.appearance_html)
+        @test occursin("option value=\"By Category\"", chart.appearance_html)
+        @test occursin("selected", chart.appearance_html)
+    end
+
+    @testset "Group buttons dynamically update" begin
+        df = generate_test_data(20)
+
+        chart = ScatterSurface3D(:dynamic_buttons, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            grouping_schemes=Dict(
+                "GroupA" => [:group],
+                "GroupB" => [:region]
+            ))
+
+        @test occursin("group_buttons_dynamic_buttons", chart.appearance_html)
+        @test occursin("updateGroupButtons_dynamic_buttons", chart.functional_html)
+    end
+
+    @testset "L1/L2 toggle button present" begin
+        df = generate_test_data(20)
+
+        chart = ScatterSurface3D(:l1l2_test, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            group_cols=[:group])
+
+        @test occursin("l1l2_toggle_l1l2_test", chart.appearance_html)
+        @test occursin("toggleL1L2_l1l2_test", chart.functional_html)
+        @test occursin("Using L2 (Mean)", chart.appearance_html)
+    end
+
+    @testset "Method explanation appears" begin
+        df = generate_test_data(20)
+
+        chart = ScatterSurface3D(:explanation_test, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            group_cols=[:group])
+
+        @test occursin("method_explanation_explanation_test", chart.appearance_html)
+        @test occursin("updateMethodExplanation_explanation_test", chart.functional_html)
+    end
+
+    @testset "Surface controls section order" begin
+        df = generate_test_data(20)
+
+        chart = ScatterSurface3D(:section_order, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            group_cols=[:group])
+
+        # Find positions of sections in HTML
+        groups_pos = findfirst("<!-- Group Selection -->", chart.appearance_html)
+        surface_pos = findfirst("<!-- Surface Controls -->", chart.appearance_html)
+
+        # Groups should come before Surface Controls
+        @test groups_pos !== nothing
+        @test surface_pos !== nothing
+        @test groups_pos.start < surface_pos.start
+    end
+
+    @testset "Shaded control sections" begin
+        df = generate_test_data(20)
+
+        chart = ScatterSurface3D(:shaded_sections, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            group_cols=[:group])
+
+        # Check for different background colors
+        @test occursin("background-color: #f9f9f9", chart.appearance_html)  # Data Filters
+        @test occursin("background-color: #fff8f0", chart.appearance_html)  # Groups
+        @test occursin("background-color: #f0f8ff", chart.appearance_html)  # Surface Controls
+    end
+
+    @testset "Multiple grouping schemes surfaces JSON structure" begin
+        df = generate_test_data(20)
+        df.type = repeat(["P", "Q"], 10)
+
+        chart = ScatterSurface3D(:json_struct, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            grouping_schemes=Dict(
+                "Scheme1" => [:group],
+                "Scheme2" => [:type]
+            ),
+            smoothing_params=[1.0])
+
+        # Check that surfaces data structure is present
+        @test occursin("allSurfaces_json_struct", chart.functional_html)
+        @test occursin("\"Scheme1\"", chart.functional_html)
+        @test occursin("\"Scheme2\"", chart.functional_html)
+    end
+
+    @testset "Backwards compatibility with group_cols" begin
+        df = generate_test_data(20)
+
+        # Old style with group_cols (no grouping_schemes)
+        chart = ScatterSurface3D(:backwards_compat, df, :test_data,
+            x_col=:x,
+            y_col=:y,
+            z_col=:z,
+            group_cols=[:group],
+            smoothing_params=[0.5, 1.0])
+
+        @test chart.chart_title == :backwards_compat
+        @test !occursin("Grouping Scheme", chart.appearance_html)
+        @test !occursin("changeScheme", chart.functional_html)
     end
 end

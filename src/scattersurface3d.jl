@@ -12,11 +12,14 @@ Three-dimensional scatter plot with fitted surfaces, combining point clouds with
 - `x_col::Symbol`: Column for x-axis values (default: `:x`)
 - `y_col::Symbol`: Column for y-axis values (default: `:y`)
 - `z_col::Symbol`: Column for z-axis values (default: `:z`)
-- `group_cols::Vector{Symbol}`: Columns for grouping data (default: `Symbol[]`)
+- `group_cols::Vector{Symbol}`: Columns for grouping data (default: `Symbol[]`). Ignored if `grouping_schemes` is provided.
+- `grouping_schemes::Dict{String, Vector{Symbol}}`: Multiple named grouping schemes with dropdown selector (default: `Dict()`).
+  If provided, creates a dropdown to switch between different grouping methods. Example:
+  `Dict("Industry" => [:industry], "Country" => [:country])` creates a dropdown to switch between grouping by industry or country.
 - `facet_cols::Vector{Symbol}`: Columns available for faceting (default: `Symbol[]`)
 - `slider_cols::Vector{Symbol}`: Additional categorical filter columns (default: `Symbol[]`)
 - `surface_fitter::Function`: Function to fit surfaces: `(x, y, z, smoothing) -> (x_grid, y_grid, z_grid)`
-- `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.5, 1.0, 5.0]`)
+- `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.15, ..., 10.0]`)
 - `default_smoothing::Dict{String, Float64}`: Default smoothing for each group (default: auto-computed)
 - `grid_size::Int`: Grid resolution for surfaces (default: `20`)
 - `marker_size::Int`: Size of scatter points (default: `4`)
@@ -52,10 +55,11 @@ struct ScatterSurface3D <: JSPlotsType
                                y_col::Symbol=:y,
                                z_col::Symbol=:z,
                                group_cols::Vector{Symbol}=Symbol[],
+                               grouping_schemes::Dict{String, Vector{Symbol}}=Dict{String, Vector{Symbol}}(),
                                facet_cols::Vector{Symbol}=Symbol[],
                                slider_cols::Vector{Symbol}=Symbol[],
                                surface_fitter::Union{Function, Nothing}=nothing,
-                               smoothing_params::Vector{Float64}=[0.1, 0.5, 1.0, 5.0],
+                               smoothing_params::Vector{Float64}=[0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0],
                                default_smoothing::Dict{String, Float64}=Dict{String, Float64}(),
                                grid_size::Int=20,
                                marker_size::Int=4,
@@ -76,39 +80,88 @@ struct ScatterSurface3D <: JSPlotsType
             String(col) in all_cols || error("Column $col not found. Available: $all_cols")
         end
 
-        # If no surface fitter provided, use a simple kernel smoother
-        if surface_fitter === nothing
-            surface_fitter = default_surface_smoother
+        # Validate grouping_schemes columns
+        for (scheme_name, scheme_cols) in grouping_schemes
+            for col in scheme_cols
+                String(col) in all_cols || error("Column $col in grouping scheme '$scheme_name' not found. Available: $all_cols")
+            end
         end
 
-        # Determine grouping levels
-        if isempty(group_cols)
-            group_levels = ["all"]
+        # Determine if using multiple grouping schemes
+        use_multiple_schemes = !isempty(grouping_schemes)
+
+        # Build all grouping configurations
+        all_scheme_info = Dict{String, Any}()  # scheme_name => (group_cols, group_levels)
+
+        if use_multiple_schemes
+            # Use provided grouping schemes
+            for (scheme_name, scheme_cols) in grouping_schemes
+                if isempty(scheme_cols)
+                    group_levels = ["all"]
+                else
+                    group_combos = unique(df[!, scheme_cols])
+                    group_levels = [join([string(row[col]) for col in scheme_cols], "_") for row in eachrow(group_combos)]
+                end
+                all_scheme_info[scheme_name] = (scheme_cols, group_levels)
+            end
         else
-            group_combos = unique(df[!, group_cols])
-            group_levels = [join([string(row[col]) for col in group_cols], "_") for row in eachrow(group_combos)]
+            # Single grouping scheme (backward compatibility)
+            if isempty(group_cols)
+                group_levels = ["all"]
+            else
+                group_combos = unique(df[!, group_cols])
+                group_levels = [join([string(row[col]) for col in group_cols], "_") for row in eachrow(group_combos)]
+            end
+            all_scheme_info["default"] = (group_cols, group_levels)
+        end
+
+        # Collect all unique group names across all schemes for default smoothing
+        all_unique_groups = Set{String}()
+        for (scheme_name, (scheme_cols, group_levels)) in all_scheme_info
+            union!(all_unique_groups, group_levels)
         end
 
         # Auto-compute default smoothing if not provided
         if isempty(default_smoothing)
             # Use middle smoothing parameter as default
             mid_smooth = smoothing_params[ceil(Int, length(smoothing_params)/2)]
-            for group in group_levels
+            for group in all_unique_groups
                 default_smoothing[group] = mid_smooth
             end
         end
 
-        # Pre-compute surfaces for each group and smoothing parameter
-        surfaces_data = compute_surfaces(df, x_col, y_col, z_col, group_cols,
-                                        group_levels, surface_fitter, smoothing_params,
-                                        grid_size)
+        # Pre-compute surfaces for each grouping scheme
+        # Structure: scheme_name => (surfaces_l2, surfaces_l1)
+        all_surfaces_data = Dict{String, Tuple}()
+
+        for (scheme_name, (scheme_cols, group_levels)) in all_scheme_info
+            surfaces_data_l2 = nothing
+            surfaces_data_l1 = nothing
+
+            if surface_fitter === nothing
+                # Compute both L1 and L2 surfaces
+                surfaces_data_l2 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
+                                                    group_levels, default_surface_smoother_l2,
+                                                    smoothing_params, grid_size)
+                surfaces_data_l1 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
+                                                    group_levels, default_surface_smoother_l1,
+                                                    smoothing_params, grid_size)
+            else
+                # Use custom fitter (only L2)
+                surfaces_data_l2 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
+                                                    group_levels, surface_fitter,
+                                                    smoothing_params, grid_size)
+            end
+
+            all_surfaces_data[scheme_name] = (surfaces_data_l2, surfaces_data_l1)
+        end
 
         # Generate HTML
         functional_html, appearance_html = generate_html(
             chart_title_safe, data_label, df,
             x_col, y_col, z_col, group_cols, facet_cols, slider_cols,
-            group_levels, smoothing_params, default_smoothing,
-            surfaces_data, marker_size, marker_opacity, height, title, notes
+            all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
+            all_surfaces_data, marker_size, marker_opacity, height, title, notes
         )
 
         new(chart_title, data_label, functional_html, appearance_html)
@@ -116,9 +169,37 @@ struct ScatterSurface3D <: JSPlotsType
 end
 
 """
-Default surface smoother using weighted average kernel
+Weighted median for L1 minimization
 """
-function default_surface_smoother(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64)
+function weighted_median(values::Vector{Float64}, weights::Vector{Float64})
+    if isempty(values)
+        return 0.0
+    end
+
+    # Sort values and weights together
+    perm = sortperm(values)
+    sorted_values = values[perm]
+    sorted_weights = weights[perm]
+
+    # Find weighted median
+    total_weight = sum(sorted_weights)
+    cumsum_weights = cumsum(sorted_weights)
+
+    # Find the value where cumulative weight >= 50%
+    half_weight = total_weight / 2
+    idx = findfirst(w -> w >= half_weight, cumsum_weights)
+
+    if idx === nothing
+        return sorted_values[end]
+    end
+
+    return sorted_values[idx]
+end
+
+"""
+Surface smoother using kernel smoothing with L2 minimization (weighted mean)
+"""
+function default_surface_smoother_l2(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64)
     # Create grid
     x_min, x_max = extrema(x)
     y_min, y_max = extrema(y)
@@ -138,7 +219,7 @@ function default_surface_smoother(x::Vector{Float64}, y::Vector{Float64}, z::Vec
 
     z_grid = zeros(grid_size, grid_size)
 
-    # Kernel smoothing for each grid point
+    # Kernel smoothing for each grid point (L2: weighted mean)
     for (i, xi) in enumerate(x_grid)
         for (j, yj) in enumerate(y_grid)
             weights = zeros(length(x))
@@ -158,6 +239,53 @@ function default_surface_smoother(x::Vector{Float64}, y::Vector{Float64}, z::Vec
 
     return (collect(x_grid), collect(y_grid), z_grid)
 end
+
+"""
+Surface smoother using kernel smoothing with L1 minimization (weighted median)
+"""
+function default_surface_smoother_l1(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64)
+    # Create grid
+    x_min, x_max = extrema(x)
+    y_min, y_max = extrema(y)
+
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+
+    # Extend range slightly
+    x_min -= 0.1 * x_range
+    x_max += 0.1 * x_range
+    y_min -= 0.1 * y_range
+    y_max += 0.1 * y_range
+
+    grid_size = 20
+    x_grid = range(x_min, x_max, length=grid_size)
+    y_grid = range(y_min, y_max, length=grid_size)
+
+    z_grid = zeros(grid_size, grid_size)
+
+    # Kernel smoothing for each grid point (L1: weighted median)
+    for (i, xi) in enumerate(x_grid)
+        for (j, yj) in enumerate(y_grid)
+            weights = zeros(length(x))
+            for k in 1:length(x)
+                dist = sqrt((x[k] - xi)^2 + (y[k] - yj)^2)
+                weights[k] = exp(-dist^2 / (2 * smoothing^2))
+            end
+
+            weight_sum = sum(weights)
+            if weight_sum > 1e-10
+                z_grid[i, j] = weighted_median(z, weights)
+            else
+                z_grid[i, j] = median(z)
+            end
+        end
+    end
+
+    return (collect(x_grid), collect(y_grid), z_grid)
+end
+
+# Default uses L2 minimization
+const default_surface_smoother = default_surface_smoother_l2
 
 """
 Compute surfaces for all groups and smoothing parameters
@@ -211,8 +339,8 @@ Generate HTML and JavaScript for ScatterSurface3D
 """
 function generate_html(chart_title_safe, data_label, df,
                       x_col, y_col, z_col, group_cols, facet_cols, slider_cols,
-                      group_levels, smoothing_params, default_smoothing,
-                      surfaces_data, marker_size, marker_opacity, height, title, notes)
+                      all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
+                      all_surfaces_data, marker_size, marker_opacity, height, title, notes)
 
     # Prepare data ranges for sliders
     x_min, x_max = extrema(df[!, x_col])
@@ -224,27 +352,52 @@ function generate_html(chart_title_safe, data_label, df,
         categorical_values[col] = sort(unique(string.(skipmissing(df[!, col]))))
     end
 
-    # Generate group colors
-    colors = generate_colors(length(group_levels))
-    group_colors = Dict(group_levels[i] => colors[i] for i in 1:length(group_levels))
+    # Get the first/default grouping scheme for initial display
+    scheme_names = collect(keys(all_scheme_info))
+    default_scheme_name = use_multiple_schemes ? scheme_names[1] : "default"
+    default_group_cols, default_group_levels = all_scheme_info[default_scheme_name]
 
-    # Convert surfaces data to JSON-friendly format
-    surfaces_json = prepare_surfaces_json(surfaces_data, group_colors)
+    # Generate colors for all unique groups across all schemes
+    all_unique_groups = Set{String}()
+    for (scheme_name, (scheme_cols, group_levels)) in all_scheme_info
+        union!(all_unique_groups, group_levels)
+    end
+    all_groups_list = sort(collect(all_unique_groups))
+    colors = generate_colors(length(all_groups_list))
+    group_colors = Dict(all_groups_list[i] => colors[i] for i in 1:length(all_groups_list))
+
+    # Prepare surfaces data for all schemes
+    all_schemes_surfaces_dict = Dict{String, Any}()
+    has_l1 = false
+
+    for (scheme_name, (surfaces_data_l2, surfaces_data_l1)) in all_surfaces_data
+        surfaces_l2 = prepare_surfaces_data(surfaces_data_l2, group_colors)
+        surfaces_l1 = surfaces_data_l1 !== nothing ? prepare_surfaces_data(surfaces_data_l1, group_colors) : nothing
+        has_l1 = has_l1 || (surfaces_data_l1 !== nothing)
+
+        all_schemes_surfaces_dict[scheme_name] = Dict(
+            "l2" => surfaces_l2,
+            "l1" => surfaces_l1
+        )
+    end
 
     # Generate JavaScript
     functional_html = generate_functional_js(
         chart_title_safe, data_label, x_col, y_col, z_col,
-        group_cols, facet_cols, slider_cols, group_levels,
+        group_cols, facet_cols, slider_cols,
+        all_scheme_info, use_multiple_schemes, default_scheme_name,
         smoothing_params, default_smoothing, categorical_values,
-        group_colors, surfaces_json, x_min, x_max, y_min, y_max,
+        group_colors, all_schemes_surfaces_dict, has_l1,
+        x_min, x_max, y_min, y_max,
         marker_size, marker_opacity, height
     )
 
     # Generate HTML appearance
     appearance_html = generate_appearance_html(
-        chart_title_safe, title, notes, group_levels, group_colors,
-        smoothing_params, default_smoothing, categorical_values,
-        x_min, x_max, y_min, y_max, height
+        chart_title_safe, title, notes,
+        all_scheme_info, use_multiple_schemes, default_scheme_name,
+        group_colors, smoothing_params, default_smoothing, categorical_values,
+        x_min, x_max, y_min, y_max, height, has_l1
     )
 
     return (functional_html, appearance_html)
@@ -277,34 +430,75 @@ function prepare_surfaces_json(surfaces_data, group_colors)
     end
     return JSON.json(surfaces_array)
 end
+
+function prepare_surfaces_data(surfaces_data, group_colors)
+    surfaces_array = []
+    for (group, smoothing_dict) in surfaces_data
+        for (smoothing, (x_grid, y_grid, z_grid)) in smoothing_dict
+            surface_obj = Dict(
+                "group" => group,
+                "smoothing" => smoothing,
+                "x" => x_grid,
+                "y" => y_grid,
+                "z" => [z_grid[i, :] for i in 1:size(z_grid, 1)],
+                "color" => get(group_colors, group, "#1f77b4")
+            )
+            push!(surfaces_array, surface_obj)
+        end
+    end
+    return surfaces_array  # Return raw array, not JSON string
+end
 function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_col,
-                                group_cols, facet_cols, slider_cols, group_levels,
+                                group_cols, facet_cols, slider_cols,
+                                all_scheme_info, use_multiple_schemes, default_scheme_name,
                                 smoothing_params, default_smoothing, categorical_values,
-                                group_colors, surfaces_json, x_min, x_max, y_min, y_max,
+                                group_colors, all_schemes_surfaces_dict, has_l1,
+                                x_min, x_max, y_min, y_max,
                                 marker_size, marker_opacity, height)
 
-    group_cols_json = JSON.json(string.(group_cols))
-    facet_cols_json = JSON.json(string.(facet_cols))
+    # Prepare scheme info for JSON
+    schemes_json_dict = Dict{String, Any}()
+    for (scheme_name, (scheme_cols, group_levels)) in all_scheme_info
+        schemes_json_dict[scheme_name] = Dict(
+            "group_cols" => string.(scheme_cols),
+            "group_levels" => group_levels
+        )
+    end
+    schemes_json = JSON.json(schemes_json_dict)
+
+    # Convert surfaces to JSON (single encoding of the entire structure)
+    all_surfaces_json = JSON.json(all_schemes_surfaces_dict)
+
     smoothing_json = JSON.json(smoothing_params)
     default_smoothing_json = JSON.json(default_smoothing)
-    group_levels_json = JSON.json(group_levels)
+
+    # Get default group info
+    default_group_cols, default_group_levels = all_scheme_info[default_scheme_name]
+    group_cols_json = JSON.json(string.(default_group_cols))
+    group_levels_json = JSON.json(default_group_levels)
 
     return """
     (function() {
-        const surfacesData_$(chart_title_safe) = $(surfaces_json);
-        const groupLevels_$(chart_title_safe) = $(group_levels_json);
+        // All grouping schemes and their surfaces
+        const allSchemes_$(chart_title_safe) = $(schemes_json);
+        const allSurfaces_$(chart_title_safe) = $(all_surfaces_json);
+        const hasL1_$(chart_title_safe) = $(has_l1);
+        const useMultipleSchemes_$(chart_title_safe) = $(use_multiple_schemes);
         const smoothingParams_$(chart_title_safe) = $(smoothing_json);
         const defaultSmoothing_$(chart_title_safe) = $(default_smoothing_json);
         const groupColors_$(chart_title_safe) = $(JSON.json(group_colors));
 
         let allData = [];
+        let currentScheme_$(chart_title_safe) = "$(default_scheme_name)";
+        let currentGroupCols_$(chart_title_safe) = allSchemes_$(chart_title_safe)[currentScheme_$(chart_title_safe)].group_cols;
+        let currentGroupLevels_$(chart_title_safe) = allSchemes_$(chart_title_safe)[currentScheme_$(chart_title_safe)].group_levels;
         let currentSmoothing_$(chart_title_safe) = null; // null means "defaults"
-        let visibleGroups_$(chart_title_safe) = new Set(groupLevels_$(chart_title_safe));
+        let visibleGroups_$(chart_title_safe) = new Set(currentGroupLevels_$(chart_title_safe));
         let showSurfaces_$(chart_title_safe) = true;
         let showPoints_$(chart_title_safe) = true;
+        let useL1_$(chart_title_safe) = false; // Default to L2
         let currentXRange_$(chart_title_safe) = [$(x_min), $(x_max)];
         let currentYRange_$(chart_title_safe) = [$(y_min), $(y_max)];
-        let currentGroup_$(chart_title_safe) = $(JSON.json(length(group_cols) > 0 ? string(group_cols[1]) : ""));
 
         window.updatePlot_$(chart_title_safe) = function() {
             if (!allData || allData.length === 0) return;
@@ -323,11 +517,11 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
 
             // Add scatter points for each group
             if (showPoints_$(chart_title_safe)) {
-                groupLevels_$(chart_title_safe).forEach(group => {
+                currentGroupLevels_$(chart_title_safe).forEach(group => {
                     if (!visibleGroups_$(chart_title_safe).has(group)) return;
 
-                    const groupData = group === 'all' ? filtered : 
-                        filtered.filter(row => getGroupName_$(chart_title_safe)(row) === group);
+                    const groupData = group === 'all' ? filtered :
+                        filtered.filter(row => getGroupName_$(chart_title_safe)(row, currentGroupCols_$(chart_title_safe)) === group);
 
                     if (groupData.length > 0) {
                         traces.push({
@@ -350,21 +544,32 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
 
             // Add surfaces
             if (showSurfaces_$(chart_title_safe)) {
-                groupLevels_$(chart_title_safe).forEach(group => {
+                currentGroupLevels_$(chart_title_safe).forEach(group => {
                     if (!visibleGroups_$(chart_title_safe).has(group)) return;
 
                     // Determine which smoothing to use
                     const smoothing = currentSmoothing_$(chart_title_safe) === null ?
                         defaultSmoothing_$(chart_title_safe)[group] : currentSmoothing_$(chart_title_safe);
 
-                    const surface = surfacesData_$(chart_title_safe).find(s => 
+                    // Get surfaces for current scheme
+                    const schemeSurfaces = allSurfaces_$(chart_title_safe)[currentScheme_$(chart_title_safe)];
+                    if (!schemeSurfaces) return;
+
+                    // Select L1 or L2 surfaces (already parsed, no need for JSON.parse)
+                    const surfacesData = useL1_$(chart_title_safe) && hasL1_$(chart_title_safe) && schemeSurfaces.l1 ?
+                        schemeSurfaces.l1 : schemeSurfaces.l2;
+
+                    if (!surfacesData) return;
+
+                    const surface = surfacesData.find(s =>
                         s.group === group && s.smoothing === smoothing
                     );
 
                     if (surface) {
+                        const methodLabel = (useL1_$(chart_title_safe) && hasL1_$(chart_title_safe)) ? ' (L1)' : ' (L2)';
                         traces.push({
                             type: 'surface',
-                            name: group + ' (surface)',
+                            name: group + ' (surface)' + methodLabel,
                             x: surface.x,
                             y: surface.y,
                             z: surface.z,
@@ -388,14 +593,66 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
             };
 
             Plotly.newPlot('plot_$(chart_title_safe)', traces, layout);
+
+            // Update method explanation
+            updateMethodExplanation_$(chart_title_safe)();
         };
 
-        window.getGroupName_$(chart_title_safe) = function(row) {
-            if (groupLevels_$(chart_title_safe).length === 1 && 
-                groupLevels_$(chart_title_safe)[0] === 'all') return 'all';
+        window.updateMethodExplanation_$(chart_title_safe) = function() {
+            const explanationDiv = document.getElementById('method_explanation_$(chart_title_safe)');
+            if (!explanationDiv) return;
 
-            const groupCols = $(group_cols_json);
+            if (!hasL1_$(chart_title_safe)) {
+                // Only L2 available (custom fitter)
+                explanationDiv.innerHTML = '<em>Surfaces fitted using custom surface fitting function.</em>';
+                return;
+            }
+
+            const method = useL1_$(chart_title_safe) ? 'L1' : 'L2';
+            const methodName = useL1_$(chart_title_safe) ?
+                'weighted median (robust to outliers)' :
+                'Nadaraya-Watson kernel regression with weighted mean';
+
+            // Build default smoothing info
+            const defaultInfo = currentGroupLevels_$(chart_title_safe).map(group => {
+                const h = defaultSmoothing_$(chart_title_safe)[group];
+                return group + '=' + h.toFixed(2);
+            }).join(', ');
+
+            explanationDiv.innerHTML = '<em>Surfaces fitted using ' + method + ' minimization (' +
+                methodName + ') with Gaussian kernel. ' +
+                'Default smoothing parameters: ' + defaultInfo + '.</em>';
+        };
+
+        window.getGroupName_$(chart_title_safe) = function(row, groupCols) {
+            if (!groupCols || groupCols.length === 0) return 'all';
             return groupCols.map(col => String(row[col])).join('_');
+        };
+
+        window.changeScheme_$(chart_title_safe) = function(schemeName) {
+            currentScheme_$(chart_title_safe) = schemeName;
+            currentGroupCols_$(chart_title_safe) = allSchemes_$(chart_title_safe)[schemeName].group_cols;
+            currentGroupLevels_$(chart_title_safe) = allSchemes_$(chart_title_safe)[schemeName].group_levels;
+            visibleGroups_$(chart_title_safe) = new Set(currentGroupLevels_$(chart_title_safe));
+
+            // Update group buttons
+            updateGroupButtons_$(chart_title_safe)();
+
+            // Update plot
+            updatePlot_$(chart_title_safe)();
+        };
+
+        window.updateGroupButtons_$(chart_title_safe) = function() {
+            const container = document.getElementById('group_buttons_$(chart_title_safe)');
+            if (!container) return;
+
+            container.innerHTML = currentGroupLevels_$(chart_title_safe).map(group => {
+                const color = groupColors_$(chart_title_safe)[group] || '#ccc';
+                return '<button onclick=\"toggleGroup_$(chart_title_safe)(\\'' + group + '\\')\" ' +
+                       'style=\"background-color: ' + color + '; margin: 2px; padding: 5px 10px; ' +
+                       'border: 1px solid #ccc; cursor: pointer;\">' +
+                       group + '</button>';
+            }).join('');
         };
 
         window.setXRange_$(chart_title_safe) = function(min, max) {
@@ -434,9 +691,20 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
             } else {
                 currentSmoothing_$(chart_title_safe) = smoothingParams_$(chart_title_safe)[idx];
             }
-            document.getElementById('smoothing_label_$(chart_title_safe)').textContent = 
-                currentSmoothing_$(chart_title_safe) === null ? 'Defaults' : 
+            document.getElementById('smoothing_label_$(chart_title_safe)').textContent =
+                currentSmoothing_$(chart_title_safe) === null ? 'Defaults' :
                 currentSmoothing_$(chart_title_safe).toFixed(2);
+            updatePlot_$(chart_title_safe)();
+        };
+
+        window.toggleL1L2_$(chart_title_safe) = function() {
+            if (!hasL1_$(chart_title_safe)) return; // No L1 surfaces available
+            useL1_$(chart_title_safe) = !useL1_$(chart_title_safe);
+            const button = document.getElementById('l1l2_toggle_$(chart_title_safe)');
+            if (button) {
+                button.textContent = useL1_$(chart_title_safe) ? 'Using L1 (Median)' : 'Using L2 (Mean)';
+                button.style.backgroundColor = useL1_$(chart_title_safe) ? '#FF9800' : '#4CAF50';
+            }
             updatePlot_$(chart_title_safe)();
         };
 
@@ -451,22 +719,43 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
     """
 end
 
-function generate_appearance_html(chart_title_safe, title, notes, group_levels, group_colors,
-                                  smoothing_params, default_smoothing, categorical_values,
-                                  x_min, x_max, y_min, y_max, height)
+function generate_appearance_html(chart_title_safe, title, notes,
+                                  all_scheme_info, use_multiple_schemes, default_scheme_name,
+                                  group_colors, smoothing_params, default_smoothing, categorical_values,
+                                  x_min, x_max, y_min, y_max, height, has_l1)
 
-    # Generate group toggle buttons
+    # Get default group levels
+    default_group_cols, default_group_levels = all_scheme_info[default_scheme_name]
+
+    # Generate group toggle buttons (will be replaced dynamically if using multiple schemes)
     group_buttons = join(["""
-        <button onclick="toggleGroup_$(chart_title_safe)('$(group)')" 
-                style="background-color: $(group_colors[group]); margin: 2px; padding: 5px 10px; 
+        <button onclick="toggleGroup_$(chart_title_safe)('$(group)')"
+                style="background-color: $(group_colors[group]); margin: 2px; padding: 5px 10px;
                        border: 1px solid #ccc; cursor: pointer;">
             $(group)
         </button>
-    """ for group in group_levels], "\n")
+    """ for group in default_group_levels], "\n")
+
+    # Generate grouping scheme selector if using multiple schemes
+    scheme_selector = ""
+    if use_multiple_schemes
+        scheme_options = join(["""<option value="$(scheme_name)"$(scheme_name == default_scheme_name ? " selected" : "")>$(scheme_name)</option>"""
+                               for scheme_name in sort(collect(keys(all_scheme_info)))], "\n")
+        scheme_selector = """
+            <div style="margin: 10px 0;">
+                <label><strong>Grouping Scheme: </strong></label>
+                <select id="scheme_selector_$(chart_title_safe)"
+                        onchange="changeScheme_$(chart_title_safe)(this.value)"
+                        style="padding: 5px; font-size: 14px;">
+                    $(scheme_options)
+                </select>
+            </div>
+        """
+    end
 
     # Generate smoothing slider (default at index -1, then 0, 1, 2, ...)
     smoothing_options = """<option value="-1">Defaults</option>\n""" *
-        join(["<option value=\"$(i-1)\">$(smoothing_params[i])</option>" 
+        join(["<option value=\"$(i-1)\">$(smoothing_params[i])</option>"
               for i in 1:length(smoothing_params)], "\n")
 
     return """
@@ -474,49 +763,65 @@ function generate_appearance_html(chart_title_safe, title, notes, group_levels, 
         <h3>$(title)</h3>
         $(isempty(notes) ? "" : "<p>$(notes)</p>")
 
-        <div style="margin: 10px 0;">
-            <strong>Global Controls:</strong>
-            <button onclick="toggleAllSurfaces_$(chart_title_safe)()">Toggle All Surfaces</button>
-            <button onclick="toggleAllPoints_$(chart_title_safe)()">Toggle All Points</button>
+        <!-- Filters (X/Y Range) -->
+        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
+            <h4 style="margin-top: 0;">Data Filters</h4>
+            <div style="margin: 5px 0;">
+                <label>X Range: </label>
+                <input type="number" id="x_min_$(chart_title_safe)" value="$(x_min)" step="any" style="width: 80px;">
+                to
+                <input type="number" id="x_max_$(chart_title_safe)" value="$(x_max)" step="any" style="width: 80px;">
+                <button onclick="setXRange_$(chart_title_safe)(
+                    document.getElementById('x_min_$(chart_title_safe)').value,
+                    document.getElementById('x_max_$(chart_title_safe)').value
+                )">Update X</button>
+            </div>
+            <div style="margin: 5px 0;">
+                <label>Y Range: </label>
+                <input type="number" id="y_min_$(chart_title_safe)" value="$(y_min)" step="any" style="width: 80px;">
+                to
+                <input type="number" id="y_max_$(chart_title_safe)" value="$(y_max)" step="any" style="width: 80px;">
+                <button onclick="setYRange_$(chart_title_safe)(
+                    document.getElementById('y_min_$(chart_title_safe)').value,
+                    document.getElementById('y_max_$(chart_title_safe)').value
+                )">Update Y</button>
+            </div>
         </div>
 
-        <div style="margin: 10px 0;">
-            <strong>Group Colors (click to toggle):</strong><br>
-            $(group_buttons)
+        <!-- Group Selection -->
+        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
+            <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+            $(scheme_selector)
+            <div id="group_buttons_$(chart_title_safe)">
+                $(group_buttons)
+            </div>
         </div>
 
-        <div style="margin: 10px 0;">
-            <label>X Range: </label>
-            <input type="number" id="x_min_$(chart_title_safe)" value="$(x_min)" step="any" style="width: 80px;">
-            to
-            <input type="number" id="x_max_$(chart_title_safe)" value="$(x_max)" step="any" style="width: 80px;">
-            <button onclick="setXRange_$(chart_title_safe)(
-                document.getElementById('x_min_$(chart_title_safe)').value,
-                document.getElementById('x_max_$(chart_title_safe)').value
-            )">Update X</button>
+        <!-- Surface Controls -->
+        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
+            <h4 style="margin-top: 0;">Surface Controls</h4>
+            <div style="margin: 5px 0;">
+                <label>Smoothing Parameter: </label>
+                <select id="smoothing_select_$(chart_title_safe)"
+                        onchange="setSmoothing_$(chart_title_safe)(this.value)">
+                    $(smoothing_options)
+                </select>
+                <span id="smoothing_label_$(chart_title_safe)">Defaults</span>
+            </div>
+            <div style="margin: 10px 0;">
+                <button onclick="toggleAllSurfaces_$(chart_title_safe)()">Toggle All Surfaces</button>
+                <button onclick="toggleAllPoints_$(chart_title_safe)()">Toggle All Points</button>
+                $(has_l1 ? """<button id="l1l2_toggle_$(chart_title_safe)" onclick="toggleL1L2_$(chart_title_safe)()"
+                             style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 10px;
+                                    border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>""" : "")
+            </div>
         </div>
 
-        <div style="margin: 10px 0;">
-            <label>Y Range: </label>
-            <input type="number" id="y_min_$(chart_title_safe)" value="$(y_min)" step="any" style="width: 80px;">
-            to
-            <input type="number" id="y_max_$(chart_title_safe)" value="$(y_max)" step="any" style="width: 80px;">
-            <button onclick="setYRange_$(chart_title_safe)(
-                document.getElementById('y_min_$(chart_title_safe)').value,
-                document.getElementById('y_max_$(chart_title_safe)').value
-            )">Update Y</button>
-        </div>
-
-        <div style="margin: 10px 0;">
-            <label>Smoothing Parameter: </label>
-            <select id="smoothing_select_$(chart_title_safe)" 
-                    onchange="setSmoothing_$(chart_title_safe)(this.value)">
-                $(smoothing_options)
-            </select>
-            <span id="smoothing_label_$(chart_title_safe)">Defaults</span>
-        </div>
-
+        <!-- Chart -->
         <div id="plot_$(chart_title_safe)" style="width: 100%; height: $(height)px;"></div>
+
+        <div id="method_explanation_$(chart_title_safe)" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
+        </div>
     </div>
     """
 end

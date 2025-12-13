@@ -53,6 +53,9 @@ struct AreaChart <: JSPlotsType
                             fill_opacity::Float64=0.6,
                             notes::String="")
 
+        # Sanitize chart title for use in JavaScript/HTML IDs
+        chart_title_safe = string(sanitize_chart_title(chart_title))
+
         # Get available columns in dataframe
         available_cols = Set(names(df))
 
@@ -155,7 +158,7 @@ struct AreaChart <: JSPlotsType
             filter_dropdowns_html *= """
             <div style="margin: 10px;">
                 <label for="$(col)_select">$(col): </label>
-                <select id="$(col)_select" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_$chart_title()">
+                <select id="$(col)_select" multiple style="min-width: 150px; height: 100px;" onchange="updatePlot_$chart_title_safe()">
     $options_html            </select>
             </div>
             """
@@ -220,12 +223,12 @@ struct AreaChart <: JSPlotsType
             }
 
             // Make it global so inline onchange can see it
-            window.updateChart_$chart_title = function() {
+            window.updatePlot_$chart_title_safe = function() {
                 // Get current X and Y columns
-                const xColSelect = document.getElementById('x_col_select_$chart_title');
+                const xColSelect = document.getElementById('x_col_select_$chart_title_safe');
                 const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
 
-                const yColSelect = document.getElementById('y_col_select_$chart_title');
+                const yColSelect = document.getElementById('y_col_select_$chart_title_safe');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
                 // Get current filter values (multiple selections)
@@ -238,16 +241,16 @@ struct AreaChart <: JSPlotsType
                 });
 
                 // Get current group column
-                const groupColSelect = document.getElementById('group_col_select_$chart_title');
+                const groupColSelect = document.getElementById('group_col_select_$chart_title_safe');
                 const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_GROUP_COL;
 
                 // Get current stack mode
-                const stackModeSelect = document.getElementById('stack_mode_select_$chart_title');
+                const stackModeSelect = document.getElementById('stack_mode_select_$chart_title_safe');
                 const STACK_MODE = stackModeSelect ? stackModeSelect.value : '$stack_mode';
 
                 // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
+                const facet1Select = document.getElementById('facet1_select_$chart_title_safe');
+                const facet2Select = document.getElementById('facet2_select_$chart_title_safe');
                 const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
                 const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
 
@@ -364,7 +367,7 @@ struct AreaChart <: JSPlotsType
                         barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
                     };
 
-                    Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
+                    Plotly.newPlot('$chart_title_safe', traces, layout, {responsive: true});
 
                 } else if (FACET_COLS.length === 1) {
                     // Facet wrap
@@ -496,7 +499,7 @@ struct AreaChart <: JSPlotsType
                         });
                     });
 
-                    Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
+                    Plotly.newPlot('$chart_title_safe', traces, layout, {responsive: true});
 
                 } else {
                     // Facet grid (2 facet columns)
@@ -650,16 +653,16 @@ struct AreaChart <: JSPlotsType
                         });
                     });
 
-                    Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
+                    Plotly.newPlot('$chart_title_safe', traces, layout, {responsive: true});
                 }
             };
 
             // Load and parse CSV data using centralized parser
             loadDataset('$data_label').then(function(data) {
                 allData = data;
-                window.updateChart_$chart_title();
+                window.updatePlot_$chart_title_safe();
             }).catch(function(error) {
-                console.error('Error loading data for chart $chart_title:', error);
+                console.error('Error loading data for chart $chart_title_safe:', error);
             });
         })();
         """
@@ -676,8 +679,8 @@ struct AreaChart <: JSPlotsType
             end
             non_facet_controls *= """
             <div style="margin: 10px;">
-                <label for="x_col_select_$chart_title">X dimension: </label>
-                <select id="x_col_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="x_col_select_$chart_title_safe">X dimension: </label>
+                <select id="x_col_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $x_options            </select>
             </div>
             """
@@ -692,8 +695,8 @@ struct AreaChart <: JSPlotsType
             end
             non_facet_controls *= """
             <div style="margin: 10px;">
-                <label for="y_col_select_$chart_title">Y dimension: </label>
-                <select id="y_col_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="y_col_select_$chart_title_safe">Y dimension: </label>
+                <select id="y_col_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $y_options            </select>
             </div>
             """
@@ -708,8 +711,8 @@ struct AreaChart <: JSPlotsType
             end
             non_facet_controls *= """
             <div style="margin: 10px;">
-                <label for="group_col_select_$chart_title">Group by: </label>
-                <select id="group_col_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="group_col_select_$chart_title_safe">Group by: </label>
+                <select id="group_col_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $group_options            </select>
             </div>
             """
@@ -724,8 +727,8 @@ struct AreaChart <: JSPlotsType
         end
         non_facet_controls *= """
         <div style="margin: 10px;">
-            <label for="stack_mode_select_$chart_title">Stack mode: </label>
-            <select id="stack_mode_select_$chart_title" onchange="updateChart_$chart_title()">
+            <label for="stack_mode_select_$chart_title_safe">Stack mode: </label>
+            <select id="stack_mode_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $stack_mode_options        </select>
         </div>
         """
@@ -742,8 +745,8 @@ struct AreaChart <: JSPlotsType
 
             facet_controls *= """
             <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="facet1_select_$chart_title_safe">Facet by: </label>
+                <select id="facet1_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $facet1_options            </select>
             </div>
             """
@@ -760,8 +763,8 @@ struct AreaChart <: JSPlotsType
 
             facet_controls *= """
             <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet 1: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="facet1_select_$chart_title_safe">Facet 1: </label>
+                <select id="facet1_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $facet1_options            </select>
             </div>
             """
@@ -777,8 +780,8 @@ struct AreaChart <: JSPlotsType
 
             facet_controls *= """
             <div style="margin: 10px;">
-                <label for="facet2_select_$chart_title">Facet 2: </label>
-                <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
+                <label for="facet2_select_$chart_title_safe">Facet 2: </label>
+                <select id="facet2_select_$chart_title_safe" onchange="updatePlot_$chart_title_safe()">
     $facet2_options            </select>
             </div>
             """
@@ -798,7 +801,7 @@ struct AreaChart <: JSPlotsType
         $(facet_controls != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $facet_controls\n        </div>" : "")
 
         <!-- Chart -->
-        <div id="$chart_title"></div>
+        <div id="$chart_title_safe"></div>
         """
 
         new(chart_title, data_label, functional_html, appearance_html)

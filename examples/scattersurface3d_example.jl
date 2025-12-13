@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Statistics
+using JSPlots, DataFrames, Statistics, Random
 
 println("Creating ScatterSurface3D examples...")
 
@@ -163,10 +163,115 @@ summary = TextBlock("""
 </ul>
 """)
 
+# =============================================================================
+# Example 3: Finance - Multiple Grouping Schemes
+# =============================================================================
+
+example3_text = TextBlock("""
+<h2>Example 3: Financial Data with Multiple Grouping Schemes</h2>
+<p>This example demonstrates stock returns analysis with switchable grouping schemes.</p>
+<p><strong>Dataset:</strong> 150 synthetic stocks with financial metrics</p>
+<ul>
+    <li><strong>X-axis (Carry):</strong> Interest rate differential - higher carry suggests positive yield</li>
+    <li><strong>Y-axis (Trading Activity):</strong> Recent market volatility and volume</li>
+    <li><strong>Z-axis (24h Return):</strong> Expected stock return over next 24 hours (%)</li>
+</ul>
+<p><strong>Grouping Schemes:</strong> Use the dropdown to switch between different groupings:</p>
+<ul>
+    <li><strong>Industry:</strong> Group by GICS sector (Technology, Financials, Healthcare, Energy, Consumer, Industrials)</li>
+    <li><strong>Country:</strong> Group by geographic region (USA, UK, Germany, Japan, China)</li>
+</ul>
+<p><strong>Key Insights:</strong></p>
+<ul>
+    <li>Each grouping reveals different patterns in the data</li>
+    <li>Technology and Healthcare sectors tend to show higher returns</li>
+    <li>Different countries have different return profiles based on local market conditions</li>
+    <li>The L1/L2 toggle allows switching between robust (median) and smooth (mean) fits</li>
+</ul>
+""")
+
+# Generate synthetic stock data
+Random.seed!(123)
+
+industries = ["Technology", "Financials", "Healthcare", "Energy", "Consumer", "Industrials"]
+countries = ["USA", "UK", "Germany", "Japan", "China"]
+
+n_stocks = 150
+
+df_finance = DataFrame(
+    stock_id = 1:n_stocks,
+    industry = rand(industries, n_stocks),
+    country = rand(countries, n_stocks)
+)
+
+# Generate financial metrics
+df_finance.carry = randn(n_stocks) .* 2.0
+
+df_finance.trading_activity = abs.(randn(n_stocks)) .* 3.0 .+ 1.0
+
+# Industry and country effects
+industry_effects = Dict(
+    "Technology" => 0.5,
+    "Financials" => -0.2,
+    "Healthcare" => 0.3,
+    "Energy" => -0.4,
+    "Consumer" => 0.1,
+    "Industrials" => 0.0
+)
+
+country_effects = Dict(
+    "USA" => 0.3,
+    "UK" => -0.1,
+    "Germany" => 0.2,
+    "Japan" => 0.0,
+    "China" => 0.4
+)
+
+# Generate returns with structure
+df_finance.return_24h = map(eachrow(df_finance)) do row
+    base = 0.2 * row.carry - 0.1 * row.trading_activity
+    industry_effect = industry_effects[row.industry]
+    country_effect = country_effects[row.country]
+    noise = randn() * 0.5
+    return base + industry_effect + country_effect + noise
+end
+
+println("Generated $(nrow(df_finance)) stocks across $(length(industries)) industries and $(length(countries)) countries")
+
+# Create chart with multiple grouping schemes
+chart3 = ScatterSurface3D(:finance_multi_group, df_finance, :finance_data,
+    x_col=:carry,
+    y_col=:trading_activity,
+    z_col=:return_24h,
+    grouping_schemes=Dict(
+        "Industry" => [:industry],
+        "Country" => [:country]
+    ),
+    smoothing_params=[0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0],
+    default_smoothing=Dict(
+        "Technology" => 1.5,
+        "Financials" => 2.0,
+        "Healthcare" => 1.5,
+        "Energy" => 2.0,
+        "Consumer" => 2.0,
+        "Industrials" => 2.0,
+        "USA" => 1.5,
+        "UK" => 2.0,
+        "Germany" => 2.0,
+        "Japan" => 2.5,
+        "China" => 1.0
+    ),
+    marker_size=4,
+    marker_opacity=0.6,
+    height=700,
+    title="Stock Returns - Switchable Grouping",
+    notes="Use the grouping scheme dropdown to switch between Industry and Country groupings. Colors and surfaces update automatically."
+)
+
 # Create combined page
 page = JSPlotPage(
-    Dict(:data => df, :data_subset => df_subset),
-    [example1_text, chart1, example2_text, chart2, summary],
+    Dict(:data => df, :data_subset => df_subset, :finance_data => df_finance),
+    [example1_text, chart1, example2_text, chart2, example3_text, chart3, summary],
     tab_title="ScatterSurface3D Examples"
 )
 
@@ -179,5 +284,6 @@ println("\nFile created: generated_html_examples/scattersurface3d_example.html")
 println("\nThis page includes:")
 println("  • Example 1: Basic scatter with default smoother (3 groups)")
 println("  • Example 2: Custom surface fitting function (2 groups)")
+println("  • Example 3: Finance with switchable grouping schemes (Industry/Country)")
 println("  • Interactive controls for smoothing, ranges, and visibility")
 println("\nOpen the HTML file in a browser to interact with the 3D plots!")
