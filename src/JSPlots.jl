@@ -1,6 +1,6 @@
 module JSPlots
 
-    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator
+    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite
 
     abstract type JSPlotsType end
 
@@ -44,6 +44,9 @@ module JSPlots
 
     include("picture.jl")
     export Picture
+
+    include("slides.jl")
+    export Slides
 
     include("table.jl")
     export Table

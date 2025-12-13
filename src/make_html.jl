@@ -657,6 +657,11 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                     table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
                 end
                 # TextBlock has no functional HTML
+            elseif isa(pti, Slides)
+                # Generate Slides HTML based on dataformat
+                functional_bit *= pti.functional_html
+                table_bit *= sp * generate_slides_html(pti, pt.dataformat, project_dir)
+                # Slides has no data attribution (uses :no_data label)
             elseif isa(pti, Table)
                 functional_bit *= pti.functional_html
                 table_bit *= sp * pti.appearance_html
@@ -735,6 +740,11 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                     table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
                 end
                 # TextBlock has no functional HTML
+            elseif isa(pti, Slides)
+                # Generate Slides HTML based on dataformat (embedded)
+                functional_bit *= pti.functional_html
+                table_bit *= sp * generate_slides_html(pti, pt.dataformat, "")
+                # Slides has no data attribution (uses :no_data label)
             elseif isa(pti, Table)
                 functional_bit *= pti.functional_html
                 table_bit *= sp * pti.appearance_html
@@ -766,13 +776,31 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         println("Pivot table page saved to $outfile_path")
     end
 
-    # Clean up temporary files for Picture objects
+    # Clean up temporary files for Picture and Slides objects
     for pti in pt.pivot_tables
         if isa(pti, Picture) && pti.is_temp
             try
                 rm(pti.image_path, force=true)
             catch e
                 @warn "Could not delete temporary file $(pti.image_path): $e"
+            end
+        elseif isa(pti, Slides) && pti.is_temp
+            # Clean up temp directory with all generated slides
+            for img_file in pti.image_files
+                try
+                    rm(img_file, force=true)
+                catch e
+                    @warn "Could not delete temporary slide file $(img_file): $e"
+                end
+            end
+            # Try to remove the temp directory if empty
+            try
+                temp_dir = dirname(first(pti.image_files))
+                if isdir(temp_dir)
+                    rm(temp_dir, force=true, recursive=true)
+                end
+            catch e
+                @warn "Could not delete temporary directory: $e"
             end
         end
     end
@@ -796,12 +824,12 @@ function create_html(pt::Picture, outfile_path::String="pivottable.html")
 end
 
 """
-    generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol)
+    generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol, project_dir::String="")
 
 Helper function to generate HTML content for a single page without creating folders.
 Returns the HTML string directly.
 """
-function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol)
+function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol, project_dir::String="")
     # Collect extra styles
     extra_styles = ""
     has_textblock = any(p -> isa(p, TextBlock), page.pivot_tables)
@@ -838,6 +866,10 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
             else
                 table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
             end
+        elseif isa(pti, Slides)
+            # Slides always use external images in slides/ directory
+            functional_bit *= pti.functional_html
+            table_bit *= sp * generate_slides_html(pti, dataformat, project_dir)
         elseif isa(pti, Table)
             functional_bit *= pti.functional_html
             table_bit *= sp * pti.appearance_html
@@ -958,7 +990,7 @@ function create_html(jsp::Pages, outfile_path::String="index.html")
 
     # Generate coverpage HTML
     coverpage_path = joinpath(project_dir, original_name)
-    coverpage_html = generate_page_html(jsp.coverpage, all_dataframes, jsp.dataformat)
+    coverpage_html = generate_page_html(jsp.coverpage, all_dataframes, jsp.dataformat, project_dir)
     open(coverpage_path, "w") do f
         write(f, coverpage_html)
     end
@@ -971,7 +1003,7 @@ function create_html(jsp::Pages, outfile_path::String="index.html")
         sanitized_name = sanitize_filename(page.tab_title)
         page_filename = "$(sanitized_name).html"
         page_path = joinpath(project_dir, page_filename)
-        page_html = generate_page_html(page, all_dataframes, jsp.dataformat)
+        page_html = generate_page_html(page, all_dataframes, jsp.dataformat, project_dir)
         open(page_path, "w") do f
             write(f, page_html)
         end

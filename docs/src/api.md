@@ -469,6 +469,142 @@ HTML text block for adding formatted text and tables to plot pages.
 - Blockquotes: `<blockquote>`
 - Divisions: `<div>`, `<span>`
 
+#### Slides
+
+```@docs
+Slides
+```
+
+Interactive slideshow with filtering, playback controls, and keyboard navigation.
+
+**Constructor 1: From Directory Pattern**
+
+Load existing images from a directory following the naming pattern: `prefix!group1!group2!...!slidenum.extension`
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this slideshow
+- `directory::String`: Directory containing slide images
+- `prefix::String`: Filename prefix to match
+- `filetype::String`: File extension (`"png"`, `"jpg"`, `"jpeg"`, `"pdf"`)
+
+**Keyword Arguments:**
+- `default_filters::Dict{Symbol,Any}`: Default values for filters (default: `Dict{Symbol,Any}()`)
+- `title::String`: Slideshow title (default: `"Slides"`)
+- `notes::String`: Descriptive text (default: `""`)
+- `autoplay::Bool`: Start in autoplay mode (default: `false`)
+- `delay::Float64`: Seconds between slides in autoplay (default: `2.0`)
+
+**File Naming Pattern:**
+- Files must follow: `prefix!group1!group2!...!slidenum.extension`
+- Groups are optional filtering dimensions
+- All files must have the same number of group segments
+- `slidenum` must be an integer
+- Supported extensions: `png`, `jpg`, `jpeg`, `pdf`
+
+**Example:**
+```julia
+# Files in directory:
+# sales!North!Q1!1.png
+# sales!North!Q1!2.png
+# sales!South!Q1!1.png
+# sales!South!Q2!1.png
+
+slides = Slides(:sales_slides, "charts", "sales", "png";
+    default_filters = Dict{Symbol,Any}(:group_1 => "North", :group_2 => "Q1"),
+    title = "Sales Analysis Slideshow"
+)
+```
+
+**Constructor 2: From Function**
+
+Generate slides dynamically by calling a function for each combination of groups and slide numbers.
+
+```julia
+Slides(chart_title::Symbol, df::DataFrame, data_label::Symbol,
+       group_cols::Vector{Symbol}, slide_col::Symbol,
+       chart_function::Function; kwargs...)
+```
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier
+- `df::DataFrame`: Data for generating charts
+- `data_label::Symbol`: Data reference symbol
+- `group_cols::Vector{Symbol}`: Columns to use as filter groups
+- `slide_col::Symbol`: Column containing slide numbers
+- `chart_function::Function`: Function with signature `(df, group_values..., slide_num) -> chart_object`
+
+**Keyword Arguments:**
+- `default_filters::Dict{Symbol,Any}`: Default filter values
+- `output_format::Symbol`: Chart output format - `:png`, `:svg`, `:jpeg` (default: `:png`)
+- `title::String`: Slideshow title
+- `notes::String`: Descriptive text
+- `autoplay::Bool`: Start in autoplay mode
+- `delay::Float64`: Seconds between slides
+
+**Example (VegaLite.jl):**
+```julia
+using VegaLite
+
+function make_chart_vegalite(df, region, quarter, slide_num)
+    filtered = df[(df.Region .== region) .& (df.Quarter .== quarter), :]
+
+    # Create and return VegaLite chart object
+    chart = filtered |> @vlplot(
+        :bar,
+        title = "$(region) - $(quarter) - Slide $(slide_num)",
+        x = :Month,
+        y = :Sales,
+        color = {value = "#2196F3"}
+    )
+
+    return chart  # Chart is automatically saved by Slides
+end
+
+slides = Slides(:generated_slides, df, :sales_data,
+    [:Region, :Quarter], :SlideNum, make_chart_vegalite;
+    output_format = :svg,  # VegaLite charts work best as SVG
+    title = "Generated Sales Slides"
+)
+```
+
+**Example (Plots.jl):**
+```julia
+using Plots
+
+function make_chart_plots(df, region, quarter, slide_num)
+    filtered = df[(df.Region .== region) .& (df.Quarter .== quarter), :]
+    return plot(filtered.Month, filtered.Sales, title="Slide $slide_num")
+end
+
+slides = Slides(:generated_slides, df, :sales_data,
+    [:Region, :Quarter], :SlideNum, make_chart_plots;
+    output_format = :png,
+    title = "Generated Sales Slides"
+)
+```
+
+**Supported Chart Libraries:**
+- **VegaLite.jl**: Auto-detected and saved (recommended for SVG output)
+- **Plots.jl**: Auto-detected and saved using `savefig`
+- **Makie.jl / CairoMakie**: Auto-detected and saved using `CairoMakie.save`
+- **Custom objects**: Any object with a `.save(filepath)` method
+
+**Features:**
+- Interactive playback controls (play/pause, previous/next)
+- Adjustable playback speed with log scale slider (0.05s to 5s per slide)
+- Keyboard shortcuts (← → for navigation, Space for play/pause)
+- Filter dropdowns for group dimensions
+- Automatic looping in autoplay mode
+- Support for PNG, JPEG, SVG, and PDF images
+
+**Data Format Behavior:**
+- Embedded formats (`:csv_embedded`, `:json_embedded`): Images are embedded directly in HTML
+  - SVG files are embedded as XML for best quality
+  - PNG/JPEG files are base64-encoded
+  - PDF files show placeholder text (limited browser support)
+- External formats (`:csv_external`, `:json_external`, `:parquet`): Images are copied to `slides/` subdirectory
+- Function-generated slides create temporary files that are cleaned up after HTML generation
+
 ## Output Functions
 
 ### create_html
