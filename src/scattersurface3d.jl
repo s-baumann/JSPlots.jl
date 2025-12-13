@@ -141,15 +141,15 @@ struct ScatterSurface3D <: JSPlotsType
             if surface_fitter === nothing
                 # Compute both L1 and L2 surfaces
                 surfaces_data_l2 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
-                                                    group_levels, default_surface_smoother_l2,
+                                                    group_levels, true,
                                                     smoothing_params, grid_size)
                 surfaces_data_l1 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
-                                                    group_levels, default_surface_smoother_l1,
+                                                    group_levels, false,
                                                     smoothing_params, grid_size)
             else
                 # Use custom fitter (only L2)
                 surfaces_data_l2 = compute_surfaces(df, x_col, y_col, z_col, scheme_cols,
-                                                    group_levels, surface_fitter,
+                                                    group_levels, true,
                                                     smoothing_params, grid_size)
             end
 
@@ -199,7 +199,7 @@ end
 """
 Surface smoother using kernel smoothing with L2 minimization (weighted mean)
 """
-function default_surface_smoother_l2(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64)
+function surface_smoother(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64; L2_metric::Bool=true)
     # Create grid
     x_min, x_max = extrema(x)
     y_min, y_max = extrema(y)
@@ -230,68 +230,21 @@ function default_surface_smoother_l2(x::Vector{Float64}, y::Vector{Float64}, z::
 
             weight_sum = sum(weights)
             if weight_sum > 0
-                z_grid[i, j] = sum(weights .* z) / weight_sum
+                z_grid[i, j] = L2_metric ? sum(weights .* z) / weight_sum : weighted_median(z, weights)
             else
-                z_grid[i, j] = mean(z)
+                z_grid[i, j] = L2_metric ? mean(z) : median(z)
             end
         end
     end
 
     return (collect(x_grid), collect(y_grid), z_grid)
 end
-
-"""
-Surface smoother using kernel smoothing with L1 minimization (weighted median)
-"""
-function default_surface_smoother_l1(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64}, smoothing::Float64)
-    # Create grid
-    x_min, x_max = extrema(x)
-    y_min, y_max = extrema(y)
-
-    x_range = x_max - x_min
-    y_range = y_max - y_min
-
-    # Extend range slightly
-    x_min -= 0.1 * x_range
-    x_max += 0.1 * x_range
-    y_min -= 0.1 * y_range
-    y_max += 0.1 * y_range
-
-    grid_size = 20
-    x_grid = range(x_min, x_max, length=grid_size)
-    y_grid = range(y_min, y_max, length=grid_size)
-
-    z_grid = zeros(grid_size, grid_size)
-
-    # Kernel smoothing for each grid point (L1: weighted median)
-    for (i, xi) in enumerate(x_grid)
-        for (j, yj) in enumerate(y_grid)
-            weights = zeros(length(x))
-            for k in 1:length(x)
-                dist = sqrt((x[k] - xi)^2 + (y[k] - yj)^2)
-                weights[k] = exp(-dist^2 / (2 * smoothing^2))
-            end
-
-            weight_sum = sum(weights)
-            if weight_sum > 1e-10
-                z_grid[i, j] = weighted_median(z, weights)
-            else
-                z_grid[i, j] = median(z)
-            end
-        end
-    end
-
-    return (collect(x_grid), collect(y_grid), z_grid)
-end
-
-# Default uses L2 minimization
-const default_surface_smoother = default_surface_smoother_l2
 
 """
 Compute surfaces for all groups and smoothing parameters
 """
 function compute_surfaces(df, x_col, y_col, z_col, group_cols, group_levels,
-                         surface_fitter, smoothing_params, grid_size)
+                         L2_metric::Bool, smoothing_params, grid_size)
     surfaces = Dict{String, Any}()
 
     for group_name in group_levels
@@ -321,7 +274,7 @@ function compute_surfaces(df, x_col, y_col, z_col, group_cols, group_levels,
         # Fit surface at each smoothing level
         for smoothing in smoothing_params
             try
-                x_grid, y_grid, z_grid = surface_fitter(x_data, y_data, z_data, smoothing)
+                x_grid, y_grid, z_grid = surface_smoother(x_data, y_data, z_data, smoothing; L2_metric=true)
                 surfaces[group_name][smoothing] = (x_grid, y_grid, z_grid)
             catch e
                 @warn "Failed to fit surface for group $group_name with smoothing $smoothing: $e"

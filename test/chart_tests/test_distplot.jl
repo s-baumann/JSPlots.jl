@@ -1,6 +1,7 @@
 using Test
 using JSPlots
 using DataFrames
+using Dates
 
 @testset "DistPlot" begin
     df_dist = DataFrame(value = randn(100))
@@ -36,5 +37,202 @@ using DataFrames
         )
         @test occursin("50", chart.functional_html)
         @test occursin("false", lowercase(chart.functional_html))
+    end
+
+    @testset "Multiple value columns" begin
+        df_multi = DataFrame(
+            value1 = randn(50),
+            value2 = randn(50) .+ 2,
+            value3 = randn(50) .* 2
+        )
+        chart = DistPlot(:multi_values, df_multi, :df_multi;
+            value_cols = [:value1, :value2, :value3],
+            show_controls = true
+        )
+        @test occursin("value1", chart.appearance_html)
+        @test occursin("value2", chart.appearance_html)
+        @test occursin("value3", chart.appearance_html)
+    end
+
+    @testset "Multiple group columns" begin
+        df_groups = DataFrame(
+            value = randn(100),
+            category = repeat(["A", "B"], 50),
+            region = repeat(["North", "South", "East", "West"], 25)
+        )
+        chart = DistPlot(:multi_groups, df_groups, :df_groups;
+            value_cols = :value,
+            group_cols = [:category, :region],
+            show_controls = true
+        )
+        @test occursin("category", chart.appearance_html)
+        @test occursin("region", chart.appearance_html)
+    end
+
+    @testset "Filter sliders - continuous" begin
+        df_filter = DataFrame(
+            value = randn(100),
+            temperature = rand(100) .* 30 .+ 10,
+            pressure = rand(100) .* 100 .+ 900
+        )
+        chart = DistPlot(:filter_continuous, df_filter, :df_filter;
+            value_cols = :value,
+            filter_cols = [:temperature, :pressure]
+        )
+        @test occursin("temperature", chart.appearance_html)
+        @test occursin("pressure", chart.appearance_html)
+        @test occursin("slider", lowercase(chart.appearance_html))
+    end
+
+    @testset "Filter sliders - dates" begin
+        ndays = 365
+        df_dates = DataFrame(
+            value = randn(ndays),
+            date = Date(2024, 1, 1):Day(1):Date(2024, 12, 30)  # 365 days
+        )
+        chart = DistPlot(:filter_dates, df_dates, :df_dates;
+            value_cols = :value,
+            filter_cols = :date
+        )
+        @test occursin("date", chart.appearance_html)
+        @test occursin("slider", lowercase(chart.appearance_html))
+    end
+
+    @testset "Filter sliders - integers" begin
+        df_int = DataFrame(
+            value = randn(100),
+            year = rand(2020:2024, 100),
+            count = rand(1:100, 100)
+        )
+        chart = DistPlot(:filter_int, df_int, :df_int;
+            value_cols = :value,
+            filter_cols = [:year, :count]
+        )
+        @test occursin("year", chart.appearance_html)
+        @test occursin("count", chart.appearance_html)
+    end
+
+    @testset "Only histogram" begin
+        chart = DistPlot(:hist_only, df_dist, :df_dist;
+            value_cols = :value,
+            show_histogram = true,
+            show_box = false,
+            show_rug = false
+        )
+        @test occursin("histogram", lowercase(chart.functional_html))
+    end
+
+    @testset "Only box plot" begin
+        chart = DistPlot(:box_only, df_dist, :df_dist;
+            value_cols = :value,
+            show_histogram = false,
+            show_box = true,
+            show_rug = false
+        )
+        @test occursin("box", lowercase(chart.functional_html))
+    end
+
+    @testset "Only rug plot" begin
+        chart = DistPlot(:rug_only, df_dist, :df_dist;
+            value_cols = :value,
+            show_histogram = false,
+            show_box = false,
+            show_rug = true
+        )
+        @test chart.functional_html != ""
+    end
+
+    @testset "Custom histogram bins" begin
+        for bins in [10, 20, 50, 100]
+            chart = DistPlot(Symbol("bins_$bins"), df_dist, :df_dist;
+                value_cols = :value,
+                histogram_bins = bins
+            )
+            @test occursin(string(bins), chart.functional_html)
+        end
+    end
+
+    @testset "Custom box opacity" begin
+        for opacity in [0.3, 0.5, 0.8, 1.0]
+            chart = DistPlot(Symbol("opacity_$(Int(opacity*10))"), df_dist, :df_dist;
+                value_cols = :value,
+                box_opacity = opacity
+            )
+            @test occursin(string(opacity), chart.functional_html)
+        end
+    end
+
+    @testset "With notes" begin
+        notes = "This is a test distribution plot with detailed notes."
+        chart = DistPlot(:with_notes, df_dist, :df_dist;
+            value_cols = :value,
+            notes = notes
+        )
+        @test occursin(notes, chart.appearance_html)
+    end
+
+    @testset "Integration with JSPlotPage" begin
+        mktempdir() do tmpdir
+            df_test = DataFrame(
+                value = randn(50),
+                category = repeat(["X", "Y"], 25)
+            )
+
+            chart = DistPlot(:page_dist, df_test, :test_data;
+                value_cols = :value,
+                group_cols = :category,
+                title = "Distribution Test"
+            )
+
+            page = JSPlotPage(Dict(:test_data => df_test), [chart])
+            outfile = joinpath(tmpdir, "distplot_test.html")
+            create_html(page, outfile)
+
+            @test isfile(outfile)
+            content = read(outfile, String)
+            @test occursin("Distribution Test", content)
+            @test occursin("page_dist", content)
+        end
+    end
+
+    @testset "Dependencies method" begin
+        chart = DistPlot(:dep_test, df_dist, :my_data;
+            value_cols = :value
+        )
+        deps = JSPlots.dependencies(chart)
+        @test deps == [:my_data]
+        @test length(deps) == 1
+    end
+
+    @testset "Empty data handling" begin
+        df_empty = DataFrame(value = Float64[])
+        chart = DistPlot(:empty_dist, df_empty, :df_empty;
+            value_cols = :value
+        )
+        @test chart.chart_title == :empty_dist
+    end
+
+    @testset "Show controls parameter" begin
+        df_test = DataFrame(
+            value = randn(50),
+            group = repeat(["A", "B"], 25)
+        )
+
+        # With controls
+        chart_with = DistPlot(:with_controls, df_test, :df_test;
+            value_cols = :value,
+            group_cols = :group,
+            show_controls = true
+        )
+        @test occursin("control", lowercase(chart_with.appearance_html)) ||
+              occursin("select", lowercase(chart_with.appearance_html))
+
+        # Without controls
+        chart_without = DistPlot(:without_controls, df_test, :df_test;
+            value_cols = :value,
+            group_cols = :group,
+            show_controls = false
+        )
+        @test chart_without.appearance_html != chart_with.appearance_html
     end
 end
