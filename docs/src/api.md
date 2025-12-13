@@ -291,6 +291,31 @@ Distribution visualization combining histogram, box plot, and rug plot.
 - `value_label`: Value axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
+#### KernelDensity
+
+```@docs
+KernelDensity
+```
+
+Kernel density plot visualization with interactive controls.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `value_cols`: Column(s) for density estimation (default: `:value`)
+- `group_cols`: Column(s) for grouping/coloring (default: `nothing`)
+- `filter_cols`: Column(s) for filtering (default: `nothing`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `bandwidth`: Bandwidth for kernel density estimation (default: automatic)
+- `density_opacity`: Opacity of density curves 0-1 (default: `0.6`)
+- `fill_density`: Whether to fill area under density curve (default: `true`)
+- `title`: Chart title (default: `"Kernel Density Plot"`)
+- `notes`: Descriptive text shown below the chart (default: `""`)
+
 ### 3D Plots
 
 #### Surface3D
