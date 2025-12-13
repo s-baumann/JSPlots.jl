@@ -1,3 +1,35 @@
+"""
+    KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
+
+Kernel density plot visualization with interactive controls.
+
+# Arguments
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+# Keyword Arguments
+- `value_cols::Union{Symbol,Vector{Symbol}}`: Column(s) for density estimation (default: `:value`)
+- `group_cols::Union{Symbol,Vector{Symbol},Nothing}`: Column(s) for grouping/coloring (default: `nothing`)
+- `filter_cols::Union{Symbol,Vector{Symbol},Nothing}`: Column(s) for filtering (default: `nothing`)
+- `facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Default faceting columns (default: `nothing`)
+- `bandwidth::Union{Float64,Nothing}`: Bandwidth for kernel density estimation (default: automatic)
+- `density_opacity::Float64`: Opacity of density curves (0-1) (default: `0.6`)
+- `fill_density::Bool`: Whether to fill area under density curve (default: `true`)
+- `title::String`: Chart title (default: `"Kernel Density Plot"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+# Examples
+```julia
+kd = KernelDensity(:density, df, :mydata;
+    value_cols = :measurement,
+    group_cols = :category,
+    bandwidth = 0.5,
+    title = "Distribution by Category"
+)
+```
+"""
 struct KernelDensity <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol

@@ -25,6 +25,10 @@ using Dates
         include("chart_tests/test_scatter3d.jl")
     end
 
+    @testset "ScatterSurface3D Tests" begin
+        include("chart_tests/test_scattersurface3d.jl")
+    end
+
     @testset "ScatterPlot Tests" begin
         include("chart_tests/test_scatterplot.jl")
     end
@@ -47,6 +51,10 @@ using Dates
 
     @testset "Picture Tests" begin
         include("chart_tests/test_picture.jl")
+    end
+
+    @testset "Slides Tests" begin
+        include("chart_tests/test_slides.jl")
     end
 
     @testset "Table Tests" begin

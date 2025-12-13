@@ -217,4 +217,174 @@ using DataFrames
             @test length(html_files) == 1  # Only the main file
         end
     end
+
+    @testset "Alternate constructor (automatic LinkList)" begin
+        mktempdir() do tmpdir
+            df1 = DataFrame(x = 1:5, y = rand(5))
+            df2 = DataFrame(a = 1:3, b = rand(3))
+
+            page1_alt = JSPlotPage(
+                Dict(:data1 => df1),
+                [LineChart(:c1, df1, :data1; x_cols=[:x], y_cols=[:y])],
+                tab_title = "Page One"
+            )
+
+            page2_alt = JSPlotPage(
+                Dict(:data2 => df2),
+                [LineChart(:c2, df2, :data2; x_cols=[:a], y_cols=[:b])],
+                tab_title = "Page Two"
+            )
+
+            # Use alternate constructor
+            pages = Pages(
+                [TextBlock("<h1>Home</h1><p>Welcome to the report</p>")],
+                [page1_alt, page2_alt],
+                tab_title = "Main Page",
+                page_header = "Main Header",
+                dataformat = :json_external
+            )
+
+            @test pages.coverpage.tab_title == "Main Page"
+            @test pages.dataformat == :json_external
+            @test length(pages.pages) == 2
+
+            outfile = joinpath(tmpdir, "auto.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "auto")
+            coverpage_content = read(joinpath(project_dir, "auto.html"), String)
+
+            # Should have auto-generated links
+            @test occursin("Page One", coverpage_content) || occursin("page_one", coverpage_content)
+            @test occursin("Page Two", coverpage_content) || occursin("page_two", coverpage_content)
+            @test occursin("Home", coverpage_content)
+        end
+    end
+
+    @testset "sanitize_filename function" begin
+        # Basic sanitization
+        @test sanitize_filename("Revenue Report") == "revenue_report"
+        @test sanitize_filename("Cost-Analysis") == "cost_analysis"
+        @test sanitize_filename("Q1 2024") == "q1_2024"
+
+        # Special characters
+        @test sanitize_filename("Test/File\\Name") == "test_file_name"
+        @test sanitize_filename("Data:Sheet.xlsx") == "data_sheet_xlsx"
+
+        # Empty string
+        @test sanitize_filename("") == "page"
+        @test sanitize_filename("!!!") == "page"
+
+        # Long names
+        long_name = "A" * "B" ^ 100
+        result = sanitize_filename(long_name)
+        @test length(result) == 50
+        @test result[1] == 'a'  # Should be lowercase
+
+        # Unicode characters (accents are preserved, then removed by regex)
+        @test sanitize_filename("Données Français") == "données_français"
+
+        # Spaces and punctuation (leading/trailing spaces become underscores)
+        @test sanitize_filename("  My   Report  ") == "__my___report__"
+    end
+
+    @testset "Page with notes and page_header" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            page_with_notes = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<p>Content</p>")],
+                tab_title = "Test",
+                page_header = "Test Page Header",
+                notes = "These are important notes about this page."
+            )
+
+            coverpage = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [TextBlock("<h1>Cover</h1>")]
+            )
+
+            pages = Pages(coverpage, [page_with_notes])
+            outfile = joinpath(tmpdir, "notes.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "notes")
+            page_content = read(joinpath(project_dir, "test.html"), String)
+
+            @test occursin("Test Page Header", page_content)
+            @test occursin("These are important notes", page_content)
+        end
+    end
+
+    @testset "Multiple pages with same tab_title" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            # Two pages with the same title should result in same filename
+            # (second one will overwrite first)
+            page1_dup = JSPlotPage(
+                Dict(:data1 => df),
+                [TextBlock("<p>First</p>")],
+                tab_title = "Same Title"
+            )
+
+            page2_dup = JSPlotPage(
+                Dict(:data2 => df),
+                [TextBlock("<p>Second</p>")],
+                tab_title = "Same Title"
+            )
+
+            coverpage = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [TextBlock("<h1>Cover</h1>")]
+            )
+
+            pages = Pages(coverpage, [page1_dup, page2_dup])
+            outfile = joinpath(tmpdir, "dup.html")
+
+            # This should work but will overwrite - just verify no crash
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "dup")
+            @test isdir(project_dir)
+            @test isfile(joinpath(project_dir, "same_title.html"))
+        end
+    end
+
+    @testset "Pages with complex mixed content" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:10, y = rand(10), cat = repeat(["A", "B"], 5))
+
+            # Create a page with multiple chart types
+            mixed_page = JSPlotPage(
+                Dict(:data => df),
+                [
+                    TextBlock("<h2>Analysis</h2>"),
+                    LineChart(:line, df, :data; x_cols=[:x], y_cols=[:y]),
+                    TextBlock("<p>Intermediate text</p>"),
+                    PivotTable(:pivot, :data)
+                ],
+                tab_title = "Mixed Content",
+                page_header = "Multi-Chart Page"
+            )
+
+            coverpage = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [TextBlock("<h1>Report</h1>")]
+            )
+
+            pages = Pages(coverpage, [mixed_page])
+            outfile = joinpath(tmpdir, "mixed.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "mixed")
+            page_content = read(joinpath(project_dir, "mixed_content.html"), String)
+
+            @test occursin("Analysis", page_content)
+            @test occursin("line", page_content)
+            @test occursin("Intermediate text", page_content)
+            @test occursin("pivot", page_content)
+        end
+    end
 end

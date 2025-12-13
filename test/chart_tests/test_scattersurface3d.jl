@@ -228,8 +228,8 @@ using Statistics
         @test occursin("setYRange_js_test", chart.functional_html)
 
         # Check for data structures
-        @test occursin("surfacesDataL2_js_test", chart.functional_html)
-        @test occursin("groupLevels_js_test", chart.functional_html)
+        @test occursin("allSurfaces_js_test", chart.functional_html)
+        @test occursin("allSchemes_js_test", chart.functional_html)
         @test occursin("smoothingParams_js_test", chart.functional_html)
     end
 
@@ -502,8 +502,8 @@ using Statistics
     end
 
     @testset "Grouping scheme selector HTML" begin
-        df = generate_test_data(20)
-        df.category = repeat(["X", "Y"], 10)
+        df = generate_test_data(20)  # Returns 40 rows (20*2 groups)
+        df.category = repeat(["X", "Y"], 20)
 
         chart = ScatterSurface3D(:scheme_selector, df, :test_data,
             x_col=:x,
@@ -598,8 +598,8 @@ using Statistics
     end
 
     @testset "Multiple grouping schemes surfaces JSON structure" begin
-        df = generate_test_data(20)
-        df.type = repeat(["P", "Q"], 10)
+        df = generate_test_data(20)  # Returns 40 rows (20*2 groups)
+        df.type = repeat(["P", "Q"], 20)
 
         chart = ScatterSurface3D(:json_struct, df, :test_data,
             x_col=:x,
@@ -629,7 +629,10 @@ using Statistics
             smoothing_params=[0.5, 1.0])
 
         @test chart.chart_title == :backwards_compat
+        # With single grouping scheme, no dropdown selector should be visible
         @test !occursin("Grouping Scheme", chart.appearance_html)
-        @test !occursin("changeScheme", chart.functional_html)
+        # But the changeScheme function is present internally
+        @test occursin("allSchemes_backwards_compat", chart.functional_html)
+        @test occursin("\"default\"", chart.functional_html)
     end
 end
