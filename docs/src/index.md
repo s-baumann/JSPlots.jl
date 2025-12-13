@@ -72,11 +72,12 @@ JSPlots provides multiple visualization types:
 
 9. **[Scatter3D](@ref)**: A 3D scatter plot;
 10. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
+11. **[ScatterSurface3D](@ref)**: A 3D scatter plot together with a surface that approximates the data points;
 
 #### Plots from other Julia packages
 
-11. **[Picture](@ref)**: Display static images from anywhere as well as plots from other Julia plotting libraries;
-12. **[Slides](@ref)**: Display slideshows and animations from a sequence of pictures/plots from other Julia plotting libraries;
+12. **[Picture](@ref)**: Display static images from anywhere as well as plots from other Julia plotting libraries;
+13. **[Slides](@ref)**: Display slideshows and animations from a sequence of pictures/plots from other Julia plotting libraries;
 
 
 

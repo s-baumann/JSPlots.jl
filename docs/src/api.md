@@ -363,6 +363,116 @@ scatter = Scatter3D(:scatter_3d, df, :data, [:x, :y, :z],
 )
 ```
 
+#### ScatterSurface3D
+
+```@docs
+ScatterSurface3D
+```
+
+Three-dimensional scatter plot with automatically fitted surfaces for each group using non-parametric regression.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `x_col::Symbol`: Column for x-axis values (default: `:x`)
+- `y_col::Symbol`: Column for y-axis values (default: `:y`)
+- `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
+- `group_cols::Vector{Symbol}`: Columns for grouping data into separate point clouds and surfaces (default: `Symbol[]`)
+- `facet_cols::Vector{Symbol}`: Columns for faceting (default: `Symbol[]`)
+- `slider_cols::Vector{Symbol}`: Columns for filter sliders (default: `Symbol[]`)
+- `surface_fitter::Union{Function, Nothing}`: Custom surface fitting function (default: `nothing`, uses kernel smoothing)
+- `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.5, 1.0, 5.0]`)
+- `default_smoothing::Dict{String, Float64}`: Group-specific default smoothing parameters (default: `Dict{String, Float64}()`)
+- `grid_size::Int`: Resolution of fitted surface grids (default: `20`)
+- `marker_size::Int`: Size of scatter points (default: `4`)
+- `marker_opacity::Float64`: Transparency of points, 0.0-1.0 (default: `0.6`)
+- `height::Int`: Plot height in pixels (default: `600`)
+- `title::String`: Chart title (default: `"3D Scatter with Surfaces"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+**Surface Fitting:**
+The default surface fitter uses kernel-based smoothing (Gaussian kernel) to fit non-parametric surfaces through point clouds. You can provide a custom fitter function with signature:
+```julia
+function custom_fitter(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float64},
+                      smoothing_param::Float64)
+    # Return: (x_grid::Vector, y_grid::Vector, z_grid::Matrix)
+end
+```
+
+**Interactive Controls:**
+- **Global toggles:** Show/hide all surfaces or all points independently
+- **Group toggles:** Click colored buttons to toggle individual groups (both points and surface)
+- **X/Y range filters:** Adjust visible data range with number inputs
+- **Smoothing selector:** Switch between pre-computed smoothing levels or use group-specific defaults
+
+**Features:**
+- Automatic surface fitting for each group using kernel smoothing
+- Multiple smoothing parameters with interactive selection
+- Group-specific default smoothing for optimal fit per group
+- Color-coded groups with matching points and surfaces
+- Pre-computation of all surfaces for instant switching
+- Supports custom surface fitting algorithms
+- Interactive range filtering and group visibility controls
+
+**Use Cases:**
+- Non-parametric regression visualization
+- Comparing fitted surfaces across different groups
+- Exploring optimal smoothing parameters interactively
+- Visualizing complex 3D relationships in data
+
+**Examples:**
+```julia
+# Basic usage with default kernel smoother
+df = DataFrame(
+    x = randn(200),
+    y = randn(200),
+    z = randn(200),
+    group = repeat(["A", "B"], 100)
+)
+
+chart = ScatterSurface3D(:scatter_surf, df, :data,
+    x_col=:x,
+    y_col=:y,
+    z_col=:z,
+    group_cols=[:group],
+    smoothing_params=[0.5, 1.0, 2.0],
+    title="3D Scatter with Fitted Surfaces"
+)
+
+# Custom surface fitter with group-specific defaults
+function custom_smoother(x::Vector{Float64}, y::Vector{Float64},
+                        z::Vector{Float64}, bandwidth::Float64)
+    grid_size = 15
+    x_grid = range(extrema(x)..., length=grid_size)
+    y_grid = range(extrema(y)..., length=grid_size)
+    z_grid = zeros(grid_size, grid_size)
+
+    for (i, xi) in enumerate(x_grid)
+        for (j, yj) in enumerate(y_grid)
+            weights = exp.(-((x .- xi).^2 .+ (y .- yj).^2) ./ (2 * bandwidth^2))
+            z_grid[i, j] = sum(weights .* z) / sum(weights)
+        end
+    end
+
+    return (collect(x_grid), collect(y_grid), z_grid)
+end
+
+chart_custom = ScatterSurface3D(:custom_surf, df, :data,
+    x_col=:x,
+    y_col=:y,
+    z_col=:z,
+    group_cols=[:group],
+    surface_fitter=custom_smoother,
+    smoothing_params=[0.3, 0.7, 1.5],
+    default_smoothing=Dict("A" => 1.5, "B" => 0.7),
+    marker_size=6,
+    title="Custom Surface Fitting"
+)
+```
+
 ### Tables and Data Display
 
 #### Picture

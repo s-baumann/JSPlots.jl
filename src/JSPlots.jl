@@ -1,6 +1,6 @@
 module JSPlots
 
-    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite
+    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite, Statistics
 
     abstract type JSPlotsType end
 
@@ -29,6 +29,9 @@ module JSPlots
 
     include("scatter3d.jl")
     export Scatter3D
+
+    include("scattersurface3d.jl")
+    export ScatterSurface3D
 
     include("scatterplot.jl")
     export ScatterPlot
