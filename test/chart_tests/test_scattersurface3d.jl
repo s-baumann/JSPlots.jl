@@ -61,13 +61,13 @@ using Statistics
     end
 
     @testset "Default surface smoother" begin
-        # Test the default_surface_smoother function directly
+        # Test the surface_smoother function directly
         x = [1.0, 2.0, 3.0, 1.5, 2.5]
         y = [1.0, 2.0, 3.0, 1.5, 2.5]
         z = [2.0, 8.0, 18.0, 4.5, 12.5]  # z ≈ 2*x*y
 
         smoothing = 1.0
-        x_grid, y_grid, z_grid = JSPlots.default_surface_smoother(x, y, z, smoothing)
+        x_grid, y_grid, z_grid = JSPlots.surface_smoother(x, y, z, smoothing)
 
         @test length(x_grid) == 20  # Default grid size
         @test length(y_grid) == 20

@@ -235,4 +235,108 @@ using Dates
         )
         @test chart_without.appearance_html != chart_with.appearance_html
     end
+
+    @testset "Filter sliders - categorical" begin
+        df_cat = DataFrame(
+            value = randn(100),
+            category = repeat(["Alpha", "Beta", "Gamma"], 34)[1:100]
+        )
+        chart = DistPlot(:filter_categorical, df_cat, :df_cat;
+            value_cols = :value,
+            filter_cols = :category
+        )
+        @test occursin("category", chart.appearance_html)
+        @test occursin("Alpha", chart.appearance_html)
+        @test occursin("Beta", chart.appearance_html)
+        @test occursin("Gamma", chart.appearance_html)
+    end
+
+    @testset "All plots disabled" begin
+        chart = DistPlot(:all_disabled, df_dist, :df_dist;
+            value_cols = :value,
+            show_histogram = false,
+            show_box = false,
+            show_rug = false
+        )
+        @test chart.chart_title == :all_disabled
+        @test chart.functional_html != ""
+    end
+
+    @testset "Single value and group column" begin
+        df_single = DataFrame(
+            value = randn(50),
+            group = repeat(["X", "Y"], 25)
+        )
+        chart = DistPlot(:single_cols, df_single, :df_single;
+            value_cols = :value,
+            group_cols = :group
+        )
+        @test occursin("value", chart.functional_html)
+        @test occursin("group", chart.functional_html)
+    end
+
+    @testset "Large number of bins" begin
+        chart = DistPlot(:large_bins, df_dist, :df_dist;
+            value_cols = :value,
+            histogram_bins = 100
+        )
+        @test occursin("100", chart.functional_html)
+    end
+
+    @testset "Small number of bins" begin
+        chart = DistPlot(:small_bins, df_dist, :df_dist;
+            value_cols = :value,
+            histogram_bins = 5
+        )
+        @test occursin("5", chart.functional_html)
+    end
+
+    @testset "Zero opacity box plot" begin
+        chart = DistPlot(:zero_opacity, df_dist, :df_dist;
+            value_cols = :value,
+            box_opacity = 0.0
+        )
+        @test occursin("0.0", chart.functional_html)
+    end
+
+    @testset "Full opacity box plot" begin
+        chart = DistPlot(:full_opacity, df_dist, :df_dist;
+            value_cols = :value,
+            box_opacity = 1.0
+        )
+        @test occursin("1.0", chart.functional_html)
+    end
+
+    @testset "Multiple filters combined" begin
+        df_multi_filter = DataFrame(
+            value = randn(200),
+            temperature = rand(200) .* 30 .+ 10,
+            category = repeat(["A", "B", "C", "D"], 50),
+            date = Date(2024, 1, 1):Day(1):Date(2024, 7, 18)
+        )
+        chart = DistPlot(:multi_filters, df_multi_filter, :df_multi_filter;
+            value_cols = :value,
+            filter_cols = [:temperature, :category, :date]
+        )
+        @test occursin("temperature", chart.appearance_html)
+        @test occursin("category", chart.appearance_html)
+        @test occursin("date", chart.appearance_html)
+    end
+
+    @testset "No filters, no groups" begin
+        chart = DistPlot(:minimal, df_dist, :df_dist;
+            value_cols = :value
+        )
+        @test chart.chart_title == :minimal
+        @test occursin("value", chart.functional_html)
+    end
+
+    @testset "Empty title and notes" begin
+        chart = DistPlot(:no_title, df_dist, :df_dist;
+            value_cols = :value,
+            title = "",
+            notes = ""
+        )
+        @test chart.appearance_html != ""
+    end
 end

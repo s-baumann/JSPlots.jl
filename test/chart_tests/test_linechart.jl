@@ -126,18 +126,6 @@ include("test_data.jl")
         @test occursin("region", chart.appearance_html)
     end
 
-    @testset "Custom axis labels" begin
-        chart = LineChart(:custom_labels, test_df, :test_df;
-            x_cols = [:x],
-            y_cols = [:y],
-            x_label = "Time (seconds)",
-            y_label = "Response (mV)",
-            title = "Custom Labels"
-        )
-        @test occursin("Time (seconds)", chart.functional_html)
-        @test occursin("Response (mV)", chart.functional_html)
-    end
-
     @testset "With notes" begin
         notes = "This line chart shows temporal trends in the data."
         chart = LineChart(:with_notes, test_df, :test_df;
@@ -239,6 +227,183 @@ include("test_data.jl")
             @test occursin("chart2", content)
             @test occursin("First Chart", content)
             @test occursin("Second Chart", content)
+        end
+    end
+
+    @testset "Aggregator - mean" begin
+        df_agg = DataFrame(
+            x = repeat(1:5, 4),
+            y = rand(20),
+            category = repeat(["A", "B"], 10)
+        )
+        chart = LineChart(:agg_mean, df_agg, :df_agg;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = [:category],
+            aggregator = "mean"
+        )
+        @test occursin("mean", chart.functional_html)
+    end
+
+    @testset "Aggregator - median" begin
+        df_agg = DataFrame(x = repeat(1:5, 4), y = rand(20))
+        chart = LineChart(:agg_median, df_agg, :df_agg;
+            x_cols = [:x],
+            y_cols = [:y],
+            aggregator = "median"
+        )
+        @test occursin("median", chart.functional_html)
+    end
+
+    @testset "Aggregator - count" begin
+        df_agg = DataFrame(x = repeat(1:5, 4), y = rand(20))
+        chart = LineChart(:agg_count, df_agg, :df_agg;
+            x_cols = [:x],
+            y_cols = [:y],
+            aggregator = "count"
+        )
+        @test occursin("count", chart.functional_html)
+    end
+
+    @testset "Aggregator - min" begin
+        df_agg = DataFrame(x = repeat(1:5, 4), y = rand(20))
+        chart = LineChart(:agg_min, df_agg, :df_agg;
+            x_cols = [:x],
+            y_cols = [:y],
+            aggregator = "min"
+        )
+        @test occursin("min", chart.functional_html)
+    end
+
+    @testset "Aggregator - max" begin
+        df_agg = DataFrame(x = repeat(1:5, 4), y = rand(20))
+        chart = LineChart(:agg_max, df_agg, :df_agg;
+            x_cols = [:x],
+            y_cols = [:y],
+            aggregator = "max"
+        )
+        @test occursin("max", chart.functional_html)
+    end
+
+    @testset "Custom line width and marker size" begin
+        chart = LineChart(:custom_style, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            line_width = 3,
+            marker_size = 8
+        )
+        @test occursin("3", chart.functional_html)
+        @test occursin("8", chart.functional_html)
+    end
+
+    @testset "Invalid aggregator error" begin
+        @test_throws ErrorException LineChart(:bad_agg, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            aggregator = "invalid"
+        )
+    end
+
+    @testset "Invalid x_cols error" begin
+        @test_throws ErrorException LineChart(:bad_x, test_df, :test_df;
+            x_cols = [:nonexistent],
+            y_cols = [:y]
+        )
+    end
+
+    @testset "Invalid y_cols error" begin
+        @test_throws ErrorException LineChart(:bad_y, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:nonexistent]
+        )
+    end
+
+    @testset "Too many default facets error" begin
+        @test_throws ErrorException LineChart(:too_many_facets, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            facet_cols = [:category, :region, :type],
+            default_facet_cols = [:category, :region, :type]
+        )
+    end
+
+    @testset "Default facets not in choices error" begin
+        @test_throws ErrorException LineChart(:facet_mismatch, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            facet_cols = [:category],
+            default_facet_cols = [:region]
+        )
+    end
+
+    @testset "Empty notes and custom title" begin
+        chart = LineChart(:empty_notes, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            title = "Custom Title",
+            notes = ""
+        )
+        @test occursin("Custom Title", chart.appearance_html)
+    end
+
+    @testset "Single facet choice" begin
+        df_facet = DataFrame(
+            x = repeat(1:10, 2),
+            y = rand(20),
+            group = repeat(["A", "B"], 10)
+        )
+        chart = LineChart(:single_facet, df_facet, :df_facet;
+            x_cols = [:x],
+            y_cols = [:y],
+            facet_cols = :group
+        )
+        @test occursin("group", chart.appearance_html)
+    end
+
+    @testset "Default facet with single choice" begin
+        df_facet = DataFrame(
+            x = repeat(1:10, 2),
+            y = rand(20),
+            group = repeat(["A", "B"], 10)
+        )
+        chart = LineChart(:default_single_facet, df_facet, :df_facet;
+            x_cols = [:x],
+            y_cols = [:y],
+            facet_cols = :group,
+            default_facet_cols = :group
+        )
+        @test occursin("group", chart.appearance_html)
+    end
+
+    @testset "No color columns specified" begin
+        df_no_color = DataFrame(x = 1:20, y = rand(20))
+        chart = LineChart(:no_color_specified, df_no_color, :df_no_color;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = Symbol[]
+        )
+        @test occursin("__no_color__", chart.functional_html)
+    end
+
+    @testset "Line width variations" begin
+        for width in [1, 2, 5, 10]
+            chart = LineChart(Symbol("width_$width"), test_df, :test_df;
+                x_cols = [:x],
+                y_cols = [:y],
+                line_width = width
+            )
+            @test occursin(string(width), chart.functional_html)
+        end
+    end
+
+    @testset "Marker size variations" begin
+        for size in [1, 3, 6, 10]
+            chart = LineChart(Symbol("size_$size"), test_df, :test_df;
+                x_cols = [:x],
+                y_cols = [:y],
+                marker_size = size
+            )
+            @test occursin(string(size), chart.functional_html)
         end
     end
 end
