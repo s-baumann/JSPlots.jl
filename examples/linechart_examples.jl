@@ -199,7 +199,7 @@ for product in ["Product A", "Product B"]
         for rep in 1:5
             push!(agg_df, (
                 Month = month,
-                Sales = 100 + rand() * 50 + month * 5,
+                Sales = 100 + rand(rng, 1)[1] * 50 + month * 5,
                 Product = product,
                 color = product
             ))

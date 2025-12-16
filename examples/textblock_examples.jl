@@ -1,4 +1,5 @@
-using JSPlots, DataFrames, Dates
+using JSPlots, DataFrames, Dates, StableRNGs
+rng = StableRNG(444)
 
 println("Creating TextBlock examples...")
 
@@ -109,7 +110,7 @@ simple_image = TextBlock("""
 # Example 7: Combining text blocks with actual plots
 df = DataFrame(
     x = 1:10,
-    y = rand(10) .* 100,
+    y = rand(rng, 10) .* 100,
     color = repeat(["A", "B"], inner=5)
 )
 

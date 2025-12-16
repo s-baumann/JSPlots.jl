@@ -1,4 +1,5 @@
-using JSPlots, DataFrames, Statistics, Random
+using JSPlots, DataFrames, Statistics, Random, StableRNGs
+rng = StableRNG(444)
 
 println("Creating ScatterSurface3D examples...")
 
@@ -7,21 +8,21 @@ function generate_3d_data(n=100)
     df = DataFrame()
 
     # Group A: Saddle surface z = x^2 - y^2 + noise
-    x_a = randn(n) .* 2
-    y_a = randn(n) .* 2
-    z_a = x_a.^2 .- y_a.^2 .+ randn(n) .* 0.5
+    x_a = randn(rng, n) .* 2
+    y_a = randn(rng, n) .* 2
+    z_a = x_a.^2 .- y_a.^2 .+ randn(rng, n) .* 0.5
     df_a = DataFrame(x=x_a, y=y_a, z=z_a, group="A", region="North")
 
     # Group B: Paraboloid surface z = x^2 + y^2 + noise
-    x_b = randn(n) .* 2
-    y_b = randn(n) .* 2
-    z_b = x_b.^2 .+ y_b.^2 .+ randn(n) .* 0.5
+    x_b = randn(rng, n) .* 2
+    y_b = randn(rng, n) .* 2
+    z_b = x_b.^2 .+ y_b.^2 .+ randn(rng, n) .* 0.5
     df_b = DataFrame(x=x_b, y=y_b, z=z_b, group="B", region="South")
 
     # Group C: Plane z = 2x + 3y + noise
-    x_c = randn(n) .* 2
-    y_c = randn(n) .* 2
-    z_c = 2 .* x_c .+ 3 .* y_c .+ randn(n) .* 0.5
+    x_c = randn(rng, n) .* 2
+    y_c = randn(rng, n) .* 2
+    z_c = 2 .* x_c .+ 3 .* y_c .+ randn(rng, n) .* 0.5
     df_c = DataFrame(x=x_c, y=y_c, z=z_c, group="C", region="North")
 
     return vcat(df_a, df_b, df_c)
@@ -109,7 +110,7 @@ function custom_smoother(x::Vector{Float64}, y::Vector{Float64}, z::Vector{Float
     return (collect(x_grid), collect(y_grid), z_grid)
 end
 
-# Subset data for second example (just group A and B)
+# Subset data for second example (just group A and B)rng = StableRNG(444)
 df_subset = df[in.(df.group, Ref(["A", "B"])), :]
 
 chart2 = ScatterSurface3D(:scatter_surface_custom, df_subset, :data_subset,
@@ -190,9 +191,6 @@ example3_text = TextBlock("""
 </ul>
 """)
 
-# Generate synthetic stock data
-Random.seed!(123)
-
 industries = ["Technology", "Financials", "Healthcare", "Energy", "Consumer", "Industrials"]
 countries = ["USA", "UK", "Germany", "Japan", "China"]
 
@@ -200,14 +198,14 @@ n_stocks = 150
 
 df_finance = DataFrame(
     stock_id = 1:n_stocks,
-    industry = rand(industries, n_stocks),
-    country = rand(countries, n_stocks)
+    industry = rand(rng, industries, n_stocks),
+    country = rand(rng, countries, n_stocks)
 )
 
 # Generate financial metrics
-df_finance.carry = randn(n_stocks) .* 2.0
+df_finance.carry = randn(rng, n_stocks) .* 2.0
 
-df_finance.trading_activity = abs.(randn(n_stocks)) .* 3.0 .+ 1.0
+df_finance.trading_activity = abs.(randn(rng, n_stocks)) .* 3.0 .+ 1.0
 
 # Industry and country effects
 industry_effects = Dict(
@@ -232,7 +230,7 @@ df_finance.return_24h = map(eachrow(df_finance)) do row
     base = 0.2 * row.carry - 0.1 * row.trading_activity
     industry_effect = industry_effects[row.industry]
     country_effect = country_effects[row.country]
-    noise = randn() * 0.5
+    noise = randn(rng, 1)[1] * 0.5
     return base + industry_effect + country_effect + noise
 end
 

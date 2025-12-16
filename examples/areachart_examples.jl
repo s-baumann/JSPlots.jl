@@ -98,7 +98,7 @@ for dept in departments
     for team in teams
         push!(df4, (
             Department = dept,
-            Headcount = rand(5:25),
+            Headcount = rand(rng, 5:25),
             Team = team
         ))
     end

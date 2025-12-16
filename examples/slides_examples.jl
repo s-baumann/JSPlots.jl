@@ -1,4 +1,6 @@
-using JSPlots, DataFrames, Dates, VegaLite
+using JSPlots, DataFrames, Dates, VegaLite, StableRNGs
+rng = StableRNG(333)
+
 
 println("Creating Slides examples...")
 
@@ -112,8 +114,8 @@ df = DataFrame(
     Product = repeat(["Widget", "Gadget", "Doohickey"], outer=12),
     Category = repeat(["Electronics", "Home"], inner=18),
     Month = repeat(1:12, inner=3),
-    Sales = rand(100:1000, 36),
-    Profit = rand(10:200, 36)
+    Sales = rand(rng, 100:1000, 36),
+    Profit = rand(rng, 10:200, 36)
 )
 
 # VegaLite-based chart generation function
@@ -186,7 +188,7 @@ df_external = DataFrame(
     Region = repeat(["East", "West"], inner=4),
     Quarter = repeat(repeat(["Q3", "Q4"], inner=2), outer=2),
     Month = repeat([1, 2], 4),
-    Revenue = rand(5000:15000, 8)
+    Revenue = rand(rng, 5000:15000, 8)
 )
 
 # Chart function for external example

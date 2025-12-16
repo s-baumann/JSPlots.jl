@@ -80,7 +80,7 @@ customer_df = DataFrame(
     Country = rand(rng, ["USA", "UK", "Germany", "France", "Japan", "Test"], 120),
     ProductType = rand(rng, ["Premium", "Standard", "Budget"], 120),
     Channel = rand(rng, ["Online", "Retail", "Wholesale"], 120),
-    Revenue = rand(500:5000, 120),
+    Revenue = rand(rng, 500:5000, 120),
     Year = repeat([2022, 2023, 2024], 40)
 )
 
@@ -98,7 +98,7 @@ pivot4 = PivotTable(:customer_revenue, :customer_data;
 survey_df = DataFrame(
     Age_Group = rand(rng, ["18-25", "26-35", "36-45", "46-55", "56+"], 200),
     Gender = rand(rng, ["Male", "Female", "Other", "Prefer not to say"], 200),
-    Satisfaction = rand(1:10, 200),
+    Satisfaction = rand(rng, 1:10, 200),
     Product = rand(rng, ["Product A", "Product B", "Product C"], 200),
     Region = rand(rng, ["North", "South", "East", "West"], 200)
 )

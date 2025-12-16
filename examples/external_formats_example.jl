@@ -1,4 +1,5 @@
-using JSPlots, DataFrames, Dates, Random
+using JSPlots, DataFrames, Dates, Random, StableRNGs
+rng = StableRNG(555)
 
 println("Creating External Formats examples...")
 
@@ -35,12 +36,11 @@ format_explanation = TextBlock("""
 """)
 
 # Create sample data for time series
-Random.seed!(42)
 df = DataFrame(
     date = Date(2024, 1, 1):Day(1):Date(2024, 1, 31),
-    value = randn(31) .* 10 .+ 50,
-    category = rand(["A", "B", "C"], 31),
-    score = rand(1:100, 31)
+    value = randn(rng, 31) .* 10 .+ 50,
+    category = rand(rng, ["A", "B", "C"], 31),
+    score = rand(rng, 1:100, 31)
 )
 
 # Create a line chart
@@ -55,8 +55,8 @@ line_chart = LineChart(:timeseries, df, :df;
 stock_data = DataFrame(
     date = repeat(Date(2024, 1, 1):Day(1):Date(2024, 3, 31), inner=3),
     symbol = repeat(["AAPL", "GOOGL", "MSFT"], outer=91),
-    price = rand(273) .* 100 .+ 100,
-    volume = rand(273) .* 1_000_000
+    price = rand(rng, 273) .* 100 .+ 100,
+    volume = rand(rng, 273) .* 1_000_000
 )
 
 scatter_chart = ScatterPlot(:stock_scatter, stock_data, :stock_data, [:volume, :price];
