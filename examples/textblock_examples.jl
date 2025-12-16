@@ -123,7 +123,6 @@ line_plot = LineChart(:example_chart, df, :df;
 
 intro_text = TextBlock("""
 <h2>Example: Analysis Report</h2>
-<p><em>Generated on $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))</em></p>
 <p>This section shows how to create a complete analysis report with text blocks and interactive charts.</p>
 """)
 

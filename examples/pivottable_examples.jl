@@ -43,7 +43,7 @@ pivot1 = PivotTable(:sales_pivot, :sales_data;
 performance_df = DataFrame(
     Employee = repeat(["Alice", "Bob", "Charlie", "Diana", "Eve"], inner=4),
     Quarter = repeat(["Q1", "Q2", "Q3", "Q4"], outer=5),
-    Score = randn(20) .* 10 .+ 75,  # Scores around 75 with some variation
+    Score = randn(rng, 20) .* 10 .+ 75,  # Scores around 75 with some variation
     Department = repeat(["Sales", "Engineering", "Sales", "Marketing", "Engineering"], inner=4)
 )
 
