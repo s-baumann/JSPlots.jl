@@ -1,6 +1,9 @@
-using JSPlots, DataFrames, Dates, Statistics
+using JSPlots, DataFrames, Dates, Statistics, StableRNGs
 
 println("Creating Table examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(777)
 
 # Get the path to the example image for later use
 example_image_path = joinpath(@__DIR__, "pictures", "images.jpeg")
@@ -121,8 +124,8 @@ table_dept = Table(:department_summary, dept_summary;
 detailed_sales = DataFrame(
     Date = Date(2024, 1, 1):Day(1):Date(2024, 6, 30),
 )
-detailed_sales[!, :Revenue] = rand(5000:8000, nrow(detailed_sales))
-detailed_sales[!, :Category] = rand(["Online", "Retail", "Wholesale"], nrow(detailed_sales))
+detailed_sales[!, :Revenue] = rand(rng,5000:8000, nrow(detailed_sales))
+detailed_sales[!, :Category] = rand(rng,["Online", "Retail", "Wholesale"], nrow(detailed_sales))
 
 # Monthly summary for table
 detailed_sales[!, :MonthNum] = Dates.month.(detailed_sales.Date)
@@ -157,10 +160,10 @@ dashboard_pic = Picture(:dashboard_image, example_image_path;
 large_df = DataFrame(
     ID = 1:100,
     Customer = ["Customer_$i" for i in 1:100],
-    Order_Date = [Date(2024, 1, 1) + Day(rand(1:180)) for _ in 1:100],
-    Product = rand(["Product A", "Product B", "Product C", "Product D", "Product E"], 100),
-    Quantity = rand(1:50, 100),
-    Unit_Price = rand([9.99, 14.99, 19.99, 24.99, 34.99], 100)
+    Order_Date = [Date(2024, 1, 1) + Day(rand(rng,1:180)) for _ in 1:100],
+    Product = rand(rng,["Product A", "Product B", "Product C", "Product D", "Product E"], 100),
+    Quantity = rand(rng,1:50, 100),
+    Unit_Price = rand(rng,[9.99, 14.99, 19.99, 24.99, 34.99], 100)
 )
 large_df[!, :Total] = large_df.Quantity .* large_df.Unit_Price
 large_df[!, :Total] = round.(large_df.Total, digits=2)

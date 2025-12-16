@@ -1,8 +1,9 @@
-using JSPlots, DataFrames, Dates, Random, Distributions
+using JSPlots, DataFrames, Dates, Distributions, StableRNGs
 
 println("Creating KernelDensity examples...")
 
-Random.seed!(42)
+# Use stable RNG for reproducible examples
+rng = StableRNG(333)
 
 # Prepare header
 header = TextBlock("""
@@ -20,7 +21,7 @@ header = TextBlock("""
 # Example 1: Simple Single Distribution
 n = 1000
 df1 = DataFrame(
-    value = randn(n) .* 10 .+ 50
+    value = randn(rng,n) .* 10 .+ 50
 )
 
 kde1 = KernelDensity(:simple_kde, df1, :df1;
@@ -33,9 +34,9 @@ kde1 = KernelDensity(:simple_kde, df1, :df1;
 n = 500
 df2 = DataFrame(
     value = vcat(
-        randn(n) .* 5 .+ 100,  # Control group
-        randn(n) .* 6 .+ 110,  # Treatment A
-        randn(n) .* 4 .+ 95    # Treatment B
+        randn(rng,n) .* 5 .+ 100,  # Control group
+        randn(rng,n) .* 6 .+ 110,  # Treatment A
+        randn(rng,n) .* 4 .+ 95    # Treatment B
     ),
     group = repeat(["Control", "Treatment A", "Treatment B"], inner=n)
 )
@@ -51,10 +52,10 @@ kde2 = KernelDensity(:multi_group_kde, df2, :df2;
 # Example 3: With Interactive Filters
 n = 1200
 df3 = DataFrame(
-    score = abs.(randn(n) .* 15 .+ 70),
-    age = rand(18:80, n),
-    department = rand(["Engineering", "Sales", "Marketing", "HR"], n),
-    region = rand(["North", "South", "East", "West"], n)
+    score = abs.(randn(rng,n) .* 15 .+ 70),
+    age = rand(rng,18:80, n),
+    department = rand(rng,["Engineering", "Sales", "Marketing", "HR"], n),
+    region = rand(rng,["North", "South", "East", "West"], n)
 )
 
 kde3 = KernelDensity(:filtered_kde, df3, :df3;
@@ -69,12 +70,12 @@ kde3 = KernelDensity(:filtered_kde, df3, :df3;
 n = 400
 df4 = DataFrame(
     measurement = vcat(
-        randn(n) .* 8 .+ 100,
-        randn(n) .* 7 .+ 110,
-        randn(n) .* 9 .+ 95
+        randn(rng,n) .* 8 .+ 100,
+        randn(rng,n) .* 7 .+ 110,
+        randn(rng,n) .* 9 .+ 95
     ),
     category = repeat(["Category A", "Category B", "Category C"], inner=n),
-    phase = rand(["Phase 1", "Phase 2"], 3*n)
+    phase = rand(rng,["Phase 1", "Phase 2"], 3*n)
 )
 
 kde4 = KernelDensity(:facet_one_kde, df4, :df4;
@@ -90,10 +91,10 @@ kde4 = KernelDensity(:facet_one_kde, df4, :df4;
 n = 300
 df5 = DataFrame(
     value = vcat(
-        randn(n) .* 10 .+ 100,
-        randn(n) .* 12 .+ 110,
-        randn(n) .* 8 .+ 105,
-        randn(n) .* 11 .+ 95
+        randn(rng,n) .* 10 .+ 100,
+        randn(rng,n) .* 12 .+ 110,
+        randn(rng,n) .* 8 .+ 105,
+        randn(rng,n) .* 11 .+ 95
     ),
     treatment = repeat(["Placebo", "Drug A"], inner=2*n),
     timepoint = repeat(["Baseline", "Post-Treatment", "Baseline", "Post-Treatment"], inner=n)
@@ -112,8 +113,8 @@ kde5 = KernelDensity(:facet_grid_kde, df5, :df5;
 n = 800
 df6 = DataFrame(
     value = vcat(
-        randn(n÷2) .* 5 .+ 70,   # First mode
-        randn(n÷2) .* 5 .+ 100   # Second mode
+        randn(rng,n÷2) .* 5 .+ 70,   # First mode
+        randn(rng,n÷2) .* 5 .+ 100   # Second mode
     ),
     condition = repeat(["Bimodal", "Bimodal"], inner=n÷2)
 )
@@ -129,9 +130,9 @@ kde6 = KernelDensity(:bimodal_kde, df6, :df6;
 n = 500
 df7 = DataFrame(
     value = vcat(
-        randn(n) .* 3 .+ 50,
-        randn(n) .* 4 .+ 60,
-        randn(n) .* 3.5 .+ 55
+        randn(rng,n) .* 3 .+ 50,
+        randn(rng,n) .* 4 .+ 60,
+        randn(rng,n) .* 3.5 .+ 55
     ),
     group = repeat(["Group A", "Group B", "Group C"], inner=n)
 )
@@ -148,12 +149,12 @@ kde7 = KernelDensity(:custom_bandwidth_kde, df7, :df7;
 # Example 8: Multiple Value and Group Columns with Dropdowns
 n = 800
 df8 = DataFrame(
-    height = randn(n) .* 10 .+ 170,
-    weight = randn(n) .* 15 .+ 70,
-    age_value = randn(n) .* 10 .+ 35,
-    gender = rand(["Male", "Female"], n),
-    country = rand(["USA", "UK", "Canada"], n),
-    category = rand(["A", "B", "C"], n)
+    height = randn(rng,n) .* 10 .+ 170,
+    weight = randn(rng,n) .* 15 .+ 70,
+    age_value = randn(rng,n) .* 10 .+ 35,
+    gender = rand(rng,["Male", "Female"], n),
+    country = rand(rng,["USA", "UK", "Canada"], n),
+    category = rand(rng,["A", "B", "C"], n)
 )
 
 kde8 = KernelDensity(:multi_dropdown_kde, df8, :df8;
@@ -168,16 +169,16 @@ kde8 = KernelDensity(:multi_dropdown_kde, df8, :df8;
 n = 1500
 df9 = DataFrame(
     measurement = vcat(
-        randn(n÷3) .* 8 .+ 100,
-        randn(n÷3) .* 9 .+ 110,
-        randn(n÷3) .* 7 .+ 95
+        randn(rng,n÷3) .* 8 .+ 100,
+        randn(rng,n÷3) .* 9 .+ 110,
+        randn(rng,n÷3) .* 7 .+ 95
     ),
-    score = abs.(randn(n) .* 15 .+ 70),
-    age = rand(20:65, n),
-    region = rand(["North", "South", "East", "West"], n),
-    department = rand(["Engineering", "Sales", "Marketing"], n),
-    experience_level = rand(["Junior", "Mid", "Senior"], n),
-    project_type = rand(["Type A", "Type B"], n)
+    score = abs.(randn(rng,n) .* 15 .+ 70),
+    age = rand(rng,20:65, n),
+    region = rand(rng,["North", "South", "East", "West"], n),
+    department = rand(rng,["Engineering", "Sales", "Marketing"], n),
+    experience_level = rand(rng,["Junior", "Mid", "Senior"], n),
+    project_type = rand(rng,["Type A", "Type B"], n)
 )
 
 kde9 = KernelDensity(:comprehensive_kde, df9, :df9;

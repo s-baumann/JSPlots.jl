@@ -1,6 +1,9 @@
-using JSPlots, DataFrames
+using JSPlots, DataFrames, StableRNGs
 
 println("Creating 3D Scatter Plot examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(666)
 
 # Prepare header
 header = TextBlock("""
@@ -27,10 +30,10 @@ indicating the directions of maximum variance. Toggle them on/off to see how the
 
 n = 200
 df1 = DataFrame(
-    x = randn(n) .* 2,
-    y = randn(n) .* 1.5 .+ randn(n) .* 0.5,  # Correlated with x
-    z = randn(n),
-    category = rand(["Group A", "Group B", "Group C"], n)
+    x = randn(rng,n) .* 2,
+    y = randn(rng,n) .* 1.5 .+ randn(rng,n) .* 0.5,  # Correlated with x
+    z = randn(rng,n),
+    category = rand(rng,["Group A", "Group B", "Group C"], n)
 )
 
 chart1 = Scatter3D(:basic_3d_scatter, df1, :df1, [:x, :y, :z];
@@ -49,13 +52,13 @@ This is perfect for exploring high-dimensional data from different perspectives!
 
 n = 300
 df2 = DataFrame(
-    dim1 = randn(n),
-    dim2 = randn(n) .* 1.5,
-    dim3 = randn(n) .+ 2,
-    dim4 = abs.(randn(n)),
-    dim5 = randn(n) .* 0.5 .- 1,
-    dim6 = cumsum(randn(n)) ./ sqrt.(1:n),
-    cluster = rand(["Cluster 1", "Cluster 2", "Cluster 3"], n)
+    dim1 = randn(rng,n),
+    dim2 = randn(rng,n) .* 1.5,
+    dim3 = randn(rng,n) .+ 2,
+    dim4 = abs.(randn(rng,n)),
+    dim5 = randn(rng,n) .* 0.5 .- 1,
+    dim6 = cumsum(randn(rng,n)) ./ sqrt.(1:n),
+    cluster = rand(rng,["Cluster 1", "Cluster 2", "Cluster 3"], n)
 )
 
 chart2 = Scatter3D(:multi_dim_scatter, df2, :df2,
@@ -75,12 +78,12 @@ the principal components of the filtered data!</p>
 
 n = 400
 df3 = DataFrame(
-    x = randn(n) .* 2,
-    y = randn(n) .* 1.5,
-    z = randn(n) .+ 1,
-    temperature = rand(15.0:0.1:35.0, n),
-    region = rand(["North", "South", "East", "West"], n),
-    category = rand(["Type A", "Type B", "Type C"], n)
+    x = randn(rng,n) .* 2,
+    y = randn(rng,n) .* 1.5,
+    z = randn(rng,n) .+ 1,
+    temperature = rand(rng,15.0:0.1:35.0, n),
+    region = rand(rng,["North", "South", "East", "West"], n),
+    category = rand(rng,["Type A", "Type B", "Type C"], n)
 )
 
 chart3 = Scatter3D(:filtered_scatter, df3, :df3, [:x, :y, :z];
@@ -103,30 +106,30 @@ The eigenvectors show the principal axes of variation across all clusters.</p>
 n = 150
 # Generate 3 distinct clusters
 cluster1 = DataFrame(
-    x = randn(n÷3) .+ 3,
-    y = randn(n÷3) .+ 3,
-    z = randn(n÷3) .+ 3,
-    w = randn(n÷3) .* 0.5,
+    x = randn(rng,n÷3) .+ 3,
+    y = randn(rng,n÷3) .+ 3,
+    z = randn(rng,n÷3) .+ 3,
+    w = randn(rng,n÷3) .* 0.5,
     cluster = "Cluster 1",
-    density = rand(["High", "Medium", "Low"], n÷3)
+    density = rand(rng,["High", "Medium", "Low"], n÷3)
 )
 
 cluster2 = DataFrame(
-    x = randn(n÷3) .- 3,
-    y = randn(n÷3) .+ 2,
-    z = randn(n÷3) .- 2,
-    w = randn(n÷3) .* 0.5 .+ 2,
+    x = randn(rng,n÷3) .- 3,
+    y = randn(rng,n÷3) .+ 2,
+    z = randn(rng,n÷3) .- 2,
+    w = randn(rng,n÷3) .* 0.5 .+ 2,
     cluster = "Cluster 2",
-    density = rand(["High", "Medium", "Low"], n÷3)
+    density = rand(rng,["High", "Medium", "Low"], n÷3)
 )
 
 cluster3 = DataFrame(
-    x = randn(n÷3) .+ 1,
-    y = randn(n÷3) .- 3,
-    z = randn(n÷3) .+ 2,
-    w = randn(n÷3) .* 0.5 .- 1,
+    x = randn(rng,n÷3) .+ 1,
+    y = randn(rng,n÷3) .- 3,
+    z = randn(rng,n÷3) .+ 2,
+    w = randn(rng,n÷3) .* 0.5 .- 1,
     cluster = "Cluster 3",
-    density = rand(["High", "Medium", "Low"], n÷3)
+    density = rand(rng,["High", "Medium", "Low"], n÷3)
 )
 
 df4 = vcat(cluster1, cluster2, cluster3)
@@ -149,9 +152,9 @@ This is useful for understanding how multivariate time series evolve in 3D space
 n = 300
 t = range(0, 10π, length=n)
 df5 = DataFrame(
-    x = cos.(t) .+ randn(n) .* 0.1,
-    y = sin.(t) .+ randn(n) .* 0.1,
-    z = t ./ (2π) .+ randn(n) .* 0.1,
+    x = cos.(t) .+ randn(rng,n) .* 0.1,
+    y = sin.(t) .+ randn(rng,n) .* 0.1,
+    z = t ./ (2π) .+ randn(rng,n) .* 0.1,
     phase = [t_val < 10π/3 ? "Early" : (t_val < 20π/3 ? "Middle" : "Late") for t_val in t],
     time = t
 )
@@ -174,11 +177,11 @@ Rotating one plot rotates them all - perfect for comparing similar data across c
 
 n = 300
 df6 = DataFrame(
-    x = vcat([randn(n÷3) .+ i for i in [-2, 0, 2]]...),
-    y = vcat([randn(n÷3) .+ i for i in [2, 0, -2]]...),
-    z = randn(n),
+    x = vcat([randn(rng,n÷3) .+ i for i in [-2, 0, 2]]...),
+    y = vcat([randn(rng,n÷3) .+ i for i in [2, 0, -2]]...),
+    z = randn(rng,n),
     experiment = vcat(fill("Exp 1", n÷3), fill("Exp 2", n÷3), fill("Exp 3", n÷3)),
-    condition = rand(["Control", "Treatment"], n)
+    condition = rand(rng,["Control", "Treatment"], n)
 )
 
 chart6 = Scatter3D(:faceted_scatter, df6, :df6, [:x, :y, :z];
@@ -200,16 +203,16 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
 
 n = 500
 df7 = DataFrame(
-    measurement1 = randn(n) .* 2,
-    measurement2 = randn(n) .* 1.5 .+ randn(n) .* 0.3,
-    measurement3 = randn(n) .+ 1,
-    measurement4 = abs.(randn(n)) .* 2,
-    measurement5 = cumsum(randn(n)) ./ sqrt.(1:n),
-    temperature = rand(15.0:0.1:35.0, n),
-    pressure = rand(980.0:0.1:1030.0, n),
-    location = rand(["Site A", "Site B", "Site C", "Site D"], n),
-    experiment = rand(["Exp 1", "Exp 2", "Exp 3"], n),
-    quality = rand(["High", "Medium", "Low"], n)
+    measurement1 = randn(rng,n) .* 2,
+    measurement2 = randn(rng,n) .* 1.5 .+ randn(rng,n) .* 0.3,
+    measurement3 = randn(rng,n) .+ 1,
+    measurement4 = abs.(randn(rng,n)) .* 2,
+    measurement5 = cumsum(randn(rng,n)) ./ sqrt.(1:n),
+    temperature = rand(rng,15.0:0.1:35.0, n),
+    pressure = rand(rng,980.0:0.1:1030.0, n),
+    location = rand(rng,["Site A", "Site B", "Site C", "Site D"], n),
+    experiment = rand(rng,["Exp 1", "Exp 2", "Exp 3"], n),
+    quality = rand(rng,["High", "Medium", "Low"], n)
 )
 
 chart7 = Scatter3D(:comprehensive_scatter, df7, :df7,

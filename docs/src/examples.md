@@ -509,6 +509,150 @@ scatter = ScatterPlot(:filtered_scatter, df, :df;
 )
 ```
 
+## Path Examples
+
+Path charts show trajectories through 2D space, connecting points in a specified order. Perfect for visualizing evolution over time or sequences.
+
+### Basic Path - Trading Strategy Evolution
+
+```julia
+using DataFrames
+
+# Create strategy performance data over time
+df = DataFrame(
+    year = repeat(2015:2024, 3),
+    strategy = repeat(["Momentum", "Carry", "Value"], inner=10),
+    volatility = 0.08 .+ rand(30) .* 0.08,
+    sharpe = 0.5 .+ rand(30) .* 0.8,
+    max_drawdown = 0.05 .+ rand(30) .* 0.15
+)
+
+chart = Path(:strategy_paths, df, :df;
+    x_cols = [:volatility],
+    y_cols = [:sharpe],
+    order_col = :year,
+    color_cols = [:strategy],
+    title = "Strategy Risk-Return Evolution",
+    notes = "Each path shows how a strategy evolved from 2015-2024",
+    show_arrows = true
+)
+
+create_html(chart, df, "strategy_paths.html")
+```
+
+### Interactive Dimension Swapping
+
+```julia
+# Multiple dimensions available for x and y axes
+chart = Path(:flexible_view, df, :df;
+    x_cols = [:volatility, :sharpe, :max_drawdown],  # Multiple x options
+    y_cols = [:sharpe, :volatility, :max_drawdown],  # Multiple y options
+    order_col = :year,
+    color_cols = [:strategy],
+    title = "Multi-Dimensional Strategy Analysis",
+    notes = "Use dropdowns to swap x and y dimensions dynamically"
+)
+```
+
+### Path Without Arrows - Clean Visualization
+
+```julia
+# Disable arrows for a cleaner look
+chart = Path(:clean_paths, df, :df;
+    x_cols = [:volatility],
+    y_cols = [:sharpe],
+    order_col = :year,
+    color_cols = [:strategy],
+    show_arrows = false,  # No direction arrows
+    line_width = 3,
+    marker_size = 8,
+    title = "Strategy Paths (Clean)"
+)
+```
+
+### Path with Faceting
+
+```julia
+# Add regional dimension
+df[!, :region] = repeat(["US", "Europe", "Asia"], 10)
+
+# Facet by region
+chart = Path(:regional_paths, df, :df;
+    x_cols = [:volatility],
+    y_cols = [:sharpe],
+    order_col = :year,
+    color_cols = [:strategy],
+    facet_cols = [:region],
+    default_facet_cols = [:region],
+    title = "Regional Strategy Performance",
+    notes = "Separate panels for each region"
+)
+```
+
+### Path with Filters
+
+```julia
+# Add market regime data
+df[!, :regime] = rand(["Bull", "Bear", "Sideways"], nrow(df))
+
+chart = Path(:filtered_paths, df, :df;
+    x_cols = [:volatility],
+    y_cols = [:sharpe],
+    order_col = :year,
+    color_cols = [:strategy],
+    filters = Dict(:regime => "Bull"),
+    title = "Strategy Paths by Market Regime",
+    notes = "Filter by market regime to see different conditions"
+)
+```
+
+### Portfolio Optimization Journey
+
+```julia
+# Show optimization iterations
+opt_df = DataFrame(
+    iteration = 1:50,
+    risk = 0.20 .- (1:50) ./ 50 .* 0.10 .+ rand(50) .* 0.02,
+    return = 0.08 .+ (1:50) ./ 50 .* 0.05 .+ rand(50) .* 0.01,
+    stage = vcat(fill("Initial", 15), fill("Refinement", 20), fill("Final", 15))
+)
+
+chart = Path(:optimization, opt_df, :opt_df;
+    x_cols = [:risk],
+    y_cols = [:return],
+    order_col = :iteration,
+    color_cols = [:stage],
+    title = "Portfolio Optimization Journey",
+    notes = "50 iterations of optimization, colored by stage",
+    show_arrows = true,
+    line_width = 2
+)
+```
+
+### Path with Date Ordering
+
+```julia
+using Dates
+
+# Business metrics over time
+dates = Date(2023, 1, 1):Month(1):Date(2024, 12, 1)
+business_df = DataFrame(
+    date = dates,
+    cac = 50 .+ (0:23) .* 2 .+ rand(24) .* 10,
+    ltv = 300 .+ (0:23) .* 5 .+ rand(24) .* 50,
+    company = repeat(["Company"], 24)
+)
+
+chart = Path(:business_metrics, business_df, :business_df;
+    x_cols = [:cac],
+    y_cols = [:ltv],
+    order_col = :date,  # Date-based ordering
+    color_cols = [:company],
+    title = "Customer Economics Evolution",
+    notes = "CAC vs LTV over 24 months"
+)
+```
+
 ## DistPlot Examples
 
 ### Single Distribution

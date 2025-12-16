@@ -1,18 +1,19 @@
-using JSPlots, DataFrames, Dates, Random
-
-Random.seed!(42)
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating comprehensive ScatterPlot examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(111)
 
 # Example 1: Multi-dimensional scatter with dimensions parameter
 n = 300
 df1 = DataFrame(
-    mass = randn(n) .* 10 .+ 70,
-    height = randn(n) .* 10 .+ 170,
-    age = rand(20:60, n),
+    mass = randn(rng, n) .* 10 .+ 70,
+    height = randn(rng, n) .* 10 .+ 170,
+    age = rand(rng, 20:60, n),
     bmi = zeros(n),
-    gender = rand(["Male", "Female"], n),
-    activity = rand(["Low", "Medium", "High"], n),
+    gender = rand(rng, ["Male", "Female"], n),
+    activity = rand(rng, ["Low", "Medium", "High"], n),
     color = repeat(["default"], n)
 )
 df1.bmi = df1.mass ./ ((df1.height ./100) .^ 2)
@@ -27,12 +28,12 @@ scatter1 = ScatterPlot(:multi_dim, df1, :df1, [:mass, :height, :age, :bmi];
 # Example 2: Multiple styling options (color, point type, point size)
 n = 400
 df2 = DataFrame(
-    x = randn(n) .* 10,
-    y = randn(n) .* 10,
-    region = rand(["North", "South", "East", "West"], n),
-    category = rand(["A", "B", "C"], n),
-    priority = rand(["Low", "Medium", "High"], n),
-    size_group = rand(["Small", "Medium", "Large"], n)
+    x = randn(rng, n) .* 10,
+    y = randn(rng, n) .* 10,
+    region = rand(rng, ["North", "South", "East", "West"], n),
+    category = rand(rng, ["A", "B", "C"], n),
+    priority = rand(rng, ["Low", "Medium", "High"], n),
+    size_group = rand(rng, ["Small", "Medium", "Large"], n)
 )
 
 scatter2 = ScatterPlot(:multi_style, df2, :df2, [:x, :y];
@@ -45,10 +46,10 @@ scatter2 = ScatterPlot(:multi_style, df2, :df2, [:x, :y];
 # Example 3: Faceting with single facet (marginals disappear when faceted)
 n = 500
 df3 = DataFrame(
-    temperature = randn(n) .* 5 .+ 20,
-    humidity = randn(n) .* 10 .+ 60,
-    season = rand(["Spring", "Summer", "Fall", "Winter"], n),
-    location = rand(["Urban", "Rural", "Coastal"], n),
+    temperature = randn(rng, n) .* 5 .+ 20,
+    humidity = randn(rng, n) .* 10 .+ 60,
+    season = rand(rng, ["Spring", "Summer", "Fall", "Winter"], n),
+    location = rand(rng, ["Urban", "Rural", "Coastal"], n),
     color = repeat(["Measurement"], n)
 )
 
@@ -64,12 +65,12 @@ scatter3 = ScatterPlot(:facet_single, df3, :df3, [:temperature, :humidity];
 # Example 4: Two-dimensional faceting (facet grid)
 n = 600
 df4 = DataFrame(
-    score1 = randn(n) .* 15 .+ 75,
-    score2 = randn(n) .* 12 .+ 70,
-    grade = rand(["Freshman", "Sophomore", "Junior", "Senior"], n),
-    major = rand(["Science", "Arts", "Engineering"], n),
-    semester = rand(["Fall", "Spring"], n),
-    performance = rand(["Below Average", "Average", "Above Average"], n),
+    score1 = randn(rng, n) .* 15 .+ 75,
+    score2 = randn(rng, n) .* 12 .+ 70,
+    grade = rand(rng, ["Freshman", "Sophomore", "Junior", "Senior"], n),
+    major = rand(rng, ["Science", "Arts", "Engineering"], n),
+    semester = rand(rng, ["Fall", "Spring"], n),
+    performance = rand(rng, ["Below Average", "Average", "Above Average"], n),
     color = repeat(["Student"], n)
 )
 
@@ -86,14 +87,14 @@ scatter4 = ScatterPlot(:facet_grid, df4, :df4,  [:score1, :score2];
 # Example 5: Complex multi-everything example
 n = 800
 df5 = DataFrame(
-    var1 = randn(n) .* 20,
-    var2 = randn(n) .* 25,
-    var3 = randn(n) .* 15 .+ 50,
-    var4 = randn(n) .* 30 .+ 100,
-    group_A = rand(["Group1", "Group2", "Group3"], n),
-    group_B = rand(["TypeX", "TypeY", "TypeZ"], n),
-    group_C = rand(["Class1", "Class2"], n),
-    intensity = rand(["Low", "Medium", "High"], n)
+    var1 = randn(rng, n) .* 20,
+    var2 = randn(rng, n) .* 25,
+    var3 = randn(rng, n) .* 15 .+ 50,
+    var4 = randn(rng, n) .* 30 .+ 100,
+    group_A = rand(rng, ["Group1", "Group2", "Group3"], n),
+    group_B = rand(rng, ["TypeX", "TypeY", "TypeZ"], n),
+    group_C = rand(rng, ["Class1", "Class2"], n),
+    intensity = rand(rng, ["Low", "Medium", "High"], n)
 )
 
 scatter5 = ScatterPlot(:complex, df5, :df5,  [:var1, :var2, :var3, :var4];
@@ -111,14 +112,14 @@ n = length(dates)
 df6 = DataFrame(
     date = repeat(dates, outer=3),
     value1 = vcat(
-        cumsum(randn(n)) .+ 100,
-        cumsum(randn(n)) .+ 120,
-        cumsum(randn(n)) .+ 110
+        cumsum(randn(rng, n)) .+ 100,
+        cumsum(randn(rng, n)) .+ 120,
+        cumsum(randn(rng, n)) .+ 110
     ),
     value2 = vcat(
-        cumsum(randn(n)) .+ 50,
-        cumsum(randn(n)) .+ 55,
-        cumsum(randn(n)) .+ 52
+        cumsum(randn(rng, n)) .+ 50,
+        cumsum(randn(rng, n)) .+ 55,
+        cumsum(randn(rng, n)) .+ 52
     ),
     portfolio = repeat(["Portfolio A", "Portfolio B", "Portfolio C"], inner=n),
     quarter = map(d -> Dates.quarter(d), repeat(dates, outer=3)),

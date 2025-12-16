@@ -1,6 +1,9 @@
-using JSPlots, DataFrames, Dates
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating AreaChart examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(789)
 
 # Prepare header
 header = TextBlock("""
@@ -25,7 +28,7 @@ for region in regions
     for date in dates
         push!(df1, (
             Date = date,
-            Sales = abs(10000 + randn() * 2000) + (Dates.dayofyear(date) * 50),
+            Sales = abs(10000 + randn(rng) * 2000) + (Dates.dayofyear(date) * 50),
             Region = region
         ))
     end
@@ -48,7 +51,7 @@ for product in products
     for t in time_points
         push!(df2, (
             Time = t,
-            Value = 50 + 20 * sin(t + hash(product) * 0.01) + randn() * 5,
+            Value = 50 + 20 * sin(t + hash(product) * 0.01) + randn(rng) * 5,
             Product = product
         ))
     end
@@ -72,7 +75,7 @@ for category in categories
     for month in months
         push!(df3, (
             Month = month,
-            MarketShare = abs(20 + randn() * 5),
+            MarketShare = abs(20 + randn(rng) * 5),
             Category = category
         ))
     end
@@ -123,7 +126,7 @@ for year in years
             for date in dates5
                 push!(df5, (
                     Date = date,
-                    Revenue = abs(100000 + randn() * 20000 + Dates.week(date) * 1000),
+                    Revenue = abs(100000 + randn(rng) * 20000 + Dates.week(date) * 1000),
                     Channel = channel,
                     Region = region,
                     Year = year
@@ -154,7 +157,7 @@ for metric in metrics
         for week in weeks
             push!(df6, (
                 Week = week,
-                Value = abs(100 + randn() * 20 + week * 3),
+                Value = abs(100 + randn(rng) * 20 + week * 3),
                 Metric = metric,
                 Source = source
             ))
@@ -186,7 +189,7 @@ for product in products_grid
             for month in months7
                 push!(df7, (
                     Month = month,
-                    Sales = abs(50000 + randn() * 10000 + month * 2000),
+                    Sales = abs(50000 + randn(rng) * 10000 + month * 2000),
                     Product = product,
                     Region = region,
                     Segment = segment
@@ -218,9 +221,9 @@ for industry in industries
         for quarter in quarters
             push!(df8, (
                 Quarter = quarter,
-                Revenue = abs(100 + randn() * 20),
-                Profit = abs(20 + randn() * 5),
-                Growth = abs(5 + randn() * 3),
+                Revenue = abs(100 + randn(rng) * 20),
+                Profit = abs(20 + randn(rng) * 5),
+                Growth = abs(5 + randn(rng) * 3),
                 Industry = industry,
                 CompanySize = size
             ))
@@ -247,7 +250,7 @@ for category in categories_compare
     for time in time_compare
         push!(df9, (
             Time = time,
-            Value = abs(10 + randn() * 3 + time * 0.5),
+            Value = abs(10 + randn(rng) * 3 + time * 0.5),
             Category = category
         ))
     end

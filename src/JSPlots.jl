@@ -39,6 +39,9 @@ module JSPlots
     include("distplot.jl")
     export DistPlot
 
+    include("path.jl")
+    export Path
+
     include("kerneldensity.jl")
     export KernelDensity
 

@@ -1,6 +1,9 @@
-using JSPlots, DataFrames, Dates
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating PivotTable examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(444)
 
 # Prepare header
 header = TextBlock("""
@@ -22,9 +25,9 @@ sales_df = DataFrame(
     Region = repeat(["North", "South", "East", "West"], inner=12),
     Month = repeat(["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], outer=4),
-    Product = rand(["Widget", "Gadget", "Gizmo"], 48),
-    Sales = rand(10000:50000, 48),
-    Units = rand(50:200, 48)
+    Product = rand(rng, ["Widget", "Gadget", "Gizmo"], 48),
+    Sales = rand(rng, 10000:50000, 48),
+    Units = rand(rng, 50:200, 48)
 )
 
 pivot1 = PivotTable(:sales_pivot, :sales_data;
@@ -58,8 +61,8 @@ pivot2 = PivotTable(:performance_heatmap, :performance_data;
 # Example 3: Pivot Table with Bar Chart Renderer
 product_data = DataFrame(
     Category = repeat(["Electronics", "Clothing", "Home", "Sports", "Books"], 20),
-    Brand = rand(["Brand A", "Brand B", "Brand C", "Brand D"], 100),
-    Revenue = rand(1000:10000, 100),
+    Brand = rand(rng, ["Brand A", "Brand B", "Brand C", "Brand D"], 100),
+    Revenue = rand(rng, 1000:10000, 100),
     Quarter = repeat(["Q1", "Q2", "Q3", "Q4"], 25)
 )
 
@@ -74,9 +77,9 @@ pivot3 = PivotTable(:revenue_by_category, :product_data;
 
 # Example 4: Pivot Table with Exclusions
 customer_df = DataFrame(
-    Country = rand(["USA", "UK", "Germany", "France", "Japan", "Test"], 120),
-    ProductType = rand(["Premium", "Standard", "Budget"], 120),
-    Channel = rand(["Online", "Retail", "Wholesale"], 120),
+    Country = rand(rng, ["USA", "UK", "Germany", "France", "Japan", "Test"], 120),
+    ProductType = rand(rng, ["Premium", "Standard", "Budget"], 120),
+    Channel = rand(rng, ["Online", "Retail", "Wholesale"], 120),
     Revenue = rand(500:5000, 120),
     Year = repeat([2022, 2023, 2024], 40)
 )
@@ -93,11 +96,11 @@ pivot4 = PivotTable(:customer_revenue, :customer_data;
 
 # Example 5: Pivot with Inclusions
 survey_df = DataFrame(
-    Age_Group = rand(["18-25", "26-35", "36-45", "46-55", "56+"], 200),
-    Gender = rand(["Male", "Female", "Other", "Prefer not to say"], 200),
+    Age_Group = rand(rng, ["18-25", "26-35", "36-45", "46-55", "56+"], 200),
+    Gender = rand(rng, ["Male", "Female", "Other", "Prefer not to say"], 200),
     Satisfaction = rand(1:10, 200),
-    Product = rand(["Product A", "Product B", "Product C"], 200),
-    Region = rand(["North", "South", "East", "West"], 200)
+    Product = rand(rng, ["Product A", "Product B", "Product C"], 200),
+    Region = rand(rng, ["North", "South", "East", "West"], 200)
 )
 
 pivot5 = PivotTable(:survey_results, :survey_data;
@@ -112,11 +115,11 @@ pivot5 = PivotTable(:survey_results, :survey_data;
 
 # Example 6: Count Aggregation
 transactions_df = DataFrame(
-    Transaction_Type = rand(["Purchase", "Refund", "Exchange", "Cancel"], 500),
-    Customer_Type = rand(["New", "Returning", "VIP"], 500),
-    Payment_Method = rand(["Credit Card", "PayPal", "Bank Transfer", "Cash"], 500),
-    Store = rand(["Store 1", "Store 2", "Store 3"], 500),
-    Amount = rand(10:500, 500)
+    Transaction_Type = rand(rng, ["Purchase", "Refund", "Exchange", "Cancel"], 500),
+    Customer_Type = rand(rng, ["New", "Returning", "VIP"], 500),
+    Payment_Method = rand(rng, ["Credit Card", "PayPal", "Bank Transfer", "Cash"], 500),
+    Store = rand(rng, ["Store 1", "Store 2", "Store 3"], 500),
+    Amount = rand(rng, 10:500, 500)
 )
 
 pivot6 = PivotTable(:transaction_analysis, :transaction_data;
@@ -167,7 +170,7 @@ pivot8 = PivotTable(:Correlation_Matrix, :correlations;
 df_line = DataFrame(
     date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
     x = 1:10,
-    y = rand(10),
+    y = rand(rng, 10),
     color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
 )
 df_line[!, :categ] .=  [ :B, :B, :B, :B, :B, :A, :A, :A, :A, :C]
@@ -176,7 +179,7 @@ df_line[!, :categ22] .= "Category_A"
 df_line2 = DataFrame(
     date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
     x = 1:10,
-    y = rand(10),
+    y = rand(rng, 10),
     color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
 )
 df_line2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]

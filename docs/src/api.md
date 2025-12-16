@@ -291,6 +291,60 @@ Distribution visualization combining histogram, box plot, and rug plot.
 - `value_label`: Value axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
+#### Path
+
+```@docs
+Path
+```
+
+Trajectory visualization showing ordered paths through 2D space with direction arrows. Perfect for visualizing evolution over time or sequences.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
+- `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
+- `order_col::Symbol`: Column determining the order of points along the path (default: `:order`)
+- `color_cols::Vector{Symbol}`: Columns available for color grouping/paths (default: `Symbol[]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `title::String`: Chart title (default: `"Path Chart"`)
+- `line_width::Int`: Width of path lines (default: `2`)
+- `marker_size::Int`: Size of markers (default: `8`)
+- `show_arrows::Bool`: Show direction arrows on paths (default: `true`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+**Features:**
+- Points connected in order according to `order_col` (e.g., year, iteration, date)
+- Direction arrows show path progression (can be toggled off)
+- Interactive x/y dimension swapping from HTML dropdown menus
+- Multiple paths colored by grouping variable
+- Full faceting support (wrap and grid)
+- Data filtering with multi-select dropdowns
+
+**Example:**
+```julia
+df = DataFrame(
+    year = repeat(2015:2024, 2),
+    strategy = repeat(["Momentum", "Carry"], inner=10),
+    volatility = rand(20) .* 0.1 .+ 0.08,
+    sharpe = rand(20) .* 0.8 .+ 0.5
+)
+
+chart = Path(:paths, df, :df;
+    x_cols = [:volatility],
+    y_cols = [:sharpe],
+    order_col = :year,
+    color_cols = [:strategy],
+    title = "Strategy Evolution",
+    show_arrows = true
+)
+```
+
 #### KernelDensity
 
 ```@docs

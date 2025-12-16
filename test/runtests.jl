@@ -37,6 +37,10 @@ using Dates
         include("chart_tests/test_distplot.jl")
     end
 
+    @testset "Path Tests" begin
+        include("chart_tests/test_path.jl")
+    end
+
     @testset "KernelDensity Tests" begin
         include("chart_tests/test_kerneldensity.jl")
     end

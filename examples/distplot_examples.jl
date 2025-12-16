@@ -1,8 +1,9 @@
-using JSPlots, DataFrames, Dates, Random, Distributions
+using JSPlots, DataFrames, Dates, Distributions, StableRNGs
 
 println("Creating DistPlot examples...")
 
-Random.seed!(42)
+# Use stable RNG for reproducible examples
+rng = StableRNG(222)
 
 # Prepare header
 header = TextBlock("""
@@ -20,7 +21,7 @@ header = TextBlock("""
 # Example 1: Simple Distribution - Single Group
 n = 1000
 df1 = DataFrame(
-    value = randn(n) .* 10 .+ 50
+    value = randn(rng,n) .* 10 .+ 50
 )
 
 distplot1 = DistPlot(:simple_dist, df1, :df1;
@@ -34,9 +35,9 @@ distplot1 = DistPlot(:simple_dist, df1, :df1;
 n = 500
 df2 = DataFrame(
     value = vcat(
-        randn(n) .* 5 .+ 100,  # Control group
-        randn(n) .* 6 .+ 110,  # Treatment A
-        randn(n) .* 4 .+ 95    # Treatment B
+        randn(rng,n) .* 5 .+ 100,  # Control group
+        randn(rng,n) .* 6 .+ 110,  # Treatment A
+        randn(rng,n) .* 4 .+ 95    # Treatment B
     ),
     group = repeat(["Control", "Treatment A", "Treatment B"], inner=n)
 )
@@ -51,9 +52,9 @@ distplot2 = DistPlot(:multi_group_dist, df2, :df2;
 # Example 3: Interactive Filters with Range Sliders
 n = 1200
 df3 = DataFrame(
-    score = abs.(randn(n) .* 15 .+ 70),
-    age = rand(18:80, n),
-    department = rand(["Engineering", "Sales", "Marketing", "HR"], n)
+    score = abs.(randn(rng,n) .* 15 .+ 70),
+    age = rand(rng,18:80, n),
+    department = rand(rng,["Engineering", "Sales", "Marketing", "HR"], n)
 )
 
 distplot3 = DistPlot(:filtered_dist, df3, :df3;
@@ -67,12 +68,12 @@ distplot3 = DistPlot(:filtered_dist, df3, :df3;
 # Example 4: Multiple Value and Group Columns with Dropdowns
 n = 800
 df4 = DataFrame(
-    height = randn(n) .* 10 .+ 170,
-    weight = randn(n) .* 15 .+ 70,
-    age_value = randn(n) .* 10 .+ 35,
-    gender = rand(["Male", "Female"], n),
-    country = rand(["USA", "UK", "Canada"], n),
-    category = rand(["A", "B", "C"], n)
+    height = randn(rng,n) .* 10 .+ 170,
+    weight = randn(rng,n) .* 15 .+ 70,
+    age_value = randn(rng,n) .* 10 .+ 35,
+    gender = rand(rng,["Male", "Female"], n),
+    country = rand(rng,["USA", "UK", "Canada"], n),
+    category = rand(rng,["A", "B", "C"], n)
 )
 
 distplot4 = DistPlot(:multi_dropdown, df4, :df4;
@@ -87,11 +88,11 @@ distplot4 = DistPlot(:multi_dropdown, df4, :df4;
 n = 600
 df5 = DataFrame(
     measurement = vcat(
-        randn(n÷5) .* 8 .+ 100,
-        randn(n÷5) .* 7 .+ 105,
-        randn(n÷5) .* 6 .+ 108,
-        randn(n÷5) .* 6 .+ 110,
-        randn(n÷5) .* 5 .+ 112
+        randn(rng,n÷5) .* 8 .+ 100,
+        randn(rng,n÷5) .* 7 .+ 105,
+        randn(rng,n÷5) .* 6 .+ 108,
+        randn(rng,n÷5) .* 6 .+ 110,
+        randn(rng,n÷5) .* 5 .+ 112
     ),
     time_point = repeat(["Baseline", "Week 1", "Week 2", "Week 3", "Week 4"], inner=n÷5)
 )

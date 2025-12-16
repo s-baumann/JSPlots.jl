@@ -1,6 +1,9 @@
-using JSPlots, DataFrames, Dates
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating LineChart examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(456)
 
 # Prepare header
 header = TextBlock("""
@@ -21,7 +24,7 @@ header = TextBlock("""
 dates = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
 df1 = DataFrame(
     Date = dates,
-    Revenue = cumsum(randn(length(dates)) .* 1000 .+ 50000),
+    Revenue = cumsum(randn(rng, length(dates)) .* 1000 .+ 50000),
     color = repeat(["Revenue"], length(dates))
 )
 
@@ -67,7 +70,7 @@ for dept in departments
                 Department = dept,
                 Quarter = quarter,
                 Month = month_name,
-                Productivity = 70 + rand() * 30,
+                Productivity = 70 + rand(rng) * 30,
                 Metric = "Productivity"
             ))
         end
@@ -99,7 +102,7 @@ for product in products
         for month in 1:12
             push!(facet_df, (
                 Month = month,
-                Sales = 100 + rand() * 50 + (month - 1) * 5,
+                Sales = 100 + rand(rng) * 50 + (month - 1) * 5,
                 Product = product,
                 Region = region,
                 color = region
@@ -132,7 +135,7 @@ for product in products_small
             for month in 1:12
                 push!(facet_grid_df, (
                     Month = month,
-                    Sales = 100 + rand() * 50 + (month - 1) * 5,
+                    Sales = 100 + rand(rng) * 50 + (month - 1) * 5,
                     Product = product,
                     Region = region,
                     Year = year,
@@ -166,7 +169,7 @@ for stock in stocks
             for month in 1:12
                 push!(dynamic_df, (
                     Month = month,
-                    Return = 5 + randn() * 3 + (month - 6) * 0.3,
+                    Return = 5 + randn(rng) * 3 + (month - 6) * 0.3,
                     Stock = stock,
                     Strategy = strategy,
                     Region = region
@@ -217,10 +220,10 @@ chart8 = LineChart(:aggregation_demo, agg_df, :agg_data;
 df_multi = DataFrame(
     time_hours = 1:24,
     time_halfhours = 0.5:0.5:12,
-    temperature_celsius = 15 .+ 8 .* sin.(2π .* (1:24) ./ 24) .+ randn(24),
-    temperature_fahrenheit = 59 .+ 14.4 .* sin.(2π .* (1:24) ./ 24) .+ randn(24) .* 1.8,
-    humidity_percent = 60 .+ 20 .* cos.(2π .* (1:24) ./ 24) .+ randn(24) .* 5,
-    pressure_hpa = 1013 .+ 5 .* sin.(2π .* (1:24) ./ 24 .+ π/4) .+ randn(24) .* 2,
+    temperature_celsius = 15 .+ 8 .* sin.(2π .* (1:24) ./ 24) .+ randn(rng, 24),
+    temperature_fahrenheit = 59 .+ 14.4 .* sin.(2π .* (1:24) ./ 24) .+ randn(rng, 24) .* 1.8,
+    humidity_percent = 60 .+ 20 .* cos.(2π .* (1:24) ./ 24) .+ randn(rng, 24) .* 5,
+    pressure_hpa = 1013 .+ 5 .* sin.(2π .* (1:24) ./ 24 .+ π/4) .+ randn(rng, 24) .* 2,
     location = repeat(["Station A"], 24),
     color = repeat(["default"], 24)
 )

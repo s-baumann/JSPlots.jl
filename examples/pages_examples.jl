@@ -1,6 +1,9 @@
-using JSPlots, DataFrames, Dates
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating Pages (multi-page) examples...")
+
+# Use stable RNG for reproducible examples
+rng = StableRNG(555)
 
 # ==============================================================================
 # Example 1: Manual LinkList Construction
@@ -11,10 +14,10 @@ println("\n=== Example 1: Manual LinkList Construction ===")
 dates = Date(2024, 1, 1):Day(1):Date(2024, 12, 31)
 df_sales = DataFrame(
     Date = dates,
-    Revenue = cumsum(randn(length(dates)) .* 1000 .+ 50000),
-    Costs = cumsum(randn(length(dates)) .* 500 .+ 30000),
-    Region = rand(["North", "South", "East", "West"], length(dates)),
-    Product = rand(["Product A", "Product B", "Product C"], length(dates))
+    Revenue = cumsum(randn(rng,length(dates)) .* 1000 .+ 50000),
+    Costs = cumsum(randn(rng,length(dates)) .* 500 .+ 30000),
+    Region = rand(rng,["North", "South", "East", "West"], length(dates)),
+    Product = rand(rng,["Product A", "Product B", "Product C"], length(dates))
 )
 
 df_metrics = DataFrame(
@@ -186,9 +189,9 @@ println("\n=== Example 2: Easy Constructor (Auto-Generated LinkList) ===")
 dates2 = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
 df_sales2 = DataFrame(
     Date = dates2,
-    Revenue = cumsum(randn(length(dates2)) .* 1000 .+ 50000),
-    Region = rand(["North", "South", "East", "West"], length(dates2)),
-    Product = rand(["Product A", "Product B", "Product C"], length(dates2))
+    Revenue = cumsum(randn(rng,length(dates2)) .* 1000 .+ 50000),
+    Region = rand(rng,["North", "South", "East", "West"], length(dates2)),
+    Product = rand(rng,["Product A", "Product B", "Product C"], length(dates2))
 )
 
 df_metrics2 = DataFrame(

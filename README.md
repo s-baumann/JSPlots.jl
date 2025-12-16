@@ -45,6 +45,7 @@ create_html(page, "dashboard.html")
 - **LineChart** - Time series and trend visualization with faceting
 - **AreaChart** - Stacked area charts or bar charts (auto-detects continuous vs discrete x-axis)
 - **ScatterPlot** - 2D scatter plots with marginal distributions
+- **Path** - Trajectory visualization showing ordered paths through 2D space with direction arrows
 
 #### Distributional Plots
 - **DistPlot** - Distribution visualization combining histogram, box plot, and rug plot
