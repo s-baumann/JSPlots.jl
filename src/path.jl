@@ -201,6 +201,9 @@ struct Path <: JSPlotsType
             const ORDER_COL = '$order_col';
             const USE_ALPHARANGE = $use_alpharange;
 
+            // Global state for arrow/line toggle
+            window.showArrows_$chart_title = $(show_arrows ? "true" : "false");
+
             let allData = [];
 
             // Helper function to generate alpha values for path progression
@@ -329,61 +332,68 @@ struct Path <: JSPlotsType
                             showlegend: true
                         });
 
-                        // Add line segments with alpha gradient
-                        if (USE_ALPHARANGE && xValues.length > 1) {
-                            // Create individual line segments with varying alpha
-                            for (let i = 0; i < xValues.length - 1; i++) {
-                                const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
-                                traces.push({
-                                    x: [xValues[i], xValues[i + 1]],
-                                    y: [yValues[i], yValues[i + 1]],
-                                    type: 'scatter',
-                                    mode: 'lines',
-                                    line: {
-                                        color: hexToRgba(baseColor, alpha),
-                                        width: $line_width
-                                    },
-                                    showlegend: false,
-                                    hoverinfo: 'skip'
-                                });
-                            }
-                        } else {
-                            // Single line trace without alpha gradient
-                            traces.push({
-                                x: xValues,
-                                y: yValues,
-                                type: 'scatter',
-                                mode: 'lines',
-                                line: {
-                                    color: baseColor,
-                                    width: $line_width
-                                },
-                                showlegend: false,
-                                hoverinfo: 'skip'
-                            });
-                        }
+                        // Add connections between points (arrows or lines)
+                        if (xValues.length > 1) {
+                            if (window.showArrows_$chart_title) {
+                                // Add arrow segments connecting points (each segment is an arrow)
+                                for (let i = 0; i < xValues.length - 1; i++) {
+                                    const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                                    const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
 
-                        // Add arrow annotations $(show_arrows ? "if true" : "if false")
-                        if ($show_arrows && xValues.length > 1) {
-                            // Add arrows every few points to show direction
-                            const arrowInterval = Math.max(1, Math.floor(xValues.length / 5));
-                            for (let i = arrowInterval; i < xValues.length; i += arrowInterval) {
-                                annotations.push({
-                                    x: xValues[i],
-                                    y: yValues[i],
-                                    ax: xValues[i - 1],
-                                    ay: yValues[i - 1],
-                                    xref: 'x',
-                                    yref: 'y',
-                                    axref: 'x',
-                                    ayref: 'y',
-                                    showarrow: true,
-                                    arrowhead: 2,
-                                    arrowsize: 1,
-                                    arrowwidth: 1,
-                                    arrowcolor: COLOR_MAP[group.color] || '#000000',
-                                    opacity: 0.4
-                                });
+                                    annotations.push({
+                                        x: xValues[i + 1],
+                                        y: yValues[i + 1],
+                                        ax: xValues[i],
+                                        ay: yValues[i],
+                                        xref: 'x',
+                                        yref: 'y',
+                                        axref: 'x',
+                                        ayref: 'y',
+                                        showarrow: true,
+                                        arrowhead: 2,
+                                        arrowsize: 1.5,
+                                        arrowwidth: $line_width,
+                                        arrowcolor: arrowColor,
+                                        opacity: alpha
+                                    });
+                                }
+                            } else {
+                                // Add line trace connecting points
+                                if (USE_ALPHARANGE) {
+                                    // Create individual line segments with varying opacity
+                                    for (let i = 0; i < xValues.length - 1; i++) {
+                                        const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                        const lineColor = hexToRgba(baseColor, alpha);
+
+                                        traces.push({
+                                            x: [xValues[i], xValues[i + 1]],
+                                            y: [yValues[i], yValues[i + 1]],
+                                            type: 'scatter',
+                                            mode: 'lines',
+                                            line: {
+                                                color: lineColor,
+                                                width: $line_width
+                                            },
+                                            showlegend: false,
+                                            hoverinfo: 'skip'
+                                        });
+                                    }
+                                } else {
+                                    // Simple continuous line
+                                    traces.push({
+                                        x: xValues,
+                                        y: yValues,
+                                        type: 'scatter',
+                                        mode: 'lines',
+                                        name: group.color + ' (path)',
+                                        line: {
+                                            color: baseColor,
+                                            width: $line_width
+                                        },
+                                        showlegend: false,
+                                        hoverinfo: 'skip'
+                                    });
+                                }
                             }
                         }
                     }
@@ -485,64 +495,74 @@ struct Path <: JSPlotsType
                                 hovertemplate: '%{text}<br>' + X_COL + ': %{x}<br>' + Y_COL + ': %{y}<extra></extra>'
                             });
 
-                            // Add line segments with alpha gradient
-                            if (USE_ALPHARANGE && xValues.length > 1) {
-                                for (let i = 0; i < xValues.length - 1; i++) {
-                                    const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
-                                    traces.push({
-                                        x: [xValues[i], xValues[i + 1]],
-                                        y: [yValues[i], yValues[i + 1]],
-                                        type: 'scatter',
-                                        mode: 'lines',
-                                        line: {
-                                            color: hexToRgba(baseColor, alpha),
-                                            width: $line_width
-                                        },
-                                        legendgroup: legendGroup,
-                                        showlegend: false,
-                                        xaxis: xaxis,
-                                        yaxis: yaxis,
-                                        hoverinfo: 'skip'
-                                    });
-                                }
-                            } else {
-                                traces.push({
-                                    x: xValues,
-                                    y: yValues,
-                                    type: 'scatter',
-                                    mode: 'lines',
-                                    line: {
-                                        color: baseColor,
-                                        width: $line_width
-                                    },
-                                    legendgroup: legendGroup,
-                                    showlegend: false,
-                                    xaxis: xaxis,
-                                    yaxis: yaxis,
-                                    hoverinfo: 'skip'
-                                });
-                            }
+                            // Add connections between points (arrows or lines)
+                            if (xValues.length > 1) {
+                                if (window.showArrows_$chart_title) {
+                                    // Add arrow segments connecting points (each segment is an arrow)
+                                    for (let i = 0; i < xValues.length - 1; i++) {
+                                        const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                                        const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
 
-                            // Add arrow annotations
-                            if ($show_arrows && xValues.length > 1) {
-                                const arrowInterval = Math.max(1, Math.floor(xValues.length / 5));
-                                for (let i = arrowInterval; i < xValues.length; i += arrowInterval) {
-                                    layout.annotations.push({
-                                        x: xValues[i],
-                                        y: yValues[i],
-                                        ax: xValues[i - 1],
-                                        ay: yValues[i - 1],
-                                        xref: xaxis === 'x' ? 'x' : xaxis,
-                                        yref: yaxis === 'y' ? 'y' : yaxis,
-                                        axref: xaxis === 'x' ? 'x' : xaxis,
-                                        ayref: yaxis === 'y' ? 'y' : yaxis,
-                                        showarrow: true,
-                                        arrowhead: 2,
-                                        arrowsize: 1,
-                                        arrowwidth: 1,
-                                        arrowcolor: COLOR_MAP[group.color] || '#000000',
-                                        opacity: 0.4
-                                    });
+                                        layout.annotations.push({
+                                            x: xValues[i + 1],
+                                            y: yValues[i + 1],
+                                            ax: xValues[i],
+                                            ay: yValues[i],
+                                            xref: xaxis === 'x' ? 'x' : xaxis,
+                                            yref: yaxis === 'y' ? 'y' : yaxis,
+                                            axref: xaxis === 'x' ? 'x' : xaxis,
+                                            ayref: yaxis === 'y' ? 'y' : yaxis,
+                                            showarrow: true,
+                                            arrowhead: 2,
+                                            arrowsize: 1.5,
+                                            arrowwidth: $line_width,
+                                            arrowcolor: arrowColor,
+                                            opacity: alpha
+                                        });
+                                    }
+                                } else {
+                                    // Add line trace connecting points
+                                    if (USE_ALPHARANGE) {
+                                        // Create individual line segments with varying opacity
+                                        for (let i = 0; i < xValues.length - 1; i++) {
+                                            const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                            const lineColor = hexToRgba(baseColor, alpha);
+
+                                            traces.push({
+                                                x: [xValues[i], xValues[i + 1]],
+                                                y: [yValues[i], yValues[i + 1]],
+                                                type: 'scatter',
+                                                mode: 'lines',
+                                                line: {
+                                                    color: lineColor,
+                                                    width: $line_width
+                                                },
+                                                legendgroup: legendGroup,
+                                                showlegend: false,
+                                                xaxis: xaxis,
+                                                yaxis: yaxis,
+                                                hoverinfo: 'skip'
+                                            });
+                                        }
+                                    } else {
+                                        // Simple continuous line
+                                        traces.push({
+                                            x: xValues,
+                                            y: yValues,
+                                            type: 'scatter',
+                                            mode: 'lines',
+                                            name: group.color + ' (path)',
+                                            legendgroup: legendGroup,
+                                            showlegend: false,
+                                            xaxis: xaxis,
+                                            yaxis: yaxis,
+                                            line: {
+                                                color: baseColor,
+                                                width: $line_width
+                                            },
+                                            hoverinfo: 'skip'
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -660,64 +680,74 @@ struct Path <: JSPlotsType
                                     hovertemplate: '%{text}<br>' + X_COL + ': %{x}<br>' + Y_COL + ': %{y}<extra></extra>'
                                 });
 
-                                // Add line segments with alpha gradient
-                                if (USE_ALPHARANGE && xValues.length > 1) {
-                                    for (let i = 0; i < xValues.length - 1; i++) {
-                                        const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
-                                        traces.push({
-                                            x: [xValues[i], xValues[i + 1]],
-                                            y: [yValues[i], yValues[i + 1]],
-                                            type: 'scatter',
-                                            mode: 'lines',
-                                            line: {
-                                                color: hexToRgba(baseColor, alpha),
-                                                width: $line_width
-                                            },
-                                            legendgroup: legendGroup,
-                                            showlegend: false,
-                                            xaxis: xaxis,
-                                            yaxis: yaxis,
-                                            hoverinfo: 'skip'
-                                        });
-                                    }
-                                } else {
-                                    traces.push({
-                                        x: xValues,
-                                        y: yValues,
-                                        type: 'scatter',
-                                        mode: 'lines',
-                                        line: {
-                                            color: baseColor,
-                                            width: $line_width
-                                        },
-                                        legendgroup: legendGroup,
-                                        showlegend: false,
-                                        xaxis: xaxis,
-                                        yaxis: yaxis,
-                                        hoverinfo: 'skip'
-                                    });
-                                }
+                                // Add connections between points (arrows or lines)
+                                if (xValues.length > 1) {
+                                    if (window.showArrows_$chart_title) {
+                                        // Add arrow segments connecting points (each segment is an arrow)
+                                        for (let i = 0; i < xValues.length - 1; i++) {
+                                            const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                                            const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
 
-                                // Add arrow annotations
-                                if ($show_arrows && xValues.length > 1) {
-                                    const arrowInterval = Math.max(1, Math.floor(xValues.length / 5));
-                                    for (let i = arrowInterval; i < xValues.length; i += arrowInterval) {
-                                        layout.annotations.push({
-                                            x: xValues[i],
-                                            y: yValues[i],
-                                            ax: xValues[i - 1],
-                                            ay: yValues[i - 1],
-                                            xref: xaxis === 'x' ? 'x' : xaxis,
-                                            yref: yaxis === 'y' ? 'y' : yaxis,
-                                            axref: xaxis === 'x' ? 'x' : xaxis,
-                                            ayref: yaxis === 'y' ? 'y' : yaxis,
-                                            showarrow: true,
-                                            arrowhead: 2,
-                                            arrowsize: 1,
-                                            arrowwidth: 1,
-                                            arrowcolor: COLOR_MAP[group.color] || '#000000',
-                                            opacity: 0.4
-                                        });
+                                            layout.annotations.push({
+                                                x: xValues[i + 1],
+                                                y: yValues[i + 1],
+                                                ax: xValues[i],
+                                                ay: yValues[i],
+                                                xref: xaxis === 'x' ? 'x' : xaxis,
+                                                yref: yaxis === 'y' ? 'y' : yaxis,
+                                                axref: xaxis === 'x' ? 'x' : xaxis,
+                                                ayref: yaxis === 'y' ? 'y' : yaxis,
+                                                showarrow: true,
+                                                arrowhead: 2,
+                                                arrowsize: 1.5,
+                                                arrowwidth: $line_width,
+                                                arrowcolor: arrowColor,
+                                                opacity: alpha
+                                            });
+                                        }
+                                    } else {
+                                        // Add line trace connecting points
+                                        if (USE_ALPHARANGE) {
+                                            // Create individual line segments with varying opacity
+                                            for (let i = 0; i < xValues.length - 1; i++) {
+                                                const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                                const lineColor = hexToRgba(baseColor, alpha);
+
+                                                traces.push({
+                                                    x: [xValues[i], xValues[i + 1]],
+                                                    y: [yValues[i], yValues[i + 1]],
+                                                    type: 'scatter',
+                                                    mode: 'lines',
+                                                    line: {
+                                                        color: lineColor,
+                                                        width: $line_width
+                                                    },
+                                                    legendgroup: legendGroup,
+                                                    showlegend: false,
+                                                    xaxis: xaxis,
+                                                    yaxis: yaxis,
+                                                    hoverinfo: 'skip'
+                                                });
+                                            }
+                                        } else {
+                                            // Simple continuous line
+                                            traces.push({
+                                                x: xValues,
+                                                y: yValues,
+                                                type: 'scatter',
+                                                mode: 'lines',
+                                                name: group.color + ' (path)',
+                                                legendgroup: legendGroup,
+                                                showlegend: false,
+                                                xaxis: xaxis,
+                                                yaxis: yaxis,
+                                                line: {
+                                                    color: baseColor,
+                                                    width: $line_width
+                                                },
+                                                hoverinfo: 'skip'
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -769,6 +799,16 @@ struct Path <: JSPlotsType
                     Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
                 }
             };
+
+            // Arrow/line toggle button handler
+            const arrowToggleBtn = document.getElementById('$(chart_title)_arrow_toggle');
+            if (arrowToggleBtn) {
+                arrowToggleBtn.addEventListener('click', function() {
+                    window.showArrows_$chart_title = !window.showArrows_$chart_title;
+                    arrowToggleBtn.textContent = window.showArrows_$chart_title ? 'Show Lines' : 'Show Arrows';
+                    window.updateChart_$chart_title();
+                });
+            }
 
             // Load and parse CSV data using centralized parser
             loadDataset('$data_label').then(function(data) {
@@ -830,6 +870,15 @@ struct Path <: JSPlotsType
             </div>
             """
         end
+
+        # Add arrow/line toggle button
+        non_facet_controls *= """
+        <div style="margin: 10px;">
+            <button id="$(chart_title)_arrow_toggle" style="padding: 5px 15px; cursor: pointer;">
+                $(show_arrows ? "Show Lines" : "Show Arrows")
+            </button>
+        </div>
+        """
 
         # Build facet controls separately
         facet_controls = ""

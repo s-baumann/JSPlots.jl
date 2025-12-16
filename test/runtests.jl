@@ -41,6 +41,10 @@ using Dates
         include("chart_tests/test_path.jl")
     end
 
+    @testset "PieChart Tests" begin
+        include("chart_tests/test_piechart.jl")
+    end
+
     @testset "KernelDensity Tests" begin
         include("chart_tests/test_kerneldensity.jl")
     end

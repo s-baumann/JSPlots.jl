@@ -42,6 +42,9 @@ module JSPlots
     include("path.jl")
     export Path
 
+    include("piechart.jl")
+    export PieChart
+
     include("kerneldensity.jl")
     export KernelDensity
 

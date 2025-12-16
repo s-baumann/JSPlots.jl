@@ -1,6 +1,10 @@
 using Test
 using JSPlots
 
+# Define test structs at top level
+struct FakeChart end
+struct UnknownChart end
+
 @testset "Picture" begin
     mktempdir() do tmpdir
         # Use the real example image for testing
@@ -319,6 +323,221 @@ using JSPlots
             # From save function - is temp
             pic2 = Picture(:is_temp, Dict(), (o, p) -> write(p, "data"); format=:png)
             @test pic2.is_temp == true
+        end
+
+        @testset "Auto-detect VegaLite" begin
+            # This tests the auto-detection path for VegaLite
+            # We can't test actual VegaLite without adding it as a dependency,
+            # but we can test the error path
+            @test_throws ErrorException Picture(:fake, FakeChart())
+        end
+
+        @testset "Error message for undetected type" begin
+            unknown = UnknownChart()
+            try
+                Picture(:unknown, unknown)
+                @test false  # Should not reach here
+            catch e
+                @test occursin("Could not auto-detect", e.msg)
+                @test occursin("UnknownChart", e.msg)
+            end
+        end
+
+        @testset "Generate picture HTML function" begin
+            pic = Picture(:gen_test, test_png)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("gen_test", html)
+            @test occursin("data:image/jpeg;base64", html)
+            @test occursin("picture-container", html)
+        end
+
+        @testset "Generate SVG picture HTML" begin
+            pic = Picture(:svg_gen, test_svg)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("svg_gen", html)
+            @test occursin("<svg", html)
+            @test !occursin("data:image", html)
+        end
+
+        @testset "Generate external picture HTML" begin
+            pic = Picture(:ext_gen, test_png)
+            html = JSPlots.generate_picture_html(pic, :csv_external, tmpdir)
+            @test occursin("pictures/ext_gen.jpeg", html)
+            @test isfile(joinpath(tmpdir, "pictures", "ext_gen.jpeg"))
+        end
+
+        @testset "Check image size function (small)" begin
+            # Test with small image - should not warn
+            @test_nowarn JSPlots.check_image_size(test_png_small, :csv_embedded)
+        end
+
+        @testset "Check image size function (large)" begin
+            # Create a "large" image file (>5MB)
+            large_file = joinpath(tmpdir, "large.png")
+            # Write 6MB of data
+            write(large_file, zeros(UInt8, 6_000_000))
+            # Should warn for large embedded images
+            @test_logs (:warn, r"Large image.*MB.*embedded") JSPlots.check_image_size(large_file, :csv_embedded)
+        end
+
+        @testset "Check image size - external format (no warning)" begin
+            # Should not warn for external formats even if large
+            large_file = joinpath(tmpdir, "large2.png")
+            write(large_file, zeros(UInt8, 6_000_000))
+            @test_nowarn JSPlots.check_image_size(large_file, :csv_external)
+        end
+
+        @testset "MIME type detection - PNG" begin
+            pic = Picture(:mime_png, test_png_small)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("data:image/png;base64", html)
+        end
+
+        @testset "MIME type detection - JPEG (.jpeg)" begin
+            jpeg_file = joinpath(tmpdir, "test.jpeg")
+            cp(test_png, jpeg_file, force=true)
+            pic = Picture(:mime_jpeg, jpeg_file)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("data:image/jpeg;base64", html)
+        end
+
+        @testset "MIME type detection - JPEG (.jpg)" begin
+            jpg_file = joinpath(tmpdir, "test.jpg")
+            cp(test_png, jpg_file, force=true)
+            pic = Picture(:mime_jpg, jpg_file)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("data:image/jpeg;base64", html)
+        end
+
+        @testset "MIME type detection - JPEG case insensitive" begin
+            jpeg_upper = joinpath(tmpdir, "test.JPEG")
+            cp(test_png, jpeg_upper, force=true)
+            pic = Picture(:mime_upper, jpeg_upper)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("data:image/jpeg;base64", html)
+        end
+
+        @testset "Picture template replacement" begin
+            pic = Picture(:template_test, test_png; notes="Test notes content")
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("template_test", html)
+            @test occursin("Test notes content", html)
+            @test occursin("picture-container", html)
+        end
+
+        @testset "Picture style constant" begin
+            @test occursin(".picture-container", JSPlots.PICTURE_STYLE)
+            @test occursin(".picture-container h2", JSPlots.PICTURE_STYLE)
+            @test occursin(".picture-container img", JSPlots.PICTURE_STYLE)
+            @test occursin(".picture-container svg", JSPlots.PICTURE_STYLE)
+        end
+
+        @testset "Picture template constant" begin
+            @test occursin("___PICTURE_TITLE___", JSPlots.PICTURE_TEMPLATE)
+            @test occursin("___NOTES___", JSPlots.PICTURE_TEMPLATE)
+            @test occursin("___IMAGE_CONTENT___", JSPlots.PICTURE_TEMPLATE)
+            @test occursin("picture-container", JSPlots.PICTURE_TEMPLATE)
+        end
+
+        @testset "External format creates pictures directory" begin
+            new_tmpdir = joinpath(tmpdir, "new_project")
+            pic = Picture(:new_pic, test_png)
+            html = JSPlots.generate_picture_html(pic, :parquet, new_tmpdir)
+            @test isdir(joinpath(new_tmpdir, "pictures"))
+            @test isfile(joinpath(new_tmpdir, "pictures", "new_pic.jpeg"))
+        end
+
+        @testset "Picture with different file extensions" begin
+            # Test that file extension is preserved
+            for (ext, expected_mime) in [(".png", "png"), (".svg", "svg"), (".jpg", "jpeg"), (".jpeg", "jpeg")]
+                test_file = joinpath(tmpdir, "test_ext$ext")
+                if ext == ".svg"
+                    write(test_file, "<svg></svg>")
+                else
+                    cp(test_png, test_file, force=true)
+                end
+                pic = Picture(Symbol("ext$ext"), test_file)
+                project = joinpath(tmpdir, "ext_test$ext")
+                html = JSPlots.generate_picture_html(pic, :csv_external, project)
+                @test occursin("pictures/ext$ext$ext", html)
+            end
+        end
+
+        @testset "Picture HTML contains alt attribute" begin
+            pic = Picture(:alt_test, test_png)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("alt=\"alt_test\"", html)
+        end
+
+        @testset "Multiple format specifications" begin
+            for fmt in [:png, :svg, :jpeg, :jpg]
+                mock_chart = Dict(:format => fmt)
+                save_func = (obj, path) -> write(path, "test_data")
+                pic = Picture(Symbol("fmt_$fmt"), mock_chart, save_func; format=fmt)
+                @test endswith(pic.image_path, "." * string(fmt))
+            end
+        end
+
+        @testset "Base64 encoding integrity" begin
+            # Test that base64 encoding is valid
+            pic = Picture(:b64_test, test_png_small)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin(r"data:image/png;base64,[A-Za-z0-9+/=]+", html)
+        end
+
+        @testset "Copy file with force=true" begin
+            # Test that copying to existing file works
+            pic = Picture(:copy_test, test_png)
+            dest_dir = joinpath(tmpdir, "copy_dest")
+            mkpath(joinpath(dest_dir, "pictures"))
+            # Create existing file
+            existing = joinpath(dest_dir, "pictures", "copy_test.jpeg")
+            write(existing, "old content")
+            # Generate HTML should overwrite
+            html = JSPlots.generate_picture_html(pic, :csv_external, dest_dir)
+            @test isfile(existing)
+            @test read(existing) != b"old content"
+        end
+
+        @testset "Empty notes in template" begin
+            pic = Picture(:empty_notes_template, test_png; notes="")
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("<p></p>", html)
+        end
+
+        @testset "Notes with special characters in template" begin
+            special_notes = "Notes with <tags> & special \"chars\""
+            pic = Picture(:special_notes, test_png; notes=special_notes)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            # Notes should be in the HTML (might be escaped by browser)
+            @test occursin(special_notes, html)
+        end
+
+        @testset "SVG lowercase extension check" begin
+            svg_upper = joinpath(tmpdir, "test.SVG")
+            write(svg_upper, "<svg></svg>")
+            pic = Picture(:svg_upper_ext, svg_upper)
+            html = JSPlots.generate_picture_html(pic, :csv_embedded, "")
+            @test occursin("<svg", html)
+            @test !occursin("data:image", html)
+        end
+
+        @testset "Picture fields" begin
+            pic = Picture(:fields_test, test_png; notes="Test notes")
+            @test pic.chart_title == :fields_test
+            @test pic.image_path == test_png
+            @test pic.notes == "Test notes"
+            @test pic.is_temp == false
+            @test pic.appearance_html == ""
+            @test pic.functional_html == ""
+        end
+
+        @testset "Internal constructor" begin
+            pic = JSPlots.Picture(:internal, test_png, "Internal notes", true)
+            @test pic.chart_title == :internal
+            @test pic.image_path == test_png
+            @test pic.notes == "Internal notes"
+            @test pic.is_temp == true
         end
     end
 end

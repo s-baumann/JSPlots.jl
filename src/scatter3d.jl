@@ -73,6 +73,18 @@ struct Scatter3D <: JSPlotsType
         isempty(valid_color_cols) && error("None of the specified color_cols exist in dataframe. Available: $all_cols")
         default_color_col = string(valid_color_cols[1])
 
+        # Build color maps for all valid color columns
+        color_palette = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
+                        "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
+        color_maps = Dict()
+        for col in valid_color_cols
+            unique_vals = unique(df[!, col])
+            color_maps[string(col)] = Dict(
+                string(key) => color_palette[(i - 1) % length(color_palette) + 1]
+                for (i, key) in enumerate(unique_vals)
+            )
+        end
+
         # Normalize facet_cols
         facet_choices = if facet_cols === nothing
             Symbol[]
@@ -136,10 +148,13 @@ $options                </select>
         </div>
         """
 
-        # X, Y, Z dropdowns (on same line if any has multiple options)
-        xyz_html = build_dropdown("$(chart_title_safe)_x_col_select", "X", dimensions, default_x_col, "updatePlotWithFilters_$(chart_title_safe)()") *
-                   build_dropdown("$(chart_title_safe)_y_col_select", "Y", dimensions, default_y_col, "updatePlotWithFilters_$(chart_title_safe)()") *
-                   build_dropdown("$(chart_title_safe)_z_col_select", "Z", dimensions, default_z_col, "updatePlotWithFilters_$(chart_title_safe)()")
+        # X, Y, Z dropdowns (only show if more than 3 dimensions)
+        xyz_html = ""
+        if length(dimensions) > 3
+            xyz_html = build_dropdown("$(chart_title_safe)_x_col_select", "X", dimensions, default_x_col, "updatePlotWithFilters_$(chart_title_safe)()") *
+                       build_dropdown("$(chart_title_safe)_y_col_select", "Y", dimensions, default_y_col, "updatePlotWithFilters_$(chart_title_safe)()") *
+                       build_dropdown("$(chart_title_safe)_z_col_select", "Z", dimensions, default_z_col, "updatePlotWithFilters_$(chart_title_safe)()")
+        end
         if !isempty(xyz_html)
             plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
 $xyz_html        </div>
@@ -162,8 +177,8 @@ $style_html        </div>
                      "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
             faceting_html = """
             <div style="margin: 10px 0;">
-                <label for="facet1_select_$(chart_title_safe)">Facet by: </label>
-                <select id="facet1_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
+                <label for="facet1_selector_$(chart_title_safe)">Facet by: </label>
+                <select id="facet1_selector_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options                </select>
             </div>
             """
@@ -181,13 +196,13 @@ $options                </select>
             faceting_html = """
             <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$(chart_title_safe)">Facet 1:</label>
-                    <select id="facet1_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
+                    <label for="facet1_selector_$(chart_title_safe)">Facet 1:</label>
+                    <select id="facet1_selector_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options1                </select>
                 </div>
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$(chart_title_safe)">Facet 2:</label>
-                    <select id="facet2_select_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
+                    <label for="facet2_selector_$(chart_title_safe)">Facet 2:</label>
+                    <select id="facet2_selector_$(chart_title_safe)" onchange="updatePlotWithFilters_$chart_title()">
 $options2                </select>
                 </div>
             </div>
@@ -292,6 +307,12 @@ $options2                </select>
             "window.updatePlotWithFilters_$(chart_title_safe) = function() { updateChart_$(chart_title_safe)(window.allData_$(chart_title_safe)); };"
         end
 
+        # Create color maps as nested JavaScript object
+        color_maps_js = "{" * join([
+            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
+            for (col, map) in color_maps
+        ], ", ") * "}"
+
         functional_html = """
             (function() {
             window.showEigenvectors_$(chart_title_safe) = $(show_eigenvectors ? "true" : "false");
@@ -301,6 +322,7 @@ $options2                </select>
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_Z_COL = '$default_z_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
+            const COLOR_MAPS = $color_maps_js;
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
 
@@ -420,8 +442,8 @@ $options2                </select>
                 const COLOR_COL = getCol('$(chart_title_safe)_color_col_select', DEFAULT_COLOR_COL);
 
                 // Get facet selections
-                const FACET1_COL = getCol('facet1_select_$(chart_title_safe)', 'None');
-                const FACET2_COL = getCol('facet2_select_$(chart_title_safe)', 'None');
+                const FACET1_COL = getCol('facet1_selector_$(chart_title_safe)', 'None');
+                const FACET2_COL = getCol('facet2_selector_$(chart_title_safe)', 'None');
 
                 if (FACET1_COL === 'None' && FACET2_COL === 'None') {
                     renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL);
@@ -442,6 +464,7 @@ $options2                </select>
                     groups[key].push(row);
                 });
 
+                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
                 const traces = Object.entries(groups).map(([key, groupData]) => ({
                     x: groupData.map(d => parseFloat(d[X_COL])),
                     y: groupData.map(d => parseFloat(d[Y_COL])),
@@ -451,7 +474,8 @@ $options2                </select>
                     type: 'scatter3d',
                     marker: {
                         size: $marker_size,
-                        opacity: $marker_opacity
+                        opacity: $marker_opacity,
+                        color: COLOR_MAP[key] || '#636efa'
                     }
                 }));
 
@@ -491,6 +515,7 @@ $options2                </select>
                 const rows = Math.ceil(nFacets / cols);
 
                 const traces = [];
+                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 facetValues.forEach((facetVal, idx) => {
                     const facetData = data.filter(row => row[FACET_COL] === facetVal);
@@ -516,7 +541,8 @@ $options2                </select>
                             type: 'scatter3d',
                             marker: {
                                 size: $marker_size,
-                                opacity: $marker_opacity
+                                opacity: $marker_opacity,
+                                color: COLOR_MAP[key] || '#636efa'
                             }
                         });
                     });
@@ -603,6 +629,7 @@ $options2                </select>
                 const cols = facet2Values.length;
 
                 const traces = [];
+                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 facet1Values.forEach((facet1Val, rowIdx) => {
                     facet2Values.forEach((facet2Val, colIdx) => {
@@ -632,7 +659,8 @@ $options2                </select>
                                 type: 'scatter3d',
                                 marker: {
                                     size: $marker_size,
-                                    opacity: $marker_opacity
+                                    opacity: $marker_opacity,
+                                    color: COLOR_MAP[key] || '#636efa'
                                 }
                             });
                         });
