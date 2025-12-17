@@ -61,6 +61,10 @@ using Dates
         include("chart_tests/test_picture.jl")
     end
 
+    @testset "Picture Integration Tests" begin
+        include("chart_tests/test_picture_integrations.jl")
+    end
+
     @testset "Slides Tests" begin
         include("chart_tests/test_slides.jl")
     end

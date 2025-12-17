@@ -836,10 +836,10 @@ pic = Picture(:plots_chart, p; format=:png)
 create_html(pic, "plots_example.html")
 ```
 
-### Picture with CairoMakie
+### Picture with Makie
 
 ```julia
-using CairoMakie
+using GLMakie
 
 # Create a Makie figure
 fig = Figure(size = (800, 600))

@@ -136,25 +136,13 @@ function Picture(chart_title::Symbol, chart_object; format::Symbol=:png, notes::
                       format=format, notes=notes)
     end
 
-    # Check for Makie (CairoMakie, GLMakie, etc.)
+    # Check for Makie (GLMakie, WGLMakie, etc.)
     if isdefined(Main, :Makie)
         makie_types = [:Figure, :FigureAxisPlot, :Scene]
         for t in makie_types
             if isdefined(Main.Makie, t) && chart_type <: getfield(Main.Makie, t)
                 return Picture(chart_title, chart_object,
                               (obj, path) -> Main.Makie.save(path, obj);
-                              format=format, notes=notes)
-            end
-        end
-    end
-
-    # Check for CairoMakie directly
-    if isdefined(Main, :CairoMakie)
-        makie_types = [:Figure, :FigureAxisPlot, :Scene]
-        for t in makie_types
-            if isdefined(Main.CairoMakie, t) && chart_type <: getfield(Main.CairoMakie, t)
-                return Picture(chart_title, chart_object,
-                              (obj, path) -> Main.CairoMakie.save(path, obj);
                               format=format, notes=notes)
             end
         end
