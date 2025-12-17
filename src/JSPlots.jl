@@ -15,6 +15,8 @@ module JSPlots
 
     export sanitize_chart_title
 
+    include("html_controls.jl")
+
     include("pivottables.jl")
     export PivotTable
 

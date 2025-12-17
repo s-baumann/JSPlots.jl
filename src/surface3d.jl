@@ -321,16 +321,15 @@ struct Surface3D <: JSPlotsType
             $filter_logic_js
         """
 
-        appearance_html = """
-        <h2>$title</h2>
-        <p>$notes</p>
-
-        <!-- Filters (for data filtering) -->
-        $(sliders_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $sliders_html\n        </div>" : "")
-
-        <!-- Chart -->
-        <div id="$chart_title"></div>
-        """
+        # Use html_controls abstraction to generate appearance HTML
+        appearance_html = generate_appearance_html_from_sections(
+            sliders_html,
+            "",  # No plot attributes in Surface3D
+            "",  # No faceting in Surface3D
+            title,
+            notes,
+            string(chart_title)
+        )
 
         new(chart_title, data_label, functional_html, appearance_html)
     end

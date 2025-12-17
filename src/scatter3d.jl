@@ -792,22 +792,15 @@ $options2                </select>
         filters_html = sliders_html
         # plot_attributes_html and faceting_html already built above
 
-        appearance_html = """
-        <h2>$title</h2>
-        <p>$notes</p>
-
-        <!-- Filters (for data filtering) -->
-        $(filters_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filters_html\n        </div>" : "")
-
-        <!-- Plot Attributes -->
-        $(plot_attributes_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $plot_attributes_html\n        </div>" : "")
-
-        <!-- Faceting -->
-        $(faceting_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $faceting_html\n        </div>" : "")
-
-        <!-- Chart -->
-        <div id="$(chart_title_safe)"></div>
-        """
+        # Use html_controls abstraction to generate appearance HTML
+        appearance_html = generate_appearance_html_from_sections(
+            filters_html,
+            plot_attributes_html,
+            faceting_html,
+            title,
+            notes,
+            string(chart_title_safe)
+        )
 
         new(chart_title, data_label, functional_html, appearance_html)
     end

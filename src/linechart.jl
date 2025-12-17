@@ -131,23 +131,10 @@ struct LineChart <: JSPlotsType
         end
         # If no color columns specified or valid, we'll use a default black color for all lines
 
-        # Build filter dropdowns (multi-select)
-        filter_dropdowns_html = ""
-        for col in keys(filters)
-            default_val = filters[col]
-            options_html = ""
-            for opt in filter_options[string(col)]
-                selected = (opt == default_val) ? " selected" : ""
-                options_html *= "                <option value=\"$(opt)\"$selected>$(opt)</option>\n"
-            end
-            filter_dropdowns_html *= """
-            <div style="margin: 10px;">
-                <label for="$(col)_select">$(col): </label>
-                <select id="$(col)_select" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_$chart_title()">
-    $options_html            </select>
-            </div>
-            """
-        end
+        # Build HTML controls using abstraction
+        chart_title_str = string(chart_title)
+        update_function = "updateChart_$chart_title()"
+        filter_dropdowns = build_filter_dropdowns(chart_title_str, filters, df, update_function)
 
         # Create JavaScript arrays for columns
         filter_cols_js = "[" * join(["'$col'" for col in keys(filters)], ", ") * "]"
@@ -612,141 +599,66 @@ struct LineChart <: JSPlotsType
         })();
         """
 
-        # Build non-facet controls
-        non_facet_controls = ""
+        # Build attribute dropdowns
+        attribute_dropdowns = DropdownControl[]
 
         # X dimension dropdown
         if length(valid_x_cols) > 1
-            x_options = ""
-            for col in valid_x_cols
-                selected = (col == valid_x_cols[1]) ? " selected" : ""
-                x_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            non_facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="x_col_select_$chart_title">X dimension: </label>
-                <select id="x_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $x_options            </select>
-            </div>
-            """
+            push!(attribute_dropdowns, DropdownControl(
+                "x_col_select_$chart_title_str",
+                "X dimension",
+                [string(col) for col in valid_x_cols],
+                string(valid_x_cols[1]),
+                update_function
+            ))
         end
 
         # Y dimension dropdown
         if length(valid_y_cols) > 1
-            y_options = ""
-            for col in valid_y_cols
-                selected = (col == valid_y_cols[1]) ? " selected" : ""
-                y_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            non_facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="y_col_select_$chart_title">Y dimension: </label>
-                <select id="y_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $y_options            </select>
-            </div>
-            """
+            push!(attribute_dropdowns, DropdownControl(
+                "y_col_select_$chart_title_str",
+                "Y dimension",
+                [string(col) for col in valid_y_cols],
+                string(valid_y_cols[1]),
+                update_function
+            ))
         end
 
-        # Build color column dropdown
+        # Color column dropdown
         if length(valid_color_cols) > 1
-            color_options = ""
-            for col in valid_color_cols
-                selected = (col == valid_color_cols[1]) ? " selected" : ""
-                color_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            non_facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="color_col_select_$chart_title">Color by: </label>
-                <select id="color_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $color_options            </select>
-            </div>
-            """
+            push!(attribute_dropdowns, DropdownControl(
+                "color_col_select_$chart_title_str",
+                "Color by",
+                [string(col) for col in valid_color_cols],
+                string(valid_color_cols[1]),
+                update_function
+            ))
         end
 
-        # Build aggregator dropdown
-        aggregator_options = ""
-        for agg in ["none", "mean", "median", "count", "min", "max"]
-            selected = (agg == aggregator) ? " selected" : ""
-            aggregator_options *= "                <option value=\"$agg\"$selected>$agg</option>\n"
-        end
-        non_facet_controls *= """
-        <div style="margin: 10px;">
-            <label for="aggregator_select_$chart_title">Aggregator: </label>
-            <select id="aggregator_select_$chart_title" onchange="updateChart_$chart_title()">
-    $aggregator_options        </select>
-        </div>
-        """
+        # Aggregator dropdown (always shown)
+        push!(attribute_dropdowns, DropdownControl(
+            "aggregator_select_$chart_title_str",
+            "Aggregator",
+            ["none", "mean", "median", "count", "min", "max"],
+            aggregator,
+            update_function
+        ))
 
-        # Build facet controls separately
-        facet_controls = ""
-        if length(facet_choices) == 1
-            # Single facet option - just on/off toggle
-            default_facet1 = length(default_facet_array) >= 1 ? string(default_facet_array[1]) : "None"
-            facet_col = facet_choices[1]
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"$(default_facet1 == "None" ? " selected" : "")>None</option>\n"
-            facet1_options *= "                <option value=\"$facet_col\"$(default_facet1 == string(facet_col) ? " selected" : "")>$facet_col</option>\n"
+        # Build faceting dropdowns using html_controls abstraction
+        facet_dropdowns = build_facet_dropdowns(chart_title_str, facet_choices, default_facet_array, update_function)
 
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet1_options            </select>
-            </div>
-            """
-        elseif length(facet_choices) >= 2
-            # Multiple facet options - show both facet 1 and facet 2 dropdowns
-            # Facet 1 dropdown
-            default_facet1 = length(default_facet_array) >= 1 ? string(default_facet_array[1]) : "None"
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"$(default_facet1 == "None" ? " selected" : "")>None</option>\n"
-            for col in facet_choices
-                selected = (string(col) == default_facet1) ? " selected" : ""
-                facet1_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet 1: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet1_options            </select>
-            </div>
-            """
-
-            # Facet 2 dropdown
-            default_facet2 = length(default_facet_array) >= 2 ? string(default_facet_array[2]) : "None"
-            facet2_options = ""
-            facet2_options *= "                <option value=\"None\"$(default_facet2 == "None" ? " selected" : "")>None</option>\n"
-            for col in facet_choices
-                selected = (string(col) == default_facet2) ? " selected" : ""
-                facet2_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet2_select_$chart_title">Facet 2: </label>
-                <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet2_options            </select>
-            </div>
-            """
-        end
-
-        appearance_html = """
-        <h2>$title</h2>
-        <p>$notes</p>
-
-        <!-- Filters (for data filtering) -->
-        $(filter_dropdowns_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filter_dropdowns_html\n        </div>" : "")
-
-        <!-- Plot Attributes (x, y, color, aggregator) -->
-        $(non_facet_controls != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $non_facet_controls\n        </div>" : "")
-
-        <!-- Faceting -->
-        $(facet_controls != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $facet_controls\n        </div>" : "")
-
-        <!-- Chart -->
-        <div id="$chart_title"></div>
-        """
+        # Build appearance HTML using html_controls abstraction
+        controls = ChartHtmlControls(
+            chart_title_str,
+            chart_title_str,
+            update_function,
+            filter_dropdowns,
+            attribute_dropdowns,
+            facet_dropdowns,
+            title,
+            notes
+        )
+        appearance_html = generate_appearance_html(controls)
 
         new(chart_title, data_label, functional_html, appearance_html)
     end

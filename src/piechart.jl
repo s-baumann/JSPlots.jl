@@ -123,111 +123,38 @@ struct PieChart <: JSPlotsType
             )
         end
 
-        # Build filter dropdowns (multi-select)
-        filter_dropdowns_html = ""
-        for col in keys(filters)
-            default_val = filters[col]
-            options_html = ""
-            for opt in filter_options[string(col)]
-                selected = (opt == default_val) ? " selected" : ""
-                options_html *= "                <option value=\"$(opt)\"$selected>$(opt)</option>\n"
-            end
-            filter_dropdowns_html *= """
-            <div style="margin: 10px;">
-                <label for="$(col)_select_$chart_title">$(col): </label>
-                <select id="$(col)_select_$chart_title" multiple style="min-width: 150px; height: 100px;" onchange="updateChart_$chart_title()">
-    $options_html            </select>
-            </div>
-            """
-        end
+        # Build filter dropdowns using html_controls abstraction
+        chart_title_str = string(chart_title)
+        update_function = "updateChart_$chart_title()"
+        filter_dropdowns = build_filter_dropdowns(chart_title_str, filters, df, update_function)
 
-        # Build value column dropdown
-        value_col_dropdown = ""
+        # Build attribute dropdowns
+        attribute_dropdowns = DropdownControl[]
+
+        # Value column dropdown
         if length(valid_value_cols) > 1
-            value_options = ""
-            for col in valid_value_cols
-                selected = (col == valid_value_cols[1]) ? " selected" : ""
-                value_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            value_col_dropdown = """
-            <div style="margin: 10px;">
-                <label for="value_col_select_$chart_title">Slice size: </label>
-                <select id="value_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $value_options            </select>
-            </div>
-            """
+            push!(attribute_dropdowns, DropdownControl(
+                "value_col_select_$chart_title_str",
+                "Slice size",
+                [string(col) for col in valid_value_cols],
+                string(valid_value_cols[1]),
+                update_function
+            ))
         end
 
-        # Build label column dropdown
-        label_col_dropdown = ""
+        # Label column dropdown
         if length(valid_label_cols) > 1
-            label_options = ""
-            for col in valid_label_cols
-                selected = (col == valid_label_cols[1]) ? " selected" : ""
-                label_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-            label_col_dropdown = """
-            <div style="margin: 10px;">
-                <label for="label_col_select_$chart_title">Slice grouping: </label>
-                <select id="label_col_select_$chart_title" onchange="updateChart_$chart_title()">
-    $label_options            </select>
-            </div>
-            """
+            push!(attribute_dropdowns, DropdownControl(
+                "label_col_select_$chart_title_str",
+                "Slice grouping",
+                [string(col) for col in valid_label_cols],
+                string(valid_label_cols[1]),
+                update_function
+            ))
         end
 
-        # Build faceting dropdowns
-        facet_controls = ""
-        if length(facet_choices) == 1
-            # Single facet option - just on/off toggle
-            default_facet1 = length(default_facet_array) >= 1 ? string(default_facet_array[1]) : "None"
-            facet_col = facet_choices[1]
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"$(default_facet1 == "None" ? " selected" : "")>None</option>\n"
-            facet1_options *= "                <option value=\"$facet_col\"$(default_facet1 == string(facet_col) ? " selected" : "")>$facet_col</option>\n"
-
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet1_options            </select>
-            </div>
-            """
-        elseif length(facet_choices) >= 2
-            # Multiple facet options - show both facet 1 and facet 2 dropdowns
-            # Facet 1 dropdown
-            default_facet1 = length(default_facet_array) >= 1 ? string(default_facet_array[1]) : "None"
-            facet1_options = ""
-            facet1_options *= "                <option value=\"None\"$(default_facet1 == "None" ? " selected" : "")>None</option>\n"
-            for col in facet_choices
-                selected = (string(col) == default_facet1) ? " selected" : ""
-                facet1_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet1_select_$chart_title">Facet 1: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet1_options            </select>
-            </div>
-            """
-
-            # Facet 2 dropdown
-            default_facet2 = length(default_facet_array) >= 2 ? string(default_facet_array[2]) : "None"
-            facet2_options = ""
-            facet2_options *= "                <option value=\"None\"$(default_facet2 == "None" ? " selected" : "")>None</option>\n"
-            for col in facet_choices
-                selected = (string(col) == default_facet2) ? " selected" : ""
-                facet2_options *= "                <option value=\"$col\"$selected>$col</option>\n"
-            end
-
-            facet_controls *= """
-            <div style="margin: 10px;">
-                <label for="facet2_select_$chart_title">Facet 2: </label>
-                <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-    $facet2_options            </select>
-            </div>
-            """
-        end
+        # Build faceting dropdowns using html_controls abstraction
+        facet_dropdowns = build_facet_dropdowns(chart_title_str, facet_choices, default_facet_array, update_function)
 
         # Default columns
         default_value_col = string(valid_value_cols[1])
@@ -244,23 +171,18 @@ struct PieChart <: JSPlotsType
             for (col, map) in color_maps
         ], ", ") * "}"
 
-        # Build appearance HTML (controls + chart container)
-        appearance_html = """
-        <h2>$title</h2>
-        <p>$notes</p>
-
-        <!-- Filters (for data filtering) -->
-        $(filter_dropdowns_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filter_dropdowns_html\n        </div>" : "")
-
-        <!-- Plot Attributes (value and label columns) -->
-        $((value_col_dropdown != "" || label_col_dropdown != "") ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $value_col_dropdown\n            $label_col_dropdown\n        </div>" : "")
-
-        <!-- Faceting -->
-        $(facet_controls != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;\">\n            <h4 style=\"margin-top: 0;\">Faceting</h4>\n            $facet_controls\n        </div>" : "")
-
-        <!-- Chart -->
-        <div id="$chart_title"></div>
-        """
+        # Build appearance HTML using html_controls abstraction
+        controls = ChartHtmlControls(
+            chart_title_str,
+            chart_title_str,
+            update_function,
+            filter_dropdowns,
+            attribute_dropdowns,
+            facet_dropdowns,
+            title,
+            notes
+        )
+        appearance_html = generate_appearance_html(controls)
 
         # Build functional HTML (JavaScript code)
         functional_html = """

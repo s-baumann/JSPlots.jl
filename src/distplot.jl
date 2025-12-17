@@ -582,22 +582,21 @@ struct DistPlot <: JSPlotsType
             $filter_logic_js
         """
         
-        appearance_html = """
-        <h2>$title</h2>
-        <p>$notes</p>
+        # Use html_controls abstraction to generate base appearance HTML
+        base_appearance_html = generate_appearance_html_from_sections(
+            filter_sliders_html,
+            plot_attributes_html,
+            "",  # No faceting in DistPlot
+            title,
+            notes,
+            string(chart_title)
+        )
 
-        <!-- Filters (for data filtering) -->
-        $(filter_sliders_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;\">\n            <h4 style=\"margin-top: 0;\">Filters</h4>\n            $filter_sliders_html\n        </div>" : "")
-
-        <!-- Plot Attributes (variable selection, grouping, and display options) -->
-        $(plot_attributes_html != "" ? "<div style=\"margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;\">\n            <h4 style=\"margin-top: 0;\">Plot Attributes</h4>\n            $plot_attributes_html\n        </div>" : "")
-
-        <!-- Chart -->
-        <div id="$chart_title"></div>
-
-        <!-- Bins slider below chart -->
-        $bins_slider_html
-        """
+        # Add bins slider after chart div
+        appearance_html = replace(base_appearance_html,
+            "<div id=\"$chart_title\"></div>" =>
+            "<div id=\"$chart_title\"></div>\n\n        <!-- Bins slider below chart -->\n        $bins_slider_html"
+        )
         
         new(chart_title, data_label, functional_html, appearance_html)
     end
