@@ -839,7 +839,7 @@ create_html(pic, "plots_example.html")
 ### Picture with Makie
 
 ```julia
-using GLMakie
+using CairoMakie  # or GLMakie, WGLMakie - any Makie backend works
 
 # Create a Makie figure
 fig = Figure(size = (800, 600))
@@ -847,10 +847,12 @@ ax = Axis(fig[1, 1], title = "Sine Wave", xlabel = "x", ylabel = "sin(x)")
 x = 0:0.1:10
 lines!(ax, x, sin.(x), linewidth = 3)
 
-# Automatically detected as Makie
+# Automatically detected as Makie (works with any backend)
 pic = Picture(:makie_plot, fig; format=:png)
 create_html(pic, "makie_example.html")
 ```
+
+**Tip**: Use CairoMakie for headless/CI environments, GLMakie for interactive displays.
 
 ### Picture with Custom Save Function
 

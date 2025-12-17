@@ -3,7 +3,11 @@ using JSPlots
 using DataFrames
 using VegaLite
 using Plots
-using GLMakie
+using CairoMakie  # Used for testing Makie integration (works in headless CI environments)
+
+# Note: We test with CairoMakie because it works in headless CI environments,
+# but the Picture auto-detection code works with any Makie backend (GLMakie, WGLMakie, etc.)
+# through the generic Makie module detection.
 
 @testset "Picture Plotting Library Integrations" begin
     mktempdir() do tmpdir
@@ -97,11 +101,11 @@ using GLMakie
             @test isfile(joinpath(project_dir, "pictures", "plots_svg.svg"))
         end
 
-        @testset "GLMakie Integration" begin
-            # Create a simple GLMakie figure
+        @testset "Makie Integration" begin
+            # Create a simple Makie figure using CairoMakie (works in headless CI)
             fig = Figure(size = (600, 400))
             ax = Axis(fig[1, 1], title = "Test Makie Plot", xlabel = "X", ylabel = "Y")
-            GLMakie.lines!(ax, 1:10, rand(10), linewidth = 3, color = :blue)
+            CairoMakie.lines!(ax, 1:10, rand(10), linewidth = 3, color = :blue)
 
             # Test PNG format
             pic_png = Picture(:makie_png, fig; format=:png, notes="Makie PNG")
@@ -114,7 +118,7 @@ using GLMakie
             # Test with another plot type
             fig2 = Figure(size = (600, 400))
             ax2 = Axis(fig2[1, 1], title = "Scatter Test")
-            GLMakie.scatter!(ax2, 1:10, rand(10))
+            CairoMakie.scatter!(ax2, 1:10, rand(10))
             pic_scatter = Picture(:makie_scatter, fig2; format=:png, notes="Makie Scatter")
             @test pic_scatter.chart_title == :makie_scatter
             @test pic_scatter.is_temp == true
@@ -153,7 +157,7 @@ using GLMakie
 
             fig = Figure(size = (400, 300))
             ax = Axis(fig[1, 1])
-            GLMakie.barplot!(ax, 1:5, [3, 1, 4, 1, 5])
+            CairoMakie.barplot!(ax, 1:5, [3, 1, 4, 1, 5])
             pic_makie = Picture(:mixed_makie, fig; format=:png)
 
             # Create page with all three
@@ -211,7 +215,7 @@ using GLMakie
         @testset "JSON Embedded with Library Plots" begin
             fig = Figure()
             ax = Axis(fig[1, 1])
-            GLMakie.lines!(ax, 1:5, [1, 4, 2, 5, 3])
+            CairoMakie.lines!(ax, 1:5, [1, 4, 2, 5, 3])
             pic = Picture(:json_makie, fig; format=:png)
 
             page = JSPlotPage(Dict{Symbol,DataFrame}(), [pic], dataformat=:json_embedded)

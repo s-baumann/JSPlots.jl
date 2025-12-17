@@ -678,7 +678,7 @@ Display static images or plots from other Julia plotting libraries.
 **Auto-Detected Plotting Libraries:**
 - VegaLite.jl
 - Plots.jl
-- Makie.jl
+- Makie.jl (any backend: GLMakie, CairoMakie, WGLMakie, etc.)
 
 **Examples:**
 ```julia
@@ -875,8 +875,10 @@ slides = Slides(:generated_slides, df, :sales_data,
 **Supported Chart Libraries:**
 - **VegaLite.jl**: Auto-detected and saved (recommended for SVG output)
 - **Plots.jl**: Auto-detected and saved using `savefig`
-- **Makie.jl**: Auto-detected and saved using `Makie.save`
+- **Makie.jl**: Auto-detected and saved using `Makie.save` (works with any backend: GLMakie, CairoMakie, WGLMakie)
 - **Custom objects**: Any object with a `.save(filepath)` method
+
+**Note on Makie Backends**: The Picture auto-detection works with any Makie backend. For headless/CI environments, use CairoMakie. For interactive displays, use GLMakie or WGLMakie.
 
 **Features:**
 - Interactive playback controls (play/pause, previous/next)
