@@ -50,6 +50,7 @@ create_html(page, "dashboard.html")
 #### Distributional Plots
 - **DistPlot** - Distribution visualization combining histogram, box plot, and rug plot
 - **KernelDensity** - Smooth kernel density estimation for distributions
+- **PieChart** - Makes Piecharts.
 
 #### Three-Dimensional Plots
 - **Scatter3D** - 3D scatter plots with PCA eigenvectors
@@ -57,7 +58,7 @@ create_html(page, "dashboard.html")
 - **ScatterSurface3D** - 3D scatter plots with fitted surfaces (L1/L2 minimization)
 
 #### Plots from Other Julia Packages
-- **Picture** - Display static images or plots from VegaLite.jl, Plots.jl, Makie.jl
+- **Picture** - Display static images or plots from VegaLite.jl, Plots.jl or Makie.jl
 - **Slides** - Slideshows and animations from sequences of images or generated plots
 
 ## Examples

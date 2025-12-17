@@ -370,6 +370,53 @@ Kernel density plot visualization with interactive controls.
 - `title`: Chart title (default: `"Kernel Density Plot"`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
+#### PieChart
+
+```@docs
+PieChart
+```
+
+Pie chart visualization with support for faceting and interactive controls.
+
+**Parameters:**
+- `chart_title::Symbol`: Unique identifier for this chart
+- `df::DataFrame`: DataFrame containing the data
+- `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
+
+**Keyword Arguments:**
+- `value_cols::Vector{Symbol}`: Columns available for slice sizes (default: `[:value]`)
+- `label_cols::Vector{Symbol}`: Columns available for slice labels (default: `[:label]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `facet_cols`: Columns available for faceting (default: `nothing`)
+- `default_facet_cols`: Default faceting columns (default: `nothing`)
+- `hole::Float64`: Size of hole in center (0 = pie, 0-0.99 = donut) (default: `0.0`)
+- `show_legend::Bool`: Display legend (default: `true`)
+- `title::String`: Chart title (default: `"Pie Chart"`)
+- `notes::String`: Descriptive text shown below the chart (default: `""`)
+
+**Features:**
+- Dynamic value and label column selection via dropdowns
+- Interactive filters with multi-select support
+- Faceting support (1D facet wrap and 2D facet grid)
+- Automatic data aggregation for duplicate labels
+- Color-coded slices with consistent color mapping
+- Donut chart support via `hole` parameter
+
+**Example:**
+```julia
+df = DataFrame(
+    category = ["A", "B", "C", "D"],
+    revenue = [25000, 30000, 20000, 25000],
+    units = [100, 150, 80, 120]
+)
+
+pc = PieChart(:sales_pie, df, :sales_data,
+    value_cols=[:revenue, :units],
+    label_cols=[:category],
+    title="Sales by Category"
+)
+```
+
 ### 3D Plots
 
 #### Surface3D

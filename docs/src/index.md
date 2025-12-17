@@ -67,17 +67,18 @@ JSPlots provides multiple visualization types:
 
 7. **[DistPlot](@ref)**: Distribution visualization combining histogram, box plot, and rug plot;
 8. **[KernelDensity](@ref)**: Kernel Density plots;
+9. **[PieChart](@ref)**: Pie Charts;
 
 #### Three dimensional plots
 
-9. **[Scatter3D](@ref)**: A 3D scatter plot;
-10. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
-11. **[ScatterSurface3D](@ref)**: A 3D scatter plot together with a surface that approximates the data points;
+10. **[Scatter3D](@ref)**: A 3D scatter plot;
+11. **[Surface3D](@ref)**: A 3D plot showing multiple surfaces;
+12. **[ScatterSurface3D](@ref)**: A 3D scatter plot together with a surface that approximates the data points;
 
 #### Plots from other Julia packages
 
-12. **[Picture](@ref)**: Display static images from anywhere as well as plots from other Julia plotting libraries;
-13. **[Slides](@ref)**: Display slideshows and animations from a sequence of pictures/plots from other Julia plotting libraries;
+13. **[Picture](@ref)**: Display static images from anywhere as well as plots from other Julia plotting libraries;
+14. **[Slides](@ref)**: Display slideshows and animations from a sequence of pictures/plots from other Julia plotting libraries;
 
 
 
