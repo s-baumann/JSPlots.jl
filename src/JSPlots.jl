@@ -99,7 +99,133 @@ module JSPlots
         return (facet_choices, default_facet_array)
     end
 
+    """
+        validate_and_filter_columns(cols::Vector{Symbol}, df::DataFrame, col_name::String)
+
+    Validate that at least one column from cols exists in the DataFrame.
+    Returns filtered list of valid columns that exist in df.
+    Throws error if none of the specified columns exist.
+
+    # Arguments
+    - `cols::Vector{Symbol}`: Columns to validate
+    - `df::DataFrame`: DataFrame to check against
+    - `col_name::String`: Name of column type for error messages (e.g., "x_cols", "y_cols")
+
+    # Examples
+    ```julia
+    valid_x = validate_and_filter_columns([:a, :b, :c], df, "x_cols")
+    # Returns only columns that exist in df, errors if none exist
+    ```
+    """
+    function validate_and_filter_columns(cols::Vector{Symbol}, df::DataFrame, col_name::String)
+        available_cols = Set(names(df))
+        valid_cols = [col for col in cols if string(col) in available_cols]
+        if isempty(valid_cols)
+            error("None of the specified $col_name exist in the dataframe. Available columns: $(names(df))")
+        end
+        return valid_cols
+    end
+
+    """
+        build_color_maps(cols::Vector{Symbol}, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
+
+    Build color maps for categorical columns, mapping unique values to colors from a palette.
+    Returns (color_maps, valid_cols) where color_maps is a Dict{String, Dict{String, String}}.
+
+    # Arguments
+    - `cols::Vector{Symbol}`: Columns to build color maps for
+    - `df::DataFrame`: DataFrame containing the columns
+    - `palette`: Vector of color hex codes (default: DEFAULT_COLOR_PALETTE)
+
+    # Returns
+    - `color_maps`: Dict mapping column name to Dict of value->color mappings
+    - `valid_cols`: Vector of column names that existed in df
+
+    # Examples
+    ```julia
+    color_maps, valid_cols = build_color_maps([:species, :region], df)
+    # color_maps["species"]["setosa"] => "#636efa"
+    ```
+    """
+    function build_color_maps(cols::Vector{Symbol}, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
+        available_cols = Set(names(df))
+        color_maps = Dict()
+        valid_cols = Symbol[]
+
+        for col in cols
+            if string(col) in available_cols
+                push!(valid_cols, col)
+                unique_vals = unique(df[!, col])
+                color_maps[string(col)] = Dict(
+                    string(key) => palette[(i - 1) % length(palette) + 1]
+                    for (i, key) in enumerate(unique_vals)
+                )
+            end
+        end
+
+        return color_maps, valid_cols
+    end
+
+    """
+        build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
+
+    Build a dictionary of unique values for each filter column.
+    Returns Dict{String, Vector} mapping column names to their unique values.
+
+    # Arguments
+    - `filters::Dict{Symbol,Any}`: Dictionary of filter configurations
+    - `df::DataFrame`: DataFrame to extract unique values from
+
+    # Examples
+    ```julia
+    filter_options = build_filter_options(Dict(:region => nothing, :year => nothing), df)
+    # Returns: Dict("region" => ["North", "South"], "year" => [2020, 2021, 2022])
+    ```
+    """
+    function build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
+        return Dict(string(col) => unique(df[!, col]) for col in keys(filters))
+    end
+
+    """
+        build_js_array(cols::Vector)
+
+    Convert a Julia vector to a JavaScript array string representation.
+    Returns a string like "['col1', 'col2', 'col3']".
+
+    # Arguments
+    - `cols::Vector`: Vector of items to convert (typically Symbols or Strings)
+
+    # Examples
+    ```julia
+    build_js_array([:a, :b, :c])  # Returns: "['a', 'b', 'c']"
+    build_js_array(["x", "y"])    # Returns: "['x', 'y']"
+    ```
+    """
+    function build_js_array(cols::Vector)
+        return "[" * join(["'$col'" for col in cols], ", ") * "]"
+    end
+
+    """
+        select_default_column(cols::Vector{Symbol}, placeholder::String="__none__")
+
+    Select the first column as default, or return placeholder if vector is empty.
+
+    # Arguments
+    - `cols::Vector{Symbol}`: Columns to select from
+    - `placeholder::String`: Value to return if cols is empty (default: "__none__")
+
+    # Examples
+    ```julia
+    select_default_column([:a, :b, :c])           # Returns: "a"
+    select_default_column(Symbol[], "__no_color__")  # Returns: "__no_color__"
+    ```
+    """
+    function select_default_column(cols::Vector{Symbol}, placeholder::String="__none__")
+        return isempty(cols) ? placeholder : string(cols[1])
+    end
+
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
+    export validate_and_filter_columns, build_color_maps, build_filter_options, build_js_array, select_default_column
 
     include("html_controls.jl")
 

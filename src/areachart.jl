@@ -56,30 +56,9 @@ struct AreaChart <: JSPlotsType
         # Sanitize chart title for use in JavaScript/HTML IDs
         chart_title_safe = string(sanitize_chart_title(chart_title))
 
-        # Get available columns in dataframe
-        available_cols = Set(names(df))
-
-        # Validate x_cols
-        valid_x_cols = Symbol[]
-        for col in x_cols
-            if string(col) in available_cols
-                push!(valid_x_cols, col)
-            end
-        end
-        if isempty(valid_x_cols)
-            error("None of the specified x_cols exist in the dataframe. Available columns: $(names(df))")
-        end
-
-        # Validate y_cols
-        valid_y_cols = Symbol[]
-        for col in y_cols
-            if string(col) in available_cols
-                push!(valid_y_cols, col)
-            end
-        end
-        if isempty(valid_y_cols)
-            error("None of the specified y_cols exist in the dataframe. Available columns: $(names(df))")
-        end
+        # Validate columns exist in dataframe
+        valid_x_cols = validate_and_filter_columns(x_cols, df, "x_cols")
+        valid_y_cols = validate_and_filter_columns(y_cols, df, "y_cols")
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
@@ -96,28 +75,15 @@ struct AreaChart <: JSPlotsType
         end
 
         # Get unique values for each filter column
-        filter_options = Dict()
-        for col in keys(filters)
-            filter_options[string(col)] = unique(df[!, col])
-        end
+        filter_options = build_filter_options(filters, df)
 
         # Build color maps for all possible group columns that exist
-        color_palette = DEFAULT_COLOR_PALETTE
-        color_maps = Dict()
-        valid_group_cols = Symbol[]
-        group_order_maps = Dict()  # Track order of first appearance for each group
-        for col in group_cols
-            if string(col) in available_cols
-                push!(valid_group_cols, col)
-                # Preserve order of first appearance
-                unique_vals = unique(df[!, col])
-                color_maps[string(col)] = Dict(
-                    string(key) => color_palette[(i - 1) % length(color_palette) + 1]
-                    for (i, key) in enumerate(unique_vals)
-                )
-                # Store order for JavaScript
-                group_order_maps[string(col)] = [string(val) for val in unique_vals]
-            end
+        color_maps, valid_group_cols = build_color_maps(group_cols, df)
+        # Build group order maps (preserving order of first appearance)
+        group_order_maps = Dict()
+        for col in valid_group_cols
+            unique_vals = unique(df[!, col])
+            group_order_maps[string(col)] = [string(val) for val in unique_vals]
         end
 
         # Build HTML controls using abstraction
@@ -125,10 +91,10 @@ struct AreaChart <: JSPlotsType
         filter_dropdowns = build_filter_dropdowns(chart_title_safe, filters, df, update_function)
 
         # Create JavaScript arrays for columns
-        filter_cols_js = "[" * join(["'$col'" for col in keys(filters)], ", ") * "]"
-        x_cols_js = "[" * join(["'$col'" for col in valid_x_cols], ", ") * "]"
-        y_cols_js = "[" * join(["'$col'" for col in valid_y_cols], ", ") * "]"
-        group_cols_js = "[" * join(["'$col'" for col in valid_group_cols], ", ") * "]"
+        filter_cols_js = build_js_array(collect(keys(filters)))
+        x_cols_js = build_js_array(valid_x_cols)
+        y_cols_js = build_js_array(valid_y_cols)
+        group_cols_js = build_js_array(valid_group_cols)
 
         # Create color maps as nested JavaScript object
         color_maps_js = if isempty(color_maps)
@@ -153,7 +119,7 @@ struct AreaChart <: JSPlotsType
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
-        default_group_col = isempty(valid_group_cols) ? "__no_group__" : string(valid_group_cols[1])
+        default_group_col = select_default_column(valid_group_cols, "__no_group__")
 
         functional_html = """
         (function() {

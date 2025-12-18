@@ -46,21 +46,13 @@ struct ScatterPlot <: JSPlotsType
                          title::String="Scatter Plot",
                          notes::String="")
 
-        all_cols = names(df)
-
-        # Helper function to validate columns
-        validate_cols(cols, name) = begin
-            valid = [col for col in cols if String(col) in all_cols]
-            isempty(valid) && error("None of the specified $(name) exist in dataframe. Available: $all_cols")
-            valid
-        end
-
+        # Validate columns exist in dataframe
         valid_x_cols = dimensions
         valid_y_cols = dimensions
         default_x_col = string(dimensions[1])  # First dimension is default X
         default_y_col = string(dimensions[2])  # Second dimension is default Y
 
-        valid_color_cols = validate_cols(color_cols, "color_cols")
+        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
         default_color_col = string(valid_color_cols[1])
         # Point type always uses the same variable as color
         valid_pointtype_cols = valid_color_cols
@@ -72,13 +64,7 @@ struct ScatterPlot <: JSPlotsType
         end
 
         # Normalize slider_col
-        slider_cols = if slider_col === nothing
-            Symbol[]
-        elseif slider_col isa Symbol
-            [slider_col]
-        else
-            slider_col
-        end
+        slider_cols = normalize_to_symbol_vector(slider_col)
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, title, default_value) = begin

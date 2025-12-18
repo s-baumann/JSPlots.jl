@@ -45,30 +45,9 @@ struct PieChart <: JSPlotsType
                       title::String="Pie Chart",
                       notes::String="")
 
-        # Get available columns in dataframe
-        available_cols = Set(names(df))
-
-        # Validate value_cols
-        valid_value_cols = Symbol[]
-        for col in value_cols
-            if string(col) in available_cols
-                push!(valid_value_cols, col)
-            end
-        end
-        if isempty(valid_value_cols)
-            error("None of the specified value_cols exist in the dataframe. Available columns: $(names(df))")
-        end
-
-        # Validate label_cols
-        valid_label_cols = Symbol[]
-        for col in label_cols
-            if string(col) in available_cols
-                push!(valid_label_cols, col)
-            end
-        end
-        if isempty(valid_label_cols)
-            error("None of the specified label_cols exist in the dataframe. Available columns: $(names(df))")
-        end
+        # Validate columns exist in dataframe
+        valid_value_cols = validate_and_filter_columns(value_cols, df, "value_cols")
+        valid_label_cols = validate_and_filter_columns(label_cols, df, "label_cols")
 
         # Validate hole parameter
         if hole < 0.0 || hole >= 1.0
@@ -79,23 +58,10 @@ struct PieChart <: JSPlotsType
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Get unique values for each filter column
-        filter_options = Dict()
-        for col in keys(filters)
-            filter_options[string(col)] = unique(df[!, col])
-        end
-
-        # Use default color palette
-        color_palette = DEFAULT_COLOR_PALETTE
+        filter_options = build_filter_options(filters, df)
 
         # Build color maps for all possible label columns
-        color_maps = Dict()
-        for col in valid_label_cols
-            unique_labels = unique(df[!, col])
-            color_maps[string(col)] = Dict(
-                string(key) => color_palette[(i - 1) % length(color_palette) + 1]
-                for (i, key) in enumerate(unique_labels)
-            )
-        end
+        color_maps, _ = build_color_maps(valid_label_cols, df)
 
         # Build filter dropdowns using html_controls abstraction
         chart_title_str = string(chart_title)
@@ -135,9 +101,9 @@ struct PieChart <: JSPlotsType
         default_label_col = string(valid_label_cols[1])
 
         # Create JavaScript arrays for columns
-        filter_cols_js = "[" * join(["'$col'" for col in keys(filters)], ", ") * "]"
-        value_cols_js = "[" * join(["'$col'" for col in valid_value_cols], ", ") * "]"
-        label_cols_js = "[" * join(["'$col'" for col in valid_label_cols], ", ") * "]"
+        filter_cols_js = build_js_array(collect(keys(filters)))
+        value_cols_js = build_js_array(valid_value_cols)
+        label_cols_js = build_js_array(valid_label_cols)
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([

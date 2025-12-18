@@ -65,24 +65,10 @@ struct Scatter3D <: JSPlotsType
         default_y_col = string(dimensions[2])
         default_z_col = string(dimensions[3])
 
-        # Validate color columns
-        valid_color_cols = Symbol[]
-        for col in color_cols
-            String(col) in all_cols && push!(valid_color_cols, col)
-        end
-        isempty(valid_color_cols) && error("None of the specified color_cols exist in dataframe. Available: $all_cols")
+        # Validate color columns and build color maps
+        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
         default_color_col = string(valid_color_cols[1])
-
-        # Build color maps for all valid color columns
-        color_palette = DEFAULT_COLOR_PALETTE
-        color_maps = Dict()
-        for col in valid_color_cols
-            unique_vals = unique(df[!, col])
-            color_maps[string(col)] = Dict(
-                string(key) => color_palette[(i - 1) % length(color_palette) + 1]
-                for (i, key) in enumerate(unique_vals)
-            )
-        end
+        color_maps, _ = build_color_maps(valid_color_cols, df)
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
@@ -91,13 +77,7 @@ struct Scatter3D <: JSPlotsType
         end
 
         # Normalize slider_col
-        slider_cols = if slider_col === nothing
-            Symbol[]
-        elseif slider_col isa Symbol
-            [slider_col]
-        else
-            slider_col
-        end
+        slider_cols = normalize_to_symbol_vector(slider_col)
 
         # Validate slider columns
         for col in slider_cols

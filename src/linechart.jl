@@ -49,30 +49,9 @@ struct LineChart <: JSPlotsType
                             marker_size::Int=1,
                             notes::String="")
 
-        # Get available columns in dataframe
-        available_cols = Set(names(df))
-
-        # Validate x_cols
-        valid_x_cols = Symbol[]
-        for col in x_cols
-            if string(col) in available_cols
-                push!(valid_x_cols, col)
-            end
-        end
-        if isempty(valid_x_cols)
-            error("None of the specified x_cols exist in the dataframe. Available columns: $(names(df))")
-        end
-
-        # Validate y_cols
-        valid_y_cols = Symbol[]
-        for col in y_cols
-            if string(col) in available_cols
-                push!(valid_y_cols, col)
-            end
-        end
-        if isempty(valid_y_cols)
-            error("None of the specified y_cols exist in the dataframe. Available columns: $(names(df))")
-        end
+        # Validate columns exist in dataframe
+        valid_x_cols = validate_and_filter_columns(x_cols, df, "x_cols")
+        valid_y_cols = validate_and_filter_columns(y_cols, df, "y_cols")
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
@@ -84,25 +63,10 @@ struct LineChart <: JSPlotsType
         end
 
         # Get unique values for each filter column
-        filter_options = Dict()
-        for col in keys(filters)
-            filter_options[string(col)] = unique(df[!, col])
-        end
+        filter_options = build_filter_options(filters, df)
 
         # Build color maps for all possible color columns that exist
-        color_palette = DEFAULT_COLOR_PALETTE
-        color_maps = Dict()
-        valid_color_cols = Symbol[]
-        for col in color_cols
-            if string(col) in available_cols
-                push!(valid_color_cols, col)
-                unique_vals = unique(df[!, col])
-                color_maps[string(col)] = Dict(
-                    string(key) => color_palette[(i - 1) % length(color_palette) + 1]
-                    for (i, key) in enumerate(unique_vals)
-                )
-            end
-        end
+        color_maps, valid_color_cols = build_color_maps(color_cols, df)
         # If no color columns specified or valid, we'll use a default black color for all lines
 
         # Build HTML controls using abstraction
@@ -111,10 +75,10 @@ struct LineChart <: JSPlotsType
         filter_dropdowns = build_filter_dropdowns(chart_title_str, filters, df, update_function)
 
         # Create JavaScript arrays for columns
-        filter_cols_js = "[" * join(["'$col'" for col in keys(filters)], ", ") * "]"
-        x_cols_js = "[" * join(["'$col'" for col in valid_x_cols], ", ") * "]"
-        y_cols_js = "[" * join(["'$col'" for col in valid_y_cols], ", ") * "]"
-        color_cols_js = "[" * join(["'$col'" for col in valid_color_cols], ", ") * "]"
+        filter_cols_js = build_js_array(collect(keys(filters)))
+        x_cols_js = build_js_array(valid_x_cols)
+        y_cols_js = build_js_array(valid_y_cols)
+        color_cols_js = build_js_array(valid_color_cols)
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([
@@ -125,7 +89,7 @@ struct LineChart <: JSPlotsType
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
-        default_color_col = isempty(valid_color_cols) ? "__no_color__" : string(valid_color_cols[1])
+        default_color_col = select_default_column(valid_color_cols, "__no_color__")
 
         functional_html = """
         (function() {

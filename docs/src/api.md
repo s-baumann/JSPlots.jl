@@ -967,7 +967,23 @@ Data is saved as separate Parquet files in a `data/` subdirectory. Most efficien
 
 ## Utility Functions
 
-### sanitize_filename
+### Helper Functions
+
+These helper functions are used internally by chart types but are also exported for user convenience when building custom charts.
+
+```@docs
+normalize_to_symbol_vector
+validate_column
+validate_columns
+normalize_and_validate_facets
+validate_and_filter_columns
+build_color_maps
+build_filter_options
+build_js_array
+select_default_column
+```
+
+### File Utilities
 
 ```@docs
 sanitize_filename
