@@ -185,43 +185,14 @@ $style_html        </div>
             "updatePlotWithFilters_$(chart_title_safe)()"
         )
 
-        # Generate filter logic
-        filter_logic_js = if !isempty(slider_cols)
-            filter_checks = String[]
-            for col in slider_cols
-                slider_type = detect_slider_type(df, col)
-                slider_id = "$(chart_title_safe)_$(col)_slider"
-
-                if slider_type == :categorical
-                    push!(filter_checks, "const $(col)_selected = Array.from(document.getElementById('$slider_id').selectedOptions).map(opt => opt.value);\n" *
-                                        "                        if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) return false;")
-                elseif slider_type == :continuous
-                    push!(filter_checks, "if (\$(\"#$slider_id\").data('ui-slider')) {\n" *
-                                        "                            const $(col)_values = \$(\"#$slider_id\").slider(\"values\");\n" *
-                                        "                            const $(col)_val = parseFloat(row.$(col));\n" *
-                                        "                            if ($(col)_val < $(col)_values[0] || $(col)_val > $(col)_values[1]) return false;\n" *
-                                        "                        }")
-                elseif slider_type == :date
-                    push!(filter_checks, "if (\$(\"#$slider_id\").data('ui-slider')) {\n" *
-                                        "                            const $(col)_values = \$(\"#$slider_id\").slider(\"values\");\n" *
-                                        "                            const $(col)_minDate = window.dateValues_$(slider_id)[$(col)_values[0]];\n" *
-                                        "                            const $(col)_maxDate = window.dateValues_$(slider_id)[$(col)_values[1]];\n" *
-                                        "                            if (row.$(col) < $(col)_minDate || row.$(col) > $(col)_maxDate) return false;\n" *
-                                        "                        }")
-                end
-            end
-            """
-                window.updatePlotWithFilters_$(chart_title_safe) = function() {
-                    const filteredData = window.allData_$(chart_title_safe).filter(row => {
-                        $(join(filter_checks, "\n                        "))
-                        return true;
-                    });
-                    updateChart_$(chart_title_safe)(filteredData);
-                };
-            """
-        else
-            "window.updatePlotWithFilters_$(chart_title_safe) = function() { updateChart_$(chart_title_safe)(window.allData_$(chart_title_safe)); };"
-        end
+        # Generate filter logic using html_controls abstraction
+        filter_logic_js = generate_slider_filter_logic_js(
+            df,
+            slider_cols,
+            string(chart_title_safe),
+            "updateChart_$(chart_title_safe)";
+            use_window=true
+        )
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([

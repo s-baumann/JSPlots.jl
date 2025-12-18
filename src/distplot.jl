@@ -107,67 +107,14 @@ struct DistPlot <: JSPlotsType
             string(chart_title),
             "updatePlotWithFilters_$(chart_title)()"
         )
-        
-        # Generate filtering JavaScript for all sliders
-        filter_logic_js = ""
-        if !isempty(slider_cols)
-            filter_checks = String[]
-            for col in slider_cols
-                slider_type = detect_slider_type(df, col)
-                slider_id = "$(chart_title)_$(col)_slider"
-                
-                if slider_type == :categorical
-                    push!(filter_checks, """
-                        // Filter for $(col) (categorical)
-                        var $(col)_select = document.getElementById('$slider_id');
-                        var $(col)_selected = Array.from($(col)_select.selectedOptions).map(opt => opt.value);
-                        if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) {
-                            return false;
-                        }
-                    """)
-                elseif slider_type == :continuous
-                    push!(filter_checks, """
-                        // Filter for $(col) (continuous)
-                        if (\$("#$slider_id").data('ui-slider')) {
-                            var $(col)_values = \$("#$slider_id").slider("values");
-                            var $(col)_val = parseFloat(row.$(col));
-                            if ($(col)_val < $(col)_values[0] || $(col)_val > $(col)_values[1]) {
-                                return false;
-                            }
-                        }
-                    """)
-                elseif slider_type == :date
-                    push!(filter_checks, """
-                        // Filter for $(col) (date)
-                        if (\$("#$slider_id").data('ui-slider')) {
-                            var $(col)_values = \$("#$slider_id").slider("values");
-                            var $(col)_minDate = window.dateValues_$(slider_id)[$(col)_values[0]];
-                            var $(col)_maxDate = window.dateValues_$(slider_id)[$(col)_values[1]];
-                            var $(col)_rowDate = row.$(col);
-                            if ($(col)_rowDate < $(col)_minDate || $(col)_rowDate > $(col)_maxDate) {
-                                return false;
-                            }
-                        }
-                    """)
-                end
-            end
-            
-            filter_logic_js = """
-                function updatePlotWithFilters_$(chart_title)() {
-                    var filteredData = window.allData_$(chart_title).filter(function(row) {
-                        $(join(filter_checks, "\n                        "))
-                        return true;
-                    });
-                    updatePlot_$(chart_title)(filteredData);
-                }
-            """
-        else
-            filter_logic_js = """
-                function updatePlotWithFilters_$(chart_title)() {
-                    updatePlot_$(chart_title)(window.allData_$(chart_title));
-                }
-            """
-        end
+
+        # Generate filtering JavaScript using html_controls abstraction
+        filter_logic_js = generate_slider_filter_logic_js(
+            df,
+            slider_cols,
+            string(chart_title),
+            "updatePlot_$(chart_title)"
+        )
         
         # Generate trace creation JavaScript
         trace_js = """

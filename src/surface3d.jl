@@ -76,61 +76,13 @@ struct Surface3D <: JSPlotsType
             "updatePlotWithFilters_$(chart_title)()"
         )
 
-        # Generate filtering JavaScript for all sliders
-        filter_logic_js = ""
-        if !isempty(slider_cols)
-            filter_checks = String[]
-            for col in slider_cols
-                slider_type = detect_slider_type(df, col)
-                slider_id = "$(chart_title)_$(col)_slider"
-
-                if slider_type == :categorical
-                    push!(filter_checks, """
-                        // Filter for $(col) (categorical)
-                        var $(col)_select = document.getElementById('$slider_id');
-                        var $(col)_selected = Array.from($(col)_select.selectedOptions).map(opt => opt.value);
-                        if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) {
-                            return false;
-                        }
-                    """)
-                elseif slider_type == :continuous
-                    push!(filter_checks, """
-                        // Filter for $(col) (continuous)
-                        var $(col)_range = \$("#$slider_id").slider("values");
-                        if (parseFloat(row.$(col)) < $(col)_range[0] || parseFloat(row.$(col)) > $(col)_range[1]) {
-                            return false;
-                        }
-                    """)
-                elseif slider_type == :date
-                    push!(filter_checks, """
-                        // Filter for $(col) (date)
-                        var $(col)_range = \$("#$slider_id").slider("values");
-                        var $(col)_dateStrings = window.dateValues_$(slider_id);
-                        var row_date_str = String(row.$(col));
-                        var row_date_idx = $(col)_dateStrings.indexOf(row_date_str);
-                        if (row_date_idx < $(col)_range[0] || row_date_idx > $(col)_range[1]) {
-                            return false;
-                        }
-                    """)
-                end
-            end
-
-            filter_logic_js = """
-            function updatePlotWithFilters_$(chart_title)() {
-                var filteredData = window.allData_$(chart_title).filter(function(row) {
-                    $(join(filter_checks, "\n"))
-                    return true;
-                });
-                updatePlot_$(chart_title)(filteredData);
-            }
-            """
-        else
-            filter_logic_js = """
-            function updatePlotWithFilters_$(chart_title)() {
-                updatePlot_$(chart_title)(window.allData_$(chart_title));
-            }
-            """
-        end
+        # Generate filtering JavaScript using html_controls abstraction
+        filter_logic_js = generate_slider_filter_logic_js(
+            df,
+            slider_cols,
+            string(chart_title),
+            "updatePlot_$(chart_title)"
+        )
 
         # Determine if we're using grouping
         use_grouping = group_col !== nothing
