@@ -68,84 +68,13 @@ struct Surface3D <: JSPlotsType
             String(col) in all_cols || error("Slider column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Generate sliders HTML and initialization
-        sliders_html = ""
-        slider_init_js = ""
-
-        for col in slider_cols
-            slider_type = detect_slider_type(df, col)
-            slider_id = "$(chart_title)_$(col)_slider"
-
-            if slider_type == :categorical
-                unique_vals = sort(unique(skipmissing(df[!, col])))
-                options_html = join(["""<option value="$(v)" selected>$(v)</option>""" for v in unique_vals], "\n")
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label for="$slider_id">Filter by $(col): </label>
-                    <select id="$slider_id" multiple style="width: 300px; height: 100px;">
-                        $options_html
-                    </select>
-                    <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
-                </div>
-                """
-                slider_init_js *= """
-                    document.getElementById('$slider_id').addEventListener('change', function() {
-                        updatePlotWithFilters_$(chart_title)();
-                    });
-                """
-            elseif slider_type == :continuous
-                min_val = minimum(skipmissing(df[!, col]))
-                max_val = maximum(skipmissing(df[!, col]))
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(round(min_val, digits=2)) to $(round(max_val, digits=2))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    \$("#$slider_id").slider({
-                        range: true,
-                        min: $min_val,
-                        max: $max_val,
-                        step: $(abs(max_val - min_val) / 1000),
-                        values: [$min_val, $max_val],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2));
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
-                    });
-                """
-            elseif slider_type == :date
-                unique_dates = sort(unique(skipmissing(df[!, col])))
-                date_strings = string.(unique_dates)
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(first(date_strings)) to $(last(date_strings))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    window.dateValues_$(slider_id) = $(JSON.json(date_strings));
-                    \$("#$slider_id").slider({
-                        range: true,
-                        min: 0,
-                        max: $(length(unique_dates)-1),
-                        step: 1,
-                        values: [0, $(length(unique_dates)-1)],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]);
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
-                    });
-                """
-            end
-        end
+        # Generate sliders using html_controls abstraction
+        sliders_html, slider_init_js = generate_slider_html_and_js(
+            df,
+            slider_cols,
+            string(chart_title),
+            "updatePlotWithFilters_$(chart_title)()"
+        )
 
         # Generate filtering JavaScript for all sliders
         filter_logic_js = ""

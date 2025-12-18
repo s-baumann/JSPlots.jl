@@ -109,82 +109,29 @@ struct KernelDensity <: JSPlotsType
             filter_cols
         end
 
-        # Facet dropdowns
-        facet_dropdowns_html = ""
-        if length(facet_choices) == 1
-            facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
-            options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                     "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
-            facet_dropdowns_html = """
-            <div style="margin: 10px 0;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options                </select>
-            </div>
-            """
-        elseif length(facet_choices) >= 2
-            facet1_default = length(default_facet_array) >= 1 ? default_facet_array[1] : "None"
-            facet2_default = length(default_facet_array) >= 2 ? default_facet_array[2] : "None"
+        # Generate facet dropdowns using html_controls abstraction
+        facet_dropdowns_html = generate_facet_dropdowns_html(
+            string(chart_title),
+            facet_choices,
+            default_facet_array,
+            "updateChart_$chart_title()"
+        )
 
-            options1 = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet1_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
-            options2 = "                <option value=\"None\"$((facet2_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
+        # Generate value column dropdown using html_controls abstraction
+        value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
+            string(chart_title),
+            value_cols_vec,
+            default_value_col,
+            "updateChart_$(chart_title)();"
+        )
 
-            facet_dropdowns_html = """
-            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$chart_title">Facet 1:</label>
-                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options1                </select>
-                </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$chart_title">Facet 2:</label>
-                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-$options2                </select>
-                </div>
-            </div>
-            """
-        end
-
-        # Generate dropdown for value column selection (if multiple options)
-        value_dropdown_html = ""
-        value_dropdown_js = ""
-        if length(value_cols_vec) >= 2
-            value_options_html = join(["""<option value="$(col)"$(col == default_value_col ? " selected" : "")>$(col)</option>""" for col in value_cols_vec], "\n")
-            value_dropdown_html = """
-                <label for="$(chart_title)_value_selector">Select variable: </label>
-                <select id="$(chart_title)_value_selector" style="padding: 5px 10px;">
-                    $value_options_html
-                </select>
-            """
-            value_dropdown_js = """
-                document.getElementById('$(chart_title)_value_selector').addEventListener('change', function() {
-                    updateChart_$(chart_title)();
-                });
-            """
-        end
-
-        # Generate dropdown for group column selection (if multiple options)
-        group_dropdown_html = ""
-        group_dropdown_js = ""
-        if length(group_cols_vec) >= 2
-            group_options_html = """<option value="_none_"$(default_group_col === nothing ? " selected" : "")>None</option>\n""" *
-                               join(["""<option value="$(col)"$(col == default_group_col ? " selected" : "")>$(col)</option>""" for col in group_cols_vec], "\n")
-            group_dropdown_html = """
-                <label for="$(chart_title)_group_selector" style="margin-left: 20px;">Group by: </label>
-                <select id="$(chart_title)_group_selector" style="padding: 5px 10px;">
-                    $group_options_html
-                </select>
-            """
-            group_dropdown_js = """
-                document.getElementById('$(chart_title)_group_selector').addEventListener('change', function() {
-                    updateChart_$(chart_title)();
-                });
-            """
-        end
+        # Generate group column dropdown using html_controls abstraction
+        group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
+            string(chart_title),
+            group_cols_vec,
+            default_group_col,
+            "updateChart_$(chart_title)();"
+        )
 
         # Combine value/group dropdowns on same line
         combined_controls_html = ""
@@ -245,84 +192,13 @@ $options2                </select>
             });
         """
 
-        # Generate sliders HTML and initialization
-        sliders_html = ""
-        slider_init_js = ""
-
-        for col in slider_cols
-            slider_type = detect_slider_type(df, col)
-            slider_id = "$(chart_title)_$(col)_slider"
-
-            if slider_type == :categorical
-                unique_vals = sort(unique(skipmissing(df[!, col])))
-                options_html = join(["""<option value="$(v)" selected>$(v)</option>""" for v in unique_vals], "\n")
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label for="$slider_id">Filter by $(col): </label>
-                    <select id="$slider_id" multiple style="width: 300px; height: 100px;">
-                        $options_html
-                    </select>
-                    <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
-                </div>
-                """
-                slider_init_js *= """
-                    document.getElementById('$slider_id').addEventListener('change', function() {
-                        updatePlotWithFilters_$(chart_title)();
-                    });
-                """
-            elseif slider_type == :continuous
-                min_val = minimum(skipmissing(df[!, col]))
-                max_val = maximum(skipmissing(df[!, col]))
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(round(min_val, digits=2)) to $(round(max_val, digits=2))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    \$("#$slider_id").slider({
-                        range: true,
-                        min: $min_val,
-                        max: $max_val,
-                        step: $(abs(max_val - min_val) / 1000),
-                        values: [$min_val, $max_val],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2));
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
-                    });
-                """
-            elseif slider_type == :date
-                unique_dates = sort(unique(skipmissing(df[!, col])))
-                date_strings = string.(unique_dates)
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(first(date_strings)) to $(last(date_strings))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    window.dateValues_$(slider_id) = $(JSON.json(date_strings));
-                    \$("#$slider_id").slider({
-                        range: true,
-                        min: 0,
-                        max: $(length(unique_dates)-1),
-                        step: 1,
-                        values: [0, $(length(unique_dates)-1)],
-                        slide: function(event, ui) {
-                            \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]);
-                        },
-                        change: function(event, ui) {
-                            updatePlotWithFilters_$(chart_title)();
-                        }
-                    });
-                """
-            end
-        end
+        # Generate sliders using html_controls abstraction
+        sliders_html, slider_init_js = generate_slider_html_and_js(
+            df,
+            slider_cols,
+            string(chart_title),
+            "updatePlotWithFilters_$(chart_title)()"
+        )
 
         # Generate filtering JavaScript for all sliders
         filter_logic_js = ""

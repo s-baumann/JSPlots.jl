@@ -141,7 +141,7 @@ using DataFrames
             default_facet_cols = :group
         )
         @test occursin("group", chart.appearance_html)
-        @test occursin("facet1_selector", chart.appearance_html)
+        @test occursin("facet1_select", chart.appearance_html)
     end
 
     @testset "Facet grid (two facets)" begin
@@ -152,8 +152,8 @@ using DataFrames
         )
         @test occursin("category", chart.appearance_html)
         @test occursin("group", chart.appearance_html)
-        @test occursin("facet1_selector", chart.appearance_html)
-        @test occursin("facet2_selector", chart.appearance_html)
+        @test occursin("facet1_select", chart.appearance_html)
+        @test occursin("facet2_select", chart.appearance_html)
     end
 
     @testset "Facet cols as vector" begin

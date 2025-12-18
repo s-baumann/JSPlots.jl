@@ -115,65 +115,13 @@ $options                </select>
         end
 
 
-        # Generate sliders
-        sliders_html = ""
-        slider_init_js = ""
-
-        for col in slider_cols
-            slider_type = detect_slider_type(df, col)
-            slider_id = "$(chart_title)_$(col)_slider"
-
-            if slider_type == :categorical
-                unique_vals = sort(unique(skipmissing(df[!, col])))
-                options = join(["<option value=\"$(v)\" selected>$(v)</option>" for v in unique_vals], "\n")
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label for="$slider_id">Filter by $(col): </label>
-                    <select id="$slider_id" multiple style="width: 300px; height: 100px;">
-                        $options
-                    </select>
-                    <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
-                </div>
-                """
-                slider_init_js *= "                    document.getElementById('$slider_id').addEventListener('change', () => updatePlotWithFilters_$(chart_title)());\n"
-            elseif slider_type == :continuous
-                min_val, max_val = extrema(skipmissing(df[!, col]))
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(round(min_val, digits=2)) to $(round(max_val, digits=2))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    \$("#$slider_id").slider({
-                        range: true, min: $min_val, max: $max_val, step: $(abs(max_val - min_val) / 1000),
-                        values: [$min_val, $max_val],
-                        slide: (e, ui) => \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2)),
-                        change: () => updatePlotWithFilters_$(chart_title)()
-                    });
-                """
-            elseif slider_type == :date
-                unique_dates = sort(unique(skipmissing(df[!, col])))
-                date_strings = string.(unique_dates)
-                sliders_html *= """
-                <div style="margin: 20px 0;">
-                    <label>Filter by $(col): </label>
-                    <span id="$(slider_id)_label">$(first(date_strings)) to $(last(date_strings))</span>
-                    <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-                </div>
-                """
-                slider_init_js *= """
-                    window.dateValues_$(slider_id) = $(JSON.json(date_strings));
-                    \$("#$slider_id").slider({
-                        range: true, min: 0, max: $(length(unique_dates)-1), step: 1,
-                        values: [0, $(length(unique_dates)-1)],
-                        slide: (e, ui) => \$("#$(slider_id)_label").text(window.dateValues_$(slider_id)[ui.values[0]] + " to " + window.dateValues_$(slider_id)[ui.values[1]]),
-                        change: () => updatePlotWithFilters_$(chart_title)()
-                    });
-                """
-            end
-        end
+        # Generate sliders using html_controls abstraction
+        sliders_html, slider_init_js = generate_slider_html_and_js(
+            df,
+            slider_cols,
+            string(chart_title),
+            "updatePlotWithFilters_$(chart_title)()"
+        )
 
         # Generate filter logic
         filter_logic_js = if !isempty(slider_cols)
@@ -447,44 +395,13 @@ $style_html        </div>
 """
         end
 
-        # Build faceting section
-        if length(facet_choices) == 1
-            facet1_default = (length(default_facet_array) >= 1 && first(facet_choices) in default_facet_array) ? first(facet_choices) : "None"
-            options = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                     "                <option value=\"$(first(facet_choices))\"$((facet1_default == first(facet_choices)) ? " selected" : "")>$(first(facet_choices))</option>"
-            faceting_html = """
-            <div style="margin: 10px 0;">
-                <label for="facet1_select_$chart_title">Facet by: </label>
-                <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options                </select>
-            </div>
-            """
-        elseif length(facet_choices) >= 2
-            facet1_default = length(default_facet_array) >= 1 ? default_facet_array[1] : "None"
-            facet2_default = length(default_facet_array) >= 2 ? default_facet_array[2] : "None"
-
-            options1 = "                <option value=\"None\"$((facet1_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet1_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
-            options2 = "                <option value=\"None\"$((facet2_default == "None") ? " selected" : "")>None</option>\n" *
-                      join(["                <option value=\"$col\"$((col == facet2_default) ? " selected" : "")>$col</option>"
-                           for col in facet_choices], "\n")
-
-            faceting_html = """
-            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$chart_title">Facet 1:</label>
-                    <select id="facet1_select_$chart_title" onchange="updateChart_$chart_title()">
-$options1                </select>
-                </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$chart_title">Facet 2:</label>
-                    <select id="facet2_select_$chart_title" onchange="updateChart_$chart_title()">
-$options2                </select>
-                </div>
-            </div>
-            """
-        end
+        # Build faceting section using html_controls abstraction
+        faceting_html = generate_facet_dropdowns_html(
+            string(chart_title),
+            facet_choices,
+            default_facet_array,
+            "updateChart_$chart_title()"
+        )
 
         # Use html_controls abstraction to generate appearance HTML
         appearance_html = generate_appearance_html_from_sections(
