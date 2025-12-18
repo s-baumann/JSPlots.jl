@@ -75,33 +75,8 @@ struct PieChart <: JSPlotsType
             error("hole must be between 0.0 and 0.99 (0 = pie chart, >0 = donut chart)")
         end
 
-        # Normalize facet_cols to array (possible choices)
-        facet_choices = if facet_cols === nothing
-            Symbol[]
-        elseif facet_cols isa Symbol
-            [facet_cols]
-        else
-            facet_cols
-        end
-
-        # Normalize default_facet_cols to array
-        default_facet_array = if default_facet_cols === nothing
-            Symbol[]
-        elseif default_facet_cols isa Symbol
-            [default_facet_cols]
-        else
-            default_facet_cols
-        end
-
-        # Validate default facets are in choices
-        if length(default_facet_array) > 2
-            error("default_facet_cols can have at most 2 columns")
-        end
-        for col in default_facet_array
-            if !(col in facet_choices)
-                error("default_facet_cols must be a subset of facet_cols")
-            end
-        end
+        # Normalize and validate facets using centralized helper
+        facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Get unique values for each filter column
         filter_options = Dict()
@@ -109,9 +84,8 @@ struct PieChart <: JSPlotsType
             filter_options[string(col)] = unique(df[!, col])
         end
 
-        # Build color palette
-        color_palette = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
-                        "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
+        # Use default color palette
+        color_palette = DEFAULT_COLOR_PALETTE
 
         # Build color maps for all possible label columns
         color_maps = Dict()

@@ -52,8 +52,8 @@ table2 = Table(:financial_table, sales_df;
 # Example 3: Table with summary statistics
 # Generate sample data
 data_values = vcat(
-    randn(50) .* 10 .+ 75,  # Group A
-    randn(50) .* 12 .+ 82   # Group B
+    randn(rng, 50) .* 10 .+ 75,  # Group A
+    randn(rng, 50) .* 12 .+ 82   # Group B
 )
 data_groups = vcat(fill("Group A", 50), fill("Group B", 50))
 

@@ -65,28 +65,8 @@ struct ScatterPlot <: JSPlotsType
         # Point type always uses the same variable as color
         valid_pointtype_cols = valid_color_cols
 
-        # Normalize facet_cols
-        facet_choices = if facet_cols === nothing
-            Symbol[]
-        elseif facet_cols isa Symbol
-            [facet_cols]
-        else
-            facet_cols
-        end
-
-        default_facet_array = if default_facet_cols === nothing
-            Symbol[]
-        elseif default_facet_cols isa Symbol
-            [default_facet_cols]
-        else
-            default_facet_cols
-        end
-
-        # Validate facets
-        length(default_facet_array) > 2 && error("default_facet_cols can have at most 2 columns")
-        for col in default_facet_array
-            col in facet_choices || error("default_facet_cols must be a subset of facet_cols")
-        end
+        # Normalize and validate facets using centralized helper
+        facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
         for col in facet_choices
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
@@ -385,18 +365,6 @@ $style_html        </div>
 
         new(chart_title, data_label, functional_html, appearance_html)
     end
-end
-
-function detect_slider_type(df::DataFrame, col::Symbol)
-    col_data = df[!, col]
-    eltype(col_data) <: Union{Date, DateTime, Missing} && return :date
-
-    if eltype(col_data) <: Union{Number, Missing}
-        unique_vals = unique(skipmissing(col_data))
-        return length(unique_vals) <= 20 ? :categorical : :continuous
-    end
-
-    return :categorical
 end
 
 dependencies(a::ScatterPlot) = [a.data_label]

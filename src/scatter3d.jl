@@ -74,8 +74,7 @@ struct Scatter3D <: JSPlotsType
         default_color_col = string(valid_color_cols[1])
 
         # Build color maps for all valid color columns
-        color_palette = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
-                        "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
+        color_palette = DEFAULT_COLOR_PALETTE
         color_maps = Dict()
         for col in valid_color_cols
             unique_vals = unique(df[!, col])
@@ -85,28 +84,8 @@ struct Scatter3D <: JSPlotsType
             )
         end
 
-        # Normalize facet_cols
-        facet_choices = if facet_cols === nothing
-            Symbol[]
-        elseif facet_cols isa Symbol
-            [facet_cols]
-        else
-            facet_cols
-        end
-
-        default_facet_array = if default_facet_cols === nothing
-            Symbol[]
-        elseif default_facet_cols isa Symbol
-            [default_facet_cols]
-        else
-            default_facet_cols
-        end
-
-        # Validate facets
-        length(default_facet_array) > 2 && error("default_facet_cols can have at most 2 columns")
-        for col in default_facet_array
-            col in facet_choices || error("default_facet_cols must be a subset of facet_cols")
-        end
+        # Normalize and validate facets using centralized helper
+        facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
         for col in facet_choices
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end

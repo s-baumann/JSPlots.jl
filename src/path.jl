@@ -102,33 +102,8 @@ struct Path <: JSPlotsType
             error("order_col :$order_col does not exist in the dataframe. Available columns: $(names(df))")
         end
 
-        # Normalize facet_cols to array (possible choices)
-        facet_choices = if facet_cols === nothing
-            Symbol[]
-        elseif facet_cols isa Symbol
-            [facet_cols]
-        else
-            facet_cols
-        end
-
-        # Normalize default_facet_cols to array
-        default_facet_array = if default_facet_cols === nothing
-            Symbol[]
-        elseif default_facet_cols isa Symbol
-            [default_facet_cols]
-        else
-            default_facet_cols
-        end
-
-        # Validate default facets are in choices
-        if length(default_facet_array) > 2
-            error("default_facet_cols can have at most 2 columns")
-        end
-        for col in default_facet_array
-            if !(col in facet_choices)
-                error("default_facet_cols must be a subset of facet_cols")
-            end
-        end
+        # Normalize and validate facets using centralized helper
+        facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Get unique values for each filter column
         filter_options = Dict()
@@ -137,8 +112,7 @@ struct Path <: JSPlotsType
         end
 
         # Build color maps for all possible color columns that exist
-        color_palette = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
-                        "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
+        color_palette = DEFAULT_COLOR_PALETTE
         color_maps = Dict()
         valid_color_cols = Symbol[]
         for col in color_cols

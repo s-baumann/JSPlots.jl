@@ -75,7 +75,7 @@ end
 
 """
     Picture(chart_title::Symbol, chart_object, save_function::Function;
-            format::Symbol=:png, notes::String="")
+            format::Symbol=:png, notes::String="", rng=nothing)
 
 Create a Picture plot from a chart object with a custom save function.
 
@@ -85,22 +85,33 @@ Create a Picture plot from a chart object with a custom save function.
 - `save_function::Function`: Function with signature `(chart, path) -> nothing` to save the chart
 - `format::Symbol`: Output format (`:png`, `:svg`, `:jpeg`) (default: `:png`)
 - `notes::String`: Optional descriptive text shown below the chart
+- `rng`: Optional RNG object (e.g., StableRNG) for deterministic filenames. When provided, uses chart_title for filename instead of random temp name.
 
 # Example
 ```julia
 using Plots
 p = plot(1:10, rand(10))
 pic = Picture(:my_plot, p, (obj, path) -> savefig(obj, path); format=:png)
+
+# For deterministic filenames (useful for git):
+using StableRNGs
+pic = Picture(:my_plot, p, (obj, path) -> savefig(obj, path); format=:png, rng=StableRNG(123))
 ```
 """
 function Picture(chart_title::Symbol, chart_object, save_function::Function;
-                 format::Symbol=:png, notes::String="")
+                 format::Symbol=:png, notes::String="", rng=nothing)
     if !(format in [:png, :svg, :jpeg, :jpg])
         error("Unsupported format: $format. Use :png, :svg, or :jpeg")
     end
 
-    # Create temporary file
-    temp_path = tempname() * "." * string(format)
+    # Create temporary file - use deterministic name if rng provided
+    if rng !== nothing
+        # Use chart_title for deterministic filename
+        temp_dir = mktempdir()
+        temp_path = joinpath(temp_dir, string(chart_title) * "." * string(format))
+    else
+        temp_path = tempname() * "." * string(format)
+    end
 
     try
         # Call user's save function
@@ -118,7 +129,7 @@ function Picture(chart_title::Symbol, chart_object, save_function::Function;
 end
 
 # Constructor for auto-detected plotting packages
-function Picture(chart_title::Symbol, chart_object; format::Symbol=:png, notes::String="")
+function Picture(chart_title::Symbol, chart_object; format::Symbol=:png, notes::String="", rng=nothing)
     # Try to detect the plotting package and use appropriate save function
     chart_type = typeof(chart_object)
 
@@ -126,14 +137,14 @@ function Picture(chart_title::Symbol, chart_object; format::Symbol=:png, notes::
     if isdefined(Main, :VegaLite) && chart_type <: Main.VegaLite.VLSpec
         return Picture(chart_title, chart_object,
                       (obj, path) -> Main.VegaLite.save(path, obj);
-                      format=format, notes=notes)
+                      format=format, notes=notes, rng=rng)
     end
 
     # Check for Plots.jl
     if isdefined(Main, :Plots) && chart_type <: Main.Plots.Plot
         return Picture(chart_title, chart_object,
                       (obj, path) -> Main.Plots.savefig(obj, path);
-                      format=format, notes=notes)
+                      format=format, notes=notes, rng=rng)
     end
 
     # Check for Makie (GLMakie, WGLMakie, etc.)
@@ -143,7 +154,7 @@ function Picture(chart_title::Symbol, chart_object; format::Symbol=:png, notes::
             if isdefined(Main.Makie, t) && chart_type <: getfield(Main.Makie, t)
                 return Picture(chart_title, chart_object,
                               (obj, path) -> Main.Makie.save(path, obj);
-                              format=format, notes=notes)
+                              format=format, notes=notes, rng=rng)
             end
         end
     end
