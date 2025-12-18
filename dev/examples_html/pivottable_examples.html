@@ -1,0 +1,2565 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PivotTable Examples</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                resolve(results.data);
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                resolve(data);
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        resolve(results.data);
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+    loadDataset('sales_data').then(function(data) {
+        console.log('Loaded data for pivot table sales_pivot:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table sales_pivot');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for sales_pivot:', arrayData.slice(0, 3));
+
+        $("#sales_pivot").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Table","rows":["Region"],"aggregatorName":"Sum","vals":["Sales"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Month"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table sales_pivot:', error);
+        $("#sales_pivot").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('performance_data').then(function(data) {
+        console.log('Loaded data for pivot table performance_heatmap:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table performance_heatmap');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for performance_heatmap:', arrayData.slice(0, 3));
+
+        $("#performance_heatmap").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Heatmap","rows":["Employee"],"aggregatorName":"Average","vals":["Score"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([50.0, 65.0, 75.0, 85.0, 100.0]).range(["#d73027", "#fee08b", "#ffffbf", "#d9ef8b", "#1a9850"]).clamp(true)}}},"cols":["Quarter"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table performance_heatmap:', error);
+        $("#performance_heatmap").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('product_data').then(function(data) {
+        console.log('Loaded data for pivot table revenue_by_category:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table revenue_by_category');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for revenue_by_category:', arrayData.slice(0, 3));
+
+        $("#revenue_by_category").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Bar Chart","rows":["Category"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Quarter"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table revenue_by_category:', error);
+        $("#revenue_by_category").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('customer_data').then(function(data) {
+        console.log('Loaded data for pivot table customer_revenue:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table customer_revenue');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for customer_revenue:', arrayData.slice(0, 3));
+
+        $("#customer_revenue").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Heatmap","rows":["Country"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["ProductType"],"exclusions":{"Country":["Test"]}})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table customer_revenue:', error);
+        $("#customer_revenue").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('survey_data').then(function(data) {
+        console.log('Loaded data for pivot table survey_results:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table survey_results');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for survey_results:', arrayData.slice(0, 3));
+
+        $("#survey_results").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Table Barchart","rows":["Age_Group","Gender"],"aggregatorName":"Average","vals":["Satisfaction"],"inclusions":{"Age_Group":["18-25","26-35","36-45"]},"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Product"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table survey_results:', error);
+        $("#survey_results").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('transaction_data').then(function(data) {
+        console.log('Loaded data for pivot table transaction_analysis:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table transaction_analysis');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for transaction_analysis:', arrayData.slice(0, 3));
+
+        $("#transaction_analysis").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Heatmap","rows":["Customer_Type"],"aggregatorName":"Count","vals":["Amount"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#f7fbff", "#9ecae1", "#4292c6", "#08519c"]).clamp(true)}}},"cols":["Transaction_Type"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table transaction_analysis:', error);
+        $("#transaction_analysis").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('stockReturns').then(function(data) {
+        console.log('Loaded data for pivot table Returns_Over_Last_Few_Days:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table Returns_Over_Last_Few_Days');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for Returns_Over_Last_Few_Days:', arrayData.slice(0, 3));
+
+        $("#Returns_Over_Last_Few_Days").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table Returns_Over_Last_Few_Days:', error);
+        $("#Returns_Over_Last_Few_Days").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+    loadDataset('correlations').then(function(data) {
+        console.log('Loaded data for pivot table Correlation_Matrix:', data);
+
+        // Validate data
+        if (!data || data.length === 0) {
+            throw new Error('No data loaded for pivot table Correlation_Matrix');
+        }
+
+        // Convert data to array format expected by pivotUI
+        // First row is headers
+        var headers = Object.keys(data[0]);
+        var arrayData = [headers];
+
+        // Add data rows
+        data.forEach(function(row) {
+            var rowArray = headers.map(function(header) {
+                return row[header];
+            });
+            arrayData.push(rowArray);
+        });
+
+        console.log('Converted array data for Correlation_Matrix:', arrayData.slice(0, 3));
+
+        $("#Correlation_Matrix").pivotUI(
+            arrayData,
+            $.extend({
+                renderers: $.extend(
+                    $.pivotUtilities.renderers,
+                    $.pivotUtilities.c3_renderers,
+                    $.pivotUtilities.d3_renderers,
+                    $.pivotUtilities.export_renderers
+                ),
+                hiddenAttributes: [""]
+            }, {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]})
+        );
+    }).catch(function(error) {
+        console.error('Error loading data for pivot table Correlation_Matrix:', error);
+        $("#Correlation_Matrix").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+    });
+(function() {
+    // Configuration
+    const FILTER_COLS = ['categ22', 'categ'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const COLOR_COLS = ['color'];
+    const COLOR_MAPS = {'color': {'B': '#EF553B', 'A': '#636efa'}};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_COLOR_COL = 'color';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;
+        if (method === 'count') return [values.length];
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_pchart = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_pchart');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_pchart');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_pchart');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_pchart');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_pchart');
+        const facet2Select = document.getElementById('facet2_select_pchart');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                let xValues, yValues;
+                if (AGGREGATOR === 'none') {
+                    xValues = group.data.map(row => row[X_COL]);
+                    yValues = group.data.map(row => row[Y_COL]);
+                } else {
+                    // Group by x value and aggregate
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        if (!xGroups[xVal]) xGroups[xVal] = [];
+                        xGroups[xVal].push(row[Y_COL]);
+                    });
+
+                    xValues = [];
+                    yValues = [];
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
+                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        if (aggregated && aggregated.length > 0) {
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            yValues.push(aggregated[0]);
+                        }
+                    });
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('pchart', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                    let xValues, yValues;
+                    if (AGGREGATOR === 'none') {
+                        xValues = group.data.map(row => row[X_COL]);
+                        yValues = group.data.map(row => row[Y_COL]);
+                    } else {
+                        // Group by x value and aggregate
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            if (!xGroups[xVal]) xGroups[xVal] = [];
+                            xGroups[xVal].push(row[Y_COL]);
+                        });
+
+                        xValues = [];
+                        yValues = [];
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
+                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            if (aggregated && aggregated.length > 0) {
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                yValues.push(aggregated[0]);
+                            }
+                        });
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? Y_COL : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('pchart', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                        let xValues, yValues;
+                        if (AGGREGATOR === 'none') {
+                            xValues = group.data.map(row => row[X_COL]);
+                            yValues = group.data.map(row => row[Y_COL]);
+                        } else {
+                            // Group by x value and aggregate
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                if (!xGroups[xVal]) xGroups[xVal] = [];
+                                xGroups[xVal].push(row[Y_COL]);
+                            });
+
+                            xValues = [];
+                            yValues = [];
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
+                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                if (aggregated && aggregated.length > 0) {
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    yValues.push(aggregated[0]);
+                                }
+                            });
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? Y_COL : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('pchart', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('df_combined').then(function(data) {
+        allData = data;
+        window.updateChart_pchart();
+    }).catch(function(error) {
+        console.error('Error loading data for chart pchart:', error);
+    });
+})();
+    // Load and parse CSV data using centralized parser
+    loadDataset('subframe').then(function(data3d) {
+        window.allData_threeD = data3d;
+
+        $(function() {
+            
+
+            // Initial plot
+            updatePlotWithFilters_threeD();
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart threeD:', error);
+    });
+
+    function updatePlot_threeD(data3d) {
+        // ========== 3D SURFACE PLOT CONFIGURATION ==========
+        // Define your column names here
+        const x = 'x';
+        const y = 'y';
+        const z = 'z';
+        const group = 'group';
+        // ===================================================
+
+        // Get unique groups
+const uniqueGroups = [...new Set(data3d.map(row => row[group]))].sort();
+
+
+        // Define a set of distinct color gradients
+        const colorGradients = [
+            // Blue gradient
+            [[0, 'rgb(8,48,107)'], [0.25, 'rgb(33,102,172)'], [0.5, 'rgb(67,147,195)'], [0.75, 'rgb(146,197,222)'], [1, 'rgb(209,229,240)']],
+            // Red-Orange gradient
+            [[0, 'rgb(127,0,0)'], [0.25, 'rgb(189,0,38)'], [0.5, 'rgb(227,74,51)'], [0.75, 'rgb(252,141,89)'], [1, 'rgb(253,204,138)']],
+            // Green gradient
+            [[0, 'rgb(0,68,27)'], [0.25, 'rgb(0,109,44)'], [0.5, 'rgb(35,139,69)'], [0.75, 'rgb(116,196,118)'], [1, 'rgb(199,233,192)']],
+            // Purple gradient
+            [[0, 'rgb(63,0,125)'], [0.25, 'rgb(106,81,163)'], [0.5, 'rgb(158,154,200)'], [0.75, 'rgb(188,189,220)'], [1, 'rgb(218,218,235)']],
+            // Yellow-Orange gradient
+            [[0, 'rgb(102,37,6)'], [0.25, 'rgb(153,52,4)'], [0.5, 'rgb(217,95,14)'], [0.75, 'rgb(254,153,41)'], [1, 'rgb(254,217,142)']],
+            // Teal gradient
+            [[0, 'rgb(1,70,54)'], [0.25, 'rgb(1,102,94)'], [0.5, 'rgb(2,129,138)'], [0.75, 'rgb(54,175,172)'], [1, 'rgb(178,226,226)']],
+            // Pink-Magenta gradient
+            [[0, 'rgb(73,0,106)'], [0.25, 'rgb(123,50,148)'], [0.5, 'rgb(194,165,207)'], [0.75, 'rgb(231,212,232)'], [1, 'rgb(247,242,247)']],
+            // Brown gradient
+            [[0, 'rgb(84,48,5)'], [0.25, 'rgb(140,81,10)'], [0.5, 'rgb(191,129,45)'], [0.75, 'rgb(223,194,125)'], [1, 'rgb(246,232,195)']],
+        ];
+
+        // Function to create z matrix for a group
+        function createSurface(groupData, colorscale, name) {
+            const xVals = [...new Set(groupData.map(row => parseFloat(row[x])))].sort((a,b) => a-b);
+            const yVals = [...new Set(groupData.map(row => parseFloat(row[y])))].sort((a,b) => a-b);
+
+            const zMatrix = [];
+            for (let i = 0; i < yVals.length; i++) {
+                zMatrix[i] = [];
+                for (let j = 0; j < xVals.length; j++) {
+                    const point = groupData.find(row =>
+                        parseFloat(row[x]) === xVals[j] &&
+                        parseFloat(row[y]) === yVals[i]
+                    );
+                    zMatrix[i][j] = point ? parseFloat(point[z]) : null;
+                }
+            }
+
+            return {
+                z: zMatrix,
+                x: xVals,
+                y: yVals,
+                type: 'surface',
+                name: name,
+                colorscale: colorscale,
+                showscale: false
+            };
+        }
+
+        // Create a surface for each group
+const plotData = uniqueGroups.map((grp, index) => {
+    const groupData = data3d.filter(row => row[group] === grp);
+    const colorscale = colorGradients[index % colorGradients.length];
+    return createSurface(groupData, colorscale, `Group ${grp}`);
+});
+
+
+        const layout = {
+            title: '3D Surface Chart',
+            autosize: true,
+            height: 600,
+            scene: {
+                xaxis: { title: x },
+                yaxis: { title: y },
+                zaxis: { title: z }
+            },
+            showlegend: true,
+        };
+
+        Plotly.newPlot('threeD', plotData, layout);
+    }
+
+        updatePlotWithFilters_threeD = function() {
+        updatePlot_threeD(window.allData_threeD);
+    };
+
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="performance_data" data-format="csv_embedded" data-src="">
+Employee,Quarter,Score,Department
+Alice,Q1,71.86597523842131,Sales
+Alice,Q2,82.1810789062282,Sales
+Alice,Q3,82.98332075498706,Sales
+Alice,Q4,72.77225925354385,Sales
+Bob,Q1,70.78145705547773,Engineering
+Bob,Q2,81.00057834152507,Engineering
+Bob,Q3,74.64965959025935,Engineering
+Bob,Q4,60.092303128355084,Engineering
+Charlie,Q1,75.28355195772488,Sales
+Charlie,Q2,58.1227670248406,Sales
+Charlie,Q3,67.56818040108985,Sales
+Charlie,Q4,63.220523233538216,Sales
+Diana,Q1,89.024885734013,Marketing
+Diana,Q2,105.95512192739508,Marketing
+Diana,Q3,89.34213333030542,Marketing
+Diana,Q4,91.70765864074795,Marketing
+Eve,Q1,64.74262558759463,Engineering
+Eve,Q2,59.14071212211398,Engineering
+Eve,Q3,91.44220987535252,Engineering
+Eve,Q4,70.46725862427758,Engineering
+
+</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
+Category,Brand,Revenue,Quarter
+Electronics,Brand A,2651,Q1
+Clothing,Brand B,9493,Q2
+Home,Brand B,3239,Q3
+Sports,Brand D,3577,Q4
+Books,Brand A,7374,Q1
+Electronics,Brand A,4649,Q2
+Clothing,Brand C,5920,Q3
+Home,Brand D,2313,Q4
+Sports,Brand C,9404,Q1
+Books,Brand C,7841,Q2
+Electronics,Brand D,8621,Q3
+Clothing,Brand D,9082,Q4
+Home,Brand B,2221,Q1
+Sports,Brand B,1191,Q2
+Books,Brand C,9831,Q3
+Electronics,Brand A,6608,Q4
+Clothing,Brand D,2099,Q1
+Home,Brand D,1504,Q2
+Sports,Brand B,4720,Q3
+Books,Brand A,5018,Q4
+Electronics,Brand A,4698,Q1
+Clothing,Brand A,8817,Q2
+Home,Brand B,2536,Q3
+Sports,Brand C,5289,Q4
+Books,Brand A,2553,Q1
+Electronics,Brand D,5372,Q2
+Clothing,Brand A,7229,Q3
+Home,Brand C,4613,Q4
+Sports,Brand A,5211,Q1
+Books,Brand A,6563,Q2
+Electronics,Brand A,5442,Q3
+Clothing,Brand C,5407,Q4
+Home,Brand A,8034,Q1
+Sports,Brand A,5512,Q2
+Books,Brand A,5033,Q3
+Electronics,Brand B,2214,Q4
+Clothing,Brand D,3787,Q1
+Home,Brand D,8915,Q2
+Sports,Brand B,5484,Q3
+Books,Brand C,7547,Q4
+Electronics,Brand C,3404,Q1
+Clothing,Brand A,7259,Q2
+Home,Brand C,4975,Q3
+Sports,Brand C,9476,Q4
+Books,Brand B,4896,Q1
+Electronics,Brand A,1070,Q2
+Clothing,Brand D,1269,Q3
+Home,Brand C,1543,Q4
+Sports,Brand D,8416,Q1
+Books,Brand B,1126,Q2
+Electronics,Brand A,3393,Q3
+Clothing,Brand C,6439,Q4
+Home,Brand C,1075,Q1
+Sports,Brand D,3957,Q2
+Books,Brand B,4930,Q3
+Electronics,Brand D,6540,Q4
+Clothing,Brand D,7221,Q1
+Home,Brand C,5124,Q2
+Sports,Brand D,7953,Q3
+Books,Brand C,9923,Q4
+Electronics,Brand A,4848,Q1
+Clothing,Brand A,6058,Q2
+Home,Brand A,1749,Q3
+Sports,Brand D,6560,Q4
+Books,Brand B,4484,Q1
+Electronics,Brand C,1519,Q2
+Clothing,Brand C,9671,Q3
+Home,Brand B,7695,Q4
+Sports,Brand B,6522,Q1
+Books,Brand C,4684,Q2
+Electronics,Brand D,5906,Q3
+Clothing,Brand B,5720,Q4
+Home,Brand C,5531,Q1
+Sports,Brand C,7384,Q2
+Books,Brand A,7136,Q3
+Electronics,Brand B,9734,Q4
+Clothing,Brand B,3682,Q1
+Home,Brand A,5534,Q2
+Sports,Brand B,4455,Q3
+Books,Brand A,5349,Q4
+Electronics,Brand C,3616,Q1
+Clothing,Brand C,6984,Q2
+Home,Brand C,6219,Q3
+Sports,Brand A,6586,Q4
+Books,Brand A,7668,Q1
+Electronics,Brand C,1298,Q2
+Clothing,Brand A,8187,Q3
+Home,Brand C,6649,Q4
+Sports,Brand A,1280,Q1
+Books,Brand A,9133,Q2
+Electronics,Brand D,5805,Q3
+Clothing,Brand A,8108,Q4
+Home,Brand C,3546,Q1
+Sports,Brand C,3699,Q2
+Books,Brand B,3265,Q3
+Electronics,Brand B,6347,Q4
+Clothing,Brand C,7867,Q1
+Home,Brand D,5449,Q2
+Sports,Brand B,1920,Q3
+Books,Brand A,3207,Q4
+
+</script><script type="text/plain" id="customer_data" data-format="csv_embedded" data-src="">
+Country,ProductType,Channel,Revenue,Year
+UK,Standard,Wholesale,2302,2022
+USA,Budget,Online,2832,2023
+USA,Budget,Online,1162,2024
+Japan,Premium,Wholesale,2455,2022
+Japan,Standard,Wholesale,1522,2023
+Test,Standard,Retail,3820,2024
+Japan,Budget,Wholesale,3481,2022
+Germany,Budget,Retail,4701,2023
+Japan,Premium,Wholesale,1388,2024
+USA,Budget,Retail,3625,2022
+USA,Standard,Wholesale,836,2023
+Test,Standard,Wholesale,805,2024
+Test,Premium,Retail,3239,2022
+Test,Budget,Wholesale,2722,2023
+USA,Standard,Wholesale,2943,2024
+Germany,Standard,Online,4505,2022
+France,Budget,Wholesale,784,2023
+France,Standard,Wholesale,2461,2024
+France,Premium,Online,4104,2022
+UK,Premium,Online,1367,2023
+Test,Premium,Wholesale,4907,2024
+France,Premium,Online,793,2022
+Japan,Premium,Online,2633,2023
+USA,Premium,Retail,1534,2024
+Germany,Budget,Online,1117,2022
+UK,Standard,Retail,1470,2023
+USA,Premium,Retail,2309,2024
+USA,Premium,Wholesale,2991,2022
+Germany,Budget,Wholesale,1898,2023
+Germany,Budget,Wholesale,4334,2024
+France,Premium,Wholesale,4446,2022
+UK,Standard,Online,2277,2023
+Japan,Standard,Retail,1508,2024
+UK,Premium,Wholesale,4839,2022
+Test,Premium,Wholesale,4903,2023
+Test,Premium,Retail,1359,2024
+Test,Standard,Online,2590,2022
+Japan,Budget,Wholesale,2973,2023
+USA,Premium,Retail,3685,2024
+USA,Standard,Retail,4106,2022
+Test,Budget,Online,3642,2023
+UK,Premium,Wholesale,1395,2024
+USA,Budget,Online,859,2022
+Japan,Premium,Wholesale,4641,2023
+UK,Budget,Retail,3226,2024
+USA,Budget,Retail,1109,2022
+France,Budget,Retail,3787,2023
+France,Premium,Online,2931,2024
+France,Standard,Retail,4433,2022
+USA,Premium,Wholesale,4670,2023
+France,Standard,Online,4295,2024
+France,Standard,Online,1804,2022
+USA,Budget,Online,628,2023
+UK,Premium,Online,590,2024
+USA,Budget,Wholesale,4070,2022
+USA,Standard,Wholesale,3464,2023
+Japan,Premium,Retail,2104,2024
+France,Budget,Online,2881,2022
+USA,Standard,Online,1001,2023
+UK,Budget,Online,3180,2024
+Germany,Budget,Retail,3198,2022
+UK,Standard,Retail,3372,2023
+Japan,Premium,Retail,960,2024
+USA,Budget,Retail,3353,2022
+France,Standard,Wholesale,2349,2023
+UK,Budget,Wholesale,1425,2024
+France,Premium,Wholesale,2434,2022
+USA,Premium,Wholesale,2042,2023
+France,Standard,Wholesale,4505,2024
+Test,Budget,Wholesale,809,2022
+France,Budget,Retail,1523,2023
+UK,Standard,Wholesale,2929,2024
+Japan,Standard,Online,2475,2022
+Japan,Budget,Retail,2417,2023
+Japan,Standard,Online,2739,2024
+Germany,Standard,Online,3643,2022
+USA,Budget,Retail,4903,2023
+USA,Standard,Online,4778,2024
+USA,Standard,Online,1796,2022
+Test,Premium,Online,1406,2023
+Japan,Standard,Retail,4188,2024
+Japan,Premium,Online,1087,2022
+Japan,Standard,Retail,3613,2023
+UK,Budget,Retail,4177,2024
+UK,Premium,Wholesale,928,2022
+UK,Premium,Online,1506,2023
+UK,Standard,Online,3027,2024
+France,Premium,Wholesale,2367,2022
+Japan,Budget,Retail,4741,2023
+UK,Standard,Retail,2896,2024
+Test,Premium,Wholesale,1165,2022
+Japan,Premium,Wholesale,3250,2023
+USA,Premium,Online,2840,2024
+Japan,Standard,Retail,572,2022
+Germany,Premium,Retail,2107,2023
+Test,Standard,Wholesale,3447,2024
+USA,Premium,Online,2054,2022
+Test,Premium,Wholesale,2444,2023
+Germany,Premium,Wholesale,2945,2024
+UK,Standard,Retail,2868,2022
+UK,Premium,Online,4518,2023
+UK,Standard,Online,4745,2024
+France,Premium,Online,1751,2022
+France,Premium,Wholesale,4147,2023
+France,Premium,Wholesale,3610,2024
+Test,Standard,Wholesale,3949,2022
+France,Budget,Wholesale,2274,2023
+France,Premium,Wholesale,1930,2024
+USA,Premium,Wholesale,4890,2022
+France,Premium,Online,2284,2023
+UK,Budget,Online,2300,2024
+Germany,Budget,Wholesale,2769,2022
+Germany,Budget,Wholesale,588,2023
+USA,Standard,Online,1325,2024
+USA,Standard,Wholesale,1579,2022
+Test,Standard,Wholesale,4361,2023
+USA,Budget,Wholesale,502,2024
+UK,Budget,Online,2986,2022
+Test,Budget,Retail,2749,2023
+Test,Premium,Wholesale,1340,2024
+
+</script><script type="text/plain" id="survey_data" data-format="csv_embedded" data-src="">
+Age_Group,Gender,Satisfaction,Product,Region
+18-25,Other,1,Product B,West
+46-55,Female,9,Product C,South
+46-55,Female,5,Product B,South
+18-25,Other,8,Product B,South
+46-55,Prefer not to say,6,Product B,East
+56+,Other,3,Product C,North
+46-55,Female,10,Product A,North
+26-35,Male,4,Product A,East
+18-25,Prefer not to say,6,Product B,South
+26-35,Female,5,Product C,North
+36-45,Female,1,Product B,East
+18-25,Male,10,Product A,West
+56+,Prefer not to say,3,Product A,West
+36-45,Prefer not to say,8,Product A,North
+18-25,Male,3,Product A,East
+36-45,Male,7,Product A,South
+46-55,Prefer not to say,4,Product A,West
+18-25,Male,7,Product A,East
+56+,Prefer not to say,9,Product C,West
+26-35,Prefer not to say,9,Product A,South
+56+,Male,1,Product C,East
+46-55,Other,3,Product A,North
+26-35,Female,9,Product C,East
+46-55,Male,4,Product B,South
+36-45,Other,3,Product A,South
+36-45,Male,10,Product B,North
+18-25,Prefer not to say,10,Product C,North
+56+,Male,9,Product C,South
+36-45,Prefer not to say,9,Product B,North
+46-55,Other,8,Product C,South
+56+,Male,9,Product A,North
+18-25,Prefer not to say,3,Product A,South
+36-45,Male,1,Product B,East
+36-45,Other,1,Product A,South
+46-55,Female,9,Product C,South
+46-55,Prefer not to say,4,Product C,East
+18-25,Female,8,Product B,South
+18-25,Male,9,Product A,North
+56+,Other,4,Product A,South
+46-55,Female,6,Product C,South
+36-45,Female,10,Product C,West
+18-25,Female,10,Product B,North
+46-55,Female,3,Product B,North
+18-25,Female,4,Product B,West
+36-45,Female,10,Product C,South
+46-55,Female,3,Product C,East
+36-45,Male,8,Product C,East
+46-55,Other,9,Product A,North
+18-25,Other,10,Product C,West
+36-45,Other,2,Product A,East
+56+,Other,8,Product B,West
+18-25,Male,5,Product C,East
+18-25,Male,1,Product C,West
+26-35,Male,9,Product B,South
+46-55,Prefer not to say,3,Product A,West
+56+,Male,6,Product A,South
+36-45,Male,9,Product C,South
+46-55,Prefer not to say,1,Product C,East
+36-45,Female,2,Product C,South
+26-35,Male,6,Product A,West
+18-25,Male,5,Product B,South
+26-35,Male,9,Product C,North
+26-35,Other,2,Product C,North
+18-25,Other,2,Product C,North
+56+,Prefer not to say,3,Product C,North
+36-45,Male,2,Product B,North
+56+,Other,2,Product A,North
+18-25,Male,2,Product B,West
+18-25,Male,3,Product C,North
+18-25,Other,2,Product A,East
+46-55,Other,10,Product A,West
+56+,Prefer not to say,4,Product C,West
+26-35,Other,8,Product B,West
+36-45,Prefer not to say,1,Product C,West
+18-25,Female,4,Product A,East
+46-55,Female,1,Product B,East
+26-35,Prefer not to say,9,Product C,East
+46-55,Female,5,Product A,South
+18-25,Prefer not to say,2,Product C,East
+56+,Other,2,Product C,North
+46-55,Male,2,Product C,West
+36-45,Male,7,Product A,West
+46-55,Female,9,Product C,South
+18-25,Male,1,Product B,South
+46-55,Prefer not to say,4,Product A,West
+26-35,Prefer not to say,1,Product C,South
+18-25,Male,9,Product B,East
+18-25,Prefer not to say,2,Product A,East
+18-25,Female,9,Product A,East
+26-35,Other,4,Product A,East
+36-45,Prefer not to say,3,Product B,North
+46-55,Male,5,Product C,South
+26-35,Female,2,Product A,North
+56+,Prefer not to say,9,Product C,East
+56+,Female,3,Product C,South
+36-45,Female,3,Product A,North
+46-55,Other,4,Product A,South
+18-25,Other,8,Product A,East
+36-45,Male,6,Product B,East
+36-45,Male,8,Product B,West
+56+,Male,3,Product C,East
+26-35,Other,5,Product A,West
+46-55,Prefer not to say,9,Product A,East
+26-35,Male,1,Product B,West
+18-25,Male,7,Product A,East
+18-25,Prefer not to say,6,Product C,East
+18-25,Female,5,Product C,East
+18-25,Male,5,Product A,East
+56+,Prefer not to say,8,Product A,East
+36-45,Prefer not to say,6,Product A,West
+26-35,Female,6,Product C,South
+18-25,Male,4,Product A,West
+56+,Male,10,Product B,North
+46-55,Male,4,Product B,North
+18-25,Prefer not to say,8,Product A,South
+36-45,Prefer not to say,5,Product B,West
+36-45,Prefer not to say,5,Product A,South
+56+,Female,2,Product B,West
+36-45,Prefer not to say,6,Product B,East
+18-25,Male,9,Product C,South
+46-55,Other,3,Product B,West
+36-45,Other,6,Product C,South
+56+,Female,2,Product A,West
+56+,Other,4,Product B,West
+26-35,Male,6,Product A,North
+18-25,Female,5,Product B,East
+26-35,Prefer not to say,6,Product C,South
+26-35,Male,5,Product A,West
+26-35,Prefer not to say,7,Product A,South
+26-35,Male,5,Product B,South
+56+,Other,9,Product A,West
+26-35,Prefer not to say,10,Product B,East
+26-35,Prefer not to say,3,Product A,East
+36-45,Prefer not to say,8,Product C,South
+56+,Male,6,Product A,North
+36-45,Female,3,Product C,East
+56+,Other,9,Product C,East
+26-35,Male,6,Product C,West
+36-45,Female,2,Product B,South
+56+,Prefer not to say,1,Product B,South
+56+,Prefer not to say,6,Product A,West
+18-25,Female,3,Product C,West
+18-25,Other,3,Product A,North
+18-25,Female,6,Product A,North
+26-35,Other,10,Product B,South
+46-55,Prefer not to say,6,Product C,West
+26-35,Female,5,Product B,South
+18-25,Female,5,Product B,East
+36-45,Prefer not to say,6,Product C,East
+26-35,Prefer not to say,3,Product A,South
+56+,Other,2,Product A,East
+26-35,Female,3,Product A,South
+36-45,Prefer not to say,2,Product A,West
+56+,Male,1,Product C,South
+46-55,Other,4,Product A,North
+26-35,Prefer not to say,4,Product C,North
+36-45,Other,7,Product A,South
+36-45,Female,4,Product C,West
+36-45,Female,1,Product C,West
+56+,Male,2,Product B,North
+26-35,Prefer not to say,10,Product A,North
+26-35,Prefer not to say,2,Product C,West
+46-55,Prefer not to say,8,Product B,South
+36-45,Male,4,Product A,East
+36-45,Other,8,Product A,East
+26-35,Other,1,Product B,North
+26-35,Other,6,Product C,North
+56+,Prefer not to say,2,Product C,South
+18-25,Other,6,Product C,West
+18-25,Female,10,Product B,North
+56+,Other,7,Product A,East
+18-25,Male,6,Product B,North
+56+,Other,6,Product A,East
+46-55,Male,7,Product B,East
+56+,Prefer not to say,8,Product B,South
+36-45,Other,3,Product C,East
+36-45,Other,9,Product B,North
+18-25,Other,6,Product B,East
+56+,Prefer not to say,7,Product B,East
+26-35,Other,2,Product B,West
+26-35,Prefer not to say,10,Product A,South
+56+,Other,4,Product A,East
+46-55,Female,9,Product A,East
+26-35,Female,6,Product B,South
+36-45,Prefer not to say,9,Product A,West
+36-45,Male,10,Product A,South
+56+,Other,10,Product A,North
+36-45,Prefer not to say,4,Product C,South
+36-45,Female,1,Product A,North
+26-35,Male,2,Product C,North
+56+,Female,2,Product B,South
+46-55,Prefer not to say,7,Product C,East
+18-25,Other,8,Product C,West
+56+,Prefer not to say,1,Product A,East
+56+,Female,9,Product C,West
+18-25,Other,10,Product B,North
+36-45,Prefer not to say,7,Product A,North
+56+,Other,5,Product C,North
+18-25,Male,5,Product C,West
+26-35,Female,2,Product A,East
+
+</script><script type="text/plain" id="stockReturns" data-format="csv_embedded" data-src="">
+Symbol,Date,Return
+RTX,2023-01-01,10.01
+RTX,2023-01-02,-10.005
+RTX,2023-01-03,-0.5
+GOOG,2023-01-01,1.0
+GOOG,2023-01-02,0.01
+GOOG,2023-01-03,-0.003
+MSFT,2023-01-01,0.008
+MSFT,2023-01-02,0.004
+MSFT,2023-01-03,-0.002
+
+</script><script type="text/plain" id="correlations" data-format="csv_embedded" data-src="">
+Symbol1,Symbol2,Correlation
+RTX,GOOG,-0.85
+RTX,MSFT,-0.75
+GOOG,MSFT,0.8
+RTX,RTX,1.0
+GOOG,GOOG,1.0
+MSFT,MSFT,1.0
+GOOG,RTX,-0.85
+MSFT,RTX,-0.75
+MSFT,GOOG,0.8
+
+</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
+Region,Month,Product,Sales,Units
+North,Jan,Gadget,13440,125
+North,Feb,Gizmo,13974,63
+North,Mar,Widget,21708,171
+North,Apr,Gadget,26155,159
+North,May,Gadget,20072,141
+North,Jun,Widget,36916,103
+North,Jul,Gizmo,14981,71
+North,Aug,Gadget,13179,99
+North,Sep,Gizmo,10670,55
+North,Oct,Widget,45452,103
+North,Nov,Widget,36199,79
+North,Dec,Widget,49056,102
+South,Jan,Widget,37192,131
+South,Feb,Gadget,26399,177
+South,Mar,Gizmo,39692,158
+South,Apr,Gadget,11463,157
+South,May,Gizmo,47417,154
+South,Jun,Gadget,47718,191
+South,Jul,Gadget,13803,137
+South,Aug,Widget,47885,56
+South,Sep,Gizmo,43812,200
+South,Oct,Gadget,31079,146
+South,Nov,Gizmo,22968,136
+South,Dec,Gizmo,30167,167
+East,Jan,Gizmo,14379,158
+East,Feb,Gadget,46661,113
+East,Mar,Widget,15487,135
+East,Apr,Gadget,49385,73
+East,May,Gizmo,16469,125
+East,Jun,Gizmo,16835,87
+East,Jul,Widget,39483,138
+East,Aug,Gizmo,42963,189
+East,Sep,Gizmo,32181,56
+East,Oct,Gadget,18796,79
+East,Nov,Gadget,22398,78
+East,Dec,Gizmo,44427,54
+West,Jan,Gadget,31035,87
+West,Feb,Gizmo,34873,168
+West,Mar,Widget,30939,188
+West,Apr,Gadget,10910,60
+West,May,Gizmo,48954,143
+West,Jun,Gadget,12884,105
+West,Jul,Gadget,24764,128
+West,Aug,Widget,32691,174
+West,Sep,Gadget,30228,103
+West,Oct,Gizmo,45956,178
+West,Nov,Gizmo,49998,140
+West,Dec,Widget,14319,115
+
+</script><script type="text/plain" id="transaction_data" data-format="csv_embedded" data-src="">
+Transaction_Type,Customer_Type,Payment_Method,Store,Amount
+Refund,VIP,Cash,Store 2,161
+Exchange,Returning,PayPal,Store 1,185
+Exchange,New,Bank Transfer,Store 1,46
+Purchase,New,Cash,Store 3,228
+Purchase,VIP,Cash,Store 1,17
+Refund,VIP,Bank Transfer,Store 3,88
+Purchase,New,Credit Card,Store 1,71
+Exchange,New,Bank Transfer,Store 1,77
+Refund,VIP,Credit Card,Store 2,285
+Refund,New,Credit Card,Store 2,335
+Purchase,New,Bank Transfer,Store 2,480
+Refund,New,Cash,Store 3,81
+Cancel,Returning,Credit Card,Store 2,274
+Refund,New,Credit Card,Store 3,488
+Cancel,New,Credit Card,Store 2,46
+Exchange,Returning,Bank Transfer,Store 1,14
+Purchase,VIP,Cash,Store 1,88
+Cancel,Returning,PayPal,Store 2,35
+Purchase,New,PayPal,Store 3,35
+Purchase,VIP,PayPal,Store 1,405
+Cancel,Returning,Cash,Store 1,252
+Purchase,New,PayPal,Store 1,274
+Exchange,New,Bank Transfer,Store 1,394
+Purchase,Returning,Credit Card,Store 2,271
+Purchase,Returning,Cash,Store 1,72
+Exchange,Returning,Cash,Store 1,66
+Purchase,VIP,Bank Transfer,Store 3,186
+Purchase,Returning,Cash,Store 2,99
+Exchange,VIP,Credit Card,Store 3,236
+Refund,Returning,Bank Transfer,Store 2,15
+Refund,New,Credit Card,Store 3,189
+Cancel,New,Credit Card,Store 3,458
+Cancel,Returning,PayPal,Store 3,166
+Exchange,VIP,Bank Transfer,Store 1,409
+Refund,New,PayPal,Store 3,156
+Cancel,VIP,Bank Transfer,Store 1,166
+Purchase,New,PayPal,Store 1,379
+Exchange,Returning,Bank Transfer,Store 1,91
+Purchase,Returning,Bank Transfer,Store 2,310
+Exchange,New,Credit Card,Store 1,489
+Refund,VIP,Bank Transfer,Store 2,473
+Cancel,Returning,Bank Transfer,Store 1,306
+Cancel,New,PayPal,Store 3,42
+Cancel,New,PayPal,Store 1,182
+Purchase,New,Bank Transfer,Store 3,154
+Purchase,Returning,Credit Card,Store 2,243
+Cancel,New,PayPal,Store 3,406
+Refund,Returning,Bank Transfer,Store 2,28
+Purchase,New,Cash,Store 1,487
+Refund,VIP,Cash,Store 1,181
+Refund,New,Cash,Store 1,29
+Refund,VIP,Cash,Store 2,48
+Purchase,VIP,Bank Transfer,Store 2,173
+Purchase,VIP,Credit Card,Store 3,234
+Refund,VIP,PayPal,Store 3,60
+Refund,VIP,Credit Card,Store 1,493
+Refund,Returning,Cash,Store 3,74
+Refund,Returning,Bank Transfer,Store 1,402
+Purchase,New,Bank Transfer,Store 2,245
+Cancel,New,Cash,Store 2,273
+Purchase,VIP,Credit Card,Store 1,220
+Exchange,New,PayPal,Store 1,459
+Purchase,VIP,PayPal,Store 2,68
+Refund,New,PayPal,Store 2,492
+Refund,New,Credit Card,Store 1,63
+Exchange,Returning,Cash,Store 3,243
+Exchange,Returning,Cash,Store 3,292
+Exchange,New,Bank Transfer,Store 3,424
+Exchange,VIP,Bank Transfer,Store 2,96
+Cancel,Returning,PayPal,Store 1,108
+Exchange,VIP,Cash,Store 2,413
+Refund,New,PayPal,Store 2,142
+Refund,New,Cash,Store 2,313
+Refund,New,Cash,Store 1,261
+Purchase,VIP,Cash,Store 2,241
+Cancel,New,Cash,Store 2,295
+Purchase,Returning,PayPal,Store 3,339
+Purchase,New,Cash,Store 1,402
+Exchange,Returning,Cash,Store 3,495
+Cancel,New,PayPal,Store 1,69
+Cancel,New,Credit Card,Store 1,39
+Exchange,Returning,Cash,Store 1,384
+Exchange,VIP,PayPal,Store 2,325
+Exchange,Returning,PayPal,Store 2,442
+Cancel,VIP,Bank Transfer,Store 1,256
+Purchase,VIP,PayPal,Store 2,253
+Exchange,VIP,Bank Transfer,Store 2,434
+Purchase,New,Bank Transfer,Store 2,332
+Refund,New,Credit Card,Store 1,15
+Exchange,VIP,Cash,Store 2,71
+Refund,New,Credit Card,Store 1,359
+Refund,New,Bank Transfer,Store 1,238
+Exchange,New,Cash,Store 2,398
+Cancel,New,PayPal,Store 1,305
+Purchase,New,Cash,Store 3,450
+Purchase,VIP,Cash,Store 3,367
+Cancel,VIP,Bank Transfer,Store 3,55
+Purchase,VIP,Bank Transfer,Store 1,429
+Refund,VIP,Bank Transfer,Store 3,37
+Refund,New,Bank Transfer,Store 3,306
+Refund,Returning,Bank Transfer,Store 1,474
+Exchange,VIP,PayPal,Store 1,44
+Cancel,New,PayPal,Store 3,101
+Cancel,VIP,Cash,Store 2,84
+Refund,Returning,PayPal,Store 1,46
+Exchange,VIP,PayPal,Store 1,381
+Cancel,Returning,PayPal,Store 3,26
+Purchase,Returning,Credit Card,Store 3,22
+Purchase,New,Cash,Store 1,93
+Exchange,New,Bank Transfer,Store 3,474
+Cancel,Returning,PayPal,Store 2,210
+Refund,VIP,Cash,Store 1,188
+Exchange,VIP,Bank Transfer,Store 3,400
+Purchase,New,Bank Transfer,Store 1,454
+Refund,Returning,Credit Card,Store 3,192
+Refund,New,PayPal,Store 3,69
+Purchase,Returning,PayPal,Store 1,97
+Exchange,Returning,Cash,Store 1,426
+Exchange,New,Cash,Store 2,484
+Purchase,VIP,PayPal,Store 1,301
+Purchase,VIP,Credit Card,Store 1,104
+Cancel,New,Cash,Store 2,260
+Purchase,Returning,PayPal,Store 1,39
+Exchange,New,PayPal,Store 3,89
+Cancel,New,Credit Card,Store 3,276
+Exchange,Returning,Cash,Store 2,139
+Exchange,Returning,Credit Card,Store 3,500
+Purchase,VIP,Bank Transfer,Store 1,213
+Cancel,New,Cash,Store 3,231
+Cancel,VIP,Bank Transfer,Store 1,354
+Exchange,VIP,PayPal,Store 3,386
+Refund,Returning,Cash,Store 1,332
+Purchase,VIP,Cash,Store 1,37
+Refund,Returning,Bank Transfer,Store 1,178
+Purchase,VIP,Bank Transfer,Store 3,244
+Refund,VIP,Bank Transfer,Store 1,429
+Exchange,New,Bank Transfer,Store 3,347
+Purchase,Returning,Bank Transfer,Store 2,91
+Exchange,Returning,Credit Card,Store 2,472
+Exchange,Returning,Cash,Store 1,198
+Cancel,Returning,Cash,Store 2,430
+Cancel,Returning,Bank Transfer,Store 3,460
+Refund,Returning,PayPal,Store 2,107
+Purchase,Returning,PayPal,Store 2,441
+Purchase,New,PayPal,Store 3,207
+Refund,Returning,Cash,Store 3,100
+Purchase,VIP,Cash,Store 1,180
+Exchange,Returning,Credit Card,Store 3,34
+Cancel,VIP,Credit Card,Store 3,302
+Purchase,VIP,Credit Card,Store 1,367
+Cancel,VIP,PayPal,Store 1,371
+Refund,VIP,Bank Transfer,Store 1,452
+Refund,New,Cash,Store 3,370
+Purchase,VIP,Bank Transfer,Store 1,144
+Purchase,VIP,Bank Transfer,Store 3,275
+Exchange,VIP,Credit Card,Store 2,101
+Exchange,VIP,Cash,Store 3,150
+Exchange,New,PayPal,Store 2,157
+Purchase,New,Credit Card,Store 1,299
+Cancel,Returning,Credit Card,Store 3,12
+Exchange,VIP,Credit Card,Store 2,339
+Exchange,VIP,PayPal,Store 3,358
+Purchase,New,PayPal,Store 1,361
+Cancel,VIP,PayPal,Store 3,232
+Refund,VIP,Cash,Store 2,399
+Refund,New,Cash,Store 1,216
+Purchase,Returning,Cash,Store 3,308
+Exchange,Returning,Credit Card,Store 1,30
+Purchase,VIP,Credit Card,Store 1,293
+Purchase,VIP,Bank Transfer,Store 2,458
+Exchange,Returning,Credit Card,Store 3,203
+Exchange,New,Bank Transfer,Store 2,482
+Exchange,Returning,PayPal,Store 3,413
+Refund,VIP,Credit Card,Store 1,473
+Exchange,Returning,Credit Card,Store 3,271
+Purchase,Returning,PayPal,Store 2,464
+Refund,VIP,Cash,Store 1,289
+Refund,VIP,Credit Card,Store 3,440
+Exchange,VIP,Bank Transfer,Store 3,231
+Refund,New,Bank Transfer,Store 2,377
+Refund,Returning,Cash,Store 1,304
+Exchange,Returning,Bank Transfer,Store 1,348
+Purchase,Returning,Credit Card,Store 1,248
+Exchange,Returning,PayPal,Store 3,330
+Purchase,New,Credit Card,Store 3,445
+Cancel,New,PayPal,Store 1,25
+Exchange,New,Cash,Store 3,363
+Cancel,New,PayPal,Store 2,62
+Refund,Returning,Bank Transfer,Store 1,81
+Exchange,New,Cash,Store 1,271
+Refund,VIP,Bank Transfer,Store 1,321
+Cancel,New,Credit Card,Store 2,206
+Refund,Returning,Credit Card,Store 1,227
+Exchange,Returning,Cash,Store 3,441
+Exchange,New,PayPal,Store 3,208
+Cancel,VIP,Credit Card,Store 1,452
+Purchase,Returning,Cash,Store 3,189
+Exchange,VIP,Credit Card,Store 2,29
+Cancel,VIP,PayPal,Store 1,79
+Refund,Returning,Bank Transfer,Store 1,96
+Refund,VIP,Credit Card,Store 1,290
+Purchase,VIP,PayPal,Store 3,360
+Refund,VIP,Cash,Store 3,292
+Refund,New,Bank Transfer,Store 3,429
+Cancel,New,Credit Card,Store 3,119
+Exchange,Returning,Bank Transfer,Store 3,183
+Purchase,New,PayPal,Store 2,425
+Refund,VIP,Cash,Store 2,304
+Refund,Returning,Credit Card,Store 3,70
+Refund,VIP,PayPal,Store 2,425
+Refund,Returning,PayPal,Store 1,472
+Exchange,VIP,Bank Transfer,Store 3,311
+Exchange,VIP,Cash,Store 3,211
+Cancel,Returning,Bank Transfer,Store 2,419
+Purchase,VIP,Credit Card,Store 2,456
+Cancel,VIP,PayPal,Store 3,87
+Cancel,VIP,Credit Card,Store 2,285
+Cancel,VIP,Credit Card,Store 3,206
+Exchange,VIP,Credit Card,Store 2,277
+Exchange,Returning,Bank Transfer,Store 3,346
+Exchange,New,Bank Transfer,Store 2,300
+Cancel,New,Credit Card,Store 2,155
+Refund,VIP,Credit Card,Store 3,299
+Refund,New,Cash,Store 2,79
+Cancel,New,Bank Transfer,Store 2,34
+Cancel,New,Bank Transfer,Store 2,499
+Refund,New,Bank Transfer,Store 1,194
+Purchase,VIP,Credit Card,Store 1,105
+Exchange,New,Bank Transfer,Store 3,120
+Refund,New,Cash,Store 3,68
+Purchase,VIP,PayPal,Store 1,259
+Cancel,Returning,Credit Card,Store 2,18
+Exchange,VIP,PayPal,Store 3,163
+Refund,VIP,PayPal,Store 2,360
+Purchase,VIP,Cash,Store 3,59
+Exchange,VIP,PayPal,Store 1,96
+Refund,New,Cash,Store 1,174
+Cancel,VIP,Cash,Store 1,474
+Purchase,New,PayPal,Store 2,259
+Refund,Returning,Credit Card,Store 3,126
+Purchase,Returning,Cash,Store 2,327
+Refund,New,Cash,Store 3,380
+Exchange,New,PayPal,Store 1,500
+Exchange,VIP,Bank Transfer,Store 1,222
+Refund,VIP,Credit Card,Store 1,299
+Purchase,New,PayPal,Store 3,478
+Exchange,New,PayPal,Store 1,92
+Exchange,New,Credit Card,Store 3,298
+Purchase,VIP,PayPal,Store 1,262
+Cancel,Returning,Cash,Store 2,277
+Cancel,VIP,Credit Card,Store 1,223
+Refund,New,Bank Transfer,Store 3,84
+Cancel,New,Credit Card,Store 2,336
+Purchase,VIP,Credit Card,Store 3,47
+Refund,VIP,Bank Transfer,Store 2,148
+Purchase,VIP,Bank Transfer,Store 2,347
+Purchase,Returning,Cash,Store 2,162
+Exchange,Returning,Cash,Store 1,214
+Purchase,VIP,PayPal,Store 3,394
+Refund,VIP,PayPal,Store 1,353
+Exchange,New,Credit Card,Store 2,50
+Purchase,Returning,Bank Transfer,Store 1,54
+Cancel,New,Cash,Store 1,419
+Exchange,Returning,PayPal,Store 1,333
+Cancel,VIP,Bank Transfer,Store 2,471
+Exchange,New,Bank Transfer,Store 2,292
+Refund,New,PayPal,Store 3,10
+Exchange,Returning,Bank Transfer,Store 1,138
+Purchase,New,Cash,Store 2,28
+Exchange,New,Cash,Store 3,14
+Purchase,Returning,Cash,Store 2,468
+Cancel,VIP,PayPal,Store 1,313
+Refund,New,Cash,Store 2,217
+Purchase,VIP,Bank Transfer,Store 3,262
+Exchange,Returning,Bank Transfer,Store 2,191
+Purchase,New,Bank Transfer,Store 1,98
+Exchange,VIP,Cash,Store 3,146
+Cancel,Returning,Cash,Store 1,397
+Cancel,New,Bank Transfer,Store 1,272
+Refund,VIP,PayPal,Store 1,329
+Refund,New,PayPal,Store 3,237
+Purchase,VIP,Bank Transfer,Store 3,129
+Cancel,New,Cash,Store 1,79
+Refund,VIP,Credit Card,Store 1,371
+Cancel,Returning,Cash,Store 3,290
+Refund,New,Credit Card,Store 2,151
+Purchase,VIP,Cash,Store 1,264
+Purchase,Returning,Credit Card,Store 3,297
+Cancel,New,Cash,Store 2,292
+Purchase,VIP,Bank Transfer,Store 2,406
+Purchase,VIP,Cash,Store 3,344
+Exchange,Returning,PayPal,Store 3,301
+Exchange,New,Credit Card,Store 2,260
+Exchange,Returning,Cash,Store 3,14
+Exchange,New,PayPal,Store 1,223
+Purchase,VIP,Bank Transfer,Store 1,192
+Purchase,New,Bank Transfer,Store 1,103
+Exchange,Returning,Cash,Store 1,292
+Cancel,VIP,Credit Card,Store 3,183
+Exchange,VIP,Bank Transfer,Store 3,422
+Cancel,VIP,Bank Transfer,Store 1,92
+Purchase,VIP,PayPal,Store 2,144
+Refund,VIP,Bank Transfer,Store 2,135
+Cancel,Returning,Credit Card,Store 2,260
+Exchange,VIP,Credit Card,Store 2,483
+Purchase,New,PayPal,Store 3,21
+Purchase,VIP,Cash,Store 2,301
+Exchange,VIP,PayPal,Store 2,159
+Exchange,VIP,Cash,Store 3,54
+Exchange,Returning,Bank Transfer,Store 1,440
+Refund,Returning,PayPal,Store 1,98
+Refund,New,Credit Card,Store 1,118
+Cancel,VIP,PayPal,Store 1,461
+Cancel,VIP,Credit Card,Store 2,465
+Exchange,New,Credit Card,Store 1,261
+Purchase,New,Bank Transfer,Store 3,124
+Refund,New,PayPal,Store 2,117
+Purchase,Returning,Cash,Store 1,58
+Refund,VIP,Bank Transfer,Store 1,77
+Cancel,New,Credit Card,Store 3,128
+Cancel,New,Bank Transfer,Store 1,224
+Cancel,New,Bank Transfer,Store 1,286
+Refund,New,Bank Transfer,Store 2,462
+Purchase,Returning,Cash,Store 3,207
+Exchange,Returning,PayPal,Store 1,162
+Cancel,Returning,PayPal,Store 3,358
+Purchase,VIP,Credit Card,Store 2,21
+Exchange,New,Bank Transfer,Store 1,163
+Purchase,VIP,PayPal,Store 3,277
+Exchange,Returning,Credit Card,Store 2,30
+Cancel,New,Credit Card,Store 3,14
+Exchange,Returning,Credit Card,Store 1,387
+Exchange,Returning,Credit Card,Store 2,276
+Cancel,VIP,Bank Transfer,Store 1,266
+Cancel,Returning,PayPal,Store 1,242
+Purchase,New,Credit Card,Store 2,179
+Purchase,Returning,PayPal,Store 3,106
+Refund,VIP,Credit Card,Store 2,404
+Exchange,VIP,Bank Transfer,Store 1,348
+Purchase,VIP,Bank Transfer,Store 1,345
+Cancel,New,Credit Card,Store 1,487
+Purchase,Returning,Credit Card,Store 1,26
+Refund,New,Bank Transfer,Store 3,464
+Cancel,New,Cash,Store 1,180
+Purchase,Returning,Credit Card,Store 2,240
+Cancel,Returning,Bank Transfer,Store 2,272
+Exchange,Returning,Bank Transfer,Store 2,217
+Refund,Returning,Cash,Store 3,301
+Cancel,Returning,Credit Card,Store 3,385
+Cancel,VIP,Credit Card,Store 3,423
+Cancel,Returning,Cash,Store 3,412
+Exchange,New,Bank Transfer,Store 1,345
+Purchase,VIP,Credit Card,Store 3,442
+Exchange,Returning,Bank Transfer,Store 3,407
+Cancel,VIP,Cash,Store 1,138
+Cancel,Returning,PayPal,Store 1,95
+Refund,VIP,Bank Transfer,Store 3,12
+Purchase,New,Cash,Store 2,77
+Purchase,New,PayPal,Store 3,392
+Purchase,VIP,Credit Card,Store 3,182
+Cancel,VIP,Bank Transfer,Store 1,58
+Purchase,VIP,Cash,Store 2,378
+Purchase,New,PayPal,Store 1,314
+Exchange,VIP,Credit Card,Store 1,105
+Purchase,New,Cash,Store 3,361
+Refund,New,Credit Card,Store 2,87
+Purchase,VIP,PayPal,Store 1,328
+Cancel,VIP,Credit Card,Store 1,421
+Purchase,VIP,Credit Card,Store 1,482
+Refund,Returning,PayPal,Store 2,379
+Refund,Returning,Bank Transfer,Store 3,193
+Exchange,New,Credit Card,Store 2,82
+Purchase,VIP,PayPal,Store 3,473
+Exchange,Returning,Bank Transfer,Store 2,65
+Purchase,Returning,Bank Transfer,Store 1,418
+Cancel,VIP,Bank Transfer,Store 1,136
+Purchase,Returning,Cash,Store 2,401
+Exchange,New,Cash,Store 3,478
+Cancel,VIP,Cash,Store 2,82
+Cancel,Returning,PayPal,Store 1,340
+Refund,Returning,Bank Transfer,Store 2,421
+Cancel,New,PayPal,Store 2,151
+Purchase,New,PayPal,Store 1,359
+Purchase,VIP,PayPal,Store 3,311
+Cancel,Returning,Cash,Store 3,245
+Exchange,New,PayPal,Store 1,90
+Purchase,Returning,PayPal,Store 3,33
+Refund,VIP,Credit Card,Store 3,362
+Refund,Returning,Cash,Store 3,450
+Refund,VIP,Cash,Store 2,446
+Refund,VIP,Credit Card,Store 1,301
+Purchase,Returning,Credit Card,Store 3,169
+Cancel,Returning,Bank Transfer,Store 2,251
+Exchange,New,PayPal,Store 1,305
+Exchange,VIP,PayPal,Store 2,260
+Cancel,Returning,Bank Transfer,Store 3,41
+Refund,New,Credit Card,Store 2,160
+Purchase,New,Bank Transfer,Store 1,413
+Purchase,Returning,Credit Card,Store 1,18
+Purchase,Returning,Bank Transfer,Store 2,190
+Cancel,VIP,Bank Transfer,Store 3,99
+Refund,New,Cash,Store 2,426
+Refund,VIP,PayPal,Store 1,21
+Purchase,VIP,PayPal,Store 1,169
+Refund,VIP,Bank Transfer,Store 3,162
+Cancel,Returning,Bank Transfer,Store 2,400
+Cancel,Returning,PayPal,Store 1,178
+Refund,Returning,Credit Card,Store 1,31
+Purchase,VIP,Credit Card,Store 1,228
+Purchase,New,Cash,Store 1,136
+Exchange,Returning,PayPal,Store 2,491
+Cancel,VIP,Cash,Store 3,128
+Cancel,VIP,PayPal,Store 3,416
+Cancel,New,Cash,Store 2,367
+Cancel,New,PayPal,Store 1,265
+Purchase,Returning,PayPal,Store 2,35
+Refund,Returning,Bank Transfer,Store 1,101
+Refund,Returning,PayPal,Store 1,16
+Cancel,Returning,PayPal,Store 3,452
+Exchange,New,Cash,Store 2,221
+Purchase,Returning,Bank Transfer,Store 1,409
+Purchase,Returning,PayPal,Store 2,322
+Cancel,VIP,PayPal,Store 3,294
+Refund,Returning,Cash,Store 3,37
+Refund,VIP,PayPal,Store 2,88
+Cancel,New,Bank Transfer,Store 1,238
+Cancel,Returning,PayPal,Store 1,365
+Purchase,Returning,Cash,Store 3,10
+Refund,Returning,Credit Card,Store 1,373
+Purchase,New,PayPal,Store 1,164
+Refund,New,Credit Card,Store 3,77
+Exchange,Returning,Credit Card,Store 3,416
+Purchase,VIP,Bank Transfer,Store 2,270
+Exchange,VIP,Credit Card,Store 1,93
+Exchange,New,Bank Transfer,Store 2,413
+Purchase,Returning,Cash,Store 2,114
+Refund,VIP,Credit Card,Store 1,69
+Exchange,Returning,Cash,Store 2,130
+Refund,Returning,Cash,Store 3,405
+Exchange,Returning,PayPal,Store 1,328
+Exchange,Returning,Cash,Store 1,417
+Exchange,VIP,PayPal,Store 3,259
+Cancel,New,Credit Card,Store 3,358
+Refund,Returning,PayPal,Store 1,459
+Cancel,Returning,Cash,Store 3,81
+Cancel,New,Bank Transfer,Store 3,317
+Refund,Returning,PayPal,Store 1,312
+Purchase,VIP,Cash,Store 2,47
+Exchange,New,Cash,Store 2,250
+Exchange,Returning,Bank Transfer,Store 3,406
+Exchange,Returning,Credit Card,Store 1,446
+Purchase,Returning,Cash,Store 2,49
+Exchange,VIP,Bank Transfer,Store 1,433
+Exchange,New,Cash,Store 3,394
+Refund,VIP,Bank Transfer,Store 1,287
+Exchange,New,Cash,Store 3,426
+Purchase,New,Cash,Store 2,82
+Purchase,New,PayPal,Store 2,368
+Refund,Returning,Bank Transfer,Store 2,223
+Refund,Returning,Credit Card,Store 2,427
+Exchange,New,Bank Transfer,Store 1,251
+Cancel,New,Cash,Store 1,295
+Purchase,Returning,Bank Transfer,Store 1,343
+Purchase,Returning,Bank Transfer,Store 3,179
+Exchange,New,Credit Card,Store 2,361
+Purchase,VIP,Bank Transfer,Store 2,391
+Purchase,Returning,Cash,Store 3,288
+Refund,VIP,Bank Transfer,Store 2,349
+Purchase,VIP,Credit Card,Store 2,268
+Refund,Returning,Bank Transfer,Store 1,271
+Purchase,Returning,Bank Transfer,Store 3,342
+Exchange,Returning,PayPal,Store 2,384
+Refund,New,PayPal,Store 3,481
+Exchange,VIP,Bank Transfer,Store 1,134
+Cancel,New,PayPal,Store 2,75
+Exchange,New,Cash,Store 2,331
+Cancel,VIP,PayPal,Store 1,184
+Purchase,VIP,Cash,Store 3,122
+Exchange,New,Cash,Store 1,240
+Purchase,New,Bank Transfer,Store 2,298
+Refund,VIP,PayPal,Store 3,302
+Cancel,New,PayPal,Store 2,274
+Cancel,Returning,Credit Card,Store 2,263
+Cancel,Returning,Credit Card,Store 1,478
+Exchange,Returning,Bank Transfer,Store 2,158
+Purchase,New,PayPal,Store 2,431
+Cancel,New,Cash,Store 2,168
+Refund,Returning,Cash,Store 2,192
+Refund,New,Bank Transfer,Store 2,218
+Cancel,Returning,Bank Transfer,Store 2,149
+Cancel,Returning,PayPal,Store 2,249
+Purchase,New,Bank Transfer,Store 3,174
+Exchange,New,Credit Card,Store 2,46
+Refund,VIP,Cash,Store 3,460
+Refund,VIP,Credit Card,Store 3,494
+Exchange,VIP,PayPal,Store 2,321
+Refund,Returning,Bank Transfer,Store 1,184
+Exchange,VIP,Credit Card,Store 2,329
+Exchange,VIP,Credit Card,Store 3,51
+Cancel,New,PayPal,Store 2,261
+
+</script><script type="text/plain" id="subframe" data-format="csv_embedded" data-src="">
+x,y,group,z
+1,1,A,0.15594369476537437
+2,1,A,-0.6172728764571667
+3,1,A,-0.9997860728793259
+4,1,A,-0.5557653904191477
+5,1,A,0.37706981246168597
+6,1,A,0.9799824974549554
+1,2,A,-0.6172728764571667
+2,2,A,-0.9513631281258474
+3,2,A,-0.894288058558276
+4,2,A,-0.2379483919805909
+5,2,A,0.6231593449762197
+6,2,A,0.9991443830469295
+1,3,A,-0.9997860728793259
+2,3,A,-0.894288058558276
+3,3,A,-0.4526618572923528
+4,3,A,0.28366218546322625
+5,3,A,0.8994733999984659
+6,3,A,0.9110310531896002
+1,4,A,-0.5557653904191477
+2,4,A,-0.2379483919805909
+3,4,A,0.28366218546322625
+4,4,A,0.8101836031147954
+5,4,A,0.9928159447966954
+6,4,A,0.5995022633598608
+1,5,A,0.37706981246168597
+2,5,A,0.6231593449762197
+3,5,A,0.8994733999984659
+4,5,A,0.9928159447966954
+5,5,A,0.7053479063084421
+6,5,A,0.04371801995456107
+1,6,A,0.9799824974549554
+2,6,A,0.9991443830469295
+3,6,A,0.9110310531896002
+4,6,A,0.5995022633598608
+5,6,A,0.04371801995456107
+6,6,A,-0.5901944859052752
+1,1,B,-0.8440563052346256
+2,1,B,-1.6172728764571667
+3,1,B,-1.999786072879326
+4,1,B,-1.5557653904191477
+5,1,B,-0.622930187538314
+6,1,B,-0.02001750254504464
+1,2,B,-1.1605565385746905
+2,2,B,-1.769905729749893
+3,2,B,-1.9847209431240276
+4,2,B,-1.4526618572923529
+5,2,B,-0.5348859483071466
+6,2,B,-0.007045023716309329
+1,3,B,-1.4161468365471424
+2,3,B,-1.8795687341082288
+3,3,B,-1.9484431958418278
+4,3,B,-1.346174157871352
+5,3,B,-0.45271768395849554
+6,3,B,-0.0007290466739067192
+1,4,B,-1.6172728764571667
+2,4,B,-1.9513631281258474
+3,4,B,-1.894288058558276
+4,4,B,-1.237948391980591
+5,4,B,-0.3768406550237803
+6,4,B,-0.0008556169530704594
+1,5,B,-1.769905729749893
+2,5,B,-1.9899924966004454
+3,5,B,-1.8252990620752587
+4,5,B,-1.1294490013073428
+5,5,B,-0.3075808884062521
+6,5,B,-0.007184055203304562
+1,6,B,-1.8795687341082288
+2,6,B,-1.999786072879326
+3,6,B,-1.7442462713722906
+4,6,B,-1.021971452410018
+5,6,B,-0.24518280412638171
+6,6,B,-0.019450682346141668
+1,1,C,1.1559436947653743
+2,1,C,0.38272712354283334
+3,1,C,0.00021392712067414
+4,1,C,0.44423460958085226
+5,1,C,1.377069812461686
+6,1,C,1.9799824974549554
+1,2,C,1.0170215307092125
+2,2,C,0.3139470657369108
+3,2,C,0.0036540443554032853
+4,2,C,0.48641743614550437
+5,2,C,1.4142212387971869
+6,2,C,1.986175939144255
+1,3,C,0.9179968609607547
+2,3,C,0.2665566278409074
+3,3,C,0.009016517099134758
+4,3,C,0.519307022323508
+5,3,C,1.4420795294939195
+6,3,C,1.990140036061585
+1,4,C,0.8394434614253095
+2,4,C,0.2300942702501071
+3,4,C,0.015279056875972419
+4,4,C,0.5473381427076471
+5,4,C,1.4651140516928534
+6,4,C,1.9929549762836907
+1,5,C,0.7738620277177296
+2,5,C,0.20052801164655532
+3,5,C,0.022059190682766516
+4,5,C,0.5722355793970464
+5,5,C,1.485058145415328
+6,5,C,1.9950387168674295
+1,6,C,0.7174188421724267
+2,6,C,0.17579990271593138
+3,6,C,0.02916737260633384
+4,6,C,0.5948873339246776
+5,6,C,1.502801829878708
+6,6,C,1.9966053897707945
+1,1,D,0.0
+2,1,D,0.41421356237309515
+3,1,D,0.7320508075688772
+4,1,D,1.0
+5,1,D,1.2360679774997898
+6,1,D,1.4494897427831779
+1,2,D,-0.41421356237309515
+2,2,D,0.0
+3,2,D,0.31783724519578205
+4,2,D,0.5857864376269049
+5,2,D,0.8218544151266947
+6,2,D,1.0352761804100827
+1,3,D,-0.7320508075688772
+2,3,D,-0.31783724519578205
+3,3,D,0.0
+4,3,D,0.2679491924311228
+5,3,D,0.5040171699309126
+6,3,D,0.7174389352143007
+1,4,D,-1.0
+2,4,D,-0.5857864376269049
+3,4,D,-0.2679491924311228
+4,4,D,0.0
+5,4,D,0.2360679774997898
+6,4,D,0.4494897427831779
+1,5,D,-1.2360679774997898
+2,5,D,-0.8218544151266947
+3,5,D,-0.5040171699309126
+4,5,D,-0.2360679774997898
+5,5,D,0.0
+6,5,D,0.21342176528338808
+1,6,D,-1.4494897427831779
+2,6,D,-1.0352761804100827
+3,6,D,-0.7174389352143007
+4,6,D,-0.4494897427831779
+5,6,D,-0.21342176528338808
+6,6,D,0.0
+
+</script><script type="text/plain" id="df_combined" data-format="csv_embedded" data-src="">
+date,x,y,color,categ,categ22
+2024-01-01,1,0.8805891626729951,A,B,Category_A
+2024-01-02,2,0.7797801760886471,B,B,Category_A
+2024-01-03,3,0.37613610210287085,A,B,Category_A
+2024-01-04,4,0.10839025863674534,B,B,Category_A
+2024-01-05,5,0.6292752165669628,A,B,Category_A
+2024-01-06,6,0.04822552625594434,B,A,Category_A
+2024-01-07,7,0.5309705317853746,A,A,Category_A
+2024-01-08,8,0.8048003282119278,B,A,Category_A
+2024-01-09,9,0.8095318959685942,A,A,Category_A
+2024-01-10,10,0.8322079004873735,B,C,Category_A
+2024-01-01,1,0.08306225014238566,A,A,Category_B
+2024-01-02,2,0.5709065369796065,B,A,Category_B
+2024-01-03,3,0.2821043741819238,A,A,Category_B
+2024-01-04,4,0.7601621285951665,B,A,Category_B
+2024-01-05,5,0.7205829321938013,A,A,Category_B
+2024-01-06,6,0.07509290067857743,B,B,Category_B
+2024-01-07,7,0.06525327713467788,A,B,Category_B
+2024-01-08,8,0.6165463457446652,B,B,Category_B
+2024-01-09,9,0.7465745933900223,A,B,Category_B
+2024-01-10,10,0.8882351856593593,B,C,Category_B
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1></h1>
+<p></p>
+
+    <div class="textblock-content">
+        <h1>PivotTable Examples</h1>
+<p>This page demonstrates the key features of interactive PivotTable plots in JSPlots.</p>
+<ul>
+    <li><strong>Basic pivot:</strong> Simple data aggregation with drag-and-drop</li>
+    <li><strong>Custom heatmaps:</strong> Color-coded matrices with custom color scales</li>
+    <li><strong>Different renderers:</strong> Table, Bar Chart, Line Chart, and more</li>
+    <li><strong>Data filtering:</strong> Inclusions and exclusions to focus on specific data</li>
+    <li><strong>Aggregations:</strong> Sum, Average, Count, and other aggregation functions</li>
+    <li><strong>Combined with other plots:</strong> Mix PivotTables with LineCharts and 3D plots</li>
+</ul>
+<p><em>Tip: Drag and drop fields between Rows, Columns, and Values to reorganize!</em></p>
+
+    </div>
+<br>
+<hr>
+<br>
+    <h2>sales_pivot</h2>
+    <p>Basic pivot table - drag fields to reorganize rows and columns</p>
+    <div id="sales_pivot"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data</p><br>
+<hr>
+<br>
+    <h2>performance_heatmap</h2>
+    <p>Custom color scale heatmap - green indicates good performance, red needs improvement</p>
+    <div id="performance_heatmap"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: performance_data</p><br>
+<hr>
+<br>
+    <h2>revenue_by_category</h2>
+    <p>Bar chart renderer - switch renderer in the dropdown to see other visualizations</p>
+    <div id="revenue_by_category"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: product_data</p><br>
+<hr>
+<br>
+    <h2>customer_revenue</h2>
+    <p>Exclusions feature - 'Test' country data is automatically filtered out</p>
+    <div id="customer_revenue"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: customer_data</p><br>
+<hr>
+<br>
+    <h2>survey_results</h2>
+    <p>Inclusions feature - only showing ages 18-45, filtering out older demographics</p>
+    <div id="survey_results"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: survey_data</p><br>
+<hr>
+<br>
+    <h2>transaction_analysis</h2>
+    <p>Count aggregation - showing transaction counts rather than sums or averages</p>
+    <div id="transaction_analysis"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: transaction_data</p><br>
+<hr>
+<br>
+    <h2>Returns_Over_Last_Few_Days</h2>
+    <p>Stock returns heatmap with MSFT excluded</p>
+    <div id="Returns_Over_Last_Few_Days"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stockReturns</p><br>
+<hr>
+<br>
+    <h2>Correlation_Matrix</h2>
+    <p>Correlation matrix with custom red-white-blue color scale</p>
+    <div id="Correlation_Matrix"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: correlations</p><br>
+<hr>
+<br>
+<h2>Line Chart with Filters</h2>
+<p>Interactive line chart with dropdown filters - combine with PivotTables!</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="categ22_select_pchart">categ22: </label>
+            <select id="categ22_select_pchart" multiple onchange="updateChart_pchart()">
+                <option value="Category_A" selected>Category_A</option>
+                <option value="Category_B">Category_B</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="categ_select_pchart">categ: </label>
+            <select id="categ_select_pchart" multiple onchange="updateChart_pchart()">
+                <option value="A" selected>A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="aggregator_select_pchart">Aggregator: </label>
+            <select id="aggregator_select_pchart" onchange="updateChart_pchart()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="pchart"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df_combined</p><br>
+<hr>
+<br>
+<h2>3D Surface Chart</h2>
+<p>3D surface visualization grouped by mathematical functions</p>
+
+<!-- Filters (for data filtering) -->
+
+<!-- Plot Attributes -->
+
+<!-- Faceting -->
+
+<!-- Chart -->
+<div id="threeD"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: subframe</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Key Features Summary</h2>
+<ul>
+    <li><strong>Drag-and-drop interface:</strong> Reorganize data dynamically by dragging fields</li>
+    <li><strong>Multiple renderers:</strong> Table, Heatmap, Bar Chart, Line Chart, and more</li>
+    <li><strong>Custom color scales:</strong> Define your own color gradients for heatmaps</li>
+    <li><strong>Aggregation functions:</strong> Sum, Average, Count, Median, Min, Max, etc.</li>
+    <li><strong>Data filtering:</strong> Include or exclude specific values</li>
+    <li><strong>Multi-level grouping:</strong> Use multiple row or column dimensions</li>
+    <li><strong>Integration:</strong> Combine PivotTables with LineCharts, 3D plots, and more</li>
+</ul>
+<p><strong>Tip:</strong> Try dragging unused fields from the top into Rows or Columns!</p>
+
+    </div>
+
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+</body>
+</html>
