@@ -59,6 +59,7 @@ struct ScatterPlot <: JSPlotsType
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
+        all_cols = names(df)
         for col in facet_choices
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end

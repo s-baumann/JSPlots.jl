@@ -115,6 +115,8 @@ PivotTable
 
 Interactive pivot table with drag-and-drop functionality using PivotTable.js.
 
+**[→ View Interactive PivotTable Examples](../examples_html/pivottable_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
@@ -140,6 +142,8 @@ LineChart
 
 Time series or sequential data visualization with interactive filtering.
 
+**[→ View Interactive LineChart Examples](../examples_html/linechart_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -162,6 +166,8 @@ AreaChart
 ```
 
 Area chart visualization with support for stacking modes and interactive controls. Automatically adapts between continuous areas (for dates/numeric x values) and stacked bars (for categorical x values).
+
+**[→ View Interactive AreaChart Examples](../examples_html/areachart_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -247,6 +253,8 @@ ScatterPlot
 
 Scatter plot with optional marginal distributions and interactive filtering.
 
+**[→ View Interactive ScatterPlot Examples](../examples_html/scatterplot_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -273,6 +281,8 @@ DistPlot
 
 Distribution visualization combining histogram, box plot, and rug plot.
 
+**[→ View Interactive DistPlot Examples](../examples_html/distplot_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -298,6 +308,8 @@ Path
 ```
 
 Trajectory visualization showing ordered paths through 2D space with direction arrows. Perfect for visualizing evolution over time or sequences.
+
+**[→ View Interactive Path Examples](../examples_html/path_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -353,6 +365,8 @@ KernelDensity
 
 Kernel density plot visualization with interactive controls.
 
+**[→ View Interactive KernelDensity Examples](../examples_html/kerneldensity_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -377,6 +391,8 @@ PieChart
 ```
 
 Pie chart visualization with support for faceting and interactive controls.
+
+**[→ View Interactive PieChart Examples](../examples_html/piechart_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -427,6 +443,8 @@ Surface3D
 
 Three-dimensional surface plot visualization using Plotly.
 
+**[→ View Interactive Surface3D Examples](../examples_html/surface3d_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -460,6 +478,8 @@ Scatter3D
 ```
 
 Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
+
+**[→ View Interactive Scatter3D Examples](../examples_html/scatter3d_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -496,6 +516,8 @@ ScatterSurface3D
 ```
 
 Three-dimensional scatter plot with automatically fitted surfaces for each group using non-parametric regression.
+
+**[→ View Interactive ScatterSurface3D Example](../examples_html/scattersurface3d_example.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -662,6 +684,8 @@ Picture
 
 Display static images or plots from other Julia plotting libraries.
 
+**[→ View Interactive Picture Examples](../examples_html/picture_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this picture
 - `image_path::String` OR `chart_object + save_function`: Either a path to an image file, or a chart object with a save function
@@ -713,6 +737,8 @@ Table
 
 Display a DataFrame as an HTML table with a download CSV button.
 
+**[→ View Interactive Table Examples](../examples_html/table_examples.html)**
+
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this table
 - `df::DataFrame`: The DataFrame to display
@@ -745,6 +771,8 @@ TextBlock
 
 HTML text block for adding formatted text and tables to plot pages.
 
+**[→ View Interactive TextBlock Examples](../examples_html/textblock_examples.html)**
+
 **Parameters:**
 - `html_content::String`: HTML content to display
 
@@ -765,6 +793,8 @@ Slides
 ```
 
 Interactive slideshow with filtering, playback controls, and keyboard navigation.
+
+**[→ View Interactive Slides Examples (Embedded)](../examples_html/slides_examples_embedded.html)**
 
 **Constructor 1: From Directory Pattern**
 
