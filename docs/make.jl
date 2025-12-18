@@ -1,13 +1,11 @@
 using Documenter, JSPlots
 
-# Copy generated HTML examples to docs/build BEFORE makedocs so links can be checked
+# Copy generated HTML examples to docs/src so Documenter includes them in build
 examples_src = joinpath(@__DIR__, "..", "generated_html_examples")
-examples_dest = joinpath(@__DIR__, "build", "examples_html")
+examples_dest = joinpath(@__DIR__, "src", "examples_html")
 if isdir(examples_src)
-    # Ensure build directory exists
-    mkpath(joinpath(@__DIR__, "build"))
     cp(examples_src, examples_dest, force=true)
-    println("Copied HTML examples to docs/build/examples_html/")
+    println("Copied HTML examples to docs/src/examples_html/")
 else
     @warn "Generated HTML examples directory not found at: $examples_src"
 end
