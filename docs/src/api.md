@@ -2,7 +2,7 @@
 CurrentModule = JSPlots
 ```
 
-# API Reference
+# API - Main Types
 
 This page documents all public types and functions in the JSPlots package.
 
@@ -10,9 +10,7 @@ This page documents all public types and functions in the JSPlots package.
 Pages = ["api.md"]
 ```
 
-## Main Types
-
-### JSPlotPage
+## JSPlotPage
 
 ```@docs
 JSPlotPage
@@ -30,7 +28,7 @@ A container for a single HTML page with plots and data.
 - `notes::String`: Page description or notes (default: `""`)
 - `dataformat::Symbol`: Data storage format - `:csv_embedded`, `:json_embedded`, `:csv_external`, `:json_external`, or `:parquet` (default: `:csv_embedded`)
 
-### Pages
+## Pages
 
 ```@docs
 Pages
@@ -74,7 +72,7 @@ report = Pages(coverpage, [page1, page2], dataformat=:parquet)
 create_html(report, "report.html")
 ```
 
-### LinkList
+## LinkList
 
 ```@docs
 LinkList
@@ -105,17 +103,17 @@ links = LinkList([
 ])
 ```
 
-### Plot Types
+# API - Plot Types
 
-#### PivotTable
+## PivotTable
+
+**[→ View Interactive PivotTable Examples](../examples_html/pivottable_examples.html)**
 
 ```@docs
 PivotTable
 ```
 
 Interactive pivot table with drag-and-drop functionality using PivotTable.js.
-
-**[→ View Interactive PivotTable Examples](../examples_html/pivottable_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -134,15 +132,15 @@ Interactive pivot table with drag-and-drop functionality using PivotTable.js.
 - `rendererOptions`: Custom renderer options (default: `missing`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### LineChart
+## LineChart
+
+**[→ View Interactive LineChart Examples](../examples_html/linechart_examples.html)**
 
 ```@docs
 LineChart
 ```
 
 Time series or sequential data visualization with interactive filtering.
-
-**[→ View Interactive LineChart Examples](../examples_html/linechart_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -159,15 +157,15 @@ Time series or sequential data visualization with interactive filtering.
 - `y_label`: Y-axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### AreaChart
+## AreaChart
+
+**[→ View Interactive AreaChart Examples](../examples_html/areachart_examples.html)**
 
 ```@docs
 AreaChart
 ```
 
 Area chart visualization with support for stacking modes and interactive controls. Automatically adapts between continuous areas (for dates/numeric x values) and stacked bars (for categorical x values).
-
-**[→ View Interactive AreaChart Examples](../examples_html/areachart_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -245,15 +243,15 @@ area_bars = AreaChart(:headcount, df_cat, :headcount_data,
 )
 ```
 
-#### ScatterPlot
+## ScatterPlot
+
+**[→ View Interactive ScatterPlot Examples](../examples_html/scatterplot_examples.html)**
 
 ```@docs
 ScatterPlot
 ```
 
 Scatter plot with optional marginal distributions and interactive filtering.
-
-**[→ View Interactive ScatterPlot Examples](../examples_html/scatterplot_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -273,15 +271,15 @@ Scatter plot with optional marginal distributions and interactive filtering.
 - `y_label`: Y-axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### DistPlot
+## DistPlot
+
+**[→ View Interactive DistPlot Examples](../examples_html/distplot_examples.html)**
 
 ```@docs
 DistPlot
 ```
 
 Distribution visualization combining histogram, box plot, and rug plot.
-
-**[→ View Interactive DistPlot Examples](../examples_html/distplot_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -301,15 +299,15 @@ Distribution visualization combining histogram, box plot, and rug plot.
 - `value_label`: Value axis label (default: `""`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### Path
+## Path
+
+**[→ View Interactive Path Examples](../examples_html/path_examples.html)**
 
 ```@docs
 Path
 ```
 
 Trajectory visualization showing ordered paths through 2D space with direction arrows. Perfect for visualizing evolution over time or sequences.
-
-**[→ View Interactive Path Examples](../examples_html/path_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -357,15 +355,15 @@ chart = Path(:paths, df, :df;
 )
 ```
 
-#### KernelDensity
+## KernelDensity
+
+**[→ View Interactive KernelDensity Examples](../examples_html/kerneldensity_examples.html)**
 
 ```@docs
 KernelDensity
 ```
 
 Kernel density plot visualization with interactive controls.
-
-**[→ View Interactive KernelDensity Examples](../examples_html/kerneldensity_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -384,15 +382,15 @@ Kernel density plot visualization with interactive controls.
 - `title`: Chart title (default: `"Kernel Density Plot"`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
 
-#### PieChart
+## PieChart
+
+**[→ View Interactive PieChart Examples](../examples_html/piechart_examples.html)**
 
 ```@docs
 PieChart
 ```
 
 Pie chart visualization with support for faceting and interactive controls.
-
-**[→ View Interactive PieChart Examples](../examples_html/piechart_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -433,17 +431,15 @@ pc = PieChart(:sales_pie, df, :sales_data,
 )
 ```
 
-### 3D Plots
+## Surface3D
 
-#### Surface3D
+**[→ View Interactive Surface3D Examples](../examples_html/surface3d_examples.html)**
 
 ```@docs
 Surface3D
 ```
 
 Three-dimensional surface plot visualization using Plotly.
-
-**[→ View Interactive Surface3D Examples](../examples_html/surface3d_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -471,15 +467,15 @@ surf = Surface3D(:surface_chart, df, :data,
 )
 ```
 
-#### Scatter3D
+## Scatter3D
+
+**[→ View Interactive Scatter3D Examples](../examples_html/scatter3d_examples.html)**
 
 ```@docs
 Scatter3D
 ```
 
 Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
-
-**[→ View Interactive Scatter3D Examples](../examples_html/scatter3d_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -509,15 +505,15 @@ scatter = Scatter3D(:scatter_3d, df, :data, [:x, :y, :z],
 )
 ```
 
-#### ScatterSurface3D
+## ScatterSurface3D
+
+**[→ View Interactive ScatterSurface3D Example](../examples_html/scattersurface3d_example.html)**
 
 ```@docs
 ScatterSurface3D
 ```
 
 Three-dimensional scatter plot with automatically fitted surfaces for each group using non-parametric regression.
-
-**[→ View Interactive ScatterSurface3D Example](../examples_html/scattersurface3d_example.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -674,17 +670,15 @@ chart_custom = ScatterSurface3D(:custom_surf, df, :data,
 )
 ```
 
-### Tables and Data Display
+## Picture
 
-#### Picture
+**[→ View Interactive Picture Examples](../examples_html/picture_examples.html)**
 
 ```@docs
 Picture
 ```
 
 Display static images or plots from other Julia plotting libraries.
-
-**[→ View Interactive Picture Examples](../examples_html/picture_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this picture
@@ -729,15 +723,15 @@ pic4 = Picture(:custom, mock_chart, (obj, path) -> write(path, "data"); format=:
 - External formats (`:csv_external`, `:json_external`, `:parquet`): Images are copied to `pictures/` subdirectory
 - SVG files are embedded as XML (not base64) for better quality and smaller size
 
-#### Table
+## Table
+
+**[→ View Interactive Table Examples](../examples_html/table_examples.html)**
 
 ```@docs
 Table
 ```
 
 Display a DataFrame as an HTML table with a download CSV button.
-
-**[→ View Interactive Table Examples](../examples_html/table_examples.html)**
 
 **Parameters:**
 - `chart_title::Symbol`: Unique identifier for this table
@@ -763,15 +757,15 @@ table = Table(:employees, df; notes="Employee information")
 create_html(table, "employees.html")
 ```
 
-#### TextBlock
+## TextBlock
+
+**[→ View Interactive TextBlock Examples](../examples_html/textblock_examples.html)**
 
 ```@docs
 TextBlock
 ```
 
 HTML text block for adding formatted text and tables to plot pages.
-
-**[→ View Interactive TextBlock Examples](../examples_html/textblock_examples.html)**
 
 **Parameters:**
 - `html_content::String`: HTML content to display
@@ -786,15 +780,15 @@ HTML text block for adding formatted text and tables to plot pages.
 - Blockquotes: `<blockquote>`
 - Divisions: `<div>`, `<span>`
 
-#### Slides
+## Slides
+
+**[→ View Interactive Slides Examples (Embedded)](../examples_html/slides_examples_embedded.html)**
 
 ```@docs
 Slides
 ```
 
 Interactive slideshow with filtering, playback controls, and keyboard navigation.
-
-**[→ View Interactive Slides Examples (Embedded)](../examples_html/slides_examples_embedded.html)**
 
 **Constructor 1: From Directory Pattern**
 
@@ -926,9 +920,9 @@ slides = Slides(:generated_slides, df, :sales_data,
 - External formats (`:csv_external`, `:json_external`, `:parquet`): Images are copied to `slides/` subdirectory
 - Function-generated slides create temporary files that are cleaned up after HTML generation
 
-## Output Functions
+# API -  Output Functions
 
-### create_html
+## create_html
 
 ```@docs
 create_html
@@ -947,9 +941,9 @@ page = JSPlotPage(dataframes_dict, plots_array)
 create_html(page, "output.html")
 ```
 
-## Data Format Options
+# Data Format Options
 
-### Embedded Formats
+## Embedded Formats
 
 **`:csv_embedded` (Default)**
 
@@ -959,7 +953,7 @@ Data is embedded directly in the HTML as CSV text within `<script>` tags. Best f
 
 Data is embedded directly in the HTML as JSON within `<script>` tags. Better than CSV for preserving data types and handling complex structures.
 
-### External Formats
+## External Formats
 
 **`:csv_external`**
 
@@ -985,7 +979,7 @@ Data is saved as separate JSON files in a `data/` subdirectory. Similar to CSV e
 
 Data is saved as separate Parquet files in a `data/` subdirectory. Most efficient format for large datasets (> 50MB). Uses DuckDB.jl for writing and parquet-wasm for browser reading.
 
-### Choosing a Format
+## Choosing a Format
 
 | Format | File Size | Performance | Portability | Human Readable | Best For |
 |--------|-----------|-------------|-------------|----------------|----------|
@@ -995,9 +989,9 @@ Data is saved as separate Parquet files in a `data/` subdirectory. Most efficien
 | `:json_external` | Small HTML | Good | Good | Yes | Medium datasets, type preservation |
 | `:parquet` | Smallest | Excellent | Fair | No | Large datasets (>50MB) |
 
-## Utility Functions
+# Utility Functions
 
-### Helper Functions
+## Helper Functions
 
 These helper functions are used internally by chart types but are also exported for user convenience when building custom charts.
 
@@ -1013,17 +1007,17 @@ build_js_array
 select_default_column
 ```
 
-### File Utilities
+## File Utilities
 
 ```@docs
 sanitize_filename
 ```
 
-### Data Format Conversion
+## Data Format Conversion
 
 JSPlots internally handles conversion between Julia DataFrames and JavaScript-compatible formats (CSV, JSON, Parquet).
 
-### Color Mapping
+## Color Mapping
 
 For PivotTable heatmaps, you can specify custom color mappings:
 
@@ -1035,7 +1029,7 @@ colour_map = Dict{Float64,String}(
 
 The package will interpolate colors between the specified values.
 
-### Aggregation Functions
+## Aggregation Functions
 
 Available aggregators for PivotTable:
 
@@ -1060,7 +1054,7 @@ Available aggregators for PivotTable:
 - `:Count as Fraction of Rows`: Count divided by row total
 - `:Count as Fraction of Columns`: Count divided by column total
 
-### Renderer Types
+## Renderer Types
 
 Available renderers for PivotTable:
 
