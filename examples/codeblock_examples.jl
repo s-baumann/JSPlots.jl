@@ -15,8 +15,8 @@ header = TextBlock("""
 function generate_sample_data()
     n = 50
     x = 1:n
-    y1 = cumsum(randn(n)) .+ 100
-    y2 = cumsum(randn(n)) .+ 100
+    y1 = cumsum(randn(rng, n)) .+ 100
+    y2 = cumsum(randn(rng, n)) .+ 100
 
     return DataFrame(
         day = x,
@@ -76,13 +76,15 @@ example3_text = TextBlock("""
 
 tutorial_code = """
 # Tutorial: Creating a Simple Scatter Plot
+using JSPlots, DataFrames, StableRNGs
+rng = StableRNG(42)
 
 # Step 1: Create your data
 df = DataFrame(
-    x = rand(100),
-    y = rand(100),
-    size = rand(100) .* 50,
-    color = rand(["red", "blue", "green"], 100)
+    x = rand(rng, 100),
+    y = rand(rng, 100),
+    size = rand(rng, 100) .* 50,
+    color = rand(rng, ["red", "blue", "green"], 100)
 )
 
 # Step 2: Create the scatter plot
@@ -112,8 +114,8 @@ function prepare_analysis_data()
     dates = Date(2024,1,1):Day(1):Date(2024,1,31)
     df = DataFrame(
         date = dates,
-        temperature = 15 .+ 10 .* sin.(2π .* (1:31) ./ 31) .+ randn(31) .* 2,
-        humidity = 60 .+ 15 .* cos.(2π .* (1:31) ./ 31) .+ randn(31) .* 5,
+        temperature = 15 .+ 10 .* sin.(2π .* (1:31) ./ 31) .+ randn(rng, 31) .* 2,
+        humidity = 60 .+ 15 .* cos.(2π .* (1:31) ./ 31) .+ randn(rng, 31) .* 5,
         city = repeat(["New York", "Boston"], inner=16)[1:31]
     )
     return df
