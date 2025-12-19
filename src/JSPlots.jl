@@ -265,6 +265,9 @@ module JSPlots
     include("textblock.jl")
     export TextBlock
 
+    include("codeblock.jl")
+    export CodeBlock, execute_codeblock
+
     include("picture.jl")
     export Picture
 

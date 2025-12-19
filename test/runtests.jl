@@ -57,6 +57,10 @@ using Dates
         include("chart_tests/test_textblock.jl")
     end
 
+    @testset "CodeBlock Tests" begin
+        include("chart_tests/test_codeblock.jl")
+    end
+
     @testset "Picture Tests" begin
         include("chart_tests/test_picture.jl")
     end

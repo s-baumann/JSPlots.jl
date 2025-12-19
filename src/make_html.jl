@@ -54,6 +54,11 @@ const FULL_PAGE_TEMPLATE = raw"""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    ___PRISM_LANGUAGES___
 </head>
 
 <body>
@@ -559,6 +564,15 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         extra_styles *= TABLE_STYLE
     end
 
+    # Collect Prism.js language components needed for CodeBlocks
+    prism_languages = JSPlots.get_languages_from_codeblocks(pt.pivot_tables)
+    prism_scripts = if isempty(prism_languages)
+        ""
+    else
+        join(["""    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-$lang.min.js"></script>"""
+              for lang in prism_languages], "\n")
+    end
+
     # Handle external formats (csv_external, json_external, parquet) differently
     if pt.dataformat in [:csv_external, :json_external, :parquet]
         # For external formats, create a subfolder structure
@@ -685,6 +699,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+        full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
 
         # Save HTML file
         open(actual_html_path, "w") do outfile
@@ -768,6 +783,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+        full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
 
         open(outfile_path, "w") do outfile
             write(outfile, full_page_html)

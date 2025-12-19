@@ -780,6 +780,161 @@ HTML text block for adding formatted text and tables to plot pages.
 - Blockquotes: `<blockquote>`
 - Divisions: `<div>`, `<span>`
 
+## CodeBlock
+
+**[→ View Interactive CodeBlock Examples](../examples_html/codeblock_examples.html)**
+
+```@docs
+CodeBlock
+```
+
+Display code in multiple programming languages with syntax highlighting. Only Julia code can be executed.
+
+**Supported Languages:**
+- **Julia** (executable) - Full support with syntax highlighting and execution
+- **Python** (display only) - Syntax highlighting for Python code
+- **R** (display only) - Syntax highlighting for R statistical code
+- **C++** (display only) - Syntax highlighting for C++ code
+- **C** (display only) - Syntax highlighting for C code
+- **Java** (display only) - Syntax highlighting for Java code
+- **JavaScript** (display only) - Syntax highlighting for JavaScript code
+- **Rust** (display only) - Syntax highlighting for Rust code
+- **SQL** (display only) - Syntax highlighting for SQL queries
+- **PostgreSQL PL/pgSQL** (display only) - Syntax highlighting for PostgreSQL procedures
+- **Other languages** - Can be displayed with language label but without syntax highlighting
+
+**Constructor 1: From a Function (Julia Only)**
+
+Extract and display a Julia function's source code. The function can be executed to get its return values.
+
+```julia
+CodeBlock(func::Function; notes::String="", chart_title::Symbol=gensym("codeblock"))
+```
+
+**Parameters:**
+- `func::Function`: Julia function whose source code will be extracted and displayed
+- `notes::String`: Optional notes displayed below the code (default: `""`)
+- `chart_title::Symbol`: Unique identifier (default: auto-generated)
+
+**Example:**
+```julia
+function generate_data()
+    return DataFrame(x=[1,2,3], y=[4,5,6])
+end
+
+cb = CodeBlock(generate_data, notes="Creates example data")
+df = cb()  # Execute the code block
+```
+
+**Constructor 2: From a File**
+
+Display the contents of a source file in any supported language.
+
+```julia
+CodeBlock(file_path::String; language::String="julia", notes::String="",
+          chart_title::Symbol=gensym("codeblock"), executable::Bool=true)
+```
+
+**Parameters:**
+- `file_path::String`: Path to source file
+- `language::String`: Programming language (default: `"julia"`)
+  - Supported: `"julia"`, `"python"`, `"r"`, `"c++"`, `"c"`, `"java"`, `"javascript"`, `"sql"`, `"postgresql"`
+  - Any other language name can be used (displayed without syntax highlighting)
+- `notes::String`: Optional notes (default: `""`)
+- `chart_title::Symbol`: Unique identifier (default: auto-generated)
+- `executable::Bool`: Whether Julia files can be executed with `cb()` (default: `true`)
+
+**Examples:**
+```julia
+# Julia file (executable)
+cb = CodeBlock("analysis_script.jl", notes="Main analysis")
+cb()  # Execute the script
+
+# Python file (display only)
+cb = CodeBlock("ml_model.py", language="python", notes="Python ML model")
+
+# SQL file (display only)
+cb = CodeBlock("queries.sql", language="sql", notes="Database queries")
+```
+
+**Constructor 3: From a Code String**
+
+Display a code string in any supported language.
+
+```julia
+CodeBlock(code::String, ::Val{:code}; language::String="julia", notes::String="",
+          chart_title::Symbol=gensym("codeblock"))
+```
+
+**Parameters:**
+- `code::String`: Code to display
+- `Val(:code)`: Type tag to indicate this is a code string
+- `language::String`: Programming language (default: `"julia"`)
+- `notes::String`: Optional notes (default: `""`)
+- `chart_title::Symbol`: Unique identifier (default: auto-generated)
+
+**Examples:**
+```julia
+# Julia code (display only)
+julia_code = \"\"\"
+function example()
+    return 42
+end
+\"\"\"
+cb = CodeBlock(julia_code, Val(:code), notes="Example function")
+
+# Python code
+python_code = \"\"\"
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+\"\"\"
+cb = CodeBlock(python_code, Val(:code), language="python", notes="Python Fibonacci")
+
+# SQL code
+sql_code = \"\"\"
+SELECT customers.name, COUNT(orders.id) as order_count
+FROM customers
+LEFT JOIN orders ON customers.id = orders.customer_id
+GROUP BY customers.id;
+\"\"\"
+cb = CodeBlock(sql_code, Val(:code), language="sql", notes="Customer orders")
+```
+
+**Execution:**
+
+Executable CodeBlocks can be run using callable syntax:
+```julia
+# Single return value
+result = codeblock()
+
+# Multiple return values
+a, b, c = codeblock()
+
+# Alternative (less common)
+result = execute_codeblock(codeblock)
+```
+
+**Features:**
+- **Multi-Language Support**: Display code in Julia, Python, R, C++, C, Java, JavaScript, SQL, and PostgreSQL
+- **Syntax Highlighting**: Uses Prism.js with automatic language detection
+- **Optimized Loading**: Only loads Prism.js components for languages actually used in the page
+- **Source Extraction**: Automatically extracts function source code, including nested blocks
+- **Executable Julia Code**: Run Julia functions and scripts directly from the code block
+- **Security**: Execution is restricted to Julia code only; other languages are display-only
+- **HTML Safe**: Properly escapes HTML characters in code
+- **Notes**: Add context and explanations below code blocks
+- **Extensible**: Supports custom languages (displayed with language label but without syntax highlighting)
+- **Integration**: Combine code blocks with visualizations to show methodology alongside results
+
+**Tips:**
+- Install `CodeTracking.jl` for improved source extraction from functions defined in packages
+- Use appropriate language parameter for non-Julia code files
+- Only Julia code can be executed; attempting to execute other languages will raise an error
+
+**See Also:** [Multi-Language CodeBlock Examples](../examples_html/codeblock_multilang_examples.html)
+
 ## Slides
 
 **[→ View Interactive Slides Examples (Embedded)](../examples_html/slides_examples_embedded.html)**

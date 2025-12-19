@@ -1,5 +1,7 @@
 
 include("areachart_examples.jl")
+include("codeblock_examples.jl")
+include("codeblock_multilang_examples.jl")
 include("distplot_examples.jl")
 include("external_formats_example.jl")
 include("kerneldensity_examples.jl")
@@ -15,4 +17,3 @@ include("scattersurface3d_example.jl")
 include("slides_examples.jl")
 include("table_examples.jl")
 include("textblock_examples.jl")
-
