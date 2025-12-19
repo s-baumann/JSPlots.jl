@@ -782,7 +782,8 @@ HTML text block for adding formatted text and tables to plot pages.
 
 ## CodeBlock
 
-**[→ View Interactive CodeBlock Examples](../examples_html/codeblock_examples.html)**
+**[→ View CodeBlock Examples in Julia](../examples_html/codeblock_examples.html)** 
+**[→ View CodeBlock Examples in other languages](../examples_html/codeblock_multilang_examples.html)**
 
 ```@docs
 CodeBlock

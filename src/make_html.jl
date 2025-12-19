@@ -789,7 +789,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             write(outfile, full_page_html)
         end
 
-        println("Pivot table page saved to $outfile_path")
+        println("Saved to $outfile_path")
     end
 
     # Clean up temporary files for Picture and Slides objects
