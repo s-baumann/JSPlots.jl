@@ -13,7 +13,7 @@ Three-dimensional surface plot visualization using Plotly.
 - `y_col::Symbol`: Column for y-axis values (default: `:y`)
 - `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
 - `group_col`: Column for grouping multiple surfaces (default: `nothing`)
-- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `height::Int`: Plot height in pixels (default: `600`)
 - `title::String`: Chart title (default: `"3D Chart"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
@@ -35,7 +35,7 @@ struct Surface3D <: JSPlotsType
     functional_html::String
     appearance_html::String
     function Surface3D(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                            slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                            filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                             height::Int=600,
                             x_col::Symbol=:x,
                             y_col::Symbol=:y,
@@ -54,55 +54,32 @@ struct Surface3D <: JSPlotsType
             String(group_col) in all_cols || error("Column $group_col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize slider_col to always be a vector
-        slider_cols = if slider_col === nothing
-            Symbol[]
-        elseif slider_col isa Symbol
-            [slider_col]
-        else
-            slider_col
-        end
+        # Sanitize chart_title for use in JavaScript
+        chart_title_safe = sanitize_chart_title(chart_title)
 
-        # Validate slider columns
-        for col in slider_cols
-            String(col) in all_cols || error("Slider column $col not found in dataframe. Available: $all_cols")
-        end
-
-        # Generate sliders using html_controls abstraction
-        sliders_html, slider_init_js = generate_slider_html_and_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlotWithFilters_$(chart_title)()"
-        )
-
-        # Generate filtering JavaScript using html_controls abstraction
-        filter_logic_js = generate_slider_filter_logic_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlot_$(chart_title)"
-        )
+        # Build filter dropdowns using html_controls abstraction
+        update_function = "updatePlotWithFilters_$(chart_title_safe)()"
+        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_cols_js = build_js_array(collect(keys(filters)))
 
         # Determine if we're using grouping
         use_grouping = group_col !== nothing
 
         functional_html = """
+            const FILTER_COLS = $filter_cols_js;
+
             // Load and parse CSV data using centralized parser
             loadDataset('$data_label').then(function(data3d) {
-                window.allData_$(chart_title) = data3d;
+                window.allData_$(chart_title_safe) = data3d;
 
-                \$(function() {
-                    $slider_init_js
-
-                    // Initial plot
-                    updatePlotWithFilters_$(chart_title)();
-                });
+                // Initial plot
+                updatePlotWithFilters_$(chart_title_safe)();
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
 
-            function updatePlot_$(chart_title)(data3d) {
+            function updatePlot_$(chart_title_safe)(data3d) {
                 // ========== 3D SURFACE PLOT CONFIGURATION ==========
                 // Define your column names here
                 const x = '$x_col';
@@ -196,20 +173,44 @@ struct Surface3D <: JSPlotsType
                     showlegend: $(use_grouping ? "true" : "false"),
                 };
 
-                Plotly.newPlot('$chart_title', plotData, layout);
+                Plotly.newPlot('$chart_title_safe', plotData, layout);
             }
 
-            $filter_logic_js
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title_safe) = function() {
+                // Get filter values (multiple selections)
+                const filters = {};
+                FILTER_COLS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title_safe)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Filter data (support multiple selections per filter)
+                const filteredData = window.allData_$(chart_title_safe).filter(row => {
+                    for (let col in filters) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                // Update plot with filtered data
+                updatePlot_$(chart_title_safe)(filteredData);
+            };
         """
 
         # Use html_controls abstraction to generate appearance HTML
         appearance_html = generate_appearance_html_from_sections(
-            sliders_html,
+            filters_html,
             "",  # No plot attributes in Surface3D
             "",  # No faceting in Surface3D
             title,
             notes,
-            string(chart_title)
+            string(chart_title_safe)
         )
 
         new(chart_title, data_label, functional_html, appearance_html)

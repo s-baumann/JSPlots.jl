@@ -36,11 +36,11 @@ using DataFrames
     @testset "With filtering" begin
         chart = Scatter3D(:filtered_scatter, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
             color_cols = [:category],
-            slider_col = [:w, :group],
+            filters = Dict{Symbol, Any}(:w => [0.0], :group => ["G1"]),
             show_eigenvectors = true
         )
         @test occursin("w", chart.appearance_html)
-        @test occursin("_slider", chart.appearance_html)
+        @test occursin("_select", chart.appearance_html)
         @test occursin("updatePlotWithFilters", chart.functional_html)
     end
 
@@ -165,19 +165,19 @@ using DataFrames
         @test occursin("None", chart.appearance_html)
     end
 
-    @testset "Slider with single column" begin
-        chart = Scatter3D(:slider_single, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
+    @testset "Filter with single column" begin
+        chart = Scatter3D(:filter_single, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
             color_cols = [:category],
-            slider_col = :w
+            filters = Dict{Symbol, Any}(:w => [0.0])
         )
         @test occursin("w", chart.appearance_html)
-        @test occursin("_slider", chart.appearance_html)
+        @test occursin("_select", chart.appearance_html)
     end
 
-    @testset "Slider with multiple columns" begin
-        chart = Scatter3D(:slider_multi, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
+    @testset "Filter with multiple columns" begin
+        chart = Scatter3D(:filter_multi, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
             color_cols = [:category],
-            slider_col = [:w, :v]
+            filters = Dict{Symbol, Any}(:w => [0.0], :v => [0.0])
         )
         @test occursin("w", chart.appearance_html)
         @test occursin("v", chart.appearance_html)
@@ -290,9 +290,9 @@ using DataFrames
         )
     end
 
-    @testset "Error: invalid slider column" begin
-        @test_throws ErrorException Scatter3D(:bad_slider, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
-            slider_col = :nonexistent
+    @testset "Error: invalid filter column" begin
+        @test_throws ErrorException Scatter3D(:bad_filter, df_scatter_3d, :df_scatter_3d, [:x, :y, :z];
+            filters = Dict{Symbol, Any}(:nonexistent => [0.0])
         )
     end
 
@@ -308,7 +308,7 @@ using DataFrames
     @testset "All features combined" begin
         chart = Scatter3D(:all_features, df_scatter_3d, :df_scatter_3d, [:x, :y, :z, :w, :v];
             color_cols = [:category, :group],
-            slider_col = [:w, :v],
+            filters = Dict{Symbol, Any}(:w => [0.0], :v => [0.0]),
             facet_cols = [:category, :group],
             default_facet_cols = :category,
             show_eigenvectors = true,

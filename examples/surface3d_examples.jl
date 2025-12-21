@@ -9,7 +9,7 @@ header = TextBlock("""
 <ul>
     <li><strong>Single and multiple surfaces:</strong> Basic 3D surface visualization with grouping</li>
     <li><strong>Interactive controls:</strong> Rotate, zoom, and pan to explore from all angles</li>
-    <li><strong>Filtering:</strong> Use sliders to filter data and dynamically update the surface</li>
+    <li><strong>Filtering:</strong> Use dropdown filters to filter data and dynamically update the surface</li>
     <li><strong>Color gradients:</strong> Automatic color schemes for different groups</li>
 </ul>
 <p><em>Click and drag to rotate the 3D plots. Use scroll wheel to zoom!</em></p>
@@ -77,7 +77,7 @@ chart2 = Surface3D(:multi_surfaces, multi_surface_df, :multi_data;
 # Example 3: 3D Surface with Filtering
 example3_text = TextBlock("""
 <h2>Example 3: 3D Surface with Filtering</h2>
-<p>This example demonstrates filtering capability. Use the sliders to filter by distance from origin or region (quadrant).
+<p>This example demonstrates filtering capability. Use the dropdown filters to filter by distance from origin or region (quadrant).
 The surface updates dynamically as you adjust the filters - perfect for exploring subsets of your data!</p>
 """)
 
@@ -118,9 +118,9 @@ chart3 = Surface3D(:filtered_surface, filtered_df, :filtered_data;
     y_col = :y,
     z_col = :z,
     group_col = :group,
-    slider_col = [:distance, :region],
+    filters = Dict{Symbol, Any}(:distance => [5.0], :region => ["NE"]),
     title = "3D Surface with Filtering",
-    notes = "Use the sliders to filter by distance from origin or region (quadrant)"
+    notes = "Use the filters to filter by distance from origin or region (quadrant)"
 )
 
 # Example 4: Trigonometric vs Polynomial Shapes
@@ -174,7 +174,7 @@ chart4 = Surface3D(:shape_family, shape_df, :shape_data;
     y_col = :y,
     z_col = :z,
     group_col = :shape,
-    slider_col = :shapefamily,
+    filters = Dict{Symbol, Any}(:shapefamily => ["Trigonometric"]),
     title = "Shape Family Explorer",
     notes = "Filter by shape family to switch between trigonometric and polynomial functions"
 )
@@ -216,7 +216,7 @@ conclusion = TextBlock("""
 <ul>
     <li><strong>Interactive 3D controls:</strong> Click and drag to rotate, scroll to zoom, shift+drag to pan</li>
     <li><strong>Multiple surface support:</strong> Compare different datasets on the same plot with distinct color gradients</li>
-    <li><strong>Data filtering:</strong> Interactive sliders for continuous variables (like distance) and multi-select for categorical variables (like region or shape family)</li>
+    <li><strong>Data filtering:</strong> Interactive multi-select dropdowns for both continuous and categorical variables (like distance, region, or shape family)</li>
     <li><strong>Dynamic updates:</strong> Surfaces update in real-time as you adjust filters - perfect for exploring data subsets</li>
     <li><strong>Scientific applications:</strong> Perfect for mathematical functions, simulations, and terrain data</li>
     <li><strong>Integration:</strong> Combine with other plot types, images, and text blocks</li>
@@ -252,7 +252,7 @@ println("\nFile created: generated_html_examples/surface3d_examples.html")
 println("\nThis page includes:")
 println("  • Basic 3D surface plot")
 println("  • Multiple surfaces with grouping")
-println("  • Filtering with sliders (continuous and categorical)")
+println("  • Filtering (continuous and categorical)")
 println("  • Shape family filtering example")
 println("  • Wave interference pattern")
 println("  • Integration with text blocks")

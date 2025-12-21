@@ -12,10 +12,10 @@ header = TextBlock("""
 <ul>
     <li><strong>Smooth density curves:</strong> Non-parametric estimation of probability density</li>
     <li><strong>Multiple overlapping densities:</strong> Compare distributions across groups with transparency</li>
-    <li><strong>Interactive filters:</strong> Slider controls for categorical and numeric ranges</li>
+    <li><strong>Interactive filters:</strong> Multi-select dropdown controls for categorical and numeric variables</li>
     <li><strong>Faceting:</strong> Split visualizations by one or two categorical variables</li>
 </ul>
-<p><em>Use sliders and multi-select controls to filter and explore the data!</em></p>
+<p><em>Use multi-select dropdown controls to filter and explore the data!</em></p>
 """)
 
 # Example 1: Simple Single Distribution
@@ -63,7 +63,7 @@ kde3 = KernelDensity(:filtered_kde, df3, :df3;
     group_cols = :department,
     filter_cols = [:age, :region],
     title = "Score Distribution by Department with Filters",
-    notes = "Use age range slider and region multi-select to filter data dynamically and see how distributions change"
+    notes = "Use age and region filters to filter data dynamically and see how distributions change"
 )
 
 # Example 4: Faceting by One Variable
@@ -190,7 +190,7 @@ kde9 = KernelDensity(:comprehensive_kde, df9, :df9;
     density_opacity = 0.6,
     bandwidth = 0.0,
     title = "Comprehensive Example - All Features Combined",
-    notes = "This example demonstrates all KernelDensity features together: multiple value columns, grouping by color, filtering with sliders, and faceting. Use the controls to explore different combinations and see how distributions vary across departments, experience levels, and project types."
+    notes = "This example demonstrates all KernelDensity features together: multiple value columns, grouping by color, filtering with dropdown controls, and faceting. Use the controls to explore different combinations and see how distributions vary across departments, experience levels, and project types."
 )
 
 conclusion = TextBlock("""
@@ -198,7 +198,7 @@ conclusion = TextBlock("""
 <ul>
     <li><strong>Smooth density estimation:</strong> Non-parametric visualization of continuous distributions</li>
     <li><strong>Overlapping groups:</strong> Compare multiple distributions with transparency for visibility</li>
-    <li><strong>Interactive filtering:</strong> Range sliders for numeric columns, multi-select for categorical</li>
+    <li><strong>Interactive filtering:</strong> Multi-select dropdown filters for both numeric and categorical columns</li>
     <li><strong>Flexible faceting:</strong> Split plots by one or two categorical variables</li>
     <li><strong>Bandwidth control:</strong> Interactive input to adjust smoothness (0 for automatic using Silverman's rule)</li>
     <li><strong>Variable selection:</strong> Dropdowns to switch between multiple value and group columns</li>

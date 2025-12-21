@@ -74,7 +74,7 @@ example2_text = TextBlock("""
 <ul>
     <li><strong>Custom smoother:</strong> User-defined function for fitting surfaces</li>
     <li><strong>Multiple smoothing levels:</strong> Pre-compute surfaces at different smoothing parameters</li>
-    <li><strong>Slider control:</strong> Switch between smoothing levels or use group-specific defaults</li>
+    <li><strong>Dropdown control:</strong> Switch between smoothing levels or use group-specific defaults</li>
 </ul>
 """)
 
@@ -143,7 +143,6 @@ summary = TextBlock("""
             <li>Toggle all surfaces on/off</li>
             <li>Toggle all points on/off</li>
             <li>Toggle individual groups by clicking color buttons</li>
-            <li>Adjust X and Y ranges with sliders</li>
             <li>Select smoothing parameter or use group defaults</li>
         </ul>
     </li>

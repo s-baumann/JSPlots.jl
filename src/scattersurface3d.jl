@@ -17,7 +17,7 @@ Three-dimensional scatter plot with fitted surfaces, combining point clouds with
   If provided, creates a dropdown to switch between different grouping methods. Example:
   `Dict("Industry" => [:industry], "Country" => [:country])` creates a dropdown to switch between grouping by industry or country.
 - `facet_cols::Vector{Symbol}`: Columns available for faceting (default: `Symbol[]`)
-- `slider_cols::Vector{Symbol}`: Additional categorical filter columns (default: `Symbol[]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `surface_fitter::Function`: Function to fit surfaces: `(x, y, z, smoothing) -> (x_grid, y_grid, z_grid)`
 - `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.15, ..., 10.0]`)
 - `default_smoothing::Dict{String, Float64}`: Default smoothing for each group (default: auto-computed)
@@ -57,7 +57,7 @@ struct ScatterSurface3D <: JSPlotsType
                                group_cols::Vector{Symbol}=Symbol[],
                                grouping_schemes::Dict{String, Vector{Symbol}}=Dict{String, Vector{Symbol}}(),
                                facet_cols::Vector{Symbol}=Symbol[],
-                               slider_cols::Vector{Symbol}=Symbol[],
+                               filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                                surface_fitter::Union{Function, Nothing}=nothing,
                                smoothing_params::Vector{Float64}=[0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0],
                                default_smoothing::Dict{String, Float64}=Dict{String, Float64}(),
@@ -76,7 +76,7 @@ struct ScatterSurface3D <: JSPlotsType
             String(col) in all_cols || error("Column $col not found. Available: $all_cols")
         end
 
-        for col in vcat(group_cols, facet_cols, slider_cols)
+        for col in vcat(group_cols, facet_cols)
             String(col) in all_cols || error("Column $col not found. Available: $all_cols")
         end
 
@@ -159,7 +159,7 @@ struct ScatterSurface3D <: JSPlotsType
         # Generate HTML
         functional_html, appearance_html = generate_html(
             chart_title_safe, data_label, df,
-            x_col, y_col, z_col, group_cols, facet_cols, slider_cols,
+            x_col, y_col, z_col, group_cols, facet_cols, filters,
             all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
             all_surfaces_data, marker_size, marker_opacity, height, title, notes
         )
@@ -291,19 +291,15 @@ dependencies(ss::ScatterSurface3D) = [ss.data_label]
 Generate HTML and JavaScript for ScatterSurface3D
 """
 function generate_html(chart_title_safe, data_label, df,
-                      x_col, y_col, z_col, group_cols, facet_cols, slider_cols,
+                      x_col, y_col, z_col, group_cols, facet_cols, filters,
                       all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
                       all_surfaces_data, marker_size, marker_opacity, height, title, notes)
 
-    # Prepare data ranges for sliders
-    x_min, x_max = extrema(df[!, x_col])
-    y_min, y_max = extrema(df[!, y_col])
-
-    # Get unique values for categorical sliders
-    categorical_values = Dict{Symbol, Vector{String}}()
-    for col in slider_cols
-        categorical_values[col] = sort(unique(string.(skipmissing(df[!, col]))))
-    end
+    # Build filter dropdowns using html_controls abstraction
+    update_function = "updatePlotWithFilters_$(chart_title_safe)()"
+    filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+    filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+    filter_cols_js = build_js_array(collect(keys(filters)))
 
     # Get the first/default grouping scheme for initial display
     scheme_names = collect(keys(all_scheme_info))
@@ -337,11 +333,10 @@ function generate_html(chart_title_safe, data_label, df,
     # Generate JavaScript
     functional_html = generate_functional_js(
         chart_title_safe, data_label, x_col, y_col, z_col,
-        group_cols, facet_cols, slider_cols,
+        group_cols, facet_cols, filter_cols_js,
         all_scheme_info, use_multiple_schemes, default_scheme_name,
-        smoothing_params, default_smoothing, categorical_values,
+        smoothing_params, default_smoothing,
         group_colors, all_schemes_surfaces_dict, has_l1,
-        x_min, x_max, y_min, y_max,
         marker_size, marker_opacity, height
     )
 
@@ -349,8 +344,8 @@ function generate_html(chart_title_safe, data_label, df,
     appearance_html = generate_appearance_html(
         chart_title_safe, title, notes,
         all_scheme_info, use_multiple_schemes, default_scheme_name,
-        group_colors, smoothing_params, default_smoothing, categorical_values,
-        x_min, x_max, y_min, y_max, height, has_l1
+        group_colors, smoothing_params, default_smoothing, filters_html,
+        height, has_l1
     )
 
     return (functional_html, appearance_html)
@@ -402,11 +397,10 @@ function prepare_surfaces_data(surfaces_data, group_colors)
     return surfaces_array  # Return raw array, not JSON string
 end
 function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_col,
-                                group_cols, facet_cols, slider_cols,
+                                group_cols, facet_cols, filter_cols_js,
                                 all_scheme_info, use_multiple_schemes, default_scheme_name,
-                                smoothing_params, default_smoothing, categorical_values,
+                                smoothing_params, default_smoothing,
                                 group_colors, all_schemes_surfaces_dict, has_l1,
-                                x_min, x_max, y_min, y_max,
                                 marker_size, marker_opacity, height)
 
     # Prepare scheme info for JSON
@@ -432,6 +426,9 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
 
     return """
     (function() {
+        // Filter configuration
+        const FILTER_COLS = $filter_cols_js;
+
         // All grouping schemes and their surfaces
         const allSchemes_$(chart_title_safe) = $(schemes_json);
         const allSurfaces_$(chart_title_safe) = $(all_surfaces_json);
@@ -450,20 +447,11 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
         let showSurfaces_$(chart_title_safe) = true;
         let showPoints_$(chart_title_safe) = true;
         let useL1_$(chart_title_safe) = false; // Default to L2
-        let currentXRange_$(chart_title_safe) = [$(x_min), $(x_max)];
-        let currentYRange_$(chart_title_safe) = [$(y_min), $(y_max)];
 
-        window.updatePlot_$(chart_title_safe) = function() {
-            if (!allData || allData.length === 0) return;
+        window.updatePlot_$(chart_title_safe) = function(filteredData) {
+            if (!filteredData || filteredData.length === 0) return;
 
-            // Filter data by sliders
-            let filtered = allData.filter(row => {
-                if (row.$(x_col) < currentXRange_$(chart_title_safe)[0] ||
-                    row.$(x_col) > currentXRange_$(chart_title_safe)[1]) return false;
-                if (row.$(y_col) < currentYRange_$(chart_title_safe)[0] ||
-                    row.$(y_col) > currentYRange_$(chart_title_safe)[1]) return false;
-                return true;
-            });
+            let filtered = filteredData;
 
             // Create traces
             const traces = [];
@@ -592,7 +580,7 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
             updateGroupButtons_$(chart_title_safe)();
 
             // Update plot
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         };
 
         window.updateGroupButtons_$(chart_title_safe) = function() {
@@ -608,33 +596,23 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
             }).join('');
         };
 
-        window.setXRange_$(chart_title_safe) = function(min, max) {
-            currentXRange_$(chart_title_safe) = [parseFloat(min), parseFloat(max)];
-            updatePlot_$(chart_title_safe)();
-        };
-
-        window.setYRange_$(chart_title_safe) = function(min, max) {
-            currentYRange_$(chart_title_safe) = [parseFloat(min), parseFloat(max)];
-            updatePlot_$(chart_title_safe)();
-        };
-
         window.toggleGroup_$(chart_title_safe) = function(group) {
             if (visibleGroups_$(chart_title_safe).has(group)) {
                 visibleGroups_$(chart_title_safe).delete(group);
             } else {
                 visibleGroups_$(chart_title_safe).add(group);
             }
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         };
 
         window.toggleAllSurfaces_$(chart_title_safe) = function() {
             showSurfaces_$(chart_title_safe) = !showSurfaces_$(chart_title_safe);
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         };
 
         window.toggleAllPoints_$(chart_title_safe) = function() {
             showPoints_$(chart_title_safe) = !showPoints_$(chart_title_safe);
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         };
 
         window.setSmoothing_$(chart_title_safe) = function(value) {
@@ -647,7 +625,7 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
             document.getElementById('smoothing_label_$(chart_title_safe)').textContent =
                 currentSmoothing_$(chart_title_safe) === null ? 'Defaults' :
                 currentSmoothing_$(chart_title_safe).toFixed(2);
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         };
 
         window.toggleL1L2_$(chart_title_safe) = function() {
@@ -658,13 +636,39 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
                 button.textContent = useL1_$(chart_title_safe) ? 'Using L1 (Median)' : 'Using L2 (Mean)';
                 button.style.backgroundColor = useL1_$(chart_title_safe) ? '#FF9800' : '#4CAF50';
             }
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
+        };
+
+        // Filter and update function
+        window.updatePlotWithFilters_$(chart_title_safe) = function() {
+            // Get filter values (multiple selections)
+            const filters = {};
+            FILTER_COLS.forEach(col => {
+                const select = document.getElementById(col + '_select_$(chart_title_safe)');
+                if (select) {
+                    filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                }
+            });
+
+            // Filter data (support multiple selections per filter)
+            const filteredData = allData.filter(row => {
+                for (let col in filters) {
+                    const selectedValues = filters[col];
+                    if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            // Update plot with filtered data
+            updatePlot_$(chart_title_safe)(filteredData);
         };
 
         // Load and parse data using centralized loader
         loadDataset('$(data_label)').then(function(data) {
             allData = data;
-            updatePlot_$(chart_title_safe)();
+            updatePlotWithFilters_$(chart_title_safe)();
         }).catch(function(error) {
             console.error('Error loading data for chart $(chart_title_safe):', error);
         });
@@ -674,8 +678,8 @@ end
 
 function generate_appearance_html(chart_title_safe, title, notes,
                                   all_scheme_info, use_multiple_schemes, default_scheme_name,
-                                  group_colors, smoothing_params, default_smoothing, categorical_values,
-                                  x_min, x_max, y_min, y_max, height, has_l1)
+                                  group_colors, smoothing_params, default_smoothing, filters_html,
+                                  height, has_l1)
 
     # Get default group levels
     default_group_cols, default_group_levels = all_scheme_info[default_scheme_name]
@@ -711,35 +715,20 @@ function generate_appearance_html(chart_title_safe, title, notes,
         join(["<option value=\"$(i-1)\">$(smoothing_params[i])</option>"
               for i in 1:length(smoothing_params)], "\n")
 
+    # Build filters section
+    filters_section = isempty(filters_html) ? "" : """
+        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
+            <h4 style="margin-top: 0;">Data Filters</h4>
+            $(filters_html)
+        </div>
+    """
+
     return """
     <div class="chart-container">
         <h3>$(title)</h3>
         $(isempty(notes) ? "" : "<p>$(notes)</p>")
 
-        <!-- Filters (X/Y Range) -->
-        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9;">
-            <h4 style="margin-top: 0;">Data Filters</h4>
-            <div style="margin: 5px 0;">
-                <label>X Range: </label>
-                <input type="number" id="x_min_$(chart_title_safe)" value="$(x_min)" step="any" style="width: 80px;">
-                to
-                <input type="number" id="x_max_$(chart_title_safe)" value="$(x_max)" step="any" style="width: 80px;">
-                <button onclick="setXRange_$(chart_title_safe)(
-                    document.getElementById('x_min_$(chart_title_safe)').value,
-                    document.getElementById('x_max_$(chart_title_safe)').value
-                )">Update X</button>
-            </div>
-            <div style="margin: 5px 0;">
-                <label>Y Range: </label>
-                <input type="number" id="y_min_$(chart_title_safe)" value="$(y_min)" step="any" style="width: 80px;">
-                to
-                <input type="number" id="y_max_$(chart_title_safe)" value="$(y_max)" step="any" style="width: 80px;">
-                <button onclick="setYRange_$(chart_title_safe)(
-                    document.getElementById('y_min_$(chart_title_safe)').value,
-                    document.getElementById('y_max_$(chart_title_safe)').value
-                )">Update Y</button>
-            </div>
-        </div>
+        $(filters_section)
 
         <!-- Group Selection -->
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">

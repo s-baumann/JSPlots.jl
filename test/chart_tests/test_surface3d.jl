@@ -43,11 +43,11 @@ using DataFrames
             y_col = :y,
             z_col = :z,
             group_col = :group,
-            slider_col = [:w, :category],
+            filters = Dict{Symbol, Any}(:w => [0.5], :category => ["Type1"]),
             title = "Filtered 3D"
         )
         @test occursin("w", chart.appearance_html)
-        @test occursin("_slider", chart.appearance_html)
+        @test occursin("_select", chart.appearance_html)
         @test occursin("updatePlotWithFilters", chart.functional_html)
     end
 

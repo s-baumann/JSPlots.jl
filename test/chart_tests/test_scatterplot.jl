@@ -12,13 +12,13 @@ include("test_data.jl")
         @test occursin("scatter", chart.functional_html)
     end
 
-    @testset "With sliders" begin
-        chart = ScatterPlot(:slider_scatter, test_df, :test_df, [:x, :y];
-            slider_col = [:category, :date],
+    @testset "With filters" begin
+        chart = ScatterPlot(:filter_scatter, test_df, :test_df, [:x, :y];
+            filters = Dict{Symbol, Any}(:category => ["A"], :date => [Date(2024,1,1)]),
             color_cols = [:category]
         )
-        @test occursin("category", chart.functional_html)
-        @test occursin("date", chart.functional_html)
+        @test occursin("category", chart.appearance_html)
+        @test occursin("date", chart.appearance_html)
     end
 
     @testset "Custom marker settings" begin
@@ -31,23 +31,23 @@ include("test_data.jl")
         @test occursin("0.5", chart.functional_html)
     end
 
-    @testset "Slider filters - continuous" begin
-        df_slider = DataFrame(
+    @testset "Filter - continuous" begin
+        df_filter = DataFrame(
             x = randn(100),
             y = randn(100),
             color = repeat(["A", "B"], 50),
             temperature = rand(100) .* 30 .+ 10,
             pressure = rand(100) .* 100 .+ 900
         )
-        chart = ScatterPlot(:slider_continuous, df_slider, :df_slider, [:x, :y];
-            slider_col = [:temperature, :pressure]
+        chart = ScatterPlot(:filter_continuous, df_filter, :df_filter, [:x, :y];
+            filters = Dict{Symbol, Any}(:temperature => [20.0], :pressure => [1000.0])
         )
         @test occursin("temperature", chart.appearance_html)
         @test occursin("pressure", chart.appearance_html)
-        @test occursin("slider", lowercase(chart.appearance_html))
+        @test occursin("_select", chart.appearance_html)
     end
 
-    @testset "Slider filters - dates" begin
+    @testset "Filter - dates" begin
         nrows = 100
         df_dates = DataFrame(
             x = randn(nrows),
@@ -56,15 +56,15 @@ include("test_data.jl")
             date = Date(2024, 1, 1):Day(1):Date(2024, 4, 9),  # 100 days
             month = repeat(1:4, 25)
         )
-        chart = ScatterPlot(:slider_dates, df_dates, :df_dates, [:x, :y];
-            slider_col = [:date, :month]
+        chart = ScatterPlot(:filter_dates, df_dates, :df_dates, [:x, :y];
+            filters = Dict{Symbol, Any}(:date => [Date(2024,1,15)], :month => [2])
         )
         @test occursin("date", chart.appearance_html)
         @test occursin("month", chart.appearance_html)
-        @test occursin("slider", lowercase(chart.appearance_html))
+        @test occursin("_select", chart.appearance_html)
     end
 
-    @testset "Slider filters - integers" begin
+    @testset "Filter - integers" begin
         df_int = DataFrame(
             x = rand(80),
             y = rand(80),
@@ -72,8 +72,8 @@ include("test_data.jl")
             count = rand(1:100, 80),
             year = rand(2020:2024, 80)
         )
-        chart = ScatterPlot(:slider_int, df_int, :df_int, [:x, :y];
-            slider_col = [:count, :year]
+        chart = ScatterPlot(:filter_int, df_int, :df_int, [:x, :y];
+            filters = Dict{Symbol, Any}(:count => [50], :year => [2022])
         )
         @test occursin("count", chart.appearance_html)
         @test occursin("year", chart.appearance_html)

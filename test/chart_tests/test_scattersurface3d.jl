@@ -198,10 +198,6 @@ using Statistics
         @test occursin("Toggle All Surfaces", chart.appearance_html)
         @test occursin("Toggle All Points", chart.appearance_html)
 
-        # Check for X/Y range controls
-        @test occursin("X Range", chart.appearance_html)
-        @test occursin("Y Range", chart.appearance_html)
-
         # Check for smoothing control
         @test occursin("Smoothing Parameter", chart.appearance_html)
 
@@ -220,12 +216,11 @@ using Statistics
 
         # Check for essential JavaScript functions
         @test occursin("updatePlot_js_test", chart.functional_html)
+        @test occursin("updatePlotWithFilters_js_test", chart.functional_html)
         @test occursin("toggleGroup_js_test", chart.functional_html)
         @test occursin("toggleAllSurfaces_js_test", chart.functional_html)
         @test occursin("toggleAllPoints_js_test", chart.functional_html)
         @test occursin("setSmoothing_js_test", chart.functional_html)
-        @test occursin("setXRange_js_test", chart.functional_html)
-        @test occursin("setYRange_js_test", chart.functional_html)
 
         # Check for data structures
         @test occursin("allSurfaces_js_test", chart.functional_html)
@@ -246,19 +241,21 @@ using Statistics
         @test occursin("rgb(", chart.appearance_html) || occursin("#", chart.appearance_html)
     end
 
-    @testset "Data filtering and ranges" begin
+    @testset "Data filtering" begin
         df = generate_test_data(30)
 
+        # Test with filters parameter
         chart = ScatterSurface3D(:filter_test, df, :test_data,
             x_col=:x,
             y_col=:y,
             z_col=:z,
-            group_cols=[:group])
+            group_cols=[:group],
+            filters=Dict{Symbol, Any}(:region => ["North"]))
 
-        # Check for range input controls with step attribute
-        @test occursin("X Range", chart.appearance_html)
-        @test occursin("Y Range", chart.appearance_html)
-        @test occursin("step=", chart.appearance_html)
+        # Check that filter controls are present
+        @test occursin("region", chart.appearance_html)
+        @test occursin("_select", chart.appearance_html)
+        @test occursin("updatePlotWithFilters", chart.functional_html)
     end
 
     @testset "Marker customization" begin

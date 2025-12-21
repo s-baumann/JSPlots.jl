@@ -69,7 +69,7 @@ using Dates
         @test occursin("region", chart.appearance_html)
     end
 
-    @testset "Filter sliders - continuous" begin
+    @testset "Filter dropdowns - continuous" begin
         df_filter = DataFrame(
             value = randn(100),
             temperature = rand(100) .* 30 .+ 10,
@@ -81,10 +81,9 @@ using Dates
         )
         @test occursin("temperature", chart.appearance_html)
         @test occursin("pressure", chart.appearance_html)
-        @test occursin("slider", lowercase(chart.appearance_html))
     end
 
-    @testset "Filter sliders - dates" begin
+    @testset "Filter dropdowns - dates" begin
         ndays = 365
         df_dates = DataFrame(
             value = randn(ndays),
@@ -95,10 +94,9 @@ using Dates
             filter_cols = :date
         )
         @test occursin("date", chart.appearance_html)
-        @test occursin("slider", lowercase(chart.appearance_html))
     end
 
-    @testset "Filter sliders - integers" begin
+    @testset "Filter dropdowns - integers" begin
         df_int = DataFrame(
             value = randn(100),
             year = rand(2020:2024, 100),
@@ -236,7 +234,7 @@ using Dates
         @test chart_without.appearance_html != chart_with.appearance_html
     end
 
-    @testset "Filter sliders - categorical" begin
+    @testset "Filter dropdowns - categorical" begin
         df_cat = DataFrame(
             value = randn(100),
             category = repeat(["Alpha", "Beta", "Gamma"], 34)[1:100]

@@ -262,7 +262,7 @@ Scatter plot with optional marginal distributions and interactive filtering.
 - `x_col::Symbol`: Column for x-axis values
 - `y_col::Symbol`: Column for y-axis values
 - `color_col`: Column for color grouping (default: `missing`)
-- `slider_col`: Column(s) for filter sliders (default: `missing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `marker_size`: Size of scatter points (default: `5`)
 - `marker_opacity`: Transparency of points (default: `0.7`)
 - `show_marginals`: Show marginal histograms (default: `true`)
@@ -289,7 +289,7 @@ Distribution visualization combining histogram, box plot, and rug plot.
 **Keyword Arguments:**
 - `value_col::Symbol`: Column containing values to plot
 - `group_col`: Column for group comparison (default: `missing`)
-- `slider_col`: Column(s) for filter sliders (default: `missing`)
+- `filter_cols`: Column(s) for interactive filters (default: `nothing`)
 - `histogram_bins`: Number of histogram bins (default: `30`)
 - `show_histogram`: Display histogram (default: `true`)
 - `show_box`: Display box plot (default: `true`)
@@ -451,7 +451,7 @@ Three-dimensional surface plot visualization using Plotly.
 - `y_col::Symbol`: Column for y-axis values (default: `:y`)
 - `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
 - `group_col`: Column for grouping multiple surfaces (default: `nothing`)
-- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `height::Int`: Plot height in pixels (default: `600`)
 - `title`: Chart title (default: `"3D Chart"`)
 - `notes`: Descriptive text shown below the chart (default: `""`)
@@ -485,7 +485,7 @@ Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
 
 **Keyword Arguments:**
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
-- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
@@ -526,7 +526,7 @@ Three-dimensional scatter plot with automatically fitted surfaces for each group
 - `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
 - `group_cols::Vector{Symbol}`: Columns for grouping data into separate point clouds and surfaces (default: `Symbol[]`)
 - `facet_cols::Vector{Symbol}`: Columns for faceting (default: `Symbol[]`)
-- `slider_cols::Vector{Symbol}`: Columns for filter sliders (default: `Symbol[]`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `surface_fitter::Union{Function, Nothing}`: Custom surface fitting function (default: `nothing`, uses kernel smoothing)
 - `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.5, 1.0, 5.0]`)
 - `default_smoothing::Dict{String, Float64}`: Group-specific default smoothing parameters (default: `Dict{String, Float64}()`)
@@ -578,7 +578,7 @@ When `default_smoothing` is not specified, the system selects the median value f
 
 For optimal bandwidth selection in practice, consider:
 - **Cross-validation:** Leave-one-out or k-fold CV to minimize prediction error (Härdle et al., 2004)
-- **Visual inspection:** Use the interactive smoothing slider to find the best visual fit
+- **Visual inspection:** Use the interactive smoothing dropdown control to find the best visual fit
 - **Rule of thumb:** Start with h ≈ 0.1-1.0 times the data range, adjusting based on data density
 
 **Custom Surface Fitters:**

@@ -11,7 +11,7 @@ Scatter plot with optional marginal distributions and interactive filtering.
 
 # Keyword Arguments
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
-- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_density::Bool`: Show marginal density plots (default: `true`)
@@ -37,7 +37,7 @@ struct ScatterPlot <: JSPlotsType
 
     function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                          color_cols::Vector{Symbol}=[:color],
-                         slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                         filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                          facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                          default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                          show_density::Bool=true,
@@ -64,8 +64,11 @@ struct ScatterPlot <: JSPlotsType
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize slider_col
-        slider_cols = normalize_to_symbol_vector(slider_col)
+        # Build filter dropdowns
+        update_function = "updatePlotWithFilters_$(chart_title)()"
+        filter_dropdowns = build_filter_dropdowns(string(chart_title), filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_cols_js = build_js_array(collect(keys(filters)))
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, title, default_value) = begin
@@ -81,28 +84,12 @@ $options                </select>
             """
         end
 
-
-        # Generate sliders using html_controls abstraction
-        sliders_html, slider_init_js = generate_slider_html_and_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlotWithFilters_$(chart_title)()"
-        )
-
-        # Generate filter logic using html_controls abstraction
-        filter_logic_js = generate_slider_filter_logic_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlot_$(chart_title)"
-        )
-
         point_symbols = ["circle", "square", "diamond", "cross", "x", "triangle-up",
                         "triangle-down", "triangle-left", "triangle-right", "pentagon", "hexagon", "star"]
 
         functional_html = """
             (function() {
+            const FILTER_COLS = $filter_cols_js;
             window.showDensity_$(chart_title) = $(show_density ? "true" : "false");
             const POINT_SYMBOLS = $(JSON.json(point_symbols));
             const DEFAULT_X_COL = '$default_x_col';
@@ -280,7 +267,32 @@ $options                </select>
             }
 
             window.updateChart_$(chart_title) = () => updatePlotWithFilters_$(chart_title)();
-            $filter_logic_js
+
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title) = function() {
+                // Get filter values (multiple selections)
+                const filters = {};
+                FILTER_COLS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Filter data (support multiple selections per filter)
+                const filteredData = window.allData_$(chart_title).filter(row => {
+                    for (let col in filters) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                // Update plot with filtered data
+                updatePlot_$(chart_title)(filteredData);
+            };
 
             loadDataset('$data_label').then(data => {
                 window.allData_$(chart_title) = data;
@@ -293,14 +305,11 @@ $options                </select>
                             updatePlotWithFilters_$(chart_title)();
                         });
                     }
-$slider_init_js                    updatePlotWithFilters_$(chart_title)();
+                    updatePlotWithFilters_$(chart_title)();
                 });
             }).catch(error => console.error('Error loading data for chart $chart_title:', error));
             })();
         """
-
-        # Separate controls into filters, plot attributes, and faceting
-        filters_html = sliders_html
 
         # Separate plot attributes from faceting
         plot_attributes_html = ""

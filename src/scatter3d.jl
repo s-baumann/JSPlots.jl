@@ -11,7 +11,7 @@ Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
 
 # Keyword Arguments
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
-- `slider_col`: Column(s) for filter sliders (default: `nothing`)
+- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
@@ -39,11 +39,10 @@ struct Scatter3D <: JSPlotsType
 
     function Scatter3D(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                           color_cols::Vector{Symbol}=[:color],
-                          slider_col::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                          filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           show_eigenvectors::Bool=true,
-                          shared_camera::Bool=true,
                           marker_size::Int=4,
                           marker_opacity::Float64=0.6,
                           title::String="3D Scatter Plot",
@@ -76,13 +75,10 @@ struct Scatter3D <: JSPlotsType
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize slider_col
-        slider_cols = normalize_to_symbol_vector(slider_col)
-
-        # Validate slider columns
-        for col in slider_cols
-            String(col) in all_cols || error("Slider column $col not found in dataframe. Available: $all_cols")
-        end
+        # Build filter dropdowns
+        update_function = "updatePlotWithFilters_$(chart_title_safe)()"
+        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, default_value, onchange_fn) = begin
@@ -136,22 +132,8 @@ $style_html        </div>
             "updatePlotWithFilters_$chart_title()"
         )
 
-        # Generate sliders using html_controls abstraction
-        sliders_html, slider_init_js = generate_slider_html_and_js(
-            df,
-            slider_cols,
-            string(chart_title_safe),
-            "updatePlotWithFilters_$(chart_title_safe)()"
-        )
-
-        # Generate filter logic using html_controls abstraction
-        filter_logic_js = generate_slider_filter_logic_js(
-            df,
-            slider_cols,
-            string(chart_title_safe),
-            "updateChart_$(chart_title_safe)";
-            use_window=true
-        )
+        # Generate filter controls JS array
+        filter_cols_js = build_js_array(collect(keys(filters)))
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([
@@ -164,6 +146,7 @@ $style_html        </div>
             window.showEigenvectors_$(chart_title_safe) = $(show_eigenvectors ? "true" : "false");
             window.sharedCamera_$(chart_title_safe) = true; // Always use shared camera
             window.currentCamera_$(chart_title_safe) = null;
+            const FILTER_COLS = $filter_cols_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_Z_COL = '$default_z_col';
@@ -616,17 +599,55 @@ $style_html        </div>
                 }
             }
 
-            $filter_logic_js
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title_safe) = function() {
+                // Get selected columns
+                const X_COL = getCol('$(chart_title_safe)_x_col_select', DEFAULT_X_COL);
+                const Y_COL = getCol('$(chart_title_safe)_y_col_select', DEFAULT_Y_COL);
+                const Z_COL = getCol('$(chart_title_safe)_z_col_select', DEFAULT_Z_COL);
+                const COLOR_COL = getCol('$(chart_title_safe)_color_col_select', DEFAULT_COLOR_COL);
+
+                // Get filter values (multiple selections)
+                const filters = {};
+                FILTER_COLS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title_safe)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Get facet selections
+                const facet1Select = document.getElementById('facet1_select_$(chart_title_safe)');
+                const facet2Select = document.getElementById('facet2_select_$(chart_title_safe)');
+                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+                // Filter data (support multiple selections per filter)
+                const filteredData = window.allData_$(chart_title_safe).filter(row => {
+                    for (let col in filters) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                // Render based on faceting
+                if (facet1 && facet2) {
+                    renderFacetGrid_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+                } else if (facet1 || facet2) {
+                    renderFacets_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+                } else {
+                    renderSinglePlot_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+                }
+            };
 
             loadDataset('$data_label').then(function(data) {
                 window.allData_$(chart_title_safe) = data;
 
-                \$(function() {
-                    $slider_init_js
-
-                    // Initial plot
-                    updatePlotWithFilters_$(chart_title_safe)();
-                });
+                // Initial plot
+                updatePlotWithFilters_$(chart_title_safe)();
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
@@ -635,8 +656,7 @@ $style_html        </div>
         """
 
         # Organize controls into sections
-        filters_html = sliders_html
-        # plot_attributes_html and faceting_html already built above
+        # filters_html, plot_attributes_html and faceting_html already built above
 
         # Use html_controls abstraction to generate appearance HTML
         appearance_html = generate_appearance_html_from_sections(

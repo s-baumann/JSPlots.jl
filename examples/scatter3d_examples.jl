@@ -13,7 +13,7 @@ header = TextBlock("""
     <li><strong>Dimension selection:</strong> Choose which variables to display on x, y, and z axes</li>
     <li><strong>Eigenvector visualization:</strong> Show principal components (PC1, PC2, PC3) to understand data structure</li>
     <li><strong>Color coding:</strong> Customize visualization by category</li>
-    <li><strong>Filtering:</strong> Filter data with interactive sliders (shown in gray "Filters" box)</li>
+    <li><strong>Filtering:</strong> Filter data with interactive dropdowns (shown in gray "Filters" box)</li>
     <li><strong>Faceting:</strong> Create multiple plots by categorical variables (facet wrap or grid)</li>
     <li><strong>Synchronized camera:</strong> When using facets, camera rotation is automatically synchronized across all plots</li>
     <li><strong>Interactive 3D controls:</strong> Rotate, zoom, and pan to explore from all angles</li>
@@ -72,7 +72,7 @@ chart2 = Scatter3D(:multi_dim_scatter, df2, :df2,
 # Example 3: With Filtering
 example3_text = TextBlock("""
 <h2>Example 3: 3D Scatter with Filtering</h2>
-<p>Filter the data using sliders to focus on specific subsets. The eigenvectors update dynamically to show
+<p>Filter the data using dropdown filters to focus on specific subsets. The eigenvectors update dynamically to show
 the principal components of the filtered data!</p>
 """)
 
@@ -88,12 +88,12 @@ df3 = DataFrame(
 
 chart3 = Scatter3D(:filtered_scatter, df3, :df3, [:x, :y, :z];
     color_cols = [:category],
-    slider_col = [:temperature, :region],
+    filters = Dict{Symbol, Any}(:temperature => [20.0], :region => ["North"]),
     show_eigenvectors = true,
     marker_size = 5,
     marker_opacity = 0.7,
     title = "3D Scatter with Filtering",
-    notes = "Use the sliders to filter by temperature and region - eigenvectors update with the data"
+    notes = "Use the filters to filter by temperature and region - eigenvectors update with the data"
 )
 
 # Example 4: Clustering Visualization
@@ -161,7 +161,7 @@ df5 = DataFrame(
 
 chart5 = Scatter3D(:timeseries_scatter, df5, :df5, [:x, :y, :z];
     color_cols = [:phase],
-    slider_col = :time,
+    filters = Dict{Symbol, Any}(:time => [5.0]),
     show_eigenvectors = true,
     marker_size = 4,
     title = "Time Series in 3D Space",
@@ -218,7 +218,7 @@ df7 = DataFrame(
 chart7 = Scatter3D(:comprehensive_scatter, df7, :df7,
     [:measurement1, :measurement2, :measurement3, :measurement4, :measurement5];
     color_cols = [:experiment, :quality, :location],
-    slider_col = [:temperature, :pressure, :location],
+    filters = Dict{Symbol, Any}(:temperature => [25.0], :pressure => [1000.0], :location => ["Site A"]),
     facet_cols = [:experiment, :quality],
     show_eigenvectors = true,
     marker_size = 4,
@@ -238,7 +238,7 @@ conclusion = TextBlock("""
     <li><strong>PC2 (Green):</strong> Second direction of maximum variance (orthogonal to PC1)</li>
     <li><strong>PC3 (Blue):</strong> Third direction of maximum variance (orthogonal to PC1 and PC2)</li>
     <li><strong>Color selection:</strong> Switch between different categorical variables for coloring</li>
-    <li><strong>Data filtering:</strong> Interactive sliders for continuous variables and multi-select for categorical variables</li>
+    <li><strong>Data filtering:</strong> Interactive multi-select dropdowns for both continuous and categorical variables</li>
     <li><strong>Faceting:</strong> Split your data into multiple plots by categorical variables (facet wrap or grid)</li>
     <li><strong>Camera synchronization:</strong> When faceting is enabled, camera rotation is automatically synchronized across all plots</li>
     <li><strong>Dynamic updates:</strong> All settings update immediately - eigenvectors recalculate when you change any setting</li>

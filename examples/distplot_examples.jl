@@ -12,10 +12,10 @@ header = TextBlock("""
 <ul>
     <li><strong>Single distribution:</strong> Basic histogram + box plot + rug plot</li>
     <li><strong>Group comparison:</strong> Compare distributions across multiple groups</li>
-    <li><strong>Interactive filters:</strong> Slider controls for categorical and numeric ranges</li>
+    <li><strong>Interactive filters:</strong> Multi-select dropdown controls for categorical and numeric variables</li>
     <li><strong>Customization:</strong> Toggle histogram, box, and rug plot visibility</li>
 </ul>
-<p><em>Use sliders and multi-select controls to filter and explore the data!</em></p>
+<p><em>Use multi-select dropdown controls to filter and explore the data!</em></p>
 """)
 
 # Example 1: Simple Distribution - Single Group
@@ -49,7 +49,7 @@ distplot2 = DistPlot(:multi_group_dist, df2, :df2;
     notes = "Compare distributions across different treatment groups using group_cols"
 )
 
-# Example 3: Interactive Filters with Range Sliders
+# Example 3: Interactive Filters
 n = 1200
 df3 = DataFrame(
     score = abs.(randn(rng,n) .* 15 .+ 70),
@@ -62,7 +62,7 @@ distplot3 = DistPlot(:filtered_dist, df3, :df3;
     filter_cols = [:age, :department],
     histogram_bins = 40,
     title = "Score Distribution with Interactive Filters",
-    notes = "Use age range slider and department multi-select to filter data dynamically"
+    notes = "Use age and department filters to filter data dynamically"
 )
 
 # Example 4: Multiple Value and Group Columns with Dropdowns
@@ -114,7 +114,7 @@ conclusion = TextBlock("""
 <ul>
     <li><strong>Three-in-one visualization:</strong> Histogram, box plot, and rug plot combined</li>
     <li><strong>Group comparison:</strong> Overlay distributions for different groups with color coding</li>
-    <li><strong>Interactive filtering:</strong> Range sliders for numeric columns, multi-select for categorical</li>
+    <li><strong>Interactive filtering:</strong> Multi-select dropdown filters for both numeric and categorical columns</li>
     <li><strong>Customization options:</strong> Control visibility and appearance of each component</li>
     <li><strong>Statistical insight:</strong> See shape, central tendency, spread, and outliers at once</li>
 </ul>
