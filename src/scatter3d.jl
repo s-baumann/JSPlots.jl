@@ -43,6 +43,7 @@ struct Scatter3D <: JSPlotsType
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           show_eigenvectors::Bool=true,
+                          shared_camera::Bool=true,
                           marker_size::Int=4,
                           marker_opacity::Float64=0.6,
                           title::String="3D Scatter Plot",
@@ -144,7 +145,7 @@ $style_html        </div>
         functional_html = """
             (function() {
             window.showEigenvectors_$(chart_title_safe) = $(show_eigenvectors ? "true" : "false");
-            window.sharedCamera_$(chart_title_safe) = true; // Always use shared camera
+            window.sharedCamera_$(chart_title_safe) = $(shared_camera ? "true" : "false");
             window.currentCamera_$(chart_title_safe) = null;
             const FILTER_COLS = $filter_cols_js;
             const DEFAULT_X_COL = '$default_x_col';

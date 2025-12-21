@@ -586,7 +586,8 @@ using Statistics
             x_col=:x,
             y_col=:y,
             z_col=:z,
-            group_cols=[:group])
+            group_cols=[:group],
+            filters=Dict{Symbol, Any}(:region => ["North"]))
 
         # Check for different background colors
         @test occursin("background-color: #f9f9f9", chart.appearance_html)  # Data Filters
