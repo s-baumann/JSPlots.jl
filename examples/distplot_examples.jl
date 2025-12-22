@@ -44,9 +44,9 @@ df2 = DataFrame(
 
 distplot2 = DistPlot(:multi_group_dist, df2, :df2;
     value_cols = :value,
-    group_cols = :group,
+    color_cols = :group,
     title = "Treatment Effect Comparison",
-    notes = "Compare distributions across different treatment groups using group_cols"
+    notes = "Compare distributions across different treatment groups using color_cols"
 )
 
 # Example 3: Interactive Filters
@@ -78,7 +78,7 @@ df4 = DataFrame(
 
 distplot4 = DistPlot(:multi_dropdown, df4, :df4;
     value_cols = [:height, :weight, :age_value],
-    group_cols = [:gender, :country, :category],
+    color_cols = [:gender, :country, :category],
     show_controls = true,
     title = "Multi-Variable Distribution with Dropdowns",
     notes = "Select different variables and grouping columns using the dropdowns above. This example demonstrates the full flexibility of the DistPlot."
@@ -99,7 +99,7 @@ df5 = DataFrame(
 
 distplot5 = DistPlot(:custom_appearance, df5, :df5;
     value_cols = :measurement,
-    group_cols = :time_point,
+    color_cols = :time_point,
     show_histogram = true,
     show_box = true,
     show_rug = false,

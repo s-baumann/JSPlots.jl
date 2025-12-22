@@ -109,7 +109,7 @@ struct DistPlot <: JSPlotsType
             var currentValueCol = $(length(value_cols_vec) >= 2 ?
                 "document.getElementById('$(chart_title)_value_selector').value" :
                 "'$(default_value_col)'");
-            var currentGroupCol = $(length(group_cols_vec) >= 2 ?
+            var currentGroupCol = $(length(color_cols) >= 2 ?
                 "document.getElementById('$(chart_title)_group_selector').value" :
                 (default_group_col !== nothing ? "'$(default_group_col)'" : "null"));
 

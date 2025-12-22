@@ -439,7 +439,7 @@ struct KernelDensity <: JSPlotsType
                     "'$(default_value_col)'");
 
                 // Get current group column from dropdown or use default
-                let GROUP_COL = $(length(group_cols_vec) >= 2 ?
+                let GROUP_COL = $(length(color_cols) >= 2 ?
                     "document.getElementById('$(chart_title)_group_selector').value" :
                     (default_group_col !== nothing ? "'$(default_group_col)'" : "null"));
 

@@ -42,8 +42,8 @@ df2 = DataFrame(
 )
 
 kde2 = KernelDensity(:multi_group_kde, df2, :df2;
-    value_cols = :value,
-    group_cols = :group,
+    value_cols = [:value],
+    color_cols = [:group],
     title = "Treatment Comparison - Overlapping Densities",
     density_opacity = 0.5,
     notes = "Compare distributions with overlapping density curves. Transparency allows visibility of all groups."
@@ -59,8 +59,8 @@ df3 = DataFrame(
 )
 
 kde3 = KernelDensity(:filtered_kde, df3, :df3;
-    value_cols = :score,
-    group_cols = :department,
+    value_cols = [:score],
+    color_cols = [:department],
     filter_cols = [:age, :region],
     title = "Score Distribution by Department with Filters",
     notes = "Use age and region filters to filter data dynamically and see how distributions change"
@@ -79,8 +79,8 @@ df4 = DataFrame(
 )
 
 kde4 = KernelDensity(:facet_one_kde, df4, :df4;
-    value_cols = :measurement,
-    group_cols = :category,
+    value_cols = [:measurement],
+    color_cols = [:category],
     facet_cols = :phase,
     default_facet_cols = :phase,
     title = "Faceted Kernel Density - Single Variable",
@@ -138,8 +138,8 @@ df7 = DataFrame(
 )
 
 kde7 = KernelDensity(:custom_bandwidth_kde, df7, :df7;
-    value_cols = :value,
-    group_cols = :group,
+    value_cols = [:value],
+    color_cols = [:group],
     bandwidth = 2.0,
     density_opacity = 0.7,
     title = "Custom Bandwidth Setting",
@@ -159,7 +159,7 @@ df8 = DataFrame(
 
 kde8 = KernelDensity(:multi_dropdown_kde, df8, :df8;
     value_cols = [:height, :weight, :age_value],
-    group_cols = [:gender, :country, :category],
+    color_cols = [:gender, :country, :category],
     density_opacity = 0.6,
     title = "Multi-Variable KDE with Dropdowns and Bandwidth Control",
     notes = "Select different variables and grouping columns using the dropdowns. Adjust bandwidth to control smoothness. Set bandwidth to 0 for automatic calculation."
@@ -183,7 +183,7 @@ df9 = DataFrame(
 
 kde9 = KernelDensity(:comprehensive_kde, df9, :df9;
     value_cols = [:measurement, :score],
-    group_cols = [:department, :experience_level],
+    color_cols = [:department, :experience_level],
     filter_cols = [:age, :region],
     facet_cols = [:project_type],
     default_facet_cols = :project_type,
