@@ -194,8 +194,8 @@ module JSPlots
     # Returns: Dict(:country => [:Australia])
     ```
     """
-    function normalize_filters(filters::Vector{Symbol}, df::DataFrame)::Dict{Symbol, Vector}
-        result = Dict{Symbol, Vector}()
+    function normalize_filters(filters::Vector{Symbol}, df::DataFrame)::Dict{Symbol, Any}
+        result = Dict{Symbol, Any}()
         for col in filters
             if string(col) in names(df)
                 result[col] = collect(unique(skipmissing(df[!, col])))
@@ -206,8 +206,8 @@ module JSPlots
         return result
     end
 
-    function normalize_filters(filters::Dict, df::DataFrame)::Dict{Symbol, Vector}
-        result = Dict{Symbol, Vector}()
+    function normalize_filters(filters::Dict, df::DataFrame)::Dict{Symbol, Any}
+        result = Dict{Symbol, Any}()
         for (col, default_val) in filters
             col_sym = col isa Symbol ? col : Symbol(col)
             if !(string(col_sym) in names(df))
@@ -291,6 +291,9 @@ module JSPlots
 
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
     export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column
+
+    get_filter_vars(filters::Vector{Symbol}) = filters
+    get_filter_vars(filters::Dict) = Symbol.(keys(filters))
 
     include("html_controls.jl")
 

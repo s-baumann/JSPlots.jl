@@ -11,7 +11,9 @@ Kernel density plot visualization with interactive controls.
 # Keyword Arguments
 - `value_cols::Vector{Symbol}`: Column(s) for density estimation (default: `[:value]`)
 - `color_cols::Vector{Symbol}`: Column(s) for grouping/coloring (default: `[:color]`)
-- `filter_cols::Union{Symbol,Vector{Symbol},Nothing}`: Column(s) for filtering (default: `nothing`)
+- `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
+  - `Dict`: Column => default values. Values can be a single value, vector, or nothing for all values
 - `facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Default faceting columns (default: `nothing`)
 - `bandwidth::Union{Float64,Nothing}`: Bandwidth for kernel density estimation (default: automatic)
@@ -39,7 +41,7 @@ struct KernelDensity <: JSPlotsType
     function KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                           value_cols::Vector{Symbol}=Symbol[:value],
                           color_cols::Vector{Symbol}=Symbol[:color],
-                          filter_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                          filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           bandwidth::Union{Float64,Nothing}=nothing,
@@ -70,14 +72,14 @@ struct KernelDensity <: JSPlotsType
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize filter_cols to always be a vector
-        slider_cols = if filter_cols === nothing
-            Symbol[]
-        elseif filter_cols isa Symbol
-            [filter_cols]
-        else
-            filter_cols
-        end
+        # Normalize filters to standard Dict{Symbol, Vector} format
+        normalized_filters = normalize_filters(filters, df)
+
+        # Build filter dropdowns
+        update_function = "updatePlotWithFilters_$(chart_title)()"
+        filter_dropdowns = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
         # Generate facet dropdowns using html_controls abstraction
         facet_dropdowns_html = generate_facet_dropdowns_html(
@@ -161,22 +163,6 @@ struct KernelDensity <: JSPlotsType
                 updateChart_$(chart_title)();
             });
         """
-
-        # Generate sliders using html_controls abstraction
-        sliders_html, slider_init_js = generate_slider_html_and_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlotWithFilters_$(chart_title)()"
-        )
-
-        # Generate filtering JavaScript using html_controls abstraction
-        filter_logic_js = generate_slider_filter_logic_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlot_$(chart_title)"
-        )
 
         # Calculate bandwidth if not provided
         bandwidth_js = if bandwidth !== nothing
@@ -466,17 +452,43 @@ struct KernelDensity <: JSPlotsType
                 }
             }
 
+            // Wrapper function
             window.updateChart_$(chart_title) = () => updatePlotWithFilters_$(chart_title)();
-            $filter_logic_js
+
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title) = function() {
+                const FILTER_COLS = $filter_cols_js;
+
+                // Get filter values (multiple selections)
+                const filters = {};
+                FILTER_COLS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Filter data (support multiple selections per filter)
+                const filteredData = window.allData_$(chart_title).filter(row => {
+                    for (let col in filters) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                // Render with filtered data
+                updatePlot_$(chart_title)(filteredData);
+            };
 
             // Load and parse CSV data using centralized parser
             loadDataset('$data_label').then(function(data) {
                 window.allData_$(chart_title) = data;
 
-                // Initialize sliders after data is loaded
+                // Initialize controls after data is loaded
                 \$(function() {
-                    $slider_init_js
-
                     $value_dropdown_js
 
                     $group_dropdown_js
@@ -494,7 +506,7 @@ struct KernelDensity <: JSPlotsType
 
         # Use html_controls abstraction to generate base appearance HTML
         base_appearance_html = generate_appearance_html_from_sections(
-            sliders_html,
+            filters_html,
             combined_controls_html,
             facet_dropdowns_html,
             title,

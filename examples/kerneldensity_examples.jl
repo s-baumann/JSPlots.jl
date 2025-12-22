@@ -61,7 +61,7 @@ df3 = DataFrame(
 kde3 = KernelDensity(:filtered_kde, df3, :df3;
     value_cols = [:score],
     color_cols = [:department],
-    filter_cols = [:age, :region],
+    filters = [:age, :region],
     title = "Score Distribution by Department with Filters",
     notes = "Use age and region filters to filter data dynamically and see how distributions change"
 )
@@ -184,7 +184,7 @@ df9 = DataFrame(
 kde9 = KernelDensity(:comprehensive_kde, df9, :df9;
     value_cols = [:measurement, :score],
     color_cols = [:department, :experience_level],
-    filter_cols = [:age, :region],
+    filters = [:age, :region],
     facet_cols = [:project_type],
     default_facet_cols = :project_type,
     density_opacity = 0.6,

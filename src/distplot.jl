@@ -87,21 +87,11 @@ struct DistPlot <: JSPlotsType
             """
         end
 
-        # Generate sliders using html_controls abstraction
-        sliders_html, slider_init_js = generate_slider_html_and_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlotWithFilters_$(chart_title)()"
-        )
-
-        # Generate filtering JavaScript using html_controls abstraction
-        filter_logic_js = generate_slider_filter_logic_js(
-            df,
-            slider_cols,
-            string(chart_title),
-            "updatePlot_$(chart_title)"
-        )
+        # Build filter dropdowns
+        update_function = "updatePlotWithFilters_$(chart_title)()"
+        filter_dropdowns = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         
         # Generate trace creation JavaScript
         trace_js = """
@@ -326,7 +316,7 @@ struct DistPlot <: JSPlotsType
         end
 
         # Separate filters from plot attributes
-        filter_sliders_html = sliders_html
+        filter_dropdowns_html = filters_html
         plot_attributes_html = toggle_buttons_html * combined_dropdown_html
 
         # Generate bins slider (placed below chart)
@@ -399,31 +389,55 @@ struct DistPlot <: JSPlotsType
 
                         $bins_slider_js
 
-                        $slider_init_js
-
                     // Initial plot
                     updatePlotWithFilters_$(chart_title)();
                 });
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
-            
+
             function updatePlot_$(chart_title)(data) {
                 var traces = [];
-                
+
                 $trace_js
-                
+
                 $layout_js
-                
+
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
             }
-            
-            $filter_logic_js
+
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title) = function() {
+                const FILTER_COLS = $filter_cols_js;
+
+                // Get filter values (multiple selections)
+                const filters = {};
+                FILTER_COLS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Filter data (support multiple selections per filter)
+                const filteredData = window.allData_$(chart_title).filter(row => {
+                    for (let col in filters) {
+                        const selectedValues = filters[col];
+                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+
+                // Render with filtered data
+                updatePlot_$(chart_title)(filteredData);
+            };
         """
         
         # Use html_controls abstraction to generate base appearance HTML
         base_appearance_html = generate_appearance_html_from_sections(
-            filter_sliders_html,
+            filter_dropdowns_html,
             plot_attributes_html,
             "",  # No faceting in DistPlot
             title,

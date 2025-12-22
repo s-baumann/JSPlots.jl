@@ -25,7 +25,7 @@ df1 = DataFrame(
 )
 
 distplot1 = DistPlot(:simple_dist, df1, :df1;
-    value_cols = :value,
+    value_cols = [:value],
     title = "Simple Distribution Plot",
     show_controls = true,
     notes = "Basic distribution showing histogram, box plot, and rug plot for a normal distribution"

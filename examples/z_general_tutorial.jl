@@ -99,6 +99,59 @@ dataset_code = CodeBlock(generate_comprehensive_data,
 
 df = dataset_code()
 
+# ===== General Coding Patterns =====
+coding_patterns = TextBlock("""
+<h2>General Coding Patterns</h2>
+<p>The arguments each chart type accepts are slightly different reflecting the nature of each plot.
+However, there are some common elements found across many plot types:</p>
+
+<h3>Filters</h3>
+<p>Filters can be specified with either a Dict or a Vector:</p>
+<ul>
+    <li><strong>Vector of Symbols:</strong> <code>filters = [:region, :product]</code> creates multi-select dropdown filters
+    with all unique values selected by default</li>
+    <li><strong>Dict:</strong> <code>filters = Dict(:region => ["North", "South"], :product => nothing)</code> where each key
+    is a column name and each value specifies the default selected values:
+        <ul>
+            <li>A single value: <code>:region => "North"</code></li>
+            <li>A vector of values: <code>:region => ["North", "South"]</code></li>
+            <li><code>nothing</code> for all values: <code>:product => nothing</code></li>
+        </ul>
+    </li>
+</ul>
+
+<h3>Color Columns</h3>
+<p><code>color_cols</code> are the options that affect the grouping and color of objects in the chart.
+For example, in a scatter plot, points can be colored by different categories. In a distribution plot,
+separate distributions can be shown for different groups.</p>
+
+<h3>Facet Columns</h3>
+<p><code>facet_cols</code> specify which columns can be used for faceting (creating small multiples of the same plot).</p>
+<ul>
+    <li><strong>facet_cols:</strong> Defines which columns are available for faceting. Can be a single Symbol or Vector of Symbols.</li>
+    <li><strong>default_facet_cols:</strong> Specifies which facet columns should be used by default:
+        <ul>
+            <li>If <code>nothing</code>, no faceting will appear initially (but users can enable it if <code>facet_cols</code> is provided)</li>
+            <li>If specified, the chart will start with faceting enabled using those columns</li>
+        </ul>
+    </li>
+</ul>
+
+<h3>Value Columns</h3>
+<p>Many chart types accept <code>value_cols</code> which specify the columns containing the data to visualize.
+For plots that can display multiple value columns (like DistPlot or KernelDensity), you can provide a vector
+of column names and use dropdown controls to switch between them.</p>
+
+<h3>Interactive Controls</h3>
+<p>Most chart types support interactive controls including:</p>
+<ul>
+    <li><strong>Multi-select dropdown filters:</strong> Filter data by selecting values from categorical or continuous variables</li>
+    <li><strong>Column selectors:</strong> Switch between different value columns, grouping variables, or plot dimensions</li>
+    <li><strong>Facet controls:</strong> Enable/disable faceting and choose facet variables</li>
+    <li><strong>show_controls parameter:</strong> Set to <code>true</code> to display all available controls, or <code>false</code> to hide them</li>
+</ul>
+""")
+
 # ===== Tabular Data and Text =====
 tabular_section = TextBlock("<h2>1. Tabular Data and Text</h2>")
 
@@ -700,7 +753,7 @@ all_data = Dict{Symbol, DataFrame}(
 
 tabular_plot_page =  JSPlotPage(
     all_data,
-    [tabular_section, dataset_intro,
+    [tabular_section, dataset_intro, coding_patterns,
         code_intro, code_chart,
         pivot_intro, pivot_chart,
         table_intro, table_chart,

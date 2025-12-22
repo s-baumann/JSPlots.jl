@@ -22,7 +22,7 @@ using Dates
         )
         chart = DistPlot(:grouped_dist, df_grouped, :df_grouped;
             value_cols = :value,
-            group_cols = :group
+            color_cols = :group
         )
         @test occursin("group", chart.functional_html)
     end
@@ -62,7 +62,7 @@ using Dates
         )
         chart = DistPlot(:multi_groups, df_groups, :df_groups;
             value_cols = :value,
-            group_cols = [:category, :region],
+            color_cols = [:category, :region],
             show_controls = true
         )
         @test occursin("category", chart.appearance_html)
@@ -178,7 +178,7 @@ using Dates
 
             chart = DistPlot(:page_dist, df_test, :test_data;
                 value_cols = :value,
-                group_cols = :category,
+                color_cols = :category,
                 title = "Distribution Test"
             )
 
@@ -219,7 +219,7 @@ using Dates
         # With controls
         chart_with = DistPlot(:with_controls, df_test, :df_test;
             value_cols = :value,
-            group_cols = :group,
+            color_cols = :group,
             show_controls = true
         )
         @test occursin("control", lowercase(chart_with.appearance_html)) ||
@@ -228,7 +228,7 @@ using Dates
         # Without controls
         chart_without = DistPlot(:without_controls, df_test, :df_test;
             value_cols = :value,
-            group_cols = :group,
+            color_cols = :group,
             show_controls = false
         )
         @test chart_without.appearance_html != chart_with.appearance_html
@@ -267,7 +267,7 @@ using Dates
         )
         chart = DistPlot(:single_cols, df_single, :df_single;
             value_cols = :value,
-            group_cols = :group
+            color_cols = :group
         )
         @test occursin("value", chart.functional_html)
         @test occursin("group", chart.functional_html)

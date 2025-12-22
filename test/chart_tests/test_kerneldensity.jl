@@ -50,10 +50,10 @@ using DataFrames
         )
         chart = KernelDensity(:filtered_kde, df_filtered, :df_filtered;
             value_cols = :value,
-            filter_cols = [:age, :category]
+            filters = [:age, :category]
         )
-        @test occursin("age", chart.functional_html)
-        @test occursin("category", chart.functional_html)
+        @test occursin("age", chart.appearance_html)
+        @test occursin("category", chart.appearance_html)
     end
 
     @testset "Custom bandwidth and appearance" begin
