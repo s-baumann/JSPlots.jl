@@ -11,7 +11,7 @@ Scatter plot with optional marginal distributions and interactive filtering.
 
 # Keyword Arguments
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_density::Bool`: Show marginal density plots (default: `true`)
@@ -37,7 +37,7 @@ struct ScatterPlot <: JSPlotsType
 
     function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                          color_cols::Vector{Symbol}=[:color],
-                         filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                         filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                          facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                          default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                          show_density::Bool=true,
@@ -45,6 +45,9 @@ struct ScatterPlot <: JSPlotsType
                          marker_opacity::Float64=0.6,
                          title::String="Scatter Plot",
                          notes::String="")
+
+# Normalize filters to standard Dict{Symbol, Vector} format
+normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
         valid_x_cols = dimensions
@@ -66,9 +69,9 @@ struct ScatterPlot <: JSPlotsType
 
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title)()"
-        filter_dropdowns = build_filter_dropdowns(string(chart_title), filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, title, default_value) = begin

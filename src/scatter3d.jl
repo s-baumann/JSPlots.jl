@@ -11,7 +11,7 @@ Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
 
 # Keyword Arguments
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
@@ -39,7 +39,7 @@ struct Scatter3D <: JSPlotsType
 
     function Scatter3D(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                           color_cols::Vector{Symbol}=[:color],
-                          filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                          filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           show_eigenvectors::Bool=true,
@@ -48,6 +48,9 @@ struct Scatter3D <: JSPlotsType
                           marker_opacity::Float64=0.6,
                           title::String="3D Scatter Plot",
                           notes::String="")
+
+# Normalize filters to standard Dict{Symbol, Vector} format
+normalized_filters = normalize_filters(filters, df)
 
         # Sanitize chart_title for use in JavaScript function names
         chart_title_safe = sanitize_chart_title(chart_title)
@@ -78,7 +81,7 @@ struct Scatter3D <: JSPlotsType
 
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title_safe)()"
-        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
 
         # Helper function to build dropdown HTML
@@ -134,7 +137,7 @@ $style_html        </div>
         )
 
         # Generate filter controls JS array
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([

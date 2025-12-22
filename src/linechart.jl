@@ -12,7 +12,9 @@ Time series or sequential data visualization with interactive filtering.
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `Symbol[]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
+  - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `aggregator::String`: Aggregation function - "none", "mean", "median", "count", "min", or "max" (default: `"none"`)
@@ -40,7 +42,7 @@ struct LineChart <: JSPlotsType
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
                             color_cols::Vector{Symbol}=Symbol[],
-                            filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                            filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             aggregator::String="none",
@@ -48,6 +50,9 @@ struct LineChart <: JSPlotsType
                             line_width::Int=1,
                             marker_size::Int=1,
                             notes::String="")
+
+        # Normalize filters to standard Dict{Symbol, Vector} format
+        normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
         valid_x_cols = validate_and_filter_columns(x_cols, df, "x_cols")
@@ -63,7 +68,7 @@ struct LineChart <: JSPlotsType
         end
 
         # Get unique values for each filter column
-        filter_options = build_filter_options(filters, df)
+        filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible color columns that exist
         color_maps, valid_color_cols = build_color_maps(color_cols, df)
@@ -72,10 +77,10 @@ struct LineChart <: JSPlotsType
         # Build HTML controls using abstraction
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_str, filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)

@@ -167,22 +167,87 @@ module JSPlots
     end
 
     """
-        build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
+        normalize_filters(filters::Union{Vector{Symbol}, Dict}, df::DataFrame)
+
+    Normalize filter specification to a standard Dict{Symbol, Vector} format.
+
+    # Arguments
+    - `filters`: Either a Vector{Symbol} of column names or Dict with default values
+    - `df::DataFrame`: DataFrame to extract unique values from
+
+    # Behavior
+    - `Vector{Symbol}`: Expands to Dict where each column maps to all its unique values
+    - `Dict`: Normalizes values to vectors (wraps non-vector values)
+
+    # Examples
+    ```julia
+    # Vector input - all unique values selected by default
+    normalize_filters([:country, :region], df)
+    # Returns: Dict(:country => unique(df.country), :region => unique(df.region))
+
+    # Dict with array values - keeps as-is
+    normalize_filters(Dict(:country => [:Australia, :Bangladesh]), df)
+    # Returns: Dict(:country => [:Australia, :Bangladesh])
+
+    # Dict with single value - wraps in array
+    normalize_filters(Dict(:country => :Australia), df)
+    # Returns: Dict(:country => [:Australia])
+    ```
+    """
+    function normalize_filters(filters::Vector{Symbol}, df::DataFrame)::Dict{Symbol, Vector}
+        result = Dict{Symbol, Vector}()
+        for col in filters
+            if string(col) in names(df)
+                result[col] = collect(unique(skipmissing(df[!, col])))
+            else
+                @warn "Filter column $col not found in dataframe, skipping"
+            end
+        end
+        return result
+    end
+
+    function normalize_filters(filters::Dict, df::DataFrame)::Dict{Symbol, Vector}
+        result = Dict{Symbol, Vector}()
+        for (col, default_val) in filters
+            col_sym = col isa Symbol ? col : Symbol(col)
+            if !(string(col_sym) in names(df))
+                @warn "Filter column $col_sym not found in dataframe, skipping"
+                continue
+            end
+
+            # Normalize default_val to a vector
+            if default_val isa AbstractVector
+                # Already a vector, use as-is
+                result[col_sym] = collect(default_val)
+            elseif isnothing(default_val)
+                # Nothing means all values
+                result[col_sym] = collect(unique(skipmissing(df[!, col_sym])))
+            else
+                # Single value, wrap in array
+                result[col_sym] = [default_val]
+            end
+        end
+        return result
+    end
+
+    """
+        build_filter_options(filters::Dict{Symbol,Vector}, df::DataFrame)
 
     Build a dictionary of unique values for each filter column.
     Returns Dict{String, Vector} mapping column names to their unique values.
 
     # Arguments
-    - `filters::Dict{Symbol,Any}`: Dictionary of filter configurations
+    - `filters::Dict{Symbol,Vector}`: Dictionary of normalized filter configurations
     - `df::DataFrame`: DataFrame to extract unique values from
 
     # Examples
     ```julia
-    filter_options = build_filter_options(Dict(:region => nothing, :year => nothing), df)
+    normalized = normalize_filters([:region, :year], df)
+    filter_options = build_filter_options(normalized, df)
     # Returns: Dict("region" => ["North", "South"], "year" => [2020, 2021, 2022])
     ```
     """
-    function build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
+    function build_filter_options(filters::Dict{Symbol,Vector}, df::DataFrame)
         return Dict(string(col) => unique(df[!, col]) for col in keys(filters))
     end
 
@@ -225,7 +290,7 @@ module JSPlots
     end
 
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
-    export validate_and_filter_columns, build_color_maps, build_filter_options, build_js_array, select_default_column
+    export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column
 
     include("html_controls.jl")
 

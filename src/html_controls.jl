@@ -14,14 +14,14 @@ Specification for a single dropdown control.
 - `id::String`: HTML element ID
 - `label::String`: Display label for the dropdown
 - `options::Vector{String}`: Available options in the dropdown
-- `default_value::String`: Default selected value
+- `default_value::Union{String, Vector{String}}`: Default selected value(s)
 - `onchange::String`: JavaScript function to call on change
 """
 struct DropdownControl
     id::String
     label::String
     options::Vector{String}
-    default_value::String
+    default_value::Union{String, Vector{String}}  # String for single-select, Vector for multi-select
     onchange::String
 end
 
@@ -65,8 +65,13 @@ Generate HTML for a single dropdown control.
 """
 function generate_dropdown_html(dropdown::DropdownControl; multiselect::Bool=false)::String
     options_html = ""
+
+    # Handle both single value (String) and multiple values (Vector{String})
+    default_values = dropdown.default_value isa Vector{String} ? dropdown.default_value : [dropdown.default_value]
+    default_values_str = string.(default_values)
+
     for option in dropdown.options
-        selected = (option == dropdown.default_value) ? " selected" : ""
+        selected = (string(option) in default_values_str) ? " selected" : ""
         options_html *= "                <option value=\"$option\"$selected>$option</option>\n"
     end
 
@@ -248,31 +253,35 @@ Helper function to build filter dropdown controls from filter dictionary.
 - `Vector{DropdownControl}`: Vector of filter dropdown controls
 """
 function build_filter_dropdowns(chart_title_safe::String,
-                                filters::Dict{Symbol, Any},
+                                filters::Dict{Symbol, Vector},
                                 df::DataFrame,
                                 update_function::String)::Vector{DropdownControl}
 
     filter_dropdowns = DropdownControl[]
 
-    for (col, default_val) in filters
+    for (col, default_vals) in filters
         col_str = string(col)
         if col_str in names(df)
             # Get unique values for this column
             unique_vals = sort(unique(skipmissing(df[!, col])))
             options = [string(v) for v in unique_vals]
 
-            # Determine default value
-            default_str = string(default_val)
-            if !(default_str in options)
-                # If provided default not in options, use first option
-                default_str = isempty(options) ? "" : options[1]
+            # Convert default values to strings
+            default_strs = [string(v) for v in default_vals]
+
+            # Filter to only include defaults that are valid options
+            valid_defaults = filter(d -> d in options, default_strs)
+
+            # If no valid defaults, use all options
+            if isempty(valid_defaults)
+                valid_defaults = options
             end
 
             push!(filter_dropdowns, DropdownControl(
                 "$(col)_select_$chart_title_safe",
                 col_str,
                 options,
-                default_str,
+                valid_defaults,  # Now a Vector{String}
                 update_function
             ))
         end

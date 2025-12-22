@@ -12,7 +12,9 @@ Area chart visualization with support for stacking modes and interactive control
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
 - `group_cols::Vector{Symbol}`: Columns available for grouping/coloring areas (default: `Symbol[]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
+  - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `stack_mode::String`: Stacking mode - "unstack", "stack", or "normalised_stack" (default: `"stack"`)
@@ -45,13 +47,16 @@ struct AreaChart <: JSPlotsType
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
                             group_cols::Vector{Symbol}=Symbol[],
-                            filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                            filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             stack_mode::String="stack",
                             title::String="Area Chart",
                             fill_opacity::Float64=0.6,
                             notes::String="")
+
+        # Normalize filters to standard Dict{Symbol, Vector} format
+        normalized_filters = normalize_filters(filters, df)
 
         # Sanitize chart title for use in JavaScript/HTML IDs
         chart_title_safe = string(sanitize_chart_title(chart_title))
@@ -75,7 +80,7 @@ struct AreaChart <: JSPlotsType
         end
 
         # Get unique values for each filter column
-        filter_options = build_filter_options(filters, df)
+        filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible group columns that exist
         color_maps, valid_group_cols = build_color_maps(group_cols, df)
@@ -88,10 +93,10 @@ struct AreaChart <: JSPlotsType
 
         # Build HTML controls using abstraction
         update_function = "updatePlot_$chart_title_safe()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_safe, filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         group_cols_js = build_js_array(valid_group_cols)

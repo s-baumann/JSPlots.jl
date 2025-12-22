@@ -17,7 +17,7 @@ Three-dimensional scatter plot with fitted surfaces, combining point clouds with
   If provided, creates a dropdown to switch between different grouping methods. Example:
   `Dict("Industry" => [:industry], "Country" => [:country])` creates a dropdown to switch between grouping by industry or country.
 - `facet_cols::Vector{Symbol}`: Columns available for faceting (default: `Symbol[]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `surface_fitter::Function`: Function to fit surfaces: `(x, y, z, smoothing) -> (x_grid, y_grid, z_grid)`
 - `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.15, ..., 10.0]`)
 - `default_smoothing::Dict{String, Float64}`: Default smoothing for each group (default: auto-computed)
@@ -57,7 +57,7 @@ struct ScatterSurface3D <: JSPlotsType
                                group_cols::Vector{Symbol}=Symbol[],
                                grouping_schemes::Dict{String, Vector{Symbol}}=Dict{String, Vector{Symbol}}(),
                                facet_cols::Vector{Symbol}=Symbol[],
-                               filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                               filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                                surface_fitter::Union{Function, Nothing}=nothing,
                                smoothing_params::Vector{Float64}=[0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0],
                                default_smoothing::Dict{String, Float64}=Dict{String, Float64}(),
@@ -67,6 +67,9 @@ struct ScatterSurface3D <: JSPlotsType
                                height::Int=600,
                                title::String="3D Scatter with Surfaces",
                                notes::String="")
+
+# Normalize filters to standard Dict{Symbol, Vector} format
+normalized_filters = normalize_filters(filters, df)
 
         chart_title_safe = sanitize_chart_title(chart_title)
         all_cols = names(df)
@@ -297,9 +300,9 @@ function generate_html(chart_title_safe, data_label, df,
 
     # Build filter dropdowns using html_controls abstraction
     update_function = "updatePlotWithFilters_$(chart_title_safe)()"
-    filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+    filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
     filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
-    filter_cols_js = build_js_array(collect(keys(filters)))
+    filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
     # Get the first/default grouping scheme for initial display
     scheme_names = collect(keys(all_scheme_info))

@@ -862,6 +862,15 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
         extra_styles *= TABLE_STYLE
     end
 
+    # Collect Prism.js language components needed for CodeBlocks
+    prism_languages = JSPlots.get_languages_from_codeblocks(page.pivot_tables)
+    prism_scripts = if isempty(prism_languages)
+        ""
+    else
+        join(["""    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-$lang.min.js"></script>"""
+              for lang in prism_languages], "\n")
+    end
+
     # Generate datasets HTML
     data_set_bit = isempty(dataframes) ? "" : reduce(*, [dataset_to_html(k, v, dataformat) for (k,v) in dataframes])
 
@@ -910,6 +919,7 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     full_page_html = replace(full_page_html, "___PAGE_HEADER___" => page.page_header)
     full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
     full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+    full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
 
     return full_page_html
 end

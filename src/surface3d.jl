@@ -13,7 +13,7 @@ Three-dimensional surface plot visualization using Plotly.
 - `y_col::Symbol`: Column for y-axis values (default: `:y`)
 - `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
 - `group_col`: Column for grouping multiple surfaces (default: `nothing`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `height::Int`: Plot height in pixels (default: `600`)
 - `title::String`: Chart title (default: `"3D Chart"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
@@ -35,7 +35,7 @@ struct Surface3D <: JSPlotsType
     functional_html::String
     appearance_html::String
     function Surface3D(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                            filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                            filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             height::Int=600,
                             x_col::Symbol=:x,
                             y_col::Symbol=:y,
@@ -43,6 +43,9 @@ struct Surface3D <: JSPlotsType
                             group_col::Union{Symbol,Nothing}=nothing,
                             title::String="3D Chart",
                             notes::String="")
+
+# Normalize filters to standard Dict{Symbol, Vector} format
+normalized_filters = normalize_filters(filters, df)
 
         all_cols = names(df)
 
@@ -59,9 +62,9 @@ struct Surface3D <: JSPlotsType
 
         # Build filter dropdowns using html_controls abstraction
         update_function = "updatePlotWithFilters_$(chart_title_safe)()"
-        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
         # Determine if we're using grouping
         use_grouping = group_col !== nothing

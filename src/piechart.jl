@@ -11,7 +11,7 @@ Pie chart visualization with support for faceting and interactive controls.
 # Keyword Arguments
 - `value_cols::Vector{Symbol}`: Columns available for slice sizes (default: `[:value]`)
 - `label_cols::Vector{Symbol}`: Columns available for slice labels (default: `[:label]`)
-- `filters::Dict{Symbol, Any}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `hole::Float64`: Size of hole in center (0 = pie, 0-0.99 = donut) (default: `0.0`)
@@ -37,13 +37,16 @@ struct PieChart <: JSPlotsType
     function PieChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_cols::Vector{Symbol}=[:value],
                       label_cols::Vector{Symbol}=[:label],
-                      filters::Dict{Symbol, Any}=Dict{Symbol, Any}(),
+                      filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                       default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                       hole::Float64=0.0,
                       show_legend::Bool=true,
                       title::String="Pie Chart",
                       notes::String="")
+
+# Normalize filters to standard Dict{Symbol, Vector} format
+normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
         valid_value_cols = validate_and_filter_columns(value_cols, df, "value_cols")
@@ -58,7 +61,7 @@ struct PieChart <: JSPlotsType
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Get unique values for each filter column
-        filter_options = build_filter_options(filters, df)
+        filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible label columns
         color_maps, _ = build_color_maps(valid_label_cols, df)
@@ -66,7 +69,7 @@ struct PieChart <: JSPlotsType
         # Build filter dropdowns using html_controls abstraction
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_str, filters, df, update_function)
+        filter_dropdowns = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Build attribute dropdowns
         attribute_dropdowns = DropdownControl[]
@@ -101,7 +104,7 @@ struct PieChart <: JSPlotsType
         default_label_col = string(valid_label_cols[1])
 
         # Create JavaScript arrays for columns
-        filter_cols_js = build_js_array(collect(keys(filters)))
+        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         value_cols_js = build_js_array(valid_value_cols)
         label_cols_js = build_js_array(valid_label_cols)
 
