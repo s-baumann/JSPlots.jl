@@ -10,8 +10,10 @@ Distribution visualization combining histogram, box plot, and rug plot.
 
 # Keyword Arguments
 - `value_cols`: Column(s) containing values to plot (default: `:value`)
-- `group_cols`: Column(s) for group comparison (default: `nothing`)
-- `filter_cols`: Column(s) for filter sliders (default: `nothing`)
+- `color_cols`: Column(s) for group comparison and coloring (default: `nothing`)
+- `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
+  - `Dict`: Column => default values. Values can be a single value, vector, or nothing for all values
 - `show_histogram::Bool`: Display histogram (default: `true`)
 - `show_box::Bool`: Display box plot (default: `true`)
 - `show_rug::Bool`: Display rug plot (default: `true`)
@@ -25,7 +27,8 @@ Distribution visualization combining histogram, box plot, and rug plot.
 ```julia
 dp = DistPlot(:dist_chart, df, :data,
     value_cols=:age,
-    group_cols=:gender,
+    color_cols=:gender,
+    filters=[:region, :category],
     histogram_bins=20,
     title="Age Distribution"
 )
@@ -38,9 +41,9 @@ struct DistPlot <: JSPlotsType
     appearance_html::String
 
     function DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                      value_cols::Union{Symbol,Vector{Symbol}}=:value,
-                      group_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
-                      filter_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                      value_cols::Vector{Symbol}= Symbol[:value],
+                      color_cols::Vector{Symbol} = Symbol[:color],
+                      filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       show_histogram::Bool=true,
                       show_box::Bool=true,
                       show_rug::Bool=true,
@@ -49,34 +52,18 @@ struct DistPlot <: JSPlotsType
                       show_controls::Bool=false,
                       title::String="Distribution Plot",
                       notes::String="")
-        
-        # Normalize filter_cols to always be a vector
-        slider_cols = if filter_cols === nothing
-            Symbol[]
-        elseif filter_cols isa Symbol
-            [filter_cols]
-        else
-            filter_cols
-        end
 
-        # Normalize value_cols and group_cols
-        value_cols_vec = value_cols isa Symbol ? [value_cols] : value_cols
-        group_cols_vec = if group_cols === nothing
-            Symbol[]
-        elseif group_cols isa Symbol
-            [group_cols]
-        else
-            group_cols
-        end
+        # Normalize filters to standard Dict{Symbol, Vector} format
+        normalized_filters = normalize_filters(filters, df)
 
         # Default selections
-        default_value_col = first(value_cols_vec)
-        default_group_col = isempty(group_cols_vec) ? nothing : first(group_cols_vec)
+        default_value_col = first(value_cols)
+        default_group_col = isempty(color_cols) ? nothing : first(color_cols)
         
         # Generate value column dropdown using html_controls abstraction
         value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
             string(chart_title),
-            value_cols_vec,
+            value_cols,
             default_value_col,
             "updatePlotWithFilters_$(chart_title)();"
         )
@@ -84,7 +71,7 @@ struct DistPlot <: JSPlotsType
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
-            group_cols_vec,
+            color_cols,
             default_group_col,
             "updatePlotWithFilters_$(chart_title)();"
         )

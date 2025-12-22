@@ -9,8 +9,8 @@ Kernel density plot visualization with interactive controls.
 - `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
 
 # Keyword Arguments
-- `value_cols::Union{Symbol,Vector{Symbol}}`: Column(s) for density estimation (default: `:value`)
-- `group_cols::Union{Symbol,Vector{Symbol},Nothing}`: Column(s) for grouping/coloring (default: `nothing`)
+- `value_cols::Vector{Symbol}`: Column(s) for density estimation (default: `[:value]`)
+- `color_cols::Vector{Symbol}`: Column(s) for grouping/coloring (default: `[:color]`)
 - `filter_cols::Union{Symbol,Vector{Symbol},Nothing}`: Column(s) for filtering (default: `nothing`)
 - `facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols::Union{Nothing,Symbol,Vector{Symbol}}`: Default faceting columns (default: `nothing`)
@@ -23,8 +23,8 @@ Kernel density plot visualization with interactive controls.
 # Examples
 ```julia
 kd = KernelDensity(:density, df, :mydata;
-    value_cols = :measurement,
-    group_cols = :category,
+    value_cols = [:measurement],
+    color_cols = [:category],
     bandwidth = 0.5,
     title = "Distribution by Category"
 )
@@ -37,8 +37,8 @@ struct KernelDensity <: JSPlotsType
     appearance_html::String
 
     function KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                          value_cols::Union{Symbol,Vector{Symbol}}=:value,
-                          group_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
+                          value_cols::Vector{Symbol}=Symbol[:value],
+                          color_cols::Vector{Symbol}=Symbol[:color],
                           filter_cols::Union{Symbol,Vector{Symbol},Nothing}=nothing,
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -50,28 +50,18 @@ struct KernelDensity <: JSPlotsType
 
         all_cols = names(df)
 
-        # Normalize value_cols and group_cols
-        value_cols_vec = value_cols isa Symbol ? [value_cols] : value_cols
-        group_cols_vec = if group_cols === nothing
-            Symbol[]
-        elseif group_cols isa Symbol
-            [group_cols]
-        else
-            group_cols
-        end
-
         # Default selections
-        default_value_col = first(value_cols_vec)
-        default_group_col = isempty(group_cols_vec) ? nothing : first(group_cols_vec)
+        default_value_col = first(value_cols)
+        default_color_col = isempty(color_cols) ? nothing : first(color_cols)
 
         # Validate value column
-        for col in value_cols_vec
+        for col in value_cols
             String(col) in all_cols || error("Value column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Validate group columns if provided
-        for col in group_cols_vec
-            String(col) in all_cols || error("Group column $col not found in dataframe. Available: $all_cols")
+        # Validate color columns if provided
+        for col in color_cols
+            String(col) in all_cols || error("Color column $col not found in dataframe. Available: $all_cols")
         end
 
         # Normalize and validate facets using centralized helper
@@ -100,7 +90,7 @@ struct KernelDensity <: JSPlotsType
         # Generate value column dropdown using html_controls abstraction
         value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
             string(chart_title),
-            value_cols_vec,
+            value_cols,
             default_value_col,
             "updateChart_$(chart_title)();"
         )
@@ -108,8 +98,8 @@ struct KernelDensity <: JSPlotsType
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
-            group_cols_vec,
-            default_group_col,
+            color_cols,
+            default_color_col,
             "updateChart_$(chart_title)();"
         )
 
