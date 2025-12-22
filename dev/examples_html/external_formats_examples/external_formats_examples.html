@@ -797,205 +797,228 @@ $(function(){
         console.error('Error loading data for chart timeseries:', error);
     });
 })();
-            (function() {
-            window.showDensity_stock_scatter = true;
-            const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
-            const DEFAULT_X_COL = 'volume';
-            const DEFAULT_Y_COL = 'price';
-            const DEFAULT_COLOR_COL = 'symbol';
+    (function() {
+    const FILTER_COLS = [];
+    window.showDensity_stock_scatter = true;
+    const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+    const DEFAULT_X_COL = 'volume';
+    const DEFAULT_Y_COL = 'price';
+    const DEFAULT_COLOR_COL = 'symbol';
 
-            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
-            const buildSymbolMap = (data, col) => {
-                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
-                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
-            };
+    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+    const buildSymbolMap = (data, col) => {
+        const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+        return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+    };
 
-            function createTraces(data, X_COL, Y_COL, COLOR_COL, xaxis='x', yaxis='y', showlegend=true) {
-                const symbolMap = buildSymbolMap(data, COLOR_COL);
-                const groups = {};
-                data.forEach(row => {
-                    const key = row[COLOR_COL];
-                    if (!groups[key]) groups[key] = [];
-                    groups[key].push(row);
+    function createTraces(data, X_COL, Y_COL, COLOR_COL, xaxis='x', yaxis='y', showlegend=true) {
+        const symbolMap = buildSymbolMap(data, COLOR_COL);
+        const groups = {};
+        data.forEach(row => {
+            const key = row[COLOR_COL];
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(row);
+        });
+
+        return Object.entries(groups).map(([key, groupData]) => ({
+            x: groupData.map(d => d[X_COL]),
+            y: groupData.map(d => d[Y_COL]),
+            mode: 'markers',
+            name: key,
+            legendgroup: key,
+            showlegend: showlegend,
+            xaxis: xaxis,
+            yaxis: yaxis,
+            marker: {
+                size: 4,
+                opacity: 0.6,
+                symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+            },
+            type: 'scatter'
+        }));
+    }
+
+    function renderNoFacets(data, X_COL, Y_COL, COLOR_COL) {
+        const traces = createTraces(data, X_COL, Y_COL, COLOR_COL);
+
+        if (window.showDensity_stock_scatter) {
+            traces.push({
+                x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                showscale: false, type: 'histogram2dcontour', showlegend: false
+            });
+        }
+
+        traces.push(
+            { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+            { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+        );
+
+        Plotly.newPlot('stock_scatter', traces, {
+            title: 'Stock Price vs Volume', showlegend: true, autosize: true, hovermode: 'closest',
+            xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+            yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+            xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            margin: {t: 100, r: 100, b: 100, l: 100}
+        }, {responsive: true});
+    }
+
+    function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL) {
+        const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+        const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+        const traces = [];
+
+        facetValues.forEach((facetVal, idx) => {
+            const facetData = data.filter(row => row[FACET_COL] === facetVal);
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+            traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
+
+            if (window.showDensity_stock_scatter) {
+                traces.push({
+                    x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                    name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                    showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                 });
-
-                return Object.entries(groups).map(([key, groupData]) => ({
-                    x: groupData.map(d => d[X_COL]),
-                    y: groupData.map(d => d[Y_COL]),
-                    mode: 'markers',
-                    name: key,
-                    legendgroup: key,
-                    showlegend: showlegend,
-                    xaxis: xaxis,
-                    yaxis: yaxis,
-                    marker: {
-                        size: 4,
-                        opacity: 0.6,
-                        symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
-                    },
-                    type: 'scatter'
-                }));
             }
+        });
 
-            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL) {
-                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL);
+        const layout = {
+            title: 'Stock Price vs Volume', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: facetValues.map((val, idx) => ({
+                text: FACET_COL + ': ' + val, showarrow: false,
+                xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+            })),
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+        facetValues.forEach((val, idx) => {
+            const ax = idx === 0 ? '' : (idx + 1);
+            layout['xaxis' + ax] = {title: X_COL};
+            layout['yaxis' + ax] = {title: Y_COL};
+        });
+        Plotly.newPlot('stock_scatter', traces, layout, {responsive: true});
+    }
+
+    function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+        const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+        const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+        const rows = facet1Values.length, cols = facet2Values.length;
+        const traces = [];
+
+        facet1Values.forEach((facet1Val, rowIdx) => {
+            facet2Values.forEach((facet2Val, colIdx) => {
+                const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                if (facetData.length === 0) return;
+
+                const idx = rowIdx * cols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
 
                 if (window.showDensity_stock_scatter) {
                     traces.push({
-                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
                         name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
-                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                        showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                     });
                 }
+            });
+        });
 
-                traces.push(
-                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
-                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
-                );
+        const layout = {
+            title: 'Stock Price vs Volume', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: [
+                ...facet2Values.map((val, colIdx) => ({
+                    text: FACET2_COL + ': ' + val, showarrow: false,
+                    xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                    yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                    x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                })),
+                ...facet1Values.map((val, rowIdx) => ({
+                    text: FACET1_COL + ': ' + val, showarrow: false,
+                    xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                    yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                    x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                }))
+            ],
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+        facet1Values.forEach((v1, rowIdx) => {
+            facet2Values.forEach((v2, colIdx) => {
+                const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                layout['xaxis' + ax] = {title: X_COL};
+                layout['yaxis' + ax] = {title: Y_COL};
+            });
+        });
+        Plotly.newPlot('stock_scatter', traces, layout, {responsive: true});
+    }
 
-                Plotly.newPlot('stock_scatter', traces, {
-                    title: 'Stock Price vs Volume', showlegend: true, autosize: true, hovermode: 'closest',
-                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
-                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
-                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
-                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
-                    margin: {t: 100, r: 100, b: 100, l: 100}
-                }, {responsive: true});
+    function updatePlot_stock_scatter(data) {
+        const X_COL = getCol('x_col_select_stock_scatter', DEFAULT_X_COL);
+        const Y_COL = getCol('y_col_select_stock_scatter', DEFAULT_Y_COL);
+        const COLOR_COL = getCol('color_col_select_stock_scatter', DEFAULT_COLOR_COL);
+
+        let FACET1 = getCol('facet1_select_stock_scatter', null);
+        let FACET2 = getCol('facet2_select_stock_scatter', null);
+        if (FACET1 === 'None') FACET1 = null;
+        if (FACET2 === 'None') FACET2 = null;
+
+        if (FACET1 && FACET2) {
+            renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2);
+        } else if (FACET1) {
+            renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1);
+        } else {
+            renderNoFacets(data, X_COL, Y_COL, COLOR_COL);
+        }
+    }
+
+    window.updateChart_stock_scatter = () => updatePlotWithFilters_stock_scatter();
+
+    // Filter and update function
+    window.updatePlotWithFilters_stock_scatter = function() {
+        // Get filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select_stock_scatter');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
+        });
 
-            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL) {
-                const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
-                const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
-                const traces = [];
-
-                facetValues.forEach((facetVal, idx) => {
-                    const facetData = data.filter(row => row[FACET_COL] === facetVal);
-                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
-                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
-
-                    if (window.showDensity_stock_scatter) {
-                        traces.push({
-                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
-                            name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
-                            showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
-                        });
-                    }
-                });
-
-                const layout = {
-                    title: 'Stock Price vs Volume', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
-                    annotations: facetValues.map((val, idx) => ({
-                        text: FACET_COL + ': ' + val, showarrow: false,
-                        xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
-                        yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
-                        x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
-                    })),
-                    margin: {t: 100, r: 50, b: 50, l: 50}
-                };
-                facetValues.forEach((val, idx) => {
-                    const ax = idx === 0 ? '' : (idx + 1);
-                    layout['xaxis' + ax] = {title: X_COL};
-                    layout['yaxis' + ax] = {title: Y_COL};
-                });
-                Plotly.newPlot('stock_scatter', traces, layout, {responsive: true});
-            }
-
-            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
-                const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
-                const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
-                const rows = facet1Values.length, cols = facet2Values.length;
-                const traces = [];
-
-                facet1Values.forEach((facet1Val, rowIdx) => {
-                    facet2Values.forEach((facet2Val, colIdx) => {
-                        const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
-                        if (facetData.length === 0) return;
-
-                        const idx = rowIdx * cols + colIdx;
-                        const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
-                        const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
-
-                        if (window.showDensity_stock_scatter) {
-                            traces.push({
-                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
-                                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
-                                showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
-                            });
-                        }
-                    });
-                });
-
-                const layout = {
-                    title: 'Stock Price vs Volume', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
-                    annotations: [
-                        ...facet2Values.map((val, colIdx) => ({
-                            text: FACET2_COL + ': ' + val, showarrow: false,
-                            xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
-                            yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
-                            x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
-                        })),
-                        ...facet1Values.map((val, rowIdx) => ({
-                            text: FACET1_COL + ': ' + val, showarrow: false,
-                            xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
-                            yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
-                            x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
-                        }))
-                    ],
-                    margin: {t: 100, r: 50, b: 50, l: 50}
-                };
-                facet1Values.forEach((v1, rowIdx) => {
-                    facet2Values.forEach((v2, colIdx) => {
-                        const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
-                        layout['xaxis' + ax] = {title: X_COL};
-                        layout['yaxis' + ax] = {title: Y_COL};
-                    });
-                });
-                Plotly.newPlot('stock_scatter', traces, layout, {responsive: true});
-            }
-
-            function updatePlot_stock_scatter(data) {
-                const X_COL = getCol('x_col_select_stock_scatter', DEFAULT_X_COL);
-                const Y_COL = getCol('y_col_select_stock_scatter', DEFAULT_Y_COL);
-                const COLOR_COL = getCol('color_col_select_stock_scatter', DEFAULT_COLOR_COL);
-
-                let FACET1 = getCol('facet1_select_stock_scatter', null);
-                let FACET2 = getCol('facet2_select_stock_scatter', null);
-                if (FACET1 === 'None') FACET1 = null;
-                if (FACET2 === 'None') FACET2 = null;
-
-                if (FACET1 && FACET2) {
-                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2);
-                } else if (FACET1) {
-                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1);
-                } else {
-                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL);
+        // Filter data (support multiple selections per filter)
+        const filteredData = window.allData_stock_scatter.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
                 }
             }
+            return true;
+        });
 
-            window.updateChart_stock_scatter = () => updatePlotWithFilters_stock_scatter();
-                updatePlotWithFilters_stock_scatter = function() {
-        updatePlot_stock_scatter(window.allData_stock_scatter);
+        // Update plot with filtered data
+        updatePlot_stock_scatter(filteredData);
     };
 
-
-            loadDataset('stock_data').then(data => {
-                window.allData_stock_scatter = data;
-                $(function() {
-                    const densityBtn = document.getElementById('stock_scatter_density_toggle');
-                    if (densityBtn) {
-                        densityBtn.addEventListener('click', function() {
-                            window.showDensity_stock_scatter = !window.showDensity_stock_scatter;
-                            this.textContent = window.showDensity_stock_scatter ? 'Hide Density Contours' : 'Show Density Contours';
-                            updatePlotWithFilters_stock_scatter();
-                        });
-                    }
+    loadDataset('stock_data').then(data => {
+        window.allData_stock_scatter = data;
+        $(function() {
+            const densityBtn = document.getElementById('stock_scatter_density_toggle');
+            if (densityBtn) {
+                densityBtn.addEventListener('click', function() {
+                    window.showDensity_stock_scatter = !window.showDensity_stock_scatter;
+                    this.textContent = window.showDensity_stock_scatter ? 'Hide Density Contours' : 'Show Density Contours';
                     updatePlotWithFilters_stock_scatter();
                 });
-            }).catch(error => console.error('Error loading data for chart stock_scatter:', error));
-            })();
-        
+            }
+            updatePlotWithFilters_stock_scatter();
+        });
+    }).catch(error => console.error('Error loading data for chart stock_scatter:', error));
+    })();
+
 
 });
 </script>
