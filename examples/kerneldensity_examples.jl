@@ -25,7 +25,7 @@ df1 = DataFrame(
 )
 
 kde1 = KernelDensity(:simple_kde, df1, :df1;
-    value_cols = :value,
+    value_cols = [:value],
     title = "Simple Kernel Density",
     notes = "Basic kernel density estimation for a normal distribution"
 )
@@ -101,7 +101,7 @@ df5 = DataFrame(
 )
 
 kde5 = KernelDensity(:facet_grid_kde, df5, :df5;
-    value_cols = :value,
+    value_cols = [:value],
     facet_cols = [:treatment, :timepoint],
     default_facet_cols = [:treatment, :timepoint],
     title = "Faceted Grid - Two Variables",
@@ -120,7 +120,7 @@ df6 = DataFrame(
 )
 
 kde6 = KernelDensity(:bimodal_kde, df6, :df6;
-    value_cols = :value,
+    value_cols = [:value],
     title = "Bimodal Distribution Detection",
     fill_density = true,
     notes = "Kernel density estimation excels at revealing complex distribution shapes like bimodality"

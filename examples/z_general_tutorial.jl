@@ -269,8 +269,8 @@ dist_intro = TextBlock("<h3>DistPlot - Distribution Analysis</h3><p> This makes 
 
 dist_chart = DistPlot(:dist, df, :sales_data,
     value_cols=[:profit, :sales, :cost, :quantity, :customers, :satisfaction],
-    group_cols=[:region, :product, :segment],
-    filter_cols=[:region, :product, :segment, :date],
+    color_cols=[:region, :product, :segment],
+    filters=[:region, :product, :segment, :date],
     notes="Multi-view distribution analysis of profit")
 
 # KernelDensity
@@ -278,8 +278,8 @@ kde_intro = TextBlock("<h3>KernelDensity - Smooth Distribution</h3><p>This shows
 
 kde_chart = KernelDensity(:kde, df, :sales_data,
     value_cols=[:profit, :sales, :cost, :quantity, :customers, :satisfaction],
-    group_cols=[:region, :product, :segment],
-    filter_cols=[:region, :product, :segment, :date],
+    color_cols=[:region, :product, :segment],
+    filters=[:region, :product, :segment, :date],
     facet_cols=[:region, :product, :segment],
     default_facet_cols=[:segment],
     notes="Distribution of customer satisfaction ratings")

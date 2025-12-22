@@ -49,7 +49,7 @@ struct Scatter3D <: JSPlotsType
                           title::String="3D Scatter Plot",
                           notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Vector} format
+# Normalize filters to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
 
         # Sanitize chart_title for use in JavaScript function names

@@ -68,7 +68,7 @@ struct ScatterSurface3D <: JSPlotsType
                                title::String="3D Scatter with Surfaces",
                                notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Vector} format
+# Normalize filters to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
 
         chart_title_safe = sanitize_chart_title(chart_title)
@@ -297,6 +297,9 @@ function generate_html(chart_title_safe, data_label, df,
                       x_col, y_col, z_col, group_cols, facet_cols, filters,
                       all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
                       all_surfaces_data, marker_size, marker_opacity, height, title, notes)
+
+    # Normalize filters to standard Dict{Symbol, Any} format
+    normalized_filters = normalize_filters(filters, df)
 
     # Build filter dropdowns using html_controls abstraction
     update_function = "updatePlotWithFilters_$(chart_title_safe)()"

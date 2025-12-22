@@ -41,8 +41,8 @@ struct DistPlot <: JSPlotsType
     appearance_html::String
 
     function DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                      value_cols::Vector{Symbol}= Symbol[:value],
-                      color_cols::Vector{Symbol} = Symbol[:color],
+                      value_cols::Vector{Symbol}=[:value],
+                      color_cols::Vector{Symbol}=Symbol[],
                       filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       show_histogram::Bool=true,
                       show_box::Bool=true,
@@ -53,12 +53,12 @@ struct DistPlot <: JSPlotsType
                       title::String="Distribution Plot",
                       notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Vector} format
+        # Normalize filters to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
 
         # Default selections
         default_value_col = first(value_cols)
-        default_group_col = isempty(color_cols) ? nothing : first(color_cols)
+        default_color_col = isempty(color_cols) ? nothing : first(color_cols)
         
         # Generate value column dropdown using html_controls abstraction
         value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
@@ -72,7 +72,7 @@ struct DistPlot <: JSPlotsType
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
             color_cols,
-            default_group_col,
+            default_color_col,
             "updatePlotWithFilters_$(chart_title)();"
         )
 
@@ -96,12 +96,12 @@ struct DistPlot <: JSPlotsType
         # Generate trace creation JavaScript
         trace_js = """
             // Get current selections from dropdowns
-            var currentValueCol = $(length(value_cols_vec) >= 2 ?
+            var currentValueCol = $(length(value_cols) >= 2 ?
                 "document.getElementById('$(chart_title)_value_selector').value" :
                 "'$(default_value_col)'");
             var currentGroupCol = $(length(color_cols) >= 2 ?
                 "document.getElementById('$(chart_title)_group_selector').value" :
-                (default_group_col !== nothing ? "'$(default_group_col)'" : "null"));
+                (default_color_col !== nothing ? "'$(default_color_col)'" : "null"));
 
             // Handle "None" option for group selector
             if (currentGroupCol === '_none_') {

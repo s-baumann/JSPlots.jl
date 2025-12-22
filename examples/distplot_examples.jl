@@ -43,8 +43,8 @@ df2 = DataFrame(
 )
 
 distplot2 = DistPlot(:multi_group_dist, df2, :df2;
-    value_cols = :value,
-    color_cols = :group,
+    value_cols = [:value],
+    color_cols = [:group],
     title = "Treatment Effect Comparison",
     notes = "Compare distributions across different treatment groups using color_cols"
 )
@@ -58,8 +58,8 @@ df3 = DataFrame(
 )
 
 distplot3 = DistPlot(:filtered_dist, df3, :df3;
-    value_cols = :score,
-    filter_cols = [:age, :department],
+    value_cols = [:score],
+    filters = [:age, :department],
     histogram_bins = 40,
     title = "Score Distribution with Interactive Filters",
     notes = "Use age and department filters to filter data dynamically"
@@ -98,8 +98,8 @@ df5 = DataFrame(
 )
 
 distplot5 = DistPlot(:custom_appearance, df5, :df5;
-    value_cols = :measurement,
-    color_cols = :time_point,
+    value_cols = [:measurement],
+    color_cols = [:time_point],
     show_histogram = true,
     show_box = true,
     show_rug = false,

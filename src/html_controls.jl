@@ -253,7 +253,7 @@ Helper function to build filter dropdown controls from filter dictionary.
 - `Vector{DropdownControl}`: Vector of filter dropdown controls
 """
 function build_filter_dropdowns(chart_title_safe::String,
-                                filters::Dict{Symbol, Vector},
+                                filters::Dict{Symbol, Any},
                                 df::DataFrame,
                                 update_function::String)::Vector{DropdownControl}
 
@@ -290,118 +290,6 @@ function build_filter_dropdowns(chart_title_safe::String,
     return filter_dropdowns
 end
 
-"""
-    detect_slider_type(df::DataFrame, col::Symbol)
-
-Detect the appropriate slider type for a column based on its data type and values.
-
-# Returns
-- `:date` - for Date/DateTime columns
-- `:continuous` - for numeric columns with >20 unique values
-- `:categorical` - for all other cases (strings, or numeric with ≤20 unique values)
-"""
-function detect_slider_type(df::DataFrame, col::Symbol)
-    col_data = df[!, col]
-    eltype(col_data) <: Union{Date, DateTime, Missing} && return :date
-
-    if eltype(col_data) <: Union{Number, Missing}
-        unique_vals = unique(skipmissing(col_data))
-        return length(unique_vals) <= 20 ? :categorical : :continuous
-    end
-
-    return :categorical
-end
-
-"""
-    generate_slider_html_and_js(df::DataFrame,
-                                slider_cols::Vector{Symbol},
-                                chart_id::String,
-                                update_function::String)
-
-Generate HTML and JavaScript for filter sliders.
-
-# Arguments
-- `df::DataFrame`: The data to build sliders from
-- `slider_cols::Vector{Symbol}`: Columns to create sliders for
-- `chart_id::String`: Unique identifier for the chart (used in element IDs)
-- `update_function::String`: JavaScript function name to call on change
-
-# Returns
-- `(sliders_html::String, slider_init_js::String)`: Tuple of HTML markup and JS initialization code
-
-# Slider Types
-- **Categorical**: Multi-select dropdown for columns with discrete values
-- **Continuous**: Range slider for numeric columns with many values
-- **Date**: Range slider for date/datetime columns
-"""
-function generate_slider_html_and_js(df::DataFrame,
-                                     slider_cols::Vector{Symbol},
-                                     chart_id::String,
-                                     update_function::String)
-    sliders_html = ""
-    slider_init_js = ""
-
-    for col in slider_cols
-        slider_type = detect_slider_type(df, col)
-        slider_id = "$(chart_id)_$(col)_slider"
-
-        if slider_type == :categorical
-            unique_vals = sort(unique(skipmissing(df[!, col])))
-            options = join(["<option value=\"$(v)\" selected>$(v)</option>" for v in unique_vals], "\n")
-            sliders_html *= """
-            <div style="margin: 20px 0;">
-                <label for="$slider_id">Filter by $(col): </label>
-                <select id="$slider_id" multiple style="width: 300px; height: 100px;">
-                    $options
-                </select>
-                <p style="margin: 5px 0;"><em>Hold Ctrl/Cmd to select multiple values</em></p>
-            </div>
-            """
-            slider_init_js *= "                    document.getElementById('$slider_id').addEventListener('change', () => $update_function);\n"
-        elseif slider_type == :continuous
-            min_val, max_val = extrema(skipmissing(df[!, col]))
-            sliders_html *= """
-            <div style="margin: 20px 0;">
-                <label>Filter by $(col): </label>
-                <span id="$(slider_id)_label">$(round(min_val, digits=2)) to $(round(max_val, digits=2))</span>
-                <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-            </div>
-            """
-            slider_init_js *= """
-                \$("#$slider_id").slider({
-                    range: true, min: $min_val, max: $max_val, step: $(abs(max_val - min_val) / 1000),
-                    values: [$min_val, $max_val],
-                    slide: (e, ui) => \$("#$(slider_id)_label").text(ui.values[0].toFixed(2) + " to " + ui.values[1].toFixed(2)),
-                    change: () => $update_function
-                });
-            """
-        elseif slider_type == :date
-            unique_dates = sort(unique(skipmissing(df[!, col])))
-            date_strings = string.(unique_dates)
-            sliders_html *= """
-            <div style="margin: 20px 0;">
-                <label>Filter by $(col): </label>
-                <span id="$(slider_id)_label">$(first(date_strings)) to $(last(date_strings))</span>
-                <div id="$slider_id" style="width: 300px; margin: 10px 0;"></div>
-            </div>
-            """
-            slider_init_js *= """
-                window.dateValues_$(slider_id) = $(JSON.json(date_strings));
-                \$("#$slider_id").slider({
-                    range: true, min: 0, max: $(length(unique_dates) - 1),
-                    values: [0, $(length(unique_dates) - 1)],
-                    slide: (e, ui) => {
-                        const dates = window.dateValues_$(slider_id);
-                        \$("#$(slider_id)_label").text(dates[ui.values[0]] + " to " + dates[ui.values[1]]);
-                    },
-                    change: () => $update_function
-                });
-            """
-        end
-    end
-
-    return (sliders_html, slider_init_js)
-end
 
 """
     generate_facet_dropdowns_html(chart_title::String,
@@ -528,7 +416,7 @@ end
 """
     generate_group_column_dropdown_html(chart_title::String,
                                          group_cols::Vector{Symbol},
-                                         default_group_col::Union{Symbol, Nothing},
+                                         default_color_col::Union{Symbol, Nothing},
                                          update_function::String;
                                          label::String="Group by")
 
@@ -537,7 +425,7 @@ Generate group column selection dropdown HTML with "None" option.
 # Arguments
 - `chart_title::String`: Chart title for element IDs
 - `group_cols::Vector{Symbol}`: Available group columns
-- `default_group_col::Union{Symbol, Nothing}`: Default selected column (nothing for "None")
+- `default_color_col::Union{Symbol, Nothing}`: Default selected column (nothing for "None")
 - `update_function::String`: JavaScript function to call on change
 - `label::String`: Label text for the dropdown (default: "Group by")
 
@@ -547,7 +435,7 @@ Generate group column selection dropdown HTML with "None" option.
 """
 function generate_group_column_dropdown_html(chart_title::String,
                                                group_cols::Vector{Symbol},
-                                               default_group_col::Union{Symbol, Nothing},
+                                               default_color_col::Union{Symbol, Nothing},
                                                update_function::String;
                                                label::String="Group by")::Tuple{String, String}
 
@@ -555,8 +443,8 @@ function generate_group_column_dropdown_html(chart_title::String,
         return ("", "")
     end
 
-    group_options_html = """<option value="_none_"$(default_group_col === nothing ? " selected" : "")>None</option>\n""" *
-                        join(["""<option value="$(col)"$(col == default_group_col ? " selected" : "")>$(col)</option>"""
+    group_options_html = """<option value="_none_"$(default_color_col === nothing ? " selected" : "")>None</option>\n""" *
+                        join(["""<option value="$(col)"$(col == default_color_col ? " selected" : "")>$(col)</option>"""
                              for col in group_cols], "\n")
 
     html = """
@@ -575,105 +463,6 @@ function generate_group_column_dropdown_html(chart_title::String,
     return (html, js)
 end
 
-"""
-    generate_slider_filter_logic_js(df::DataFrame,
-                                     slider_cols::Vector{Symbol},
-                                     chart_id::String,
-                                     update_function_name::String;
-                                     data_variable::String="allData",
-                                     use_window::Bool=false)
-
-Generate JavaScript filter logic for slider-based filters.
-
-# Arguments
-- `df::DataFrame`: The data to analyze for slider types
-- `slider_cols::Vector{Symbol}`: Columns that have sliders
-- `chart_id::String`: Unique identifier for the chart
-- `update_function_name::String`: Name of the JavaScript update function to call with filtered data
-- `data_variable::String`: Name of the JavaScript variable holding the data (default: "allData")
-- `use_window::Bool`: Whether to attach function to window object (default: false)
-
-# Returns
-- `String`: JavaScript code that defines the filter function
-
-# Example
-```julia
-filter_js = generate_slider_filter_logic_js(
-    df,
-    [:category, :value],
-    "my_chart",
-    "updatePlot_my_chart"
-)
-```
-"""
-function generate_slider_filter_logic_js(df::DataFrame,
-                                          slider_cols::Vector{Symbol},
-                                          chart_id::String,
-                                          update_function_name::String;
-                                          data_variable::String="allData",
-                                          use_window::Bool=false)::String
-
-    if isempty(slider_cols)
-        # No sliders - just call update function with all data
-        func_prefix = use_window ? "window." : ""
-        return """
-            $(func_prefix)updatePlotWithFilters_$(chart_id) = function() {
-                $(update_function_name)(window.$(data_variable)_$(chart_id));
-            };
-        """
-    end
-
-    filter_checks = String[]
-    for col in slider_cols
-        slider_type = detect_slider_type(df, col)
-        slider_id = "$(chart_id)_$(col)_slider"
-
-        if slider_type == :categorical
-            push!(filter_checks, """
-                // Filter for $(col) (categorical)
-                const $(col)_select = document.getElementById('$slider_id');
-                const $(col)_selected = Array.from($(col)_select.selectedOptions).map(opt => opt.value);
-                if ($(col)_selected.length > 0 && !$(col)_selected.includes(String(row.$(col)))) {
-                    return false;
-                }
-            """)
-        elseif slider_type == :continuous
-            push!(filter_checks, """
-                // Filter for $(col) (continuous)
-                if (\$("#$slider_id").data('ui-slider')) {
-                    const $(col)_values = \$("#$slider_id").slider("values");
-                    const $(col)_val = parseFloat(row.$(col));
-                    if ($(col)_val < $(col)_values[0] || $(col)_val > $(col)_values[1]) {
-                        return false;
-                    }
-                }
-            """)
-        elseif slider_type == :date
-            push!(filter_checks, """
-                // Filter for $(col) (date)
-                if (\$("#$slider_id").data('ui-slider')) {
-                    const $(col)_values = \$("#$slider_id").slider("values");
-                    const $(col)_minDate = window.dateValues_$(slider_id)[$(col)_values[0]];
-                    const $(col)_maxDate = window.dateValues_$(slider_id)[$(col)_values[1]];
-                    if (row.$(col) < $(col)_minDate || row.$(col) > $(col)_maxDate) {
-                        return false;
-                    }
-                }
-            """)
-        end
-    end
-
-    func_prefix = use_window ? "window." : ""
-    return """
-        $(func_prefix)updatePlotWithFilters_$(chart_id) = function() {
-            const filteredData = window.$(data_variable)_$(chart_id).filter(function(row) {
-                $(join(filter_checks, "\n                "))
-                return true;
-            });
-            $(update_function_name)(filteredData);
-        };
-    """
-end
 
 """
     generate_appearance_html_from_sections(filters_html::String,
@@ -683,10 +472,10 @@ end
                                            notes::String,
                                            chart_div_id::String)
 
-Generate appearance HTML from pre-built sections (for charts using sliders or custom controls).
+Generate appearance HTML from pre-built sections (for charts using custom controls).
 
 This function provides the standard three-section layout without requiring DropdownControl objects.
-Useful for charts that build their HTML sections directly (e.g., using sliders instead of dropdowns).
+Useful for charts that build their HTML sections directly.
 
 # Arguments
 - `filters_html::String`: Pre-built HTML for filter controls

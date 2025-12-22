@@ -8,7 +8,7 @@ using Dates
 
     @testset "Basic creation" begin
         chart = DistPlot(:test_dist, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             title = "Dist Test"
         )
         @test chart.chart_title == :test_dist
@@ -21,15 +21,15 @@ using Dates
             group = repeat(["A", "B"], 50)
         )
         chart = DistPlot(:grouped_dist, df_grouped, :df_grouped;
-            value_cols = :value,
-            color_cols = :group
+            value_cols = [:value],
+            color_cols = [:group]
         )
         @test occursin("group", chart.functional_html)
     end
 
     @testset "Custom appearance" begin
         chart = DistPlot(:custom_dist, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             show_box = false,
             show_rug = false,
             histogram_bins = 50,
@@ -61,7 +61,7 @@ using Dates
             region = repeat(["North", "South", "East", "West"], 25)
         )
         chart = DistPlot(:multi_groups, df_groups, :df_groups;
-            value_cols = :value,
+            value_cols = [:value],
             color_cols = [:category, :region],
             show_controls = true
         )
@@ -76,8 +76,8 @@ using Dates
             pressure = rand(100) .* 100 .+ 900
         )
         chart = DistPlot(:filter_continuous, df_filter, :df_filter;
-            value_cols = :value,
-            filter_cols = [:temperature, :pressure]
+            value_cols = [:value],
+            filters = [:temperature, :pressure]
         )
         @test occursin("temperature", chart.appearance_html)
         @test occursin("pressure", chart.appearance_html)
@@ -90,8 +90,8 @@ using Dates
             date = Date(2024, 1, 1):Day(1):Date(2024, 12, 30)  # 365 days
         )
         chart = DistPlot(:filter_dates, df_dates, :df_dates;
-            value_cols = :value,
-            filter_cols = :date
+            value_cols = [:value],
+            filters = [:date]
         )
         @test occursin("date", chart.appearance_html)
     end
@@ -103,8 +103,8 @@ using Dates
             count = rand(1:100, 100)
         )
         chart = DistPlot(:filter_int, df_int, :df_int;
-            value_cols = :value,
-            filter_cols = [:year, :count]
+            value_cols = [:value],
+            filters = [:year, :count]
         )
         @test occursin("year", chart.appearance_html)
         @test occursin("count", chart.appearance_html)
@@ -112,7 +112,7 @@ using Dates
 
     @testset "Only histogram" begin
         chart = DistPlot(:hist_only, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             show_histogram = true,
             show_box = false,
             show_rug = false
@@ -122,7 +122,7 @@ using Dates
 
     @testset "Only box plot" begin
         chart = DistPlot(:box_only, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             show_histogram = false,
             show_box = true,
             show_rug = false
@@ -132,7 +132,7 @@ using Dates
 
     @testset "Only rug plot" begin
         chart = DistPlot(:rug_only, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             show_histogram = false,
             show_box = false,
             show_rug = true
@@ -143,7 +143,7 @@ using Dates
     @testset "Custom histogram bins" begin
         for bins in [10, 20, 50, 100]
             chart = DistPlot(Symbol("bins_$bins"), df_dist, :df_dist;
-                value_cols = :value,
+                value_cols = [:value],
                 histogram_bins = bins
             )
             @test occursin(string(bins), chart.functional_html)
@@ -153,7 +153,7 @@ using Dates
     @testset "Custom box opacity" begin
         for opacity in [0.3, 0.5, 0.8, 1.0]
             chart = DistPlot(Symbol("opacity_$(Int(opacity*10))"), df_dist, :df_dist;
-                value_cols = :value,
+                value_cols = [:value],
                 box_opacity = opacity
             )
             @test occursin(string(opacity), chart.functional_html)
@@ -163,7 +163,7 @@ using Dates
     @testset "With notes" begin
         notes = "This is a test distribution plot with detailed notes."
         chart = DistPlot(:with_notes, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             notes = notes
         )
         @test occursin(notes, chart.appearance_html)
@@ -177,8 +177,8 @@ using Dates
             )
 
             chart = DistPlot(:page_dist, df_test, :test_data;
-                value_cols = :value,
-                color_cols = :category,
+                value_cols = [:value],
+                color_cols = [:category],
                 title = "Distribution Test"
             )
 
@@ -195,7 +195,7 @@ using Dates
 
     @testset "Dependencies method" begin
         chart = DistPlot(:dep_test, df_dist, :my_data;
-            value_cols = :value
+            value_cols = [:value]
         )
         deps = JSPlots.dependencies(chart)
         @test deps == [:my_data]
@@ -205,7 +205,7 @@ using Dates
     @testset "Empty data handling" begin
         df_empty = DataFrame(value = Float64[])
         chart = DistPlot(:empty_dist, df_empty, :df_empty;
-            value_cols = :value
+            value_cols = [:value]
         )
         @test chart.chart_title == :empty_dist
     end
@@ -218,8 +218,8 @@ using Dates
 
         # With controls
         chart_with = DistPlot(:with_controls, df_test, :df_test;
-            value_cols = :value,
-            color_cols = :group,
+            value_cols = [:value],
+            color_cols = [:group],
             show_controls = true
         )
         @test occursin("control", lowercase(chart_with.appearance_html)) ||
@@ -227,8 +227,8 @@ using Dates
 
         # Without controls
         chart_without = DistPlot(:without_controls, df_test, :df_test;
-            value_cols = :value,
-            color_cols = :group,
+            value_cols = [:value],
+            color_cols = [:group],
             show_controls = false
         )
         @test chart_without.appearance_html != chart_with.appearance_html
@@ -240,8 +240,8 @@ using Dates
             category = repeat(["Alpha", "Beta", "Gamma"], 34)[1:100]
         )
         chart = DistPlot(:filter_categorical, df_cat, :df_cat;
-            value_cols = :value,
-            filter_cols = :category
+            value_cols = [:value],
+            filters = [:category]
         )
         @test occursin("category", chart.appearance_html)
         @test occursin("Alpha", chart.appearance_html)
@@ -251,7 +251,7 @@ using Dates
 
     @testset "All plots disabled" begin
         chart = DistPlot(:all_disabled, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             show_histogram = false,
             show_box = false,
             show_rug = false
@@ -266,8 +266,8 @@ using Dates
             group = repeat(["X", "Y"], 25)
         )
         chart = DistPlot(:single_cols, df_single, :df_single;
-            value_cols = :value,
-            color_cols = :group
+            value_cols = [:value],
+            color_cols = [:group]
         )
         @test occursin("value", chart.functional_html)
         @test occursin("group", chart.functional_html)
@@ -275,7 +275,7 @@ using Dates
 
     @testset "Large number of bins" begin
         chart = DistPlot(:large_bins, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             histogram_bins = 100
         )
         @test occursin("100", chart.functional_html)
@@ -283,7 +283,7 @@ using Dates
 
     @testset "Small number of bins" begin
         chart = DistPlot(:small_bins, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             histogram_bins = 5
         )
         @test occursin("5", chart.functional_html)
@@ -291,7 +291,7 @@ using Dates
 
     @testset "Zero opacity box plot" begin
         chart = DistPlot(:zero_opacity, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             box_opacity = 0.0
         )
         @test occursin("0.0", chart.functional_html)
@@ -299,7 +299,7 @@ using Dates
 
     @testset "Full opacity box plot" begin
         chart = DistPlot(:full_opacity, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             box_opacity = 1.0
         )
         @test occursin("1.0", chart.functional_html)
@@ -313,8 +313,8 @@ using Dates
             date = Date(2024, 1, 1):Day(1):Date(2024, 7, 18)
         )
         chart = DistPlot(:multi_filters, df_multi_filter, :df_multi_filter;
-            value_cols = :value,
-            filter_cols = [:temperature, :category, :date]
+            value_cols = [:value],
+            filters = [:temperature, :category, :date]
         )
         @test occursin("temperature", chart.appearance_html)
         @test occursin("category", chart.appearance_html)
@@ -323,7 +323,7 @@ using Dates
 
     @testset "No filters, no groups" begin
         chart = DistPlot(:minimal, df_dist, :df_dist;
-            value_cols = :value
+            value_cols = [:value]
         )
         @test chart.chart_title == :minimal
         @test occursin("value", chart.functional_html)
@@ -331,7 +331,7 @@ using Dates
 
     @testset "Empty title and notes" begin
         chart = DistPlot(:no_title, df_dist, :df_dist;
-            value_cols = :value,
+            value_cols = [:value],
             title = "",
             notes = ""
         )

@@ -55,7 +55,7 @@ struct AreaChart <: JSPlotsType
                             fill_opacity::Float64=0.6,
                             notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Vector} format
+        # Normalize filters to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
 
         # Sanitize chart title for use in JavaScript/HTML IDs
@@ -124,7 +124,7 @@ struct AreaChart <: JSPlotsType
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
-        default_group_col = select_default_column(valid_group_cols, "__no_group__")
+        default_color_col = select_default_column(valid_group_cols, "__no_group__")
 
         functional_html = """
         (function() {
@@ -137,7 +137,7 @@ struct AreaChart <: JSPlotsType
             const GROUP_ORDER = $group_order_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
-            const DEFAULT_GROUP_COL = '$default_group_col';
+            const DEFAULT_GROUP_COL = '$default_color_col';
             const FILL_OPACITY = $fill_opacity;
 
             let allData = [];

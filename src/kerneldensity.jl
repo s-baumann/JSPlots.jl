@@ -39,8 +39,8 @@ struct KernelDensity <: JSPlotsType
     appearance_html::String
 
     function KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                          value_cols::Vector{Symbol}=Symbol[:value],
-                          color_cols::Vector{Symbol}=Symbol[:color],
+                          value_cols::Vector{Symbol}=[:value],
+                          color_cols::Vector{Symbol}=Symbol[],
                           filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -72,7 +72,7 @@ struct KernelDensity <: JSPlotsType
             String(col) in all_cols || error("Facet column $col not found in dataframe. Available: $all_cols")
         end
 
-        # Normalize filters to standard Dict{Symbol, Vector} format
+        # Normalize filters to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
 
         # Build filter dropdowns
@@ -420,14 +420,14 @@ struct KernelDensity <: JSPlotsType
 
             function updatePlot_$(chart_title)(data) {
                 // Get current value column from dropdown or use default
-                const VALUE_COL = $(length(value_cols_vec) >= 2 ?
+                const VALUE_COL = $(length(value_cols) >= 2 ?
                     "document.getElementById('$(chart_title)_value_selector').value" :
                     "'$(default_value_col)'");
 
                 // Get current group column from dropdown or use default
                 let GROUP_COL = $(length(color_cols) >= 2 ?
                     "document.getElementById('$(chart_title)_group_selector').value" :
-                    (default_group_col !== nothing ? "'$(default_group_col)'" : "null"));
+                    (default_color_col !== nothing ? "'$(default_color_col)'" : "null"));
 
                 // Handle "None" option for group selector
                 if (GROUP_COL === '_none_') {

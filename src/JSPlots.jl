@@ -169,7 +169,7 @@ module JSPlots
     """
         normalize_filters(filters::Union{Vector{Symbol}, Dict}, df::DataFrame)
 
-    Normalize filter specification to a standard Dict{Symbol, Vector} format.
+    Normalize filter specification to a standard Dict{Symbol, Any} format where values are Vectors.
 
     # Arguments
     - `filters`: Either a Vector{Symbol} of column names or Dict with default values
@@ -231,13 +231,13 @@ module JSPlots
     end
 
     """
-        build_filter_options(filters::Dict{Symbol,Vector}, df::DataFrame)
+        build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
 
     Build a dictionary of unique values for each filter column.
     Returns Dict{String, Vector} mapping column names to their unique values.
 
     # Arguments
-    - `filters::Dict{Symbol,Vector}`: Dictionary of normalized filter configurations
+    - `filters::Dict{Symbol,Any}`: Dictionary of normalized filter configurations
     - `df::DataFrame`: DataFrame to extract unique values from
 
     # Examples
@@ -247,7 +247,7 @@ module JSPlots
     # Returns: Dict("region" => ["North", "South"], "year" => [2020, 2021, 2022])
     ```
     """
-    function build_filter_options(filters::Dict{Symbol,Vector}, df::DataFrame)
+    function build_filter_options(filters::Dict{Symbol,Any}, df::DataFrame)
         return Dict(string(col) => unique(df[!, col]) for col in keys(filters))
     end
 

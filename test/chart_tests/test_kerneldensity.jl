@@ -7,7 +7,7 @@ using DataFrames
 
     @testset "Basic creation" begin
         chart = KernelDensity(:test_kde, df_kde, :df_kde;
-            value_cols = :value,
+            value_cols = [:value],
             title = "KDE Test"
         )
         @test chart.chart_title == :test_kde
@@ -21,8 +21,8 @@ using DataFrames
             group = repeat(["A", "B"], 50)
         )
         chart = KernelDensity(:grouped_kde, df_grouped, :df_grouped;
-            value_cols = :value,
-            group_cols = :group
+            value_cols = [:value],
+            color_cols = [:group]
         )
         @test occursin("group", chart.functional_html)
     end
@@ -34,7 +34,7 @@ using DataFrames
             facet2 = repeat(["P", "Q"], inner=50)
         )
         chart = KernelDensity(:faceted_kde, df_faceted, :df_faceted;
-            value_cols = :value,
+            value_cols = [:value],
             facet_cols = [:facet1, :facet2],
             default_facet_cols = :facet1
         )
@@ -49,7 +49,7 @@ using DataFrames
             category = rand(["A", "B", "C"], 100)
         )
         chart = KernelDensity(:filtered_kde, df_filtered, :df_filtered;
-            value_cols = :value,
+            value_cols = [:value],
             filters = [:age, :category]
         )
         @test occursin("age", chart.appearance_html)
@@ -58,7 +58,7 @@ using DataFrames
 
     @testset "Custom bandwidth and appearance" begin
         chart = KernelDensity(:custom_kde, df_kde, :df_kde;
-            value_cols = :value,
+            value_cols = [:value],
             bandwidth = 1.5,
             density_opacity = 0.7,
             fill_density = false

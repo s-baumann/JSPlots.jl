@@ -99,7 +99,7 @@ df_regional = df_sales[df_sales.Date .>= Date(2024, 10, 1), :]  # Last quarter
 
 regional_kde = KernelDensity(:regional_distribution, df_regional, :sales_data;
     value_cols = [:Revenue],
-    group_cols = [:Region],
+    color_cols = [:Region],
     title = "Revenue Distribution by Region - Q4 2024",
     notes = "Kernel density plot showing revenue distribution patterns across regions"
 )

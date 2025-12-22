@@ -46,7 +46,7 @@ struct ScatterPlot <: JSPlotsType
                          title::String="Scatter Plot",
                          notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Vector} format
+# Normalize filters to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
