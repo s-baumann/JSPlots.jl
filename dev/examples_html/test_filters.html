@@ -1,0 +1,3390 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Filter Test</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                resolve(results.data);
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                resolve(data);
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        resolve(results.data);
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const FILTER_COLS = ['country', 'region'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const COLOR_COLS = [];
+    const COLOR_MAPS = {};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_COLOR_COL = '__no_color__';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;
+        if (method === 'count') return [values.length];
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_test_vector = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_test_vector');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_test_vector');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_test_vector');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_test_vector');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_test_vector');
+        const facet2Select = document.getElementById('facet2_select_test_vector');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                let xValues, yValues;
+                if (AGGREGATOR === 'none') {
+                    xValues = group.data.map(row => row[X_COL]);
+                    yValues = group.data.map(row => row[Y_COL]);
+                } else {
+                    // Group by x value and aggregate
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        if (!xGroups[xVal]) xGroups[xVal] = [];
+                        xGroups[xVal].push(row[Y_COL]);
+                    });
+
+                    xValues = [];
+                    yValues = [];
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
+                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        if (aggregated && aggregated.length > 0) {
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            yValues.push(aggregated[0]);
+                        }
+                    });
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('test_vector', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                    let xValues, yValues;
+                    if (AGGREGATOR === 'none') {
+                        xValues = group.data.map(row => row[X_COL]);
+                        yValues = group.data.map(row => row[Y_COL]);
+                    } else {
+                        // Group by x value and aggregate
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            if (!xGroups[xVal]) xGroups[xVal] = [];
+                            xGroups[xVal].push(row[Y_COL]);
+                        });
+
+                        xValues = [];
+                        yValues = [];
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
+                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            if (aggregated && aggregated.length > 0) {
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                yValues.push(aggregated[0]);
+                            }
+                        });
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? Y_COL : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('test_vector', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                        let xValues, yValues;
+                        if (AGGREGATOR === 'none') {
+                            xValues = group.data.map(row => row[X_COL]);
+                            yValues = group.data.map(row => row[Y_COL]);
+                        } else {
+                            // Group by x value and aggregate
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                if (!xGroups[xVal]) xGroups[xVal] = [];
+                                xGroups[xVal].push(row[Y_COL]);
+                            });
+
+                            xValues = [];
+                            yValues = [];
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
+                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                if (aggregated && aggregated.length > 0) {
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    yValues.push(aggregated[0]);
+                                }
+                            });
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? Y_COL : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('test_vector', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('test_data').then(function(data) {
+        allData = data;
+        window.updateChart_test_vector();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_vector:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['country'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const COLOR_COLS = [];
+    const COLOR_MAPS = {};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_COLOR_COL = '__no_color__';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;
+        if (method === 'count') return [values.length];
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_test_dict_vec = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_test_dict_vec');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_test_dict_vec');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_test_dict_vec');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_test_dict_vec');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_test_dict_vec');
+        const facet2Select = document.getElementById('facet2_select_test_dict_vec');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                let xValues, yValues;
+                if (AGGREGATOR === 'none') {
+                    xValues = group.data.map(row => row[X_COL]);
+                    yValues = group.data.map(row => row[Y_COL]);
+                } else {
+                    // Group by x value and aggregate
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        if (!xGroups[xVal]) xGroups[xVal] = [];
+                        xGroups[xVal].push(row[Y_COL]);
+                    });
+
+                    xValues = [];
+                    yValues = [];
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
+                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        if (aggregated && aggregated.length > 0) {
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            yValues.push(aggregated[0]);
+                        }
+                    });
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('test_dict_vec', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                    let xValues, yValues;
+                    if (AGGREGATOR === 'none') {
+                        xValues = group.data.map(row => row[X_COL]);
+                        yValues = group.data.map(row => row[Y_COL]);
+                    } else {
+                        // Group by x value and aggregate
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            if (!xGroups[xVal]) xGroups[xVal] = [];
+                            xGroups[xVal].push(row[Y_COL]);
+                        });
+
+                        xValues = [];
+                        yValues = [];
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
+                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            if (aggregated && aggregated.length > 0) {
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                yValues.push(aggregated[0]);
+                            }
+                        });
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? Y_COL : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('test_dict_vec', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                        let xValues, yValues;
+                        if (AGGREGATOR === 'none') {
+                            xValues = group.data.map(row => row[X_COL]);
+                            yValues = group.data.map(row => row[Y_COL]);
+                        } else {
+                            // Group by x value and aggregate
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                if (!xGroups[xVal]) xGroups[xVal] = [];
+                                xGroups[xVal].push(row[Y_COL]);
+                            });
+
+                            xValues = [];
+                            yValues = [];
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
+                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                if (aggregated && aggregated.length > 0) {
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    yValues.push(aggregated[0]);
+                                }
+                            });
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? Y_COL : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('test_dict_vec', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('test_data').then(function(data) {
+        allData = data;
+        window.updateChart_test_dict_vec();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_dict_vec:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['country'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const COLOR_COLS = [];
+    const COLOR_MAPS = {};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_COLOR_COL = '__no_color__';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;
+        if (method === 'count') return [values.length];
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_test_dict_single = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_test_dict_single');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_test_dict_single');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_test_dict_single');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_test_dict_single');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_test_dict_single');
+        const facet2Select = document.getElementById('facet2_select_test_dict_single');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                let xValues, yValues;
+                if (AGGREGATOR === 'none') {
+                    xValues = group.data.map(row => row[X_COL]);
+                    yValues = group.data.map(row => row[Y_COL]);
+                } else {
+                    // Group by x value and aggregate
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        if (!xGroups[xVal]) xGroups[xVal] = [];
+                        xGroups[xVal].push(row[Y_COL]);
+                    });
+
+                    xValues = [];
+                    yValues = [];
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
+                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        if (aggregated && aggregated.length > 0) {
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            yValues.push(aggregated[0]);
+                        }
+                    });
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('test_dict_single', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                    let xValues, yValues;
+                    if (AGGREGATOR === 'none') {
+                        xValues = group.data.map(row => row[X_COL]);
+                        yValues = group.data.map(row => row[Y_COL]);
+                    } else {
+                        // Group by x value and aggregate
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            if (!xGroups[xVal]) xGroups[xVal] = [];
+                            xGroups[xVal].push(row[Y_COL]);
+                        });
+
+                        xValues = [];
+                        yValues = [];
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
+                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            if (aggregated && aggregated.length > 0) {
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                yValues.push(aggregated[0]);
+                            }
+                        });
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? Y_COL : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('test_dict_single', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                        let xValues, yValues;
+                        if (AGGREGATOR === 'none') {
+                            xValues = group.data.map(row => row[X_COL]);
+                            yValues = group.data.map(row => row[Y_COL]);
+                        } else {
+                            // Group by x value and aggregate
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                if (!xGroups[xVal]) xGroups[xVal] = [];
+                                xGroups[xVal].push(row[Y_COL]);
+                            });
+
+                            xValues = [];
+                            yValues = [];
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
+                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                if (aggregated && aggregated.length > 0) {
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    yValues.push(aggregated[0]);
+                                }
+                            });
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? Y_COL : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('test_dict_single', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('test_data').then(function(data) {
+        allData = data;
+        window.updateChart_test_dict_single();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_dict_single:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['country', 'region'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const COLOR_COLS = [];
+    const COLOR_MAPS = {};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_COLOR_COL = '__no_color__';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;
+        if (method === 'count') return [values.length];
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_test_dict_nothing = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_test_dict_nothing');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_test_dict_nothing');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_test_dict_nothing');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_test_dict_nothing');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_test_dict_nothing');
+        const facet2Select = document.getElementById('facet2_select_test_dict_nothing');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                let xValues, yValues;
+                if (AGGREGATOR === 'none') {
+                    xValues = group.data.map(row => row[X_COL]);
+                    yValues = group.data.map(row => row[Y_COL]);
+                } else {
+                    // Group by x value and aggregate
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        if (!xGroups[xVal]) xGroups[xVal] = [];
+                        xGroups[xVal].push(row[Y_COL]);
+                    });
+
+                    xValues = [];
+                    yValues = [];
+                    // Sort keys - try numeric sort first, fall back to string sort
+                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        const aNum = parseFloat(a);
+                        const bNum = parseFloat(b);
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            return aNum - bNum;
+                        }
+                        return String(a).localeCompare(String(b));
+                    });
+
+                    sortedKeys.forEach(xVal => {
+                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        if (aggregated && aggregated.length > 0) {
+                            // Keep original value type (don't force to float for strings)
+                            const numVal = parseFloat(xVal);
+                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            yValues.push(aggregated[0]);
+                        }
+                    });
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('test_dict_nothing', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                    let xValues, yValues;
+                    if (AGGREGATOR === 'none') {
+                        xValues = group.data.map(row => row[X_COL]);
+                        yValues = group.data.map(row => row[Y_COL]);
+                    } else {
+                        // Group by x value and aggregate
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            if (!xGroups[xVal]) xGroups[xVal] = [];
+                            xGroups[xVal].push(row[Y_COL]);
+                        });
+
+                        xValues = [];
+                        yValues = [];
+                        // Sort keys - try numeric sort first, fall back to string sort
+                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            const aNum = parseFloat(a);
+                            const bNum = parseFloat(b);
+                            if (!isNaN(aNum) && !isNaN(bNum)) {
+                                return aNum - bNum;
+                            }
+                            return String(a).localeCompare(String(b));
+                        });
+
+                        sortedKeys.forEach(xVal => {
+                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            if (aggregated && aggregated.length > 0) {
+                                // Keep original value type (don't force to float for strings)
+                                const numVal = parseFloat(xVal);
+                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                yValues.push(aggregated[0]);
+                            }
+                        });
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? Y_COL : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('test_dict_nothing', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+
+                        let xValues, yValues;
+                        if (AGGREGATOR === 'none') {
+                            xValues = group.data.map(row => row[X_COL]);
+                            yValues = group.data.map(row => row[Y_COL]);
+                        } else {
+                            // Group by x value and aggregate
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                if (!xGroups[xVal]) xGroups[xVal] = [];
+                                xGroups[xVal].push(row[Y_COL]);
+                            });
+
+                            xValues = [];
+                            yValues = [];
+                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                const aNum = parseFloat(a);
+                                const bNum = parseFloat(b);
+                                if (!isNaN(aNum) && !isNaN(bNum)) {
+                                    return aNum - bNum;
+                                }
+                                return String(a).localeCompare(String(b));
+                            });
+
+                            sortedKeys.forEach(xVal => {
+                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                if (aggregated && aggregated.length > 0) {
+                                    const numVal = parseFloat(xVal);
+                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    yValues.push(aggregated[0]);
+                                }
+                            });
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? Y_COL : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('test_dict_nothing', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('test_data').then(function(data) {
+        allData = data;
+        window.updateChart_test_dict_nothing();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_dict_nothing:', error);
+    });
+})();
+    (function() {
+    window.showEigenvectors_test_3d = true;
+    window.sharedCamera_test_3d = true;
+    window.currentCamera_test_3d = null;
+    const FILTER_COLS = ['region', 'category'];
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_Z_COL = 'category';
+    const DEFAULT_COLOR_COL = 'country';
+    const COLOR_MAPS = {'country': {'Bangladesh': '#00cc96', 'Denmark': '#636efa', 'Australia': '#EF553B', 'Canada': '#ab63fa'}};
+
+    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+
+    // Eigenvector toggle
+    document.getElementById('test_3d_eigenvector_toggle').addEventListener('click', function() {
+        window.showEigenvectors_test_3d = !window.showEigenvectors_test_3d;
+        this.textContent = window.showEigenvectors_test_3d ? 'Hide Eigenvectors' : 'Show Eigenvectors';
+        updatePlotWithFilters_test_3d();
+    });
+
+    function computeEigenvectors(data, X_COL, Y_COL, Z_COL) {
+        // Extract numeric data
+        const xs = data.map(row => parseFloat(row[X_COL]));
+        const ys = data.map(row => parseFloat(row[Y_COL]));
+        const zs = data.map(row => parseFloat(row[Z_COL]));
+
+        // Compute means
+        const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
+        const meanY = ys.reduce((a, b) => a + b, 0) / ys.length;
+        const meanZ = zs.reduce((a, b) => a + b, 0) / zs.length;
+
+        // Center the data
+        const centeredX = xs.map(x => x - meanX);
+        const centeredY = ys.map(y => y - meanY);
+        const centeredZ = zs.map(z => z - meanZ);
+
+        // Compute covariance matrix
+        const n = xs.length;
+        const cov = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+
+        for (let i = 0; i < n; i++) {
+            cov[0][0] += centeredX[i] * centeredX[i];
+            cov[0][1] += centeredX[i] * centeredY[i];
+            cov[0][2] += centeredX[i] * centeredZ[i];
+            cov[1][0] += centeredY[i] * centeredX[i];
+            cov[1][1] += centeredY[i] * centeredY[i];
+            cov[1][2] += centeredY[i] * centeredZ[i];
+            cov[2][0] += centeredZ[i] * centeredX[i];
+            cov[2][1] += centeredZ[i] * centeredY[i];
+            cov[2][2] += centeredZ[i] * centeredZ[i];
+        }
+
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                cov[i][j] /= n;
+            }
+        }
+
+        // Power iteration for first eigenvector
+        let v1 = [1, 0, 0];
+        for (let iter = 0; iter < 20; iter++) {
+            const newV = [
+                cov[0][0] * v1[0] + cov[0][1] * v1[1] + cov[0][2] * v1[2],
+                cov[1][0] * v1[0] + cov[1][1] * v1[1] + cov[1][2] * v1[2],
+                cov[2][0] * v1[0] + cov[2][1] * v1[1] + cov[2][2] * v1[2]
+            ];
+            const norm = Math.sqrt(newV[0]**2 + newV[1]**2 + newV[2]**2);
+            v1 = [newV[0]/norm, newV[1]/norm, newV[2]/norm];
+        }
+
+        // Second eigenvector (orthogonal to first)
+        let v2 = [0, 1, 0];
+        const dot12 = v2[0]*v1[0] + v2[1]*v1[1] + v2[2]*v1[2];
+        v2 = [v2[0] - dot12*v1[0], v2[1] - dot12*v1[1], v2[2] - dot12*v1[2]];
+        const norm2 = Math.sqrt(v2[0]**2 + v2[1]**2 + v2[2]**2);
+        v2 = [v2[0]/norm2, v2[1]/norm2, v2[2]/norm2];
+
+        // Third eigenvector (cross product)
+        const v3 = [
+            v1[1]*v2[2] - v1[2]*v2[1],
+            v1[2]*v2[0] - v1[0]*v2[2],
+            v1[0]*v2[1] - v1[1]*v2[0]
+        ];
+
+        // Compute fixed scale (20% of average data range)
+        const xRange = Math.max(...xs) - Math.min(...xs);
+        const yRange = Math.max(...ys) - Math.min(...ys);
+        const zRange = Math.max(...zs) - Math.min(...zs);
+        const fixedScale = (xRange + yRange + zRange) / 3 * 0.2;
+
+        return {
+            center: [meanX, meanY, meanZ],
+            vectors: [v1, v2, v3],
+            scale: fixedScale
+        };
+    }
+
+    function createEigenvectorTraces(eigData, sceneId) {
+        const traces = [];
+        const colors = ['red', 'green', 'blue'];
+        const [cx, cy, cz] = eigData.center;
+
+        eigData.vectors.forEach((vec, idx) => {
+            traces.push({
+                x: [cx, cx + vec[0] * eigData.scale],
+                y: [cy, cy + vec[1] * eigData.scale],
+                z: [cz, cz + vec[2] * eigData.scale],
+                mode: 'lines+markers',
+                type: 'scatter3d',
+                name: `PC${idx + 1}`,
+                legendgroup: `PC${idx + 1}`,
+                scene: sceneId,
+                line: { color: colors[idx], width: 6 },
+                marker: { size: 6, symbol: 'diamond' },
+                showlegend: idx === 0 || sceneId === 'scene'
+            });
+        });
+
+        return traces;
+    }
+
+    function updateChart_test_3d(dataOverride) {
+        const data = dataOverride || window.allData_test_3d;
+        const X_COL = getCol('test_3d_x_col_select', DEFAULT_X_COL);
+        const Y_COL = getCol('test_3d_y_col_select', DEFAULT_Y_COL);
+        const Z_COL = getCol('test_3d_z_col_select', DEFAULT_Z_COL);
+        const COLOR_COL = getCol('test_3d_color_col_select', DEFAULT_COLOR_COL);
+
+        // Get facet selections
+        const FACET1_COL = getCol('facet1_select_test_3d', 'None');
+        const FACET2_COL = getCol('facet2_select_test_3d', 'None');
+
+        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+            renderNoFacets_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+            renderFacetWrap_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+            renderFacetGrid_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+        } else {
+            renderFacetWrap_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+        }
+    }
+
+    function renderNoFacets_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+        const groups = {};
+        data.forEach(row => {
+            const key = row[COLOR_COL];
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(row);
+        });
+
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+        const traces = Object.entries(groups).map(([key, groupData]) => ({
+            x: groupData.map(d => parseFloat(d[X_COL])),
+            y: groupData.map(d => parseFloat(d[Y_COL])),
+            z: groupData.map(d => parseFloat(d[Z_COL])),
+            mode: 'markers',
+            name: key,
+            type: 'scatter3d',
+            marker: {
+                size: 4,
+                opacity: 0.6,
+                color: COLOR_MAP[key] || '#636efa'
+            }
+        }));
+
+        if (window.showEigenvectors_test_3d && data.length > 3) {
+            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            traces.push(...createEigenvectorTraces(eigData, 'scene'));
+        }
+
+        const layout = {
+            title: 'Test 3D with Vector Filters',
+            autosize: true,
+            showlegend: true,
+            scene: {
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                zaxis: { title: Z_COL },
+                camera: window.currentCamera_test_3d || undefined
+            },
+            margin: { t: 50, r: 50, b: 50, l: 50 }
+        };
+
+        Plotly.react('test_3d', traces, layout, {responsive: true});
+
+        // Store current camera
+        const plotDiv = document.getElementById('test_3d');
+        plotDiv.on('plotly_relayout', (eventData) => {
+            if (eventData['scene.camera']) {
+                window.currentCamera_test_3d = eventData['scene.camera'];
+            }
+        });
+    }
+
+    function renderFacetWrap_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+        const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+        const nFacets = facetValues.length;
+        const cols = Math.ceil(Math.sqrt(nFacets));
+        const rows = Math.ceil(nFacets / cols);
+
+        const traces = [];
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        facetValues.forEach((facetVal, idx) => {
+            const facetData = data.filter(row => row[FACET_COL] === facetVal);
+            const sceneId = idx === 0 ? 'scene' : 'scene' + (idx + 1);
+
+            const groups = {};
+            facetData.forEach(row => {
+                const key = row[COLOR_COL];
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(row);
+            });
+
+            Object.entries(groups).forEach(([key, groupData]) => {
+                traces.push({
+                    x: groupData.map(d => parseFloat(d[X_COL])),
+                    y: groupData.map(d => parseFloat(d[Y_COL])),
+                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    mode: 'markers',
+                    name: key,
+                    legendgroup: key,
+                    showlegend: idx === 0,
+                    scene: sceneId,
+                    type: 'scatter3d',
+                    marker: {
+                        size: 4,
+                        opacity: 0.6,
+                        color: COLOR_MAP[key] || '#636efa'
+                    }
+                });
+            });
+
+            if (window.showEigenvectors_test_3d && facetData.length > 3) {
+                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                traces.push(...createEigenvectorTraces(eigData, sceneId));
+            }
+        });
+
+        const layout = {
+            title: 'Test 3D with Vector Filters',
+            showlegend: true,
+            grid: { rows: rows, columns: cols, pattern: 'independent' },
+            annotations: []
+        };
+
+        // Create scene for each facet
+        facetValues.forEach((val, idx) => {
+            const row = Math.floor(idx / cols);
+            const col = idx % cols;
+            const sceneKey = idx === 0 ? 'scene' : 'scene' + (idx + 1);
+
+            const xDomain = [col / cols + 0.01, (col + 1) / cols - 0.01];
+            const yDomain = [1 - (row + 1) / rows + 0.01, 1 - row / rows - 0.01];
+
+            layout[sceneKey] = {
+                domain: { x: xDomain, y: yDomain },
+                xaxis: { title: X_COL },
+                yaxis: { title: Y_COL },
+                zaxis: { title: Z_COL },
+                camera: window.sharedCamera_test_3d ? (window.currentCamera_test_3d || undefined) : undefined
+            };
+
+            layout.annotations.push({
+                text: FACET_COL + ': ' + val,
+                showarrow: false,
+                xref: sceneKey + ' domain',
+                yref: sceneKey + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom'
+            });
+        });
+
+        Plotly.react('test_3d', traces, layout, {responsive: true});
+
+        // Setup camera sync if shared
+        if (window.sharedCamera_test_3d) {
+            const plotDiv = document.getElementById('test_3d');
+            let isUpdating = false; // Prevent infinite loop
+
+            plotDiv.on('plotly_relayout', (eventData) => {
+                if (isUpdating) return; // Ignore events triggered by our own updates
+
+                // Find which scene was updated
+                for (let key in eventData) {
+                    if (key.endsWith('.camera')) {
+                        const newCamera = eventData[key];
+                        window.currentCamera_test_3d = newCamera;
+
+                        // Apply to all scenes
+                        isUpdating = true;
+                        const updates = {};
+                        facetValues.forEach((val, idx) => {
+                            const sceneKey = idx === 0 ? 'scene' : 'scene' + (idx + 1);
+                            updates[sceneKey + '.camera'] = newCamera;
+                        });
+                        Plotly.relayout(plotDiv, updates).then(() => {
+                            isUpdating = false;
+                        });
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    function renderFacetGrid_test_3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+        const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+        const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+        const rows = facet1Values.length;
+        const cols = facet2Values.length;
+
+        const traces = [];
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        facet1Values.forEach((facet1Val, rowIdx) => {
+            facet2Values.forEach((facet2Val, colIdx) => {
+                const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                if (facetData.length === 0) return;
+
+                const idx = rowIdx * cols + colIdx;
+                const sceneId = idx === 0 ? 'scene' : 'scene' + (idx + 1);
+
+                const groups = {};
+                facetData.forEach(row => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(row);
+                });
+
+                Object.entries(groups).forEach(([key, groupData]) => {
+                    traces.push({
+                        x: groupData.map(d => parseFloat(d[X_COL])),
+                        y: groupData.map(d => parseFloat(d[Y_COL])),
+                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        mode: 'markers',
+                        name: key,
+                        legendgroup: key,
+                        showlegend: idx === 0,
+                        scene: sceneId,
+                        type: 'scatter3d',
+                        marker: {
+                            size: 4,
+                            opacity: 0.6,
+                            color: COLOR_MAP[key] || '#636efa'
+                        }
+                    });
+                });
+
+                if (window.showEigenvectors_test_3d && facetData.length > 3) {
+                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    traces.push(...createEigenvectorTraces(eigData, sceneId));
+                }
+            });
+        });
+
+        const layout = {
+            title: 'Test 3D with Vector Filters',
+            showlegend: true,
+            grid: { rows: rows, columns: cols, pattern: 'independent' },
+            annotations: []
+        };
+
+        // Create scene for each facet
+        facet1Values.forEach((facet1Val, rowIdx) => {
+            facet2Values.forEach((facet2Val, colIdx) => {
+                const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                if (facetData.length === 0) return;
+
+                const idx = rowIdx * cols + colIdx;
+                const sceneKey = idx === 0 ? 'scene' : 'scene' + (idx + 1);
+
+                const xDomain = [colIdx / cols + 0.01, (colIdx + 1) / cols - 0.01];
+                const yDomain = [1 - (rowIdx + 1) / rows + 0.01, 1 - rowIdx / rows - 0.01];
+
+                layout[sceneKey] = {
+                    domain: { x: xDomain, y: yDomain },
+                    xaxis: { title: X_COL },
+                    yaxis: { title: Y_COL },
+                    zaxis: { title: Z_COL },
+                    camera: window.sharedCamera_test_3d ? (window.currentCamera_test_3d || undefined) : undefined
+                };
+
+                // Column header
+                if (rowIdx === 0) {
+                    layout.annotations.push({
+                        text: FACET2_COL + ': ' + facet2Val,
+                        showarrow: false,
+                        xref: sceneKey + ' domain',
+                        yref: sceneKey + ' domain',
+                        x: 0.5,
+                        y: 1.05,
+                        xanchor: 'center',
+                        yanchor: 'bottom'
+                    });
+                }
+
+                // Row header
+                if (colIdx === 0) {
+                    layout.annotations.push({
+                        text: FACET1_COL + ': ' + facet1Val,
+                        showarrow: false,
+                        xref: sceneKey + ' domain',
+                        yref: sceneKey + ' domain',
+                        x: -0.1,
+                        y: 0.5,
+                        xanchor: 'center',
+                        yanchor: 'middle',
+                        textangle: -90
+                    });
+                }
+            });
+        });
+
+        Plotly.react('test_3d', traces, layout, {responsive: true});
+
+        // Setup camera sync if shared
+        if (window.sharedCamera_test_3d) {
+            const plotDiv = document.getElementById('test_3d');
+            let isUpdating = false; // Prevent infinite loop
+
+            plotDiv.on('plotly_relayout', (eventData) => {
+                if (isUpdating) return; // Ignore events triggered by our own updates
+
+                // Find which scene was updated
+                for (let key in eventData) {
+                    if (key.endsWith('.camera')) {
+                        const newCamera = eventData[key];
+                        window.currentCamera_test_3d = newCamera;
+
+                        // Apply to all scenes
+                        isUpdating = true;
+                        const updates = {};
+                        let sceneCount = 0;
+                        facet1Values.forEach((f1, r) => {
+                            facet2Values.forEach((f2, c) => {
+                                const facetData = data.filter(row => row[FACET1_COL] === f1 && row[FACET2_COL] === f2);
+                                if (facetData.length > 0) {
+                                    const sceneKey = sceneCount === 0 ? 'scene' : 'scene' + (sceneCount + 1);
+                                    updates[sceneKey + '.camera'] = newCamera;
+                                    sceneCount++;
+                                }
+                            });
+                        });
+                        Plotly.relayout(plotDiv, updates).then(() => {
+                            isUpdating = false;
+                        });
+                        break;
+                    }
+                }
+            });
+        }
+    }
+
+    // Filter and update function
+    window.updatePlotWithFilters_test_3d = function() {
+        // Get selected columns
+        const X_COL = getCol('test_3d_x_col_select', DEFAULT_X_COL);
+        const Y_COL = getCol('test_3d_y_col_select', DEFAULT_Y_COL);
+        const Z_COL = getCol('test_3d_z_col_select', DEFAULT_Z_COL);
+        const COLOR_COL = getCol('test_3d_color_col_select', DEFAULT_COLOR_COL);
+
+        // Get filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select_test_3d');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get facet selections
+        const facet1Select = document.getElementById('facet1_select_test_3d');
+        const facet2Select = document.getElementById('facet2_select_test_3d');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = window.allData_test_3d.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Render based on faceting
+        if (facet1 && facet2) {
+            renderFacetGrid_test_3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+        } else if (facet1 || facet2) {
+            renderFacets_test_3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+        } else {
+            renderSinglePlot_test_3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+        }
+    };
+
+    loadDataset('test_data').then(function(data) {
+        window.allData_test_3d = data;
+
+        // Initial plot
+        updatePlotWithFilters_test_3d();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_3d:', error);
+    });
+
+    })();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['country'];
+    const X_COLS = ['x'];
+    const Y_COLS = ['y'];
+    const GROUP_COLS = [];
+    const COLOR_MAPS = {};
+    const GROUP_ORDER = {};
+    const DEFAULT_X_COL = 'x';
+    const DEFAULT_Y_COL = 'y';
+    const DEFAULT_GROUP_COL = '__no_group__';
+    const FILL_OPACITY = 0.6;
+
+    let allData = [];
+
+    // Detect if x values are discrete or continuous
+    function isDiscrete(values) {
+        // Consider discrete if we have strings, or if numeric with small number of unique values
+        const sample = values[0];
+        if (typeof sample === 'string') return true;
+
+        const uniqueVals = [...new Set(values)];
+        // If less than 20 unique values and they look like categories, treat as discrete
+        return uniqueVals.length < 20 && uniqueVals.every(v => Number.isInteger(v) || typeof v === 'string');
+    }
+
+    // Make it global so inline onchange can see it
+    window.updatePlot_test_area = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_test_area');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_test_area');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current group column
+        const groupColSelect = document.getElementById('group_col_select_test_area');
+        const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_GROUP_COL;
+
+        // Get current stack mode
+        const stackModeSelect = document.getElementById('stack_mode_select_test_area');
+        const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_test_area');
+        const facet2Select = document.getElementById('facet2_select_test_area');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map and group order for current selection
+        const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
+        const GROUP_ORDER_ARRAY = GROUP_ORDER[GROUP_COL] || [];
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - create area chart
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                if (!groupedData[groupVal]) {
+                    groupedData[groupVal] = [];
+                }
+                groupedData[groupVal].push(row);
+            });
+
+            // Get groups in order of appearance
+            const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                Object.keys(groupedData);
+
+            const traces = [];
+            const discrete = isDiscrete(filteredData.map(row => row[X_COL]));
+
+            for (let groupKey of orderedGroups) {
+                const groupData = groupedData[groupKey];
+                groupData.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                    return aVal - bVal;
+                });
+
+                const xValues = groupData.map(row => row[X_COL]);
+                const yValues = groupData.map(row => row[Y_COL]);
+
+                const color = COLOR_MAP[groupKey] || '#636efa';
+                const trace = {
+                    x: xValues,
+                    y: yValues,
+                    name: groupKey,
+                    type: discrete ? 'bar' : 'scatter'
+                };
+
+                if (discrete) {
+                    // Bar chart style
+                    trace.marker = {color: color};
+                } else {
+                    // Area chart style
+                    trace.mode = 'lines';
+                    trace.line = {color: color, width: 0};
+                }
+
+                // Apply stacking mode
+                if (STACK_MODE === 'unstack') {
+                    if (!discrete) {
+                        trace.fill = 'tozeroy';
+                        // Convert hex to rgba
+                        if (color.startsWith('#')) {
+                            const r = parseInt(color.substr(1,2), 16);
+                            const g = parseInt(color.substr(3,2), 16);
+                            const b = parseInt(color.substr(5,2), 16);
+                            trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                        }
+                    } else {
+                        trace.opacity = FILL_OPACITY;
+                    }
+                } else if (STACK_MODE === 'stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                    }
+                } else if (STACK_MODE === 'normalised_stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                        trace.groupnorm = 'percent';
+                    }
+                }
+
+                traces.push(trace);
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                },
+                hovermode: 'closest',
+                showlegend: true,
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            Plotly.newPlot('test_area', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by group column within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                    if (!groupedData[groupVal]) {
+                        groupedData[groupVal] = [];
+                    }
+                    groupedData[groupVal].push(row);
+                });
+
+                const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                    GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                    Object.keys(groupedData);
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                for (let groupKey of orderedGroups) {
+                    const groupData = groupedData[groupKey];
+                    groupData.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+                        if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                        return aVal - bVal;
+                    });
+
+                    const xValues = groupData.map(row => row[X_COL]);
+                    const yValues = groupData.map(row => row[Y_COL]);
+
+                    const color = COLOR_MAP[groupKey] || '#636efa';
+                    const legendGroup = groupKey;
+
+                    const trace = {
+                        x: xValues,
+                        y: yValues,
+                        name: groupKey,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        type: discrete ? 'bar' : 'scatter'
+                    };
+
+                    if (discrete) {
+                        trace.marker = {color: color};
+                    } else {
+                        trace.mode = 'lines';
+                        trace.line = {color: color, width: 0};
+                    }
+
+                    // Apply stacking mode
+                    if (STACK_MODE === 'unstack') {
+                        if (!discrete) {
+                            trace.fill = 'tozeroy';
+                            if (color.startsWith('#')) {
+                                const r = parseInt(color.substr(1,2), 16);
+                                const g = parseInt(color.substr(3,2), 16);
+                                const b = parseInt(color.substr(5,2), 16);
+                                trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                            }
+                        } else {
+                            trace.opacity = FILL_OPACITY;
+                        }
+                    } else if (STACK_MODE === 'stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                        }
+                    } else if (STACK_MODE === 'normalised_stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                            trace.groupnorm = 'percent';
+                        }
+                    }
+
+                    traces.push(trace);
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('test_area', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by group column within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                        if (!groupedData[groupVal]) {
+                            groupedData[groupVal] = [];
+                        }
+                        groupedData[groupVal].push(row);
+                    });
+
+                    const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                        GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                        Object.keys(groupedData);
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                    for (let groupKey of orderedGroups) {
+                        const groupData = groupedData[groupKey];
+                        groupData.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                            return aVal - bVal;
+                        });
+
+                        const xValues = groupData.map(row => row[X_COL]);
+                        const yValues = groupData.map(row => row[Y_COL]);
+
+                        const color = COLOR_MAP[groupKey] || '#636efa';
+                        const legendGroup = groupKey;
+
+                        const trace = {
+                            x: xValues,
+                            y: yValues,
+                            name: groupKey,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            type: discrete ? 'bar' : 'scatter'
+                        };
+
+                        if (discrete) {
+                            trace.marker = {color: color};
+                        } else {
+                            trace.mode = 'lines';
+                            trace.line = {color: color, width: 0};
+                        }
+
+                        // Apply stacking mode
+                        if (STACK_MODE === 'unstack') {
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                                }
+                            } else {
+                                trace.opacity = FILL_OPACITY;
+                            }
+                        } else if (STACK_MODE === 'stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                            }
+                        } else if (STACK_MODE === 'normalised_stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                                trace.groupnorm = 'percent';
+                            }
+                        }
+
+                        traces.push(trace);
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('test_area', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('test_data').then(function(data) {
+        allData = data;
+        window.updatePlot_test_area();
+    }).catch(function(error) {
+        console.error('Error loading data for chart test_area:', error);
+    });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="test_data" data-format="csv_embedded" data-src="">
+x,y,country,region,category
+1,0.01248362241148182,Denmark,North,A
+2,0.13944038089947475,Australia,South,B
+3,0.8223530799222767,Bangladesh,East,C
+4,0.3748800324749889,Australia,East,A
+5,0.55852017913346,Canada,South,A
+6,0.6354972686658865,Bangladesh,West,A
+7,0.28189312523335186,Denmark,South,B
+8,0.4448523676132713,Australia,East,A
+9,0.7760447863255621,Denmark,West,A
+10,0.13137924153108704,Australia,North,C
+11,0.21925663019396957,Bangladesh,North,B
+12,0.7617231161199409,Denmark,West,B
+13,0.7881507172900039,Canada,East,A
+14,0.6242015210777222,Denmark,South,B
+15,0.8120716152446013,Bangladesh,East,B
+16,0.39004637887361515,Canada,West,A
+17,0.5195782230231313,Denmark,North,B
+18,0.9568768298514567,Denmark,West,B
+19,0.7301808653650298,Canada,West,C
+20,0.474242003264541,Denmark,South,C
+21,0.3973304856242287,Canada,East,B
+22,0.3456425295540779,Bangladesh,South,B
+23,0.9114851549284924,Denmark,South,C
+24,0.6437556757673419,Bangladesh,East,B
+25,0.7072183015730673,Bangladesh,North,C
+26,0.15434858301890997,Canada,South,C
+27,0.8023441508751915,Australia,West,C
+28,0.7465627725235287,Bangladesh,North,B
+29,0.5571764730018285,Bangladesh,North,A
+30,0.3141857317065948,Australia,South,A
+31,0.09058889288156369,Denmark,South,A
+32,0.717116047494332,Denmark,North,B
+33,0.8403311171285244,Denmark,West,C
+34,0.4757522897019172,Bangladesh,East,B
+35,0.842618864949146,Australia,South,A
+36,0.4742529202434851,Canada,East,C
+37,0.37232127697972983,Denmark,North,A
+38,0.7977321800972841,Canada,South,B
+39,0.1845659446066531,Denmark,East,A
+40,0.6781371704108509,Denmark,West,A
+41,0.5109354573601391,Bangladesh,East,B
+42,0.22911985807003143,Bangladesh,West,A
+43,0.794115831421817,Canada,East,A
+44,0.2480408420509782,Australia,East,A
+45,0.6607267095246744,Canada,South,B
+46,0.7607566938855131,Bangladesh,West,C
+47,0.3130198759719205,Bangladesh,East,A
+48,0.7541377194833717,Canada,North,B
+49,0.9632616791193696,Australia,East,A
+50,0.32067059997276715,Canada,North,A
+51,0.8882720153149435,Bangladesh,West,C
+52,0.9102391392647884,Australia,North,A
+53,0.4869700169958029,Canada,South,C
+54,0.8423696847692301,Bangladesh,West,A
+55,0.6795374812018838,Australia,West,C
+56,0.7627118540274512,Australia,West,A
+57,0.1811086859827986,Australia,West,B
+58,0.9061654195514998,Australia,North,B
+59,0.11511246925596752,Canada,North,B
+60,0.1875314023515653,Canada,South,B
+61,0.10606223597231623,Bangladesh,East,B
+62,0.4680356602773522,Canada,North,B
+63,0.9638732987716229,Australia,North,B
+64,0.9973453981300895,Australia,West,A
+65,0.3716897123317735,Australia,North,A
+66,0.15038960308276816,Denmark,East,A
+67,0.8500025275077652,Denmark,South,C
+68,0.3501869218662327,Denmark,North,B
+69,0.6533405869988563,Denmark,South,B
+70,0.899229050877209,Canada,East,A
+71,0.3577484710023573,Denmark,East,C
+72,0.20332353582589047,Denmark,East,A
+73,0.7769979468818501,Canada,East,B
+74,0.5426104419692103,Canada,North,C
+75,0.5876941625123767,Denmark,West,C
+76,0.9730401026586092,Australia,North,C
+77,0.9581886924548569,Canada,West,C
+78,0.16989960357134204,Australia,West,B
+79,0.4967582205827221,Canada,North,C
+80,0.10874241459948908,Canada,West,C
+81,0.8111344532335529,Australia,East,B
+82,0.22683654553721533,Canada,East,A
+83,0.7617999716163875,Canada,South,C
+84,0.49221448718283667,Australia,East,C
+85,0.9413730796786702,Bangladesh,West,A
+86,0.9629567924039697,Denmark,North,C
+87,0.42520745670183924,Bangladesh,East,C
+88,0.24101291064595276,Canada,North,B
+89,0.13033757034437554,Bangladesh,North,B
+90,0.3003524543136191,Bangladesh,South,B
+91,0.7159586379318755,Australia,South,B
+92,0.56292424173751,Denmark,North,B
+93,0.9503615479936582,Bangladesh,East,B
+94,0.4941112401440747,Canada,South,C
+95,0.6140837235255585,Canada,East,A
+96,0.1541327438788025,Bangladesh,East,C
+97,0.62566485875994,Australia,West,C
+98,0.07297185797734762,Australia,West,A
+99,0.006046225112801729,Canada,West,C
+100,0.9963758911394112,Canada,South,C
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>Testing New Filter Functionality</h1>
+<p></p>
+
+<h2>Test Vector Filter Format</h2>
+<p></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="country_select_test_vector">country: </label>
+            <select id="country_select_test_vector" multiple onchange="updateChart_test_vector()">
+                <option value="Australia" selected>Australia</option>
+                <option value="Bangladesh" selected>Bangladesh</option>
+                <option value="Canada" selected>Canada</option>
+                <option value="Denmark" selected>Denmark</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="region_select_test_vector">region: </label>
+            <select id="region_select_test_vector" multiple onchange="updateChart_test_vector()">
+                <option value="East" selected>East</option>
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="aggregator_select_test_vector">Aggregator: </label>
+            <select id="aggregator_select_test_vector" onchange="updateChart_test_vector()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="test_vector"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p><br>
+<hr>
+<br>
+<h2>Test Dict with Vector</h2>
+<p></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="country_select_test_dict_vec">country: </label>
+            <select id="country_select_test_dict_vec" multiple onchange="updateChart_test_dict_vec()">
+                <option value="Australia" selected>Australia</option>
+                <option value="Bangladesh" selected>Bangladesh</option>
+                <option value="Canada">Canada</option>
+                <option value="Denmark">Denmark</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="aggregator_select_test_dict_vec">Aggregator: </label>
+            <select id="aggregator_select_test_dict_vec" onchange="updateChart_test_dict_vec()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="test_dict_vec"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p><br>
+<hr>
+<br>
+<h2>Test Dict with Single Value</h2>
+<p></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="country_select_test_dict_single">country: </label>
+            <select id="country_select_test_dict_single" multiple onchange="updateChart_test_dict_single()">
+                <option value="Australia" selected>Australia</option>
+                <option value="Bangladesh">Bangladesh</option>
+                <option value="Canada">Canada</option>
+                <option value="Denmark">Denmark</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="aggregator_select_test_dict_single">Aggregator: </label>
+            <select id="aggregator_select_test_dict_single" onchange="updateChart_test_dict_single()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="test_dict_single"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p><br>
+<hr>
+<br>
+<h2>Test Dict with Nothing</h2>
+<p></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="country_select_test_dict_nothing">country: </label>
+            <select id="country_select_test_dict_nothing" multiple onchange="updateChart_test_dict_nothing()">
+                <option value="Australia" selected>Australia</option>
+                <option value="Bangladesh" selected>Bangladesh</option>
+                <option value="Canada" selected>Canada</option>
+                <option value="Denmark" selected>Denmark</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="region_select_test_dict_nothing">region: </label>
+            <select id="region_select_test_dict_nothing" multiple onchange="updateChart_test_dict_nothing()">
+                <option value="East" selected>East</option>
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="aggregator_select_test_dict_nothing">Aggregator: </label>
+            <select id="aggregator_select_test_dict_nothing" onchange="updateChart_test_dict_nothing()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="test_dict_nothing"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p><br>
+<hr>
+<br>
+<h2>Test 3D with Vector Filters</h2>
+<p></p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="region_select_test_3d">region: </label>
+            <select id="region_select_test_3d" multiple onchange="updatePlotWithFilters_test_3d()">
+                <option value="East" selected>East</option>
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+        </div>
+        
+        <div style="margin: 10px;">
+            <label for="category_select_test_3d">category: </label>
+            <select id="category_select_test_3d" multiple onchange="updatePlotWithFilters_test_3d()">
+                <option value="A" selected>A</option>
+                <option value="B" selected>B</option>
+                <option value="C" selected>C</option>
+            </select>
+        </div>
+        
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <div style="margin: 10px 0; display: flex; gap: 10px; align-items: center;">
+    <button id="test_3d_eigenvector_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Eigenvectors
+    </button>
+</div>
+
+</div>
+
+<!-- Faceting -->
+
+<!-- Chart -->
+<div id="test_3d"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p><br>
+<hr>
+<br>
+<h2>Test AreaChart</h2>
+<p></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="country_select_test_area">country: </label>
+            <select id="country_select_test_area" multiple onchange="updatePlot_test_area()">
+                <option value="Australia" selected>Australia</option>
+                <option value="Bangladesh">Bangladesh</option>
+                <option value="Canada" selected>Canada</option>
+                <option value="Denmark">Denmark</option>
+            </select>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="stack_mode_select_test_area">Stack mode: </label>
+            <select id="stack_mode_select_test_area" onchange="updatePlot_test_area()">
+                <option value="unstack">unstack</option>
+                <option value="stack" selected>stack</option>
+                <option value="normalised_stack">normalised_stack</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="test_area"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+</body>
+</html>
