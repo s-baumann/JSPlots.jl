@@ -372,6 +372,10 @@ $(function(){
         if (values.length === 0) return null;
         if (method === 'none') return values;
         if (method === 'count') return [values.length];
+        if (method === 'sum') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
         if (method === 'mean') {
             const sum = values.reduce((a, b) => a + b, 0);
             return [sum / values.length];
@@ -467,14 +471,33 @@ $(function(){
                     const xGroups = {};
                     group.data.forEach(row => {
                         const xVal = row[X_COL];
-                        if (!xGroups[xVal]) xGroups[xVal] = [];
-                        xGroups[xVal].push(row[Y_COL]);
+                        // Convert to string for consistent grouping
+                        const xKey = String(xVal);
+                        if (!xGroups[xKey]) xGroups[xKey] = [];
+                        xGroups[xKey].push(row[Y_COL]);
                     });
 
                     xValues = [];
                     yValues = [];
+
+                    // Helper function to check if a string looks like a date
+                    function looksLikeDate(str) {
+                        // Check for common date formats: YYYY-MM-DD, ISO datetime, etc.
+                        return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                               /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                               /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                    }
+
+                    // Check if first key looks like a date to determine handling
+                    const firstKey = Object.keys(xGroups)[0];
+                    const isDateData = firstKey && looksLikeDate(firstKey);
+
                     // Sort keys - try numeric sort first, fall back to string sort
                     const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        if (isDateData) {
+                            // For dates, use string comparison (ISO format sorts correctly)
+                            return String(a).localeCompare(String(b));
+                        }
                         const aNum = parseFloat(a);
                         const bNum = parseFloat(b);
                         if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -483,12 +506,16 @@ $(function(){
                         return String(a).localeCompare(String(b));
                     });
 
-                    sortedKeys.forEach(xVal => {
-                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                    sortedKeys.forEach(xKey => {
+                        const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                         if (aggregated && aggregated.length > 0) {
-                            // Keep original value type (don't force to float for strings)
-                            const numVal = parseFloat(xVal);
-                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            // For dates, keep as string; for numbers, parse
+                            if (isDateData) {
+                                xValues.push(xKey);
+                            } else {
+                                const numVal = parseFloat(xKey);
+                                xValues.push(isNaN(numVal) ? xKey : numVal);
+                            }
                             yValues.push(aggregated[0]);
                         }
                     });
@@ -568,14 +595,29 @@ $(function(){
                         const xGroups = {};
                         group.data.forEach(row => {
                             const xVal = row[X_COL];
-                            if (!xGroups[xVal]) xGroups[xVal] = [];
-                            xGroups[xVal].push(row[Y_COL]);
+                            const xKey = String(xVal);
+                            if (!xGroups[xKey]) xGroups[xKey] = [];
+                            xGroups[xKey].push(row[Y_COL]);
                         });
 
                         xValues = [];
                         yValues = [];
-                        // Sort keys - try numeric sort first, fall back to string sort
+
+                        // Helper function to check if a string looks like a date
+                        function looksLikeDate(str) {
+                            return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                                   /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                                   /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                        }
+
+                        const firstKey = Object.keys(xGroups)[0];
+                        const isDateData = firstKey && looksLikeDate(firstKey);
+
+                        // Sort keys
                         const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            if (isDateData) {
+                                return String(a).localeCompare(String(b));
+                            }
                             const aNum = parseFloat(a);
                             const bNum = parseFloat(b);
                             if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -584,12 +626,15 @@ $(function(){
                             return String(a).localeCompare(String(b));
                         });
 
-                        sortedKeys.forEach(xVal => {
-                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        sortedKeys.forEach(xKey => {
+                            const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                             if (aggregated && aggregated.length > 0) {
-                                // Keep original value type (don't force to float for strings)
-                                const numVal = parseFloat(xVal);
-                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                if (isDateData) {
+                                    xValues.push(xKey);
+                                } else {
+                                    const numVal = parseFloat(xKey);
+                                    xValues.push(isNaN(numVal) ? xKey : numVal);
+                                }
                                 yValues.push(aggregated[0]);
                             }
                         });
@@ -694,13 +739,28 @@ $(function(){
                             const xGroups = {};
                             group.data.forEach(row => {
                                 const xVal = row[X_COL];
-                                if (!xGroups[xVal]) xGroups[xVal] = [];
-                                xGroups[xVal].push(row[Y_COL]);
+                                const xKey = String(xVal);
+                                if (!xGroups[xKey]) xGroups[xKey] = [];
+                                xGroups[xKey].push(row[Y_COL]);
                             });
 
                             xValues = [];
                             yValues = [];
+
+                            // Helper function to check if a string looks like a date
+                            function looksLikeDate(str) {
+                                return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                                       /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                                       /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                            }
+
+                            const firstKey = Object.keys(xGroups)[0];
+                            const isDateData = firstKey && looksLikeDate(firstKey);
+
                             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                if (isDateData) {
+                                    return String(a).localeCompare(String(b));
+                                }
                                 const aNum = parseFloat(a);
                                 const bNum = parseFloat(b);
                                 if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -709,11 +769,15 @@ $(function(){
                                 return String(a).localeCompare(String(b));
                             });
 
-                            sortedKeys.forEach(xVal => {
-                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            sortedKeys.forEach(xKey => {
+                                const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                                 if (aggregated && aggregated.length > 0) {
-                                    const numVal = parseFloat(xVal);
-                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    if (isDateData) {
+                                        xValues.push(xKey);
+                                    } else {
+                                        const numVal = parseFloat(xKey);
+                                        xValues.push(isNaN(numVal) ? xKey : numVal);
+                                    }
                                     yValues.push(aggregated[0]);
                                 }
                             });
@@ -801,10 +865,10 @@ $(function(){
     // Configuration
     const FILTER_COLS = [];
     const VALUE_COLS = ['sales'];
-    const LABEL_COLS = ['category'];
+    const COLOR_COLS = ['category'];
     const COLOR_MAPS = {'category': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product D': '#ab63fa', 'Product B': '#EF553B'}};
     const DEFAULT_VALUE_COL = 'sales';
-    const DEFAULT_LABEL_COL = 'category';
+    const DEFAULT_COLOR_COL = 'category';
     const HOLE = 0.0;
     const SHOW_LEGEND = true;
 
@@ -833,15 +897,15 @@ $(function(){
             return;
         }
 
-        // Get current value and label columns
+        // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_sales_pie');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
 
-        const labelColSelect = document.getElementById('label_col_select_sales_pie');
-        const LABEL_COL = labelColSelect ? labelColSelect.value : DEFAULT_LABEL_COL;
+        const colorColSelect = document.getElementById('color_col_select_sales_pie');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get color map for current label selection
-        const COLOR_MAP = COLOR_MAPS[LABEL_COL] || {};
+        // Get color map for current color selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
         // Get current filter values (multiple selections)
         const filters = {};
@@ -871,7 +935,7 @@ $(function(){
 
         if (!facet1) {
             // No faceting - single pie chart
-            const aggregated = aggregateData(filteredData, LABEL_COL, VALUE_COL);
+            const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
             const labels = Object.keys(aggregated);
             const values = Object.values(aggregated);
             const colors = labels.map(label => COLOR_MAP[label] || '#808080');
@@ -907,7 +971,7 @@ $(function(){
             for (let i = 0; i < nFacets; i++) {
                 const facetValue = facetValues[i];
                 const facetData = filteredData.filter(row => String(row[facet1]) === facetValue);
-                const aggregated = aggregateData(facetData, LABEL_COL, VALUE_COL);
+                const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
                 const labels = Object.keys(aggregated);
                 const values = Object.values(aggregated);
                 const colors = labels.map(label => COLOR_MAP[label] || '#808080');
@@ -975,7 +1039,7 @@ $(function(){
                     );
 
                     if (cellData.length > 0) {
-                        const aggregated = aggregateData(cellData, LABEL_COL, VALUE_COL);
+                        const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
                         const labels = Object.keys(aggregated);
                         const values = Object.values(aggregated);
                         const colors = labels.map(label => COLOR_MAP[label] || '#808080');
@@ -1067,6 +1131,10 @@ $(function(){
         if (values.length === 0) return null;
         if (method === 'none') return values;
         if (method === 'count') return [values.length];
+        if (method === 'sum') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
         if (method === 'mean') {
             const sum = values.reduce((a, b) => a + b, 0);
             return [sum / values.length];
@@ -1162,14 +1230,33 @@ $(function(){
                     const xGroups = {};
                     group.data.forEach(row => {
                         const xVal = row[X_COL];
-                        if (!xGroups[xVal]) xGroups[xVal] = [];
-                        xGroups[xVal].push(row[Y_COL]);
+                        // Convert to string for consistent grouping
+                        const xKey = String(xVal);
+                        if (!xGroups[xKey]) xGroups[xKey] = [];
+                        xGroups[xKey].push(row[Y_COL]);
                     });
 
                     xValues = [];
                     yValues = [];
+
+                    // Helper function to check if a string looks like a date
+                    function looksLikeDate(str) {
+                        // Check for common date formats: YYYY-MM-DD, ISO datetime, etc.
+                        return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                               /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                               /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                    }
+
+                    // Check if first key looks like a date to determine handling
+                    const firstKey = Object.keys(xGroups)[0];
+                    const isDateData = firstKey && looksLikeDate(firstKey);
+
                     // Sort keys - try numeric sort first, fall back to string sort
                     const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        if (isDateData) {
+                            // For dates, use string comparison (ISO format sorts correctly)
+                            return String(a).localeCompare(String(b));
+                        }
                         const aNum = parseFloat(a);
                         const bNum = parseFloat(b);
                         if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -1178,12 +1265,16 @@ $(function(){
                         return String(a).localeCompare(String(b));
                     });
 
-                    sortedKeys.forEach(xVal => {
-                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                    sortedKeys.forEach(xKey => {
+                        const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                         if (aggregated && aggregated.length > 0) {
-                            // Keep original value type (don't force to float for strings)
-                            const numVal = parseFloat(xVal);
-                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                            // For dates, keep as string; for numbers, parse
+                            if (isDateData) {
+                                xValues.push(xKey);
+                            } else {
+                                const numVal = parseFloat(xKey);
+                                xValues.push(isNaN(numVal) ? xKey : numVal);
+                            }
                             yValues.push(aggregated[0]);
                         }
                     });
@@ -1263,14 +1354,29 @@ $(function(){
                         const xGroups = {};
                         group.data.forEach(row => {
                             const xVal = row[X_COL];
-                            if (!xGroups[xVal]) xGroups[xVal] = [];
-                            xGroups[xVal].push(row[Y_COL]);
+                            const xKey = String(xVal);
+                            if (!xGroups[xKey]) xGroups[xKey] = [];
+                            xGroups[xKey].push(row[Y_COL]);
                         });
 
                         xValues = [];
                         yValues = [];
-                        // Sort keys - try numeric sort first, fall back to string sort
+
+                        // Helper function to check if a string looks like a date
+                        function looksLikeDate(str) {
+                            return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                                   /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                                   /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                        }
+
+                        const firstKey = Object.keys(xGroups)[0];
+                        const isDateData = firstKey && looksLikeDate(firstKey);
+
+                        // Sort keys
                         const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                            if (isDateData) {
+                                return String(a).localeCompare(String(b));
+                            }
                             const aNum = parseFloat(a);
                             const bNum = parseFloat(b);
                             if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -1279,12 +1385,15 @@ $(function(){
                             return String(a).localeCompare(String(b));
                         });
 
-                        sortedKeys.forEach(xVal => {
-                            const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                        sortedKeys.forEach(xKey => {
+                            const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                             if (aggregated && aggregated.length > 0) {
-                                // Keep original value type (don't force to float for strings)
-                                const numVal = parseFloat(xVal);
-                                xValues.push(isNaN(numVal) ? xVal : numVal);
+                                if (isDateData) {
+                                    xValues.push(xKey);
+                                } else {
+                                    const numVal = parseFloat(xKey);
+                                    xValues.push(isNaN(numVal) ? xKey : numVal);
+                                }
                                 yValues.push(aggregated[0]);
                             }
                         });
@@ -1389,13 +1498,28 @@ $(function(){
                             const xGroups = {};
                             group.data.forEach(row => {
                                 const xVal = row[X_COL];
-                                if (!xGroups[xVal]) xGroups[xVal] = [];
-                                xGroups[xVal].push(row[Y_COL]);
+                                const xKey = String(xVal);
+                                if (!xGroups[xKey]) xGroups[xKey] = [];
+                                xGroups[xKey].push(row[Y_COL]);
                             });
 
                             xValues = [];
                             yValues = [];
+
+                            // Helper function to check if a string looks like a date
+                            function looksLikeDate(str) {
+                                return /^\d{4}-\d{2}-\d{2}/.test(str) ||
+                                       /^\d{4}-\d{2}-\d{2}T/.test(str) ||
+                                       /^\d{2}\/\d{2}\/\d{4}/.test(str);
+                            }
+
+                            const firstKey = Object.keys(xGroups)[0];
+                            const isDateData = firstKey && looksLikeDate(firstKey);
+
                             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                if (isDateData) {
+                                    return String(a).localeCompare(String(b));
+                                }
                                 const aNum = parseFloat(a);
                                 const bNum = parseFloat(b);
                                 if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -1404,11 +1528,15 @@ $(function(){
                                 return String(a).localeCompare(String(b));
                             });
 
-                            sortedKeys.forEach(xVal => {
-                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            sortedKeys.forEach(xKey => {
+                                const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                                 if (aggregated && aggregated.length > 0) {
-                                    const numVal = parseFloat(xVal);
-                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    if (isDateData) {
+                                        xValues.push(xKey);
+                                    } else {
+                                        const numVal = parseFloat(xKey);
+                                        xValues.push(isNaN(numVal) ? xKey : numVal);
+                                    }
                                     yValues.push(aggregated[0]);
                                 }
                             });
@@ -1662,7 +1790,7 @@ date,temperature,humidity,city
     color: #24292e;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#230">
+<div class="codeblock-container" id="##codeblock#277">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -1706,6 +1834,7 @@ end</code></pre>
                 <option value="count">count</option>
                 <option value="min">min</option>
                 <option value="max">max</option>
+                <option value="sum">sum</option>
             </select>
         </div>
         
@@ -1770,7 +1899,7 @@ end</code></pre>
     color: #24292e;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#231">
+<div class="codeblock-container" id="##codeblock#278">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -1781,7 +1910,7 @@ end</code></pre>
     )
 
     return PieChart(:sales_pie, df, :pie_data;
-        label_cols = [:category],
+        color_cols = [:category],
         value_cols = [:sales],
         title = &quot;Sales by Product&quot;
     ), df
@@ -1855,7 +1984,7 @@ end</code></pre>
     color: #24292e;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#232">
+<div class="codeblock-container" id="##codeblock#279">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -1947,7 +2076,7 @@ create_html(scatter, &quot;output.html&quot;)
     color: #24292e;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#233">
+<div class="codeblock-container" id="##codeblock#280">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -2017,7 +2146,7 @@ end</code></pre>
     color: #24292e;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#234">
+<div class="codeblock-container" id="##codeblock#281">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -2056,6 +2185,7 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
                 <option value="count">count</option>
                 <option value="min">min</option>
                 <option value="max">max</option>
+                <option value="sum">sum</option>
             </select>
         </div>
         
