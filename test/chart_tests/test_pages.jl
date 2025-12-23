@@ -387,4 +387,437 @@ using DataFrames
             @test occursin("pivot", page_content)
         end
     end
+
+    @testset "OrderedDict constructor with grouped pages" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df1 = DataFrame(x = 1:5, y = rand(5))
+            df2 = DataFrame(x = 1:3, y = rand(3))
+            df3 = DataFrame(x = 1:4, y = rand(4))
+
+            page1 = JSPlotPage(
+                Dict(:data1 => df1),
+                [TextBlock("<h2>Scatter Page</h2>")],
+                tab_title = "Scatter Analysis",
+                notes = "Scatter plot details"
+            )
+
+            page2 = JSPlotPage(
+                Dict(:data2 => df2),
+                [TextBlock("<h2>Line Page</h2>")],
+                tab_title = "Line Analysis",
+                notes = "Line chart details"
+            )
+
+            page3 = JSPlotPage(
+                Dict(:data3 => df3),
+                [TextBlock("<h2>API Page</h2>")],
+                tab_title = "API Reference",
+                notes = "API documentation"
+            )
+
+            grouped_pages = OrderedCollections.OrderedDict(
+                "Plot Types" => [page1, page2],
+                "Documentation" => [page3]
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Welcome</h1>"), TextBlock("<p>Grouped navigation</p>")],
+                grouped_pages,
+                tab_title = "Home",
+                page_header = "Main Page"
+            )
+
+            @test pages.coverpage.tab_title == "Home"
+            @test length(pages.pages) == 3
+
+            outfile = joinpath(tmpdir, "grouped.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "grouped")
+            coverpage_content = read(joinpath(project_dir, "grouped.html"), String)
+
+            # Check for grouped headings
+            @test occursin("Plot Types", coverpage_content)
+            @test occursin("Documentation", coverpage_content)
+            @test occursin("<h4", coverpage_content)
+
+            # Check for links
+            @test occursin("Scatter Analysis", coverpage_content)
+            @test occursin("Line Analysis", coverpage_content)
+            @test occursin("API Reference", coverpage_content)
+
+            # Check for descriptions
+            @test occursin("Scatter plot details", coverpage_content)
+            @test occursin("Line chart details", coverpage_content)
+            @test occursin("API documentation", coverpage_content)
+
+            # Verify individual pages were created
+            @test isfile(joinpath(project_dir, "scatter_analysis.html"))
+            @test isfile(joinpath(project_dir, "line_analysis.html"))
+            @test isfile(joinpath(project_dir, "api_reference.html"))
+        end
+    end
+
+    @testset "OrderedDict with custom dataformat" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:10, y = rand(10))
+
+            page1 = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<h2>Page 1</h2>")],
+                tab_title = "First"
+            )
+
+            page2 = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<h2>Page 2</h2>")],
+                tab_title = "Second"
+            )
+
+            grouped = OrderedCollections.OrderedDict(
+                "Section A" => [page1],
+                "Section B" => [page2]
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Home</h1>")],
+                grouped,
+                dataformat = :parquet
+            )
+
+            @test pages.dataformat == :parquet
+
+            outfile = joinpath(tmpdir, "format.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "format")
+            @test isdir(project_dir)
+
+            # Check that pages were created
+            @test isfile(joinpath(project_dir, "first.html"))
+            @test isfile(joinpath(project_dir, "second.html"))
+        end
+    end
+
+    @testset "OrderedDict with empty group" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            page1 = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<p>Content</p>")],
+                tab_title = "Page"
+            )
+
+            # One group empty, one with content
+            grouped = OrderedCollections.OrderedDict(
+                "Empty Section" => JSPlotPage[],
+                "Full Section" => [page1]
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Test</h1>")],
+                grouped
+            )
+
+            @test length(pages.pages) == 1
+
+            outfile = joinpath(tmpdir, "empty_group.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "empty_group")
+            coverpage_content = read(joinpath(project_dir, "empty_group.html"), String)
+
+            # Both headings should appear even if one is empty
+            @test occursin("Empty Section", coverpage_content)
+            @test occursin("Full Section", coverpage_content)
+        end
+    end
+
+    @testset "OrderedDict preserves order" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            # Create pages in specific order
+            pages_list = [
+                JSPlotPage(Dict(:d1 => df), [TextBlock("<p>Z</p>")], tab_title = "Z Page"),
+                JSPlotPage(Dict(:d2 => df), [TextBlock("<p>A</p>")], tab_title = "A Page"),
+                JSPlotPage(Dict(:d3 => df), [TextBlock("<p>M</p>")], tab_title = "M Page")
+            ]
+
+            grouped = OrderedCollections.OrderedDict(
+                "Third Section" => [pages_list[1]],
+                "First Section" => [pages_list[2]],
+                "Second Section" => [pages_list[3]]
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Order Test</h1>")],
+                grouped
+            )
+
+            outfile = joinpath(tmpdir, "order.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "order")
+            coverpage_content = read(joinpath(project_dir, "order.html"), String)
+
+            # Find positions of each heading
+            pos_third = findfirst("Third Section", coverpage_content)
+            pos_first = findfirst("First Section", coverpage_content)
+            pos_second = findfirst("Second Section", coverpage_content)
+
+            # Verify order is preserved (Third -> First -> Second)
+            @test !isnothing(pos_third)
+            @test !isnothing(pos_first)
+            @test !isnothing(pos_second)
+            @test pos_third < pos_first
+            @test pos_first < pos_second
+        end
+    end
+
+    @testset "OrderedDict with page_header override" begin
+        using OrderedCollections
+
+        df = DataFrame(x = 1:5, y = rand(5))
+
+        page1 = JSPlotPage(
+            Dict(:data => df),
+            [TextBlock("<p>Content</p>")],
+            tab_title = "Page 1"
+        )
+
+        grouped = OrderedCollections.OrderedDict(
+            "Section" => [page1]
+        )
+
+        pages = Pages(
+            [TextBlock("<h1>Welcome</h1>")],
+            grouped,
+            page_header = "Custom Header"
+        )
+
+        @test pages.coverpage.page_header == "Custom Header"
+    end
+
+    @testset "Automatic LinkList with multiple pages" begin
+        mktempdir() do tmpdir
+            df1 = DataFrame(x = 1:5, y = rand(5))
+            df2 = DataFrame(x = 1:3, y = rand(3))
+            df3 = DataFrame(x = 1:7, y = rand(7))
+
+            page1 = JSPlotPage(
+                Dict(:data1 => df1),
+                [TextBlock("<p>First</p>")],
+                tab_title = "Revenue",
+                notes = "Revenue analysis and trends"
+            )
+
+            page2 = JSPlotPage(
+                Dict(:data2 => df2),
+                [TextBlock("<p>Second</p>")],
+                tab_title = "Costs",
+                notes = "Cost breakdown by category"
+            )
+
+            page3 = JSPlotPage(
+                Dict(:data3 => df3),
+                [TextBlock("<p>Third</p>")],
+                tab_title = "Profit",
+                notes = "Net profit calculations"
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Dashboard</h1>")],
+                [page1, page2, page3],
+                tab_title = "Home"
+            )
+
+            outfile = joinpath(tmpdir, "auto_links.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "auto_links")
+            coverpage_content = read(joinpath(project_dir, "auto_links.html"), String)
+
+            # Check that all page titles appear
+            @test occursin("Revenue", coverpage_content)
+            @test occursin("Costs", coverpage_content)
+            @test occursin("Profit", coverpage_content)
+
+            # Check that all notes appear
+            @test occursin("Revenue analysis and trends", coverpage_content)
+            @test occursin("Cost breakdown by category", coverpage_content)
+            @test occursin("Net profit calculations", coverpage_content)
+
+            # Check that links are properly formed
+            @test occursin("revenue.html", coverpage_content)
+            @test occursin("costs.html", coverpage_content)
+            @test occursin("profit.html", coverpage_content)
+        end
+    end
+
+    @testset "OrderedDict with single page per group" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            pages_vec = [
+                JSPlotPage(Dict(:d1 => df), [TextBlock("<p>1</p>")], tab_title = "Page 1"),
+                JSPlotPage(Dict(:d2 => df), [TextBlock("<p>2</p>")], tab_title = "Page 2"),
+                JSPlotPage(Dict(:d3 => df), [TextBlock("<p>3</p>")], tab_title = "Page 3")
+            ]
+
+            grouped = OrderedCollections.OrderedDict(
+                "Group A" => [pages_vec[1]],
+                "Group B" => [pages_vec[2]],
+                "Group C" => [pages_vec[3]]
+            )
+
+            pages = Pages([TextBlock("<h1>Test</h1>")], grouped)
+
+            @test length(pages.pages) == 3
+
+            outfile = joinpath(tmpdir, "single_per_group.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "single_per_group")
+            coverpage_content = read(joinpath(project_dir, "single_per_group.html"), String)
+
+            @test occursin("Group A", coverpage_content)
+            @test occursin("Group B", coverpage_content)
+            @test occursin("Group C", coverpage_content)
+        end
+    end
+
+    @testset "OrderedDict with many pages in one group" begin
+        using OrderedCollections
+
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            # Create 5 pages in one group
+            many_pages = [
+                JSPlotPage(Dict(Symbol("d$i") => df), [TextBlock("<p>$i</p>")], tab_title = "Page $i")
+                for i in 1:5
+            ]
+
+            grouped = OrderedCollections.OrderedDict(
+                "Large Group" => many_pages
+            )
+
+            pages = Pages([TextBlock("<h1>Many Pages</h1>")], grouped)
+
+            @test length(pages.pages) == 5
+
+            outfile = joinpath(tmpdir, "many.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "many")
+            coverpage_content = read(joinpath(project_dir, "many.html"), String)
+
+            @test occursin("Large Group", coverpage_content)
+            for i in 1:5
+                @test occursin("Page $i", coverpage_content)
+            end
+        end
+    end
+
+    @testset "File existence checks" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            page1 = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<h2>Content</h2>")],
+                tab_title = "Test Page"
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Cover</h1>")],
+                [page1]
+            )
+
+            outfile = joinpath(tmpdir, "files.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "files")
+
+            # Check all expected files exist
+            @test isfile(joinpath(project_dir, "files.html"))
+            @test isfile(joinpath(project_dir, "test_page.html"))
+            @test isfile(joinpath(project_dir, "open.sh"))
+            @test isfile(joinpath(project_dir, "open.bat"))
+            @test isfile(joinpath(project_dir, "README.md"))
+
+            # Check launcher scripts have proper permissions on Unix
+            if Sys.isunix()
+                @test isexecutable(joinpath(project_dir, "open.sh"))
+            end
+        end
+    end
+
+    @testset "Data directory structure" begin
+        mktempdir() do tmpdir
+            df1 = DataFrame(x = 1:5, y = rand(5))
+            df2 = DataFrame(a = 1:3, b = rand(3))
+
+            page1 = JSPlotPage(
+                Dict(:dataset1 => df1),
+                [TextBlock("<p>1</p>")],
+                tab_title = "P1"
+            )
+
+            page2 = JSPlotPage(
+                Dict(:dataset2 => df2),
+                [TextBlock("<p>2</p>")],
+                tab_title = "P2"
+            )
+
+            pages = Pages(
+                [TextBlock("<h1>Test</h1>")],
+                [page1, page2],
+                dataformat = :csv_embedded
+            )
+
+            outfile = joinpath(tmpdir, "data_struct.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "data_struct")
+
+            # Verify project directory and pages were created
+            @test isdir(project_dir)
+            @test isfile(joinpath(project_dir, "p1.html"))
+            @test isfile(joinpath(project_dir, "p2.html"))
+        end
+    end
+
+    @testset "Coverpage with no additional pages" begin
+        mktempdir() do tmpdir
+            pages = Pages(
+                [TextBlock("<h1>Standalone Cover</h1>"), TextBlock("<p>No other pages</p>")],
+                JSPlotPage[]
+            )
+
+            @test length(pages.pages) == 0
+
+            outfile = joinpath(tmpdir, "standalone.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "standalone")
+            @test isfile(joinpath(project_dir, "standalone.html"))
+
+            content = read(joinpath(project_dir, "standalone.html"), String)
+            @test occursin("Standalone Cover", content)
+            @test occursin("No other pages", content)
+        end
+    end
 end
