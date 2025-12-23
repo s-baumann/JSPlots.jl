@@ -92,7 +92,7 @@ normalized_filters = normalize_filters(filters, df)
         # Build HTML controls using abstraction
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
@@ -789,6 +789,7 @@ normalized_filters = normalize_filters(filters, df)
             chart_title_str,
             update_function,
             filter_dropdowns,
+            filter_sliders,
             attribute_dropdowns,
             facet_dropdowns,
             title,

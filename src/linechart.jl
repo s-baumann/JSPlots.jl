@@ -62,7 +62,7 @@ struct LineChart <: JSPlotsType
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Validate aggregator
-        valid_aggregators = ["none", "mean", "median", "count", "min", "max"]
+        valid_aggregators = ["none", "mean", "median", "count", "min", "max", "sum"]
         if !(aggregator in valid_aggregators)
             error("aggregator must be one of: $(join(valid_aggregators, ", "))")
         end
@@ -77,7 +77,7 @@ struct LineChart <: JSPlotsType
         # Build HTML controls using abstraction
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
@@ -115,6 +115,10 @@ struct LineChart <: JSPlotsType
                 if (values.length === 0) return null;
                 if (method === 'none') return values;
                 if (method === 'count') return [values.length];
+                if (method === 'sum') {
+                    const sum = values.reduce((a, b) => a + b, 0);
+                    return [sum];
+                }
                 if (method === 'mean') {
                     const sum = values.reduce((a, b) => a + b, 0);
                     return [sum / values.length];
@@ -210,14 +214,33 @@ struct LineChart <: JSPlotsType
                             const xGroups = {};
                             group.data.forEach(row => {
                                 const xVal = row[X_COL];
-                                if (!xGroups[xVal]) xGroups[xVal] = [];
-                                xGroups[xVal].push(row[Y_COL]);
+                                // Convert to string for consistent grouping
+                                const xKey = String(xVal);
+                                if (!xGroups[xKey]) xGroups[xKey] = [];
+                                xGroups[xKey].push(row[Y_COL]);
                             });
 
                             xValues = [];
                             yValues = [];
+
+                            // Helper function to check if a string looks like a date
+                            function looksLikeDate(str) {
+                                // Check for common date formats: YYYY-MM-DD, ISO datetime, etc.
+                                return /^\\d{4}-\\d{2}-\\d{2}/.test(str) ||
+                                       /^\\d{4}-\\d{2}-\\d{2}T/.test(str) ||
+                                       /^\\d{2}\\/\\d{2}\\/\\d{4}/.test(str);
+                            }
+
+                            // Check if first key looks like a date to determine handling
+                            const firstKey = Object.keys(xGroups)[0];
+                            const isDateData = firstKey && looksLikeDate(firstKey);
+
                             // Sort keys - try numeric sort first, fall back to string sort
                             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                if (isDateData) {
+                                    // For dates, use string comparison (ISO format sorts correctly)
+                                    return String(a).localeCompare(String(b));
+                                }
                                 const aNum = parseFloat(a);
                                 const bNum = parseFloat(b);
                                 if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -226,12 +249,16 @@ struct LineChart <: JSPlotsType
                                 return String(a).localeCompare(String(b));
                             });
 
-                            sortedKeys.forEach(xVal => {
-                                const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                            sortedKeys.forEach(xKey => {
+                                const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                                 if (aggregated && aggregated.length > 0) {
-                                    // Keep original value type (don't force to float for strings)
-                                    const numVal = parseFloat(xVal);
-                                    xValues.push(isNaN(numVal) ? xVal : numVal);
+                                    // For dates, keep as string; for numbers, parse
+                                    if (isDateData) {
+                                        xValues.push(xKey);
+                                    } else {
+                                        const numVal = parseFloat(xKey);
+                                        xValues.push(isNaN(numVal) ? xKey : numVal);
+                                    }
                                     yValues.push(aggregated[0]);
                                 }
                             });
@@ -311,14 +338,29 @@ struct LineChart <: JSPlotsType
                                 const xGroups = {};
                                 group.data.forEach(row => {
                                     const xVal = row[X_COL];
-                                    if (!xGroups[xVal]) xGroups[xVal] = [];
-                                    xGroups[xVal].push(row[Y_COL]);
+                                    const xKey = String(xVal);
+                                    if (!xGroups[xKey]) xGroups[xKey] = [];
+                                    xGroups[xKey].push(row[Y_COL]);
                                 });
 
                                 xValues = [];
                                 yValues = [];
-                                // Sort keys - try numeric sort first, fall back to string sort
+
+                                // Helper function to check if a string looks like a date
+                                function looksLikeDate(str) {
+                                    return /^\\d{4}-\\d{2}-\\d{2}/.test(str) ||
+                                           /^\\d{4}-\\d{2}-\\d{2}T/.test(str) ||
+                                           /^\\d{2}\\/\\d{2}\\/\\d{4}/.test(str);
+                                }
+
+                                const firstKey = Object.keys(xGroups)[0];
+                                const isDateData = firstKey && looksLikeDate(firstKey);
+
+                                // Sort keys
                                 const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                    if (isDateData) {
+                                        return String(a).localeCompare(String(b));
+                                    }
                                     const aNum = parseFloat(a);
                                     const bNum = parseFloat(b);
                                     if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -327,12 +369,15 @@ struct LineChart <: JSPlotsType
                                     return String(a).localeCompare(String(b));
                                 });
 
-                                sortedKeys.forEach(xVal => {
-                                    const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                sortedKeys.forEach(xKey => {
+                                    const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                                     if (aggregated && aggregated.length > 0) {
-                                        // Keep original value type (don't force to float for strings)
-                                        const numVal = parseFloat(xVal);
-                                        xValues.push(isNaN(numVal) ? xVal : numVal);
+                                        if (isDateData) {
+                                            xValues.push(xKey);
+                                        } else {
+                                            const numVal = parseFloat(xKey);
+                                            xValues.push(isNaN(numVal) ? xKey : numVal);
+                                        }
                                         yValues.push(aggregated[0]);
                                     }
                                 });
@@ -437,13 +482,28 @@ struct LineChart <: JSPlotsType
                                     const xGroups = {};
                                     group.data.forEach(row => {
                                         const xVal = row[X_COL];
-                                        if (!xGroups[xVal]) xGroups[xVal] = [];
-                                        xGroups[xVal].push(row[Y_COL]);
+                                        const xKey = String(xVal);
+                                        if (!xGroups[xKey]) xGroups[xKey] = [];
+                                        xGroups[xKey].push(row[Y_COL]);
                                     });
 
                                     xValues = [];
                                     yValues = [];
+
+                                    // Helper function to check if a string looks like a date
+                                    function looksLikeDate(str) {
+                                        return /^\\d{4}-\\d{2}-\\d{2}/.test(str) ||
+                                               /^\\d{4}-\\d{2}-\\d{2}T/.test(str) ||
+                                               /^\\d{2}\\/\\d{2}\\/\\d{4}/.test(str);
+                                    }
+
+                                    const firstKey = Object.keys(xGroups)[0];
+                                    const isDateData = firstKey && looksLikeDate(firstKey);
+
                                     const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                                        if (isDateData) {
+                                            return String(a).localeCompare(String(b));
+                                        }
                                         const aNum = parseFloat(a);
                                         const bNum = parseFloat(b);
                                         if (!isNaN(aNum) && !isNaN(bNum)) {
@@ -452,11 +512,15 @@ struct LineChart <: JSPlotsType
                                         return String(a).localeCompare(String(b));
                                     });
 
-                                    sortedKeys.forEach(xVal => {
-                                        const aggregated = aggregate(xGroups[xVal], AGGREGATOR);
+                                    sortedKeys.forEach(xKey => {
+                                        const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
                                         if (aggregated && aggregated.length > 0) {
-                                            const numVal = parseFloat(xVal);
-                                            xValues.push(isNaN(numVal) ? xVal : numVal);
+                                            if (isDateData) {
+                                                xValues.push(xKey);
+                                            } else {
+                                                const numVal = parseFloat(xKey);
+                                                xValues.push(isNaN(numVal) ? xKey : numVal);
+                                            }
                                             yValues.push(aggregated[0]);
                                         }
                                     });
@@ -582,7 +646,7 @@ struct LineChart <: JSPlotsType
         push!(attribute_dropdowns, DropdownControl(
             "aggregator_select_$chart_title_str",
             "Aggregator",
-            ["none", "mean", "median", "count", "min", "max"],
+            ["none", "mean", "median", "count", "min", "max", "sum"],
             aggregator,
             update_function
         ))
@@ -596,6 +660,7 @@ struct LineChart <: JSPlotsType
             chart_title_str,
             update_function,
             filter_dropdowns,
+            filter_sliders,
             attribute_dropdowns,
             facet_dropdowns,
             title,

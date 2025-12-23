@@ -81,8 +81,8 @@ normalized_filters = normalize_filters(filters, df)
 
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title_safe)()"
-        filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
-        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") * join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, default_value, onchange_fn) = begin
@@ -641,9 +641,9 @@ $style_html        </div>
                 if (facet1 && facet2) {
                     renderFacetGrid_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
                 } else if (facet1 || facet2) {
-                    renderFacets_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+                    renderFacetWrap_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
                 } else {
-                    renderSinglePlot_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+                    renderNoFacets_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
                 }
             };
 

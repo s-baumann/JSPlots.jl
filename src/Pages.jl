@@ -155,4 +155,48 @@ struct Pages
 
         new(coverpage, pages, dataformat)
     end
+
+    # Easy constructor with grouped pages that creates LinkList with subheadings
+    function Pages(coverpage_content::Vector, grouped_pages::OrderedCollections.OrderedDict{String, Vector{JSPlotPage}};
+                   tab_title::String="Home",
+                   page_header::String="",
+                   dataformat::Symbol=:parquet)
+
+        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
+            error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
+        end
+
+        # Build the grouped LinkList automatically from the grouped pages
+        grouped_links = OrderedCollections.OrderedDict{String, Vector{Tuple{String, String, String}}}()
+        all_pages = JSPlotPage[]
+
+        for (heading, pages_in_group) in grouped_pages
+            links = Tuple{String, String, String}[]
+            for page in pages_in_group
+                # Use sanitized tab_title for the filename
+                sanitized_name = sanitize_filename(page.tab_title)
+                link_url = "$(sanitized_name).html"
+                link_title = page.tab_title
+                link_blurb = page.notes
+                push!(links, (link_title, link_url, link_blurb))
+                push!(all_pages, page)
+            end
+            grouped_links[heading] = links
+        end
+
+        # Create the LinkList with subheadings
+        link_list = LinkList(grouped_links)
+
+        # Build coverpage with provided content plus the LinkList
+        coverpage_items = vcat(coverpage_content, [link_list])
+        coverpage = JSPlotPage(
+            Dict{Symbol,DataFrame}(),
+            coverpage_items,
+            tab_title = tab_title,
+            page_header = page_header,
+            dataformat = dataformat
+        )
+
+        new(coverpage, all_pages, dataformat)
+    end
 end

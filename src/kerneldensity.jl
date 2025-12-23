@@ -77,8 +77,9 @@ struct KernelDensity <: JSPlotsType
 
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title)()"
-        filter_dropdowns = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
-        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
+        filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") *
+                       join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
         # Generate facet dropdowns using html_controls abstraction

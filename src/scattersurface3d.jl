@@ -303,8 +303,8 @@ function generate_html(chart_title_safe, data_label, df,
 
     # Build filter dropdowns using html_controls abstraction
     update_function = "updatePlotWithFilters_$(chart_title_safe)()"
-    filter_dropdowns = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
-    filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n")
+    filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+    filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") * join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
     filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
     # Get the first/default grouping scheme for initial display

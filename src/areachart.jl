@@ -11,7 +11,7 @@ Area chart visualization with support for stacking modes and interactive control
 # Keyword Arguments
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
-- `group_cols::Vector{Symbol}`: Columns available for grouping/coloring areas (default: `Symbol[]`)
+- `color_cols::Vector{Symbol}`: Columns available for grouping/coloring areas (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
@@ -32,7 +32,7 @@ Area chart visualization with support for stacking modes and interactive control
 ac = AreaChart(:sales_chart, df, :sales_data,
     x_cols=[:date],
     y_cols=[:revenue],
-    group_cols=[:region],
+    color_cols=[:region],
     stack_mode="stack",
     title="Sales by Region Over Time"
 )
@@ -46,7 +46,7 @@ struct AreaChart <: JSPlotsType
     function AreaChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
-                            group_cols::Vector{Symbol}=Symbol[],
+                            color_cols::Vector{Symbol}=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -83,23 +83,23 @@ struct AreaChart <: JSPlotsType
         filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible group columns that exist
-        color_maps, valid_group_cols = build_color_maps(group_cols, df)
+        color_maps, valid_color_cols = build_color_maps(color_cols, df)
         # Build group order maps (preserving order of first appearance)
         group_order_maps = Dict()
-        for col in valid_group_cols
+        for col in valid_color_cols
             unique_vals = unique(df[!, col])
             group_order_maps[string(col)] = [string(val) for val in unique_vals]
         end
 
         # Build HTML controls using abstraction
         update_function = "updatePlot_$chart_title_safe()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
-        group_cols_js = build_js_array(valid_group_cols)
+        color_cols_js = build_js_array(valid_color_cols)
 
         # Create color maps as nested JavaScript object
         color_maps_js = if isempty(color_maps)
@@ -124,7 +124,7 @@ struct AreaChart <: JSPlotsType
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
-        default_color_col = select_default_column(valid_group_cols, "__no_group__")
+        default_color_col = select_default_column(valid_color_cols, "__no_group__")
 
         functional_html = """
         (function() {
@@ -132,12 +132,12 @@ struct AreaChart <: JSPlotsType
             const FILTER_COLS = $filter_cols_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
-            const GROUP_COLS = $group_cols_js;
+            const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
             const GROUP_ORDER = $group_order_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
-            const DEFAULT_GROUP_COL = '$default_color_col';
+            const DEFAULT_COLOR_COL = '$default_color_col';
             const FILL_OPACITY = $fill_opacity;
 
             let allData = [];
@@ -173,7 +173,7 @@ struct AreaChart <: JSPlotsType
 
                 // Get current group column
                 const groupColSelect = document.getElementById('group_col_select_$chart_title_safe');
-                const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_GROUP_COL;
+                const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_COLOR_COL;
 
                 // Get current stack mode
                 const stackModeSelect = document.getElementById('stack_mode_select_$chart_title_safe');
@@ -624,12 +624,12 @@ struct AreaChart <: JSPlotsType
         end
 
         # Group column dropdown
-        if length(valid_group_cols) > 1
+        if length(valid_color_cols) > 1
             push!(attribute_dropdowns, DropdownControl(
-                "group_col_select_$chart_title_safe",
-                "Group by",
-                [string(col) for col in valid_group_cols],
-                string(valid_group_cols[1]),
+                "color_col_select_$chart_title_safe",
+                "Color by",
+                [string(col) for col in valid_color_cols],
+                string(valid_color_cols[1]),
                 update_function
             ))
         end
@@ -655,6 +655,7 @@ struct AreaChart <: JSPlotsType
             chart_title_safe,
             update_function,
             filter_dropdowns,
+            filter_sliders,
             attribute_dropdowns,
             facet_dropdowns,
             title,

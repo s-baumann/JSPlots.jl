@@ -10,7 +10,7 @@ Pie chart visualization with support for faceting and interactive controls.
 
 # Keyword Arguments
 - `value_cols::Vector{Symbol}`: Columns available for slice sizes (default: `[:value]`)
-- `label_cols::Vector{Symbol}`: Columns available for slice labels (default: `[:label]`)
+- `color_cols::Vector{Symbol}`: Columns available for slice labels/colors (default: `[:label]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -23,7 +23,7 @@ Pie chart visualization with support for faceting and interactive controls.
 ```julia
 pc = PieChart(:sales_pie, df, :sales_data,
     value_cols=[:revenue, :units],
-    label_cols=[:category, :product],
+    color_cols=[:category, :product],
     title="Sales by Category"
 )
 ```
@@ -36,7 +36,7 @@ struct PieChart <: JSPlotsType
 
     function PieChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_cols::Vector{Symbol}=[:value],
-                      label_cols::Vector{Symbol}=[:label],
+                      color_cols::Vector{Symbol}=[:label],
                       filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                       default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -50,7 +50,7 @@ normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
         valid_value_cols = validate_and_filter_columns(value_cols, df, "value_cols")
-        valid_label_cols = validate_and_filter_columns(label_cols, df, "label_cols")
+        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
 
         # Validate hole parameter
         if hole < 0.0 || hole >= 1.0
@@ -63,13 +63,13 @@ normalized_filters = normalize_filters(filters, df)
         # Get unique values for each filter column
         filter_options = build_filter_options(normalized_filters, df)
 
-        # Build color maps for all possible label columns
-        color_maps, _ = build_color_maps(valid_label_cols, df)
+        # Build color maps for all possible color columns
+        color_maps, _ = build_color_maps(valid_color_cols, df)
 
         # Build filter dropdowns using html_controls abstraction
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
+        filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Build attribute dropdowns
         attribute_dropdowns = DropdownControl[]
@@ -85,13 +85,13 @@ normalized_filters = normalize_filters(filters, df)
             ))
         end
 
-        # Label column dropdown
-        if length(valid_label_cols) > 1
+        # Color column dropdown
+        if length(valid_color_cols) > 1
             push!(attribute_dropdowns, DropdownControl(
-                "label_col_select_$chart_title_str",
+                "color_col_select_$chart_title_str",
                 "Slice grouping",
-                [string(col) for col in valid_label_cols],
-                string(valid_label_cols[1]),
+                [string(col) for col in valid_color_cols],
+                string(valid_color_cols[1]),
                 update_function
             ))
         end
@@ -101,12 +101,12 @@ normalized_filters = normalize_filters(filters, df)
 
         # Default columns
         default_value_col = string(valid_value_cols[1])
-        default_label_col = string(valid_label_cols[1])
+        default_color_col = string(valid_color_cols[1])
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         value_cols_js = build_js_array(valid_value_cols)
-        label_cols_js = build_js_array(valid_label_cols)
+        color_cols_js = build_js_array(valid_color_cols)
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([
@@ -120,6 +120,7 @@ normalized_filters = normalize_filters(filters, df)
             chart_title_str,
             update_function,
             filter_dropdowns,
+            filter_sliders,
             attribute_dropdowns,
             facet_dropdowns,
             title,
@@ -133,10 +134,10 @@ normalized_filters = normalize_filters(filters, df)
             // Configuration
             const FILTER_COLS = $filter_cols_js;
             const VALUE_COLS = $value_cols_js;
-            const LABEL_COLS = $label_cols_js;
+            const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
             const DEFAULT_VALUE_COL = '$default_value_col';
-            const DEFAULT_LABEL_COL = '$default_label_col';
+            const DEFAULT_COLOR_COL = '$default_color_col';
             const HOLE = $(hole);
             const SHOW_LEGEND = $(show_legend);
 
@@ -165,15 +166,15 @@ normalized_filters = normalize_filters(filters, df)
                     return;
                 }
 
-                // Get current value and label columns
+                // Get current value and color columns
                 const valueColSelect = document.getElementById('value_col_select_$chart_title');
                 const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
 
-                const labelColSelect = document.getElementById('label_col_select_$chart_title');
-                const LABEL_COL = labelColSelect ? labelColSelect.value : DEFAULT_LABEL_COL;
+                const colorColSelect = document.getElementById('color_col_select_$chart_title');
+                const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-                // Get color map for current label selection
-                const COLOR_MAP = COLOR_MAPS[LABEL_COL] || {};
+                // Get color map for current color selection
+                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 // Get current filter values (multiple selections)
                 const filters = {};
@@ -203,7 +204,7 @@ normalized_filters = normalize_filters(filters, df)
 
                 if (!facet1) {
                     // No faceting - single pie chart
-                    const aggregated = aggregateData(filteredData, LABEL_COL, VALUE_COL);
+                    const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
                     const labels = Object.keys(aggregated);
                     const values = Object.values(aggregated);
                     const colors = labels.map(label => COLOR_MAP[label] || '#808080');
@@ -239,7 +240,7 @@ normalized_filters = normalize_filters(filters, df)
                     for (let i = 0; i < nFacets; i++) {
                         const facetValue = facetValues[i];
                         const facetData = filteredData.filter(row => String(row[facet1]) === facetValue);
-                        const aggregated = aggregateData(facetData, LABEL_COL, VALUE_COL);
+                        const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
                         const labels = Object.keys(aggregated);
                         const values = Object.values(aggregated);
                         const colors = labels.map(label => COLOR_MAP[label] || '#808080');
@@ -307,7 +308,7 @@ normalized_filters = normalize_filters(filters, df)
                             );
 
                             if (cellData.length > 0) {
-                                const aggregated = aggregateData(cellData, LABEL_COL, VALUE_COL);
+                                const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
                                 const labels = Object.keys(aggregated);
                                 const values = Object.values(aggregated);
                                 const colors = labels.map(label => COLOR_MAP[label] || '#808080');

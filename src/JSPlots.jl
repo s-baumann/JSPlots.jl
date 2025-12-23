@@ -1,6 +1,6 @@
 module JSPlots
 
-    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite, Statistics
+    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite, Statistics, OrderedCollections
 
     abstract type JSPlotsType end
 
@@ -252,6 +252,44 @@ module JSPlots
     end
 
     """
+        is_continuous_column(df::DataFrame, col::Symbol; threshold::Int=20)
+
+    Determine if a column should be treated as continuous (numeric with many unique values).
+
+    # Arguments
+    - `df::DataFrame`: DataFrame containing the column
+    - `col::Symbol`: Column to check
+    - `threshold::Int`: Minimum number of unique values to be considered continuous (default: 20)
+
+    # Returns
+    - `Bool`: true if column is numeric and has >= threshold unique values
+
+    # Examples
+    ```julia
+    is_continuous_column(df, :age)        # true if numeric with many values
+    is_continuous_column(df, :category)   # false if string or few unique values
+    ```
+    """
+    function is_continuous_column(df::DataFrame, col::Symbol; threshold::Int=20)
+        col_str = string(col)
+        if !(col_str in names(df))
+            return false
+        end
+
+        col_type = eltype(df[!, col])
+        # Check if numeric type
+        is_numeric = col_type <: Number || col_type <: Union{Missing, <:Number}
+
+        if !is_numeric
+            return false
+        end
+
+        # Check number of unique values
+        unique_vals = unique(skipmissing(df[!, col]))
+        return length(unique_vals) >= threshold
+    end
+
+    """
         build_js_array(cols::Vector)
 
     Convert a Julia vector to a JavaScript array string representation.
@@ -290,7 +328,7 @@ module JSPlots
     end
 
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
-    export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column
+    export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column, is_continuous_column
 
     get_filter_vars(filters::Vector{Symbol}) = filters
     get_filter_vars(filters::Dict) = Symbol.(keys(filters))

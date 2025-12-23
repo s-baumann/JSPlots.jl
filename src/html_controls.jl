@@ -26,6 +26,30 @@ struct DropdownControl
 end
 
 """
+    RangeSliderControl
+
+Specification for a range slider control (for continuous numeric filters).
+
+# Fields
+- `id::String`: HTML element ID (without _min/_max suffix)
+- `label::String`: Display label for the slider
+- `min_value::Float64`: Minimum value of the range
+- `max_value::Float64`: Maximum value of the range
+- `default_min::Float64`: Default minimum selection
+- `default_max::Float64`: Default maximum selection
+- `onchange::String`: JavaScript function to call on change
+"""
+struct RangeSliderControl
+    id::String
+    label::String
+    min_value::Float64
+    max_value::Float64
+    default_min::Float64
+    default_max::Float64
+    onchange::String
+end
+
+"""
     ChartHtmlControls
 
 Complete specification for a chart's HTML controls (filters, attributes, facets).
@@ -35,6 +59,7 @@ Complete specification for a chart's HTML controls (filters, attributes, facets)
 - `chart_div_id::String`: ID of the main chart div element
 - `update_function_name::String`: Name of the JavaScript update function
 - `filter_dropdowns::Vector{DropdownControl}`: Categorical filter controls
+- `filter_sliders::Vector{RangeSliderControl}`: Continuous filter controls
 - `attribute_dropdowns::Vector{DropdownControl}`: Chart-specific attribute controls
 - `facet_dropdowns::Vector{DropdownControl}`: Faceting controls (0-2 elements)
 - `title::String`: Chart title to display
@@ -45,6 +70,7 @@ struct ChartHtmlControls
     chart_div_id::String
     update_function_name::String
     filter_dropdowns::Vector{DropdownControl}
+    filter_sliders::Vector{RangeSliderControl}
     attribute_dropdowns::Vector{DropdownControl}
     facet_dropdowns::Vector{DropdownControl}
     title::String
@@ -87,6 +113,51 @@ function generate_dropdown_html(dropdown::DropdownControl; multiselect::Bool=fal
 end
 
 """
+    generate_range_slider_html(slider::RangeSliderControl)
+
+Generate HTML for a range slider control (dual-handle slider for numeric ranges).
+
+# Arguments
+- `slider::RangeSliderControl`: The range slider specification
+
+# Returns
+- `String`: HTML string for the range slider
+"""
+function generate_range_slider_html(slider::RangeSliderControl)::String
+    return """
+            <div style="margin: 10px;">
+                <label>$(slider.label): </label>
+                <span id="$(slider.id)_display">$(slider.default_min) - $(slider.default_max)</span>
+                <div style="margin-top: 5px;">
+                    <input type="range" id="$(slider.id)_min" min="$(slider.min_value)" max="$(slider.max_value)"
+                           value="$(slider.default_min)" step="any" style="width: 45%;"
+                           oninput="updateRangeDisplay_$(slider.id)(); $(slider.onchange)">
+                    <input type="range" id="$(slider.id)_max" min="$(slider.min_value)" max="$(slider.max_value)"
+                           value="$(slider.default_max)" step="any" style="width: 45%;"
+                           oninput="updateRangeDisplay_$(slider.id)(); $(slider.onchange)">
+                </div>
+                <script>
+                    function updateRangeDisplay_$(slider.id)() {
+                        const minVal = parseFloat(document.getElementById('$(slider.id)_min').value);
+                        const maxVal = parseFloat(document.getElementById('$(slider.id)_max').value);
+                        // Ensure min <= max
+                        if (minVal > maxVal) {
+                            document.getElementById('$(slider.id)_min').value = maxVal;
+                            document.getElementById('$(slider.id)_max').value = minVal;
+                        }
+                        const displayMin = parseFloat(document.getElementById('$(slider.id)_min').value);
+                        const displayMax = parseFloat(document.getElementById('$(slider.id)_max').value);
+                        document.getElementById('$(slider.id)_display').textContent =
+                            displayMin.toFixed(2) + ' - ' + displayMax.toFixed(2);
+                    }
+                    // Initialize display
+                    updateRangeDisplay_$(slider.id)();
+                </script>
+            </div>
+            """
+end
+
+"""
     generate_appearance_html(controls::ChartHtmlControls; multiselect_filters::Bool=true)
 
 Generate complete appearance HTML for a chart including filters, attributes, facets, and chart container.
@@ -111,10 +182,17 @@ function generate_appearance_html(controls::ChartHtmlControls;
 
     # Build filters section
     filters_html = ""
-    if !isempty(controls.filter_dropdowns)
+    if !isempty(controls.filter_dropdowns) || !isempty(controls.filter_sliders)
         filter_controls_html = ""
+
+        # Add dropdown filters
         for dropdown in controls.filter_dropdowns
             filter_controls_html *= generate_dropdown_html(dropdown; multiselect=multiselect_filters)
+        end
+
+        # Add range slider filters
+        for slider in controls.filter_sliders
+            filter_controls_html *= generate_range_slider_html(slider)
         end
 
         filters_html = """
@@ -241,7 +319,8 @@ end
                           df::DataFrame,
                           update_function::String)
 
-Helper function to build filter dropdown controls from filter dictionary.
+Helper function to build filter controls from filter dictionary.
+Returns both dropdown controls (for categorical filters) and range slider controls (for continuous filters).
 
 # Arguments
 - `chart_title_safe::String`: Sanitized chart title for IDs
@@ -250,44 +329,67 @@ Helper function to build filter dropdown controls from filter dictionary.
 - `update_function::String`: JavaScript function name for updates
 
 # Returns
-- `Vector{DropdownControl}`: Vector of filter dropdown controls
+- `Tuple{Vector{DropdownControl}, Vector{RangeSliderControl}}`: (categorical filters, continuous filters)
 """
 function build_filter_dropdowns(chart_title_safe::String,
                                 filters::Dict{Symbol, Any},
                                 df::DataFrame,
-                                update_function::String)::Vector{DropdownControl}
+                                update_function::String)::Tuple{Vector{DropdownControl}, Vector{RangeSliderControl}}
 
     filter_dropdowns = DropdownControl[]
+    filter_sliders = RangeSliderControl[]
 
     for (col, default_vals) in filters
         col_str = string(col)
         if col_str in names(df)
-            # Get unique values for this column
-            unique_vals = sort(unique(skipmissing(df[!, col])))
-            options = [string(v) for v in unique_vals]
+            # Check if this is a continuous variable
+            if is_continuous_column(df, col)
+                # Create range slider for continuous variables
+                col_data = collect(skipmissing(df[!, col]))
+                min_val = Float64(minimum(col_data))
+                max_val = Float64(maximum(col_data))
 
-            # Convert default values to strings
-            default_strs = [string(v) for v in default_vals]
+                # Default to full range if default_vals is empty or contains all values
+                default_min = min_val
+                default_max = max_val
 
-            # Filter to only include defaults that are valid options
-            valid_defaults = filter(d -> d in options, default_strs)
+                push!(filter_sliders, RangeSliderControl(
+                    "$(col)_range_$chart_title_safe",
+                    col_str,
+                    min_val,
+                    max_val,
+                    default_min,
+                    default_max,
+                    update_function
+                ))
+            else
+                # Create dropdown for categorical variables
+                unique_vals = sort(unique(skipmissing(df[!, col])))
+                options = [string(v) for v in unique_vals]
 
-            # If no valid defaults, use all options
-            if isempty(valid_defaults)
-                valid_defaults = options
+                # Convert default values to strings
+                default_strs = [string(v) for v in default_vals]
+
+                # Filter to only include defaults that are valid options
+                valid_defaults = filter(d -> d in options, default_strs)
+
+                # If no valid defaults, use all options
+                if isempty(valid_defaults)
+                    valid_defaults = options
+                end
+
+                push!(filter_dropdowns, DropdownControl(
+                    "$(col)_select_$chart_title_safe",
+                    col_str,
+                    options,
+                    valid_defaults,  # Now a Vector{String}
+                    update_function
+                ))
             end
-
-            push!(filter_dropdowns, DropdownControl(
-                "$(col)_select_$chart_title_safe",
-                col_str,
-                options,
-                valid_defaults,  # Now a Vector{String}
-                update_function
-            ))
         end
     end
 
-    return filter_dropdowns
+    return (filter_dropdowns, filter_sliders)
 end
 
 
