@@ -171,7 +171,8 @@ using DataFrames
             filters = Dict{Symbol, Any}(:w => [0.0])
         )
         @test occursin("w", chart.appearance_html)
-        @test occursin("_select", chart.appearance_html)
+        # Filter controls can be either dropdowns (_select) or range sliders (_range) depending on data type
+        @test occursin("_select", chart.appearance_html) || occursin("_range", chart.appearance_html)
     end
 
     @testset "Filter with multiple columns" begin

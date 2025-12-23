@@ -12,7 +12,7 @@ using DataFrames
     @testset "Basic creation" begin
         chart = PieChart(:test_pie, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             title = "Test Pie Chart"
         )
         @test chart.chart_title == :test_pie
@@ -26,7 +26,7 @@ using DataFrames
     @testset "With hole parameter (donut chart)" begin
         chart = PieChart(:donut_chart, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             hole = 0.4
         )
         @test occursin("0.4", chart.functional_html)
@@ -36,7 +36,7 @@ using DataFrames
     @testset "Legend disabled" begin
         chart = PieChart(:no_legend, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             show_legend = false
         )
         @test occursin("false", chart.functional_html)
@@ -46,7 +46,7 @@ using DataFrames
     @testset "Legend enabled" begin
         chart = PieChart(:with_legend, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             show_legend = true
         )
         @test occursin("true", chart.functional_html)
@@ -56,7 +56,7 @@ using DataFrames
     @testset "With notes" begin
         chart = PieChart(:with_notes, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             notes = "This is a test note"
         )
         @test occursin("This is a test note", chart.appearance_html)
@@ -71,7 +71,7 @@ using DataFrames
         )
         chart = PieChart(:with_filters, df_filter, :df_filter;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             filters = Dict{Symbol,Any}(:region => "North", :year => "2023")
         )
         @test occursin("region", chart.functional_html)
@@ -89,7 +89,7 @@ using DataFrames
         )
         chart = PieChart(:facet_wrap, df_facet, :df_facet;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = :region,
             default_facet_cols = :region
         )
@@ -108,7 +108,7 @@ using DataFrames
         )
         chart = PieChart(:facet_grid, df_grid, :df_grid;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = [:region, :year],
             default_facet_cols = [:region, :year]
         )
@@ -127,7 +127,7 @@ using DataFrames
         )
         chart = PieChart(:facet_vec, df_facet, :df_facet;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = [:region],
             default_facet_cols = nothing
         )
@@ -138,7 +138,7 @@ using DataFrames
     @testset "No faceting (default)" begin
         chart = PieChart(:no_facet, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test !occursin("facet1_select", chart.appearance_html)
         @test occursin("Plotly.newPlot", chart.functional_html)
@@ -147,7 +147,7 @@ using DataFrames
     @testset "Color mapping" begin
         chart = PieChart(:color_map, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("COLOR_MAP", chart.functional_html)
         @test occursin("#636efa", chart.functional_html) || occursin("#EF553B", chart.functional_html)
@@ -157,7 +157,7 @@ using DataFrames
         # Test that data aggregation is included
         chart = PieChart(:aggregation, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("aggregateData", chart.functional_html)
     end
@@ -170,7 +170,7 @@ using DataFrames
         )
         chart = PieChart(:filter_func, df_filter, :df_filter;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             filters = Dict{Symbol,Any}(:group => "X")
         )
         @test occursin("filteredData", chart.functional_html)
@@ -180,7 +180,7 @@ using DataFrames
     @testset "Event listeners" begin
         chart = PieChart(:listeners, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("loadDataset", chart.functional_html)
         @test occursin(".then(function(data)", chart.functional_html)
@@ -189,7 +189,7 @@ using DataFrames
     @testset "Plotly chart types" begin
         chart = PieChart(:plotly_type, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("type: 'pie'", chart.functional_html)
         @test occursin("Plotly.newPlot", chart.functional_html)
@@ -198,21 +198,21 @@ using DataFrames
     @testset "Error: invalid value_col" begin
         @test_throws ErrorException PieChart(:error_test, test_df, :test_df;
             value_cols = [:nonexistent],
-            label_cols = [:category]
+            color_cols = [:category]
         )
     end
 
     @testset "Error: invalid label_col" begin
         @test_throws ErrorException PieChart(:error_test, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:nonexistent]
+            color_cols = [:nonexistent]
         )
     end
 
     @testset "Error: hole out of range (negative)" begin
         @test_throws ErrorException PieChart(:error_test, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             hole = -0.1
         )
     end
@@ -220,7 +220,7 @@ using DataFrames
     @testset "Error: hole out of range (>= 1)" begin
         @test_throws ErrorException PieChart(:error_test, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             hole = 1.0
         )
     end
@@ -235,7 +235,7 @@ using DataFrames
         )
         @test_throws ErrorException PieChart(:error_test, df_facet, :df_facet;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = [:f1, :f2, :f3],
             default_facet_cols = [:f1, :f2, :f3]
         )
@@ -250,7 +250,7 @@ using DataFrames
         )
         @test_throws ErrorException PieChart(:error_test, df_facet, :df_facet;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = [:f1],
             default_facet_cols = :f2
         )
@@ -266,7 +266,7 @@ using DataFrames
         )
         chart = PieChart(:full_features, df_full, :df_full;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             filters = Dict{Symbol,Any}(:product => "P1"),
             facet_cols = [:region, :year],
             default_facet_cols = [:region],
@@ -291,7 +291,7 @@ using DataFrames
         )
         chart = PieChart(:aggregation_test, df_agg, :df_agg;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         # Should aggregate A: 25, B: 45, C: 30
         @test occursin("aggregateData", chart.functional_html)
@@ -300,7 +300,7 @@ using DataFrames
     @testset "Empty filters dictionary" begin
         chart = PieChart(:empty_filters, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             filters = Dict{Symbol,Any}()
         )
         @test !occursin("_select", chart.appearance_html)
@@ -309,7 +309,7 @@ using DataFrames
     @testset "Hole at boundary (0.0)" begin
         chart = PieChart(:hole_zero, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             hole = 0.0
         )
         @test occursin("0.0", chart.functional_html)
@@ -318,7 +318,7 @@ using DataFrames
     @testset "Hole at boundary (0.99)" begin
         chart = PieChart(:hole_max, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             hole = 0.99
         )
         @test occursin("0.99", chart.functional_html)
@@ -327,7 +327,7 @@ using DataFrames
     @testset "Sanitized chart title" begin
         chart = PieChart(Symbol("test-pie.chart"), test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("test-pie.chart", chart.functional_html) || occursin("test_pie_chart", chart.functional_html)
     end
@@ -335,7 +335,7 @@ using DataFrames
     @testset "Hover info" begin
         chart = PieChart(:hover_test, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("hoverinfo", chart.functional_html)
         @test occursin("label+value+percent", chart.functional_html)
@@ -349,7 +349,7 @@ using DataFrames
         )
         chart = PieChart(:facet_annotations, df_facet, :df_facet;
             value_cols = [:value],
-            label_cols = [:category],
+            color_cols = [:category],
             facet_cols = :region,
             default_facet_cols = :region
         )
@@ -359,7 +359,7 @@ using DataFrames
     @testset "Update plot function" begin
         chart = PieChart(:update_plot, test_df, :test_df;
             value_cols = [:value],
-            label_cols = [:category]
+            color_cols = [:category]
         )
         @test occursin("window.updateChart_", chart.functional_html)
     end

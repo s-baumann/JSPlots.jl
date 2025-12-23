@@ -451,3 +451,5 @@ function get_languages_from_codeblocks(charts::Vector)
 
     return collect(languages)
 end
+
+dependencies(a::CodeBlock) = []

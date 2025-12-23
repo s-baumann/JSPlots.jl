@@ -19,7 +19,7 @@ include("test_data.jl")
         chart = AreaChart(:grouped_area, test_df, :test_df;
             x_cols = [:x],
             y_cols = [:y],
-            group_cols = [:category],
+            color_cols = [:category],
             filters = Dict{Symbol,Any}(:category => "A"),
             title = "Grouped Area Chart"
         )
@@ -42,7 +42,7 @@ include("test_data.jl")
             chart = AreaChart(:stack_test, test_df, :test_df;
                 x_cols = [:x],
                 y_cols = [:y],
-                group_cols = [:category],
+                color_cols = [:category],
                 stack_mode = mode,
                 title = "Stack Mode: $mode"
             )
@@ -54,7 +54,7 @@ include("test_data.jl")
         chart = AreaChart(:facet_area, test_df, :test_df;
             x_cols = [:x],
             y_cols = [:y],
-            group_cols = [:category],
+            color_cols = [:category],
             facet_cols = [:color],
             default_facet_cols = [:color],
             title = "Faceted Area Chart"
@@ -86,7 +86,7 @@ include("test_data.jl")
         chart = AreaChart(:multi_area, df_multi, :df_multi;
             x_cols = [:x1, :x2],
             y_cols = [:y1, :y2],
-            group_cols = [:group1, :group2],
+            color_cols = [:group1, :group2],
             title = "Multiple Dimensions"
         )
         @test occursin("x1", chart.functional_html)
@@ -107,7 +107,7 @@ include("test_data.jl")
         chart = AreaChart(:date_area, df_dates, :df_dates;
             x_cols = [:date],
             y_cols = [:sales],
-            group_cols = [:region],
+            color_cols = [:region],
             stack_mode = "stack",
             title = "Sales Over Time"
         )
@@ -125,7 +125,7 @@ include("test_data.jl")
         chart = AreaChart(:discrete_area, df_discrete, :df_discrete;
             x_cols = [:category],
             y_cols = [:count],
-            group_cols = [:type],
+            color_cols = [:type],
             stack_mode = "normalised_stack",
             title = "Normalized Stacks"
         )
@@ -144,7 +144,7 @@ include("test_data.jl")
             chart = AreaChart(:page_test, df_test, :test_data;
                 x_cols = [:x],
                 y_cols = [:y],
-                group_cols = [:group],
+                color_cols = [:group],
                 stack_mode = "stack",
                 title = "Integration Test"
             )
@@ -174,14 +174,14 @@ include("test_data.jl")
             chart1 = AreaChart(:chart1, df1, :data1;
                 x_cols = [:x],
                 y_cols = [:y],
-                group_cols = [:g],
+                color_cols = [:g],
                 title = "First Chart"
             )
 
             chart2 = AreaChart(:chart2, df2, :data2;
                 x_cols = [:x],
                 y_cols = [:y],
-                group_cols = [:g],
+                color_cols = [:g],
                 title = "Second Chart",
                 stack_mode = "normalised_stack"
             )
@@ -222,7 +222,7 @@ include("test_data.jl")
         chart = AreaChart(:controls_test, df_multi, :test_df;
             x_cols = [:x, :x2],
             y_cols = [:y, :y2],
-            group_cols = [:category, :category2],
+            color_cols = [:category, :category2],
             stack_mode = "stack",
             title = "Controls Test"
         )
@@ -230,7 +230,7 @@ include("test_data.jl")
         # Check for control elements in appearance HTML
         @test occursin("X dimension", chart.appearance_html)
         @test occursin("Y dimension", chart.appearance_html)
-        @test occursin("Group by", chart.appearance_html)
+        @test occursin("Color by", chart.appearance_html)
         @test occursin("Stack mode", chart.appearance_html)
         @test occursin("controls_test", chart.appearance_html)
 
@@ -263,12 +263,12 @@ include("test_data.jl")
         @test occursin("<b>HTML</b>", chart.appearance_html)
     end
 
-    @testset "Empty group_cols creates default group" begin
+    @testset "Empty color_cols creates default group" begin
         df_no_groups = DataFrame(x = 1:10, y = rand(10))
         chart = AreaChart(:default_group, df_no_groups, :df_no_groups;
             x_cols = [:x],
             y_cols = [:y],
-            group_cols = Symbol[],
+            color_cols = Symbol[],
             title = "No Groups"
         )
 
@@ -279,7 +279,7 @@ include("test_data.jl")
         chart = AreaChart(:data_struct, test_df, :test_df;
             x_cols = [:x],
             y_cols = [:y],
-            group_cols = [:category]
+            color_cols = [:category]
         )
 
         # Check that data is loaded via loadDataset

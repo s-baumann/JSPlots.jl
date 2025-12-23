@@ -59,7 +59,7 @@ function create_pie_chart()
     )
 
     return PieChart(:sales_pie, df, :pie_data;
-        label_cols = [:category],
+        color_cols = [:category],
         value_cols = [:sales],
         title = "Sales by Product"
     ), df

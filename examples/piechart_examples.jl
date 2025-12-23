@@ -28,7 +28,7 @@ market_share_df = DataFrame(
 
 pie1 = PieChart(:market_share, market_share_df, :market_data;
     value_cols = [:revenue, :units],
-    label_cols = [:company],
+    color_cols = [:company],
     title = "Example 1: Market Share by Revenue",
     notes = "Basic pie chart showing relative market share. Toggle between revenue and units sold using the dropdown."
 )
@@ -41,7 +41,7 @@ budget_df = DataFrame(
 
 pie2 = PieChart(:budget_donut, budget_df, :budget_data;
     value_cols = [:amount],
-    label_cols = [:category],
+    color_cols = [:category],
     hole = 0.4,
     title = "Example 2: Budget Allocation (Donut Chart)",
     notes = "Donut chart (hole=0.4) showing budget distribution across categories"
@@ -68,7 +68,7 @@ end
 
 pie3 = PieChart(:sales_filtered, sales_df, :sales_data;
     value_cols = [:sales],
-    label_cols = [:product],
+    color_cols = [:product],
     filters = Dict{Symbol,Any}(:region => "North", :year => "2024"),
     title = "Example 3: Product Sales with Filters",
     notes = "Interactive filters allow you to select different regions and years. Try selecting multiple options!"
@@ -77,7 +77,7 @@ pie3 = PieChart(:sales_filtered, sales_df, :sales_data;
 # Example 4: Facet Wrap (1 variable) - Sales by Region
 pie4 = PieChart(:sales_by_region, sales_df, :sales_data;
     value_cols = [:sales],
-    label_cols = [:product],
+    color_cols = [:product],
     facet_cols = [:region],
     default_facet_cols = :region,
     filters = Dict{Symbol,Any}(:year => "2024"),
@@ -106,7 +106,7 @@ end
 
 pie5 = PieChart(:demographics_grid, demo_df, :demo_data;
     value_cols = [:count],
-    label_cols = [:preference],
+    color_cols = [:preference],
     facet_cols = [:age_group, :gender],
     default_facet_cols = [:age_group, :gender],
     title = "Example 5: Device Preference by Age and Gender (Facet Grid)",
@@ -134,7 +134,7 @@ end
 
 pie6 = PieChart(:dept_expenses, expense_df, :expense_data;
     value_cols = [:amount],
-    label_cols = [:expense_type, :department],
+    color_cols = [:expense_type, :department],
     facet_cols = [:department],
     default_facet_cols = :department,
     filters = Dict{Symbol,Any}(:quarter => "Q1"),
@@ -150,7 +150,7 @@ segment_df = DataFrame(
 
 pie7 = PieChart(:customer_segments, segment_df, :segment_data;
     value_cols = [:revenue_contribution],
-    label_cols = [:segment],
+    color_cols = [:segment],
     hole = 0.3,
     title = "Example 7: Revenue Contribution by Customer Segment (%)",
     notes = "Donut chart showing percentage revenue contribution from different customer segments"
@@ -173,7 +173,7 @@ end
 
 pie8 = PieChart(:store_comparison, store_df, :store_data;
     value_cols = [:sales],
-    label_cols = [:category],
+    color_cols = [:category],
     facet_cols = [:store],
     default_facet_cols = :store,
     title = "Example 8: Category Sales by Store",
@@ -201,7 +201,7 @@ end
 
 pie9 = PieChart(:traffic_analysis, traffic_df, :traffic_data;
     value_cols = [:visitors],
-    label_cols = [:browser, :device],
+    color_cols = [:browser, :device],
     facet_cols = [:country, :device],
     default_facet_cols = nothing,
     title = "Example 9: Website Traffic Analysis - Dynamic Faceting",
@@ -238,7 +238,7 @@ end
 
 pie10 = PieChart(:comprehensive_sales, comprehensive_df, :comprehensive_data;
     value_cols = [:revenue, :units_sold, :profit, :customer_count],
-    label_cols = [:product, :channel, :region],
+    color_cols = [:product, :channel, :region],
     facet_cols = [:region, :channel, :quarter],
     default_facet_cols = nothing,
     filters = Dict{Symbol,Any}(:quarter => "Q4-2024"),

@@ -2,7 +2,8 @@
 
 | Build | Coverage | Documentation |
 |-------|----------|---------------|
-| [![Build status](https://github.com/s-baumann/JSPlots.jl/workflows/CI/badge.svg)](https://github.com/s-baumann/JSPlots.jl/actions) | [![codecov](https://codecov.io/gh/s-baumann/JSPlots.jl/graph/badge.svg?token=d2Io7pTUtr)](https://codecov.io/gh/s-baumann/JSPlots.jl) | [![docs-latest-img](https://img.shields.io/badge/docs-latest-blue.svg)](https://s-baumann.github.io/JSPlots.jl/dev/index.html) |
+| [![Build status](https://github.com/s-baumann/JSPlots.jl/workflows/CI/badge.svg)](https://github.com/s-baumann/JSPlots.jl/actions) | [![codecov](https://codecov.io/gh/s-baumann/JSPlots.jl/graph/badge.svg?token=d2Io7pTUtr)](https://codecov.io/gh/s-baumann/JSPlots.jl) | [![docs-latest-img](https://img.shields.io/badge/docs-latest-blue.svg)](https://s-baumann.github.io/JSPlots.jl/dev/index.html) | [![](img.shields.io)](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example.html)  |
+
 
 **Interactive JavaScript-based visualizations built in Julia**
 
