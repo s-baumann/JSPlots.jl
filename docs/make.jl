@@ -10,21 +10,21 @@ else
     @warn "Generated HTML examples directory not found at: $examples_src"
 end
 
-makedocs(
-    format = Documenter.HTML(),
-    sitename = "JSPlots",
-    modules = [JSPlots],
-    checkdocs = :exports,  # Only check exported functions, not internal helpers
-    warnonly = [:cross_references, :missing_docs],  # Don't fail on link warnings
-    pages = Any[
-        "Introduction" => "index.md",
-        "Examples" => "examples.md",
-        "API" => "api.md"]
-)
+# makedocs(
+#     format = Documenter.HTML(),
+#     sitename = "JSPlots",
+#     modules = [JSPlots],
+#     checkdocs = :exports,  # Only check exported functions, not internal helpers
+#     warnonly = [:cross_references, :missing_docs],  # Don't fail on link warnings
+#     pages = Any[
+#         "Introduction" => "index.md",
+#         "Examples" => "examples.md",
+#         "API" => "api.md"]
+# )
 
-deploydocs(
-    repo   = "github.com/s-baumann/JSPlots.jl.git",
-    target = "build",
-    deps   = nothing,
-    make   = nothing
-)
+# deploydocs(
+#     repo   = "github.com/s-baumann/JSPlots.jl.git",
+#     target = "build",
+#     deps   = nothing,
+#     make   = nothing
+# )
