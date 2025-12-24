@@ -5,6 +5,7 @@ println("Creating CodeBlock examples...")
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/codeblock_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>CodeBlock Examples</h1>
 <p>This page demonstrates how to use CodeBlock elements in JSPlots to display Julia code with syntax highlighting and execute it to generate visualizations.</p>
 <p>CodeBlocks are perfect for creating literate programming documents where you show both the code and its output.</p>

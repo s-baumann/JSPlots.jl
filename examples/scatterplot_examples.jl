@@ -5,6 +5,13 @@ println("Creating comprehensive ScatterPlot examples...")
 # Use stable RNG for reproducible examples
 rng = StableRNG(111)
 
+# Prepare header
+header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/scatterplot_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>ScatterPlot Examples</h1>
+<p>This page demonstrates 2D scatter plots with marginal distributions in JSPlots.</p>
+""")
+
 # Example 1: Multi-dimensional scatter with dimensions parameter
 n = 300
 df1 = DataFrame(
@@ -146,7 +153,7 @@ data_dict = Dict{Symbol,DataFrame}(
 
 page = JSPlotPage(
     data_dict,
-    [scatter1, scatter2, scatter3, scatter4, scatter5, scatter6];
+    [header, scatter1, scatter2, scatter3, scatter4, scatter5, scatter6];
     dataformat = :csv_embedded
 )
 

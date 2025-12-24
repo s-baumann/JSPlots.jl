@@ -33,6 +33,13 @@ df = generate_3d_data(80)
 
 println("Generated $(nrow(df)) data points across 3 groups")
 
+# Prepare header
+header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/scattersurface3d_example.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>ScatterSurface3D Examples</h1>
+<p>This page demonstrates 3D scatter plots with fitted surfaces in JSPlots.</p>
+""")
+
 # =============================================================================
 # Example 1: Basic ScatterSurface3D with default smoother
 # =============================================================================
@@ -268,7 +275,7 @@ chart3 = ScatterSurface3D(:finance_multi_group, df_finance, :finance_data,
 # Create combined page
 page = JSPlotPage(
     Dict(:data => df, :data_subset => df_subset, :finance_data => df_finance),
-    [example1_text, chart1, example2_text, chart2, example3_text, chart3, summary],
+    [header, example1_text, chart1, example2_text, chart2, example3_text, chart3, summary],
     tab_title="ScatterSurface3D Examples"
 )
 

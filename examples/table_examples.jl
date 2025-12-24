@@ -10,6 +10,7 @@ example_image_path = joinpath(@__DIR__, "pictures", "images.jpeg")
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/table_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>Table Examples</h1>
 <p>This page demonstrates various Table features in JSPlots.</p>
 <ul>

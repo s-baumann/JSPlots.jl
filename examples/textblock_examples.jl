@@ -5,6 +5,7 @@ println("Creating TextBlock examples...")
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/textblock_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>TextBlock Examples</h1>
 <p>This page demonstrates how to use TextBlock elements in JSPlots to add formatted text, documentation, images, and context to your visualizations.</p>
 <p>TextBlocks support full HTML formatting including headings, paragraphs, lists, tables, and embedded images.</p>

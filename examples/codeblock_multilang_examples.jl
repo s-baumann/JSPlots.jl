@@ -4,6 +4,7 @@ println("Creating Multi-Language CodeBlock examples...")
 
 # Header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/codeblock_multilang_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>Multi-Language CodeBlock Examples</h1>
 <p>CodeBlock supports displaying code in multiple programming languages with proper syntax highlighting.</p>
 <p>Supported languages: <strong>Julia</strong>, <strong>Python</strong>, <strong>R</strong>, <strong>C++</strong>, <strong>C</strong>, <strong>Java</strong>, <strong>JavaScript</strong>, <strong>SQL</strong>, and <strong>PostgreSQL (PL/pgSQL)</strong></p>

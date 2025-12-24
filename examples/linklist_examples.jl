@@ -4,6 +4,7 @@ println("Creating LinkList examples...")
 
 # Introduction
 intro = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/linklist_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a> | <a href="https://s-baumann.github.io/JSPlots.jl/dev/" style="color: blue; font-weight: bold;">See general documentation</a>
 <h1>LinkList Examples</h1>
 <p>LinkList provides a styled navigation component for creating links between pages in multi-page reports or linking to external resources.</p>
 <p>This page demonstrates three ways to use LinkList:</p>

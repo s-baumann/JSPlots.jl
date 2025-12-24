@@ -135,6 +135,7 @@ links = LinkList([
 ])
 
 coverpage_header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>Annual Business Report 2024</h1>
 <p>Welcome to the 2024 Business Performance Report. This multi-page report provides comprehensive insights into our company's performance across multiple dimensions.</p>
 
@@ -255,6 +256,7 @@ pageB = JSPlotPage(
 # Create coverpage content (WITHOUT manually creating LinkList!)
 # The easy constructor will automatically create the LinkList from the pages
 coverpage_header2 = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>H1 2024 Business Report</h1>
 <p>Welcome to the first half 2024 Business Performance Report.</p>
 

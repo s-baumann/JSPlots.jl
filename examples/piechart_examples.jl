@@ -7,6 +7,7 @@ rng = StableRNG(888)
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/piechart_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>PieChart Examples</h1>
 <p>This page demonstrates the key features of PieChart plots in JSPlots.</p>
 <ul>

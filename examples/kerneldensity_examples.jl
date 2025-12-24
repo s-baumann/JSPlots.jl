@@ -7,6 +7,7 @@ rng = StableRNG(333)
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/kerneldensity_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>Kernel Density Plot Examples</h1>
 <p>This page demonstrates kernel density estimation for visualizing continuous distributions.</p>
 <ul>

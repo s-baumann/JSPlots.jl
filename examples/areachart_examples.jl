@@ -7,6 +7,7 @@ rng = StableRNG(789)
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/areachart_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>AreaChart Examples</h1>
 <p>This page demonstrates the key features of AreaChart plots in JSPlots.</p>
 <ul>

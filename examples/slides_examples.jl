@@ -6,6 +6,7 @@ println("Creating Slides examples...")
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/slides_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>Slides Examples</h1>
 <p>This page demonstrates the interactive Slides chart type in JSPlots.</p>
 <ul>

@@ -5,6 +5,7 @@ println("Creating External Formats examples...")
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/external_formats_example.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>External Data Format Examples</h1>
 <p>This page demonstrates different data storage formats available in JSPlots.</p>
 <p>By default, data is embedded directly in the HTML file. For larger datasets, external formats can be more efficient.</p>

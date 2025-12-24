@@ -7,6 +7,7 @@ rng = StableRNG(666)
 
 # Prepare header
 header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/scatter3d_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>3D Scatter Plot Examples</h1>
 <p>This page demonstrates 3D scatter plots in JSPlots with advanced interactive features.</p>
 <ul>
