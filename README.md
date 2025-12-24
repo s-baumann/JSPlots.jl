@@ -1,9 +1,10 @@
 # JSPlots.jl
 
-| Build | Coverage | Documentation | New Documentat
+| Build | Coverage | Documentation |
 |-------|----------|---------------|
-| [![Build status](https://github.com/s-baumann/JSPlots.jl/workflows/CI/badge.svg)](https://github.com/s-baumann/JSPlots.jl/actions) | [![codecov](https://codecov.io/gh/s-baumann/JSPlots.jl/graph/badge.svg?token=d2Io7pTUtr)](https://codecov.io/gh/s-baumann/JSPlots.jl) | [![docs-latest-img](https://img.shields.io/badge/docs-latest-blue.svg)](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example.html) |
+| [![Build status](https://github.com/s-baumann/JSPlots.jl/workflows/CI/badge.svg)](https://github.com/s-baumann/JSPlots.jl/actions) | [![codecov](https://codecov.io/gh/s-baumann/JSPlots.jl/graph/badge.svg?token=d2Io7pTUtr)](https://codecov.io/gh/s-baumann/JSPlots.jl) | [![docs-latest-img](https://img.shields.io/badge/docs-latest-blue.svg)](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html) |
 
+/home/stuart/Dropbox/library_julia/JSPlots.jl/generated_html_examples/
 
 **Interactive JavaScript-based visualizations built in Julia**
 
