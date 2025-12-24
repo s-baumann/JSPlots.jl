@@ -506,11 +506,8 @@ dataset_code = CodeBlock(generate_comprehensive_data,
 
 df = dataset_code()
 
-# ===== Tabular Data and Text =====
-tabular_section = TextBlock("<h1>Tabular Data and Text</h1>")
-
 # PivotTable
-pivot_chart = PivotTable(:pivot, :sales_data,
+pivot_chart = PivotTable(:PivotTable, :sales_data,
     rows=[:product],
     cols=[:region],
     vals=:customers,
@@ -528,36 +525,60 @@ product_summary = @linq df |> groupby(:product) |> combine(:total_sales = sum(:s
     :total_profit = sum(:profit))
 sort!(product_summary, :total_sales, rev=true)
 
-table_chart = Table(:table, product_summary,
+table_chart = Table(:Table, product_summary,
     notes="This just displays your DataFrame in a nice way on the html page. There is a download as csv button at the bottom of it. You could also just use a PivotTable but this is lighterweight for cases where a PivotTable is overkill. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Table examples</a>")
 
 # CodeBlock
 code_chart = dataset_code
 
 # LinkList
+linklist_intro = TextBlock("""
+<h1>LinkList</h1>
+""")
+
+
 linklist_chart = LinkList([
-    ("Interactive Examples", "https://s-baumann.github.io/JSPlots.jl/dev/index.html", "Browse interactive examples"),
-    ("Full Documentation", "https://s-baumann.github.io/JSPlots.jl/dev/api.html", "API reference"),
-    ("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code")
+    ("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code"),
+    ("Documentation", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html", "General tutorial and overview"),
+    ("PivotTable Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
+    ("Table Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
+    ("TextBlock Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
+    ("CodeBlock Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks"),
+    ("LinkList Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html", "Navigation and link lists"),
+    ("LineChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
+    ("AreaChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
+    ("ScatterPlot Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
+    ("Path Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows"),
+    ("DistPlot Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
+    ("KernelDensity Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
+    ("PieChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering"),
+    ("Scatter3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
+    ("Surface3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
+    ("ScatterSurface3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces"),
+    ("Picture Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display plots from VegaLite, Plots.jl, or Makie"),
+    ("Slides Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations"),
+    ("Pages Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html", "Multi-page reports with navigation")
 ], chart_title=:links,
 notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
 
 # TextBlock
 textblock_example = TextBlock("""
+<h1>TextBlock</h1>
 You can write whatever HTML you want and put it in a TextBlock which will put it in the resultant HTML.
 <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px;">
     <p><strong>TextBlock</strong> allows you to add rich text, HTML, and annotations to your reports.</p>
     <p>You can include <em>formatting</em>, <strong>styled text</strong>, and even <code>inline code</code>.</p>
+    <p> See here for <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html" style="color: blue; font-weight: bold;">TextBlock examples</a>.</p>
 </div>
 """)
 
-# ===== 2D Plotting ====
+# ===== 2D Plotting =====
 plotting_2d_section = TextBlock("<h1>Two-Dimensional Plots</h1>")
 
 # LineChart
 daily_product = @linq df |> groupby( [:date, :product]) |> combine( :total_sales = sum(:sales))
 
-line_chart = LineChart(:line, df, :sales_data,
+line_chart = LineChart(:LineChart, df, :sales_data,
     x_cols=[:date, :quarter],
     y_cols=[:sales, :quantity, :profit, :customers, :satisfaction],
     color_cols=[:product, :region, :segment],
@@ -565,7 +586,7 @@ line_chart = LineChart(:line, df, :sales_data,
     notes="A linechart. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LineChart examples</a>")
 
 # AreaChart
-area_chart = AreaChart(:area, df, :sales_data,
+area_chart = AreaChart(:AreaChart, df, :sales_data,
     x_cols=[:date, :quarter],
     y_cols=[:sales, :quantity, :cost, :customers, :satisfaction],
     color_cols=[:product, :segment, :region],
@@ -578,21 +599,50 @@ scatter_chart = ScatterPlot(:scatter, df, :sales_data, [:profit, :sales, :quanti
     color_cols=[:product, :region, :segment, :month],
     facet_cols=[:region, :product, :segment],
     default_facet_cols=nothing,
-    notes="Scatter plots show x vs y. There is a density colouring that can be applied or not depending on a slider. In addition the marginal distributions appear on the edges of the plot in cases when you do not apply faceting.")
+    notes="Scatter plots show x vs y. There is a density colouring that can be applied or not depending on a slider. In addition the marginal distributions appear on the edges of the plot in cases when you do not apply faceting. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ScatterPlot examples</a>")
 
 
-# Path
-path_chart = Path(:path, df, :sales_data;
-    x_cols=[:cost, :quantity, :sales, :profit, :customers, :satisfaction],
-    y_cols=[:profit, :sales, :quantity, :cost, :satisfaction, :customers],
-    order_col=:date,
-    color_cols=[:region, :product, :segment],
-    filters = Dict{Symbol,Any}(:product => [:laptop]),
-    facet_cols = [:region, :product, :segment],
-    default_facet_cols = [:product, :segment],
+# Path - Business Performance Trajectories
+# Create business metrics dataset (same as used in Slides examples)
+rng_path = StableRNG(333)
+products_path = ["Widget", "Gadget", "Doohickey"]
+regions_path = ["North", "South", "East", "West"]
+segments_path = ["Consumer", "Enterprise", "Government"]
+
+business_path_data = []
+for product in products_path
+    for region in regions_path
+        for segment in segments_path
+            for month in 1:12
+                base_sales = product == "Widget" ? 500 : (product == "Gadget" ? 700 : 400)
+                sales = base_sales + month * 20 + rand(rng_path, 50:300)
+                cost = sales * (0.60 + rand(rng_path) * 0.10)
+                profit = sales - cost
+
+                push!(business_path_data, (
+                    Product = product,
+                    Region = region,
+                    Segment = segment,
+                    Month = month,
+                    Sales = round(sales),
+                    Cost = round(cost),
+                    Profit = round(profit)
+                ))
+            end
+        end
+    end
+end
+df_business_path = DataFrame(business_path_data)
+
+path_chart = Path(:path, df_business_path, :business_path_data;
+    x_cols=[:Cost, :Profit, :Sales],
+    y_cols=[:Profit, :Sales, :Cost],
+    order_col=:Month,
+    color_cols=[:Product, :Region, :Segment],
+    filters = Dict{Symbol,Any}(:Region => "North", :Segment => "Consumer", :Product => unique(df_business_path.Product)),
     show_arrows=true,
     use_alpharange=true,
-    notes="We can use a Paths chart to show the temporal ordering of data. This is like a scatter plot but the points are joined in the order they occured. We can show the ordering either through use_alpharange which makes the line go darker later or with show_arrows.")
+    notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
 
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
@@ -601,14 +651,14 @@ distribution_section = TextBlock("<h1>Distributional Plots</h1>")
 dist_chart = DistPlot(:dist, df, :sales_data,
     value_cols=[:profit, :sales, :cost, :quantity, :customers, :satisfaction],
     color_cols=[:region, :product, :segment],
-    filters=[:region, :product, :segment, :date, :customers, :cost],
+    filters=[:region, :product, :segment],
     notes="This makes a historgram, box and whiskers and rugplot. So you can see differences in distribution for a variable between different groups of observations. Note at the bottom there is a slider for changing the number of bins in the histogram. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for DistPlot examples</a>")
 
 # KernelDensity
 kde_chart = KernelDensity(:kde, df, :sales_data,
     value_cols=[:profit, :sales, :cost, :quantity, :customers, :satisfaction],
     color_cols=[:region, :product, :segment],
-    filters=[:region, :product, :segment, :date],
+    filters=[:region, :product, :segment],
     facet_cols=[:region, :product, :segment],
     default_facet_cols=[:segment],
     notes="This shows kernel density estimates for a variable seperated by groups in the observations. It also has faceting available (unlike DistPlot). There is a slider at the bottom for controlling the bandwidth of the kernel density estimate. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html\" style=\"color: blue; font-weight: bold;\">See here for KernelDensity examples</a>")
@@ -668,7 +718,7 @@ scattersurface_chart = ScatterSurface3D(:scattersurface, df, :sales_data,
     x_col=:longitude,
     y_col=:latitude,
     z_col=:sales,
-    group_cols= [:region],
+    group_cols= [:product, :segment],
     facet_cols= [:region, :product, :segment],
     notes="This is a 3D scatter plot with a fitted surface for each group of points. You can train the surface with differing bandwidth parameters and with the L1 or L2 norm (L2 is default). You can rotate it and zoom in and out. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ScatterSurface3D examples</a>")
 
@@ -687,25 +737,20 @@ picture_chart = Picture(
             The other use is if you want to save a static chart from another charting package into the html (VegaLite, Plots.jl and Makie are directly supported or if there is another charting library you are using you could save it first and then input it as a picture).
             Below I will just include Tux the linux mascot picture but you can see more interesting examples on the relevent examples page. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Picture examples</a>")
 
-# Prepare aggregated data for slides: group by product, region, segment, and month
-df_slides = @chain df begin
-    groupby([:product, :region, :segment, :month])
-    @combine(
-        :total_cost = sum(:cost),
-        :total_profit = sum(:profit),
-        :total_sales = sum(:sales)
-    )
-end
+# Prepare aggregated data for slides using the same business metrics as Path examples
+# This is the same dataset structure used in the Path chart above
+df_slides = df_business_path
 
 # Function to generate a chart for each slide
 # This receives: (data, product, region, segment, month)
+# Uses the same business metrics dataset as the Path examples
 function make_financial_breakdown_chart(data, product, region, segment, month)
     # Filter data for this specific combination
     filtered = filter(row ->
-        row.product == product &&
-        row.region == region &&
-        row.segment == segment &&
-        row.month == month,
+        row.Product == product &&
+        row.Region == region &&
+        row.Segment == segment &&
+        row.Month == month,
         data
     )
 
@@ -715,9 +760,9 @@ function make_financial_breakdown_chart(data, product, region, segment, month)
         profit = 0.0
         sales = 0.0
     else
-        cost = filtered.total_cost[1]
-        profit = filtered.total_profit[1]
-        sales = filtered.total_sales[1]
+        cost = filtered.Cost[1]
+        profit = filtered.Profit[1]
+        sales = filtered.Sales[1]
     end
 
     # Create a bar chart using VegaLite
@@ -760,21 +805,22 @@ end
 
 # Create slides with filters for product, region, and segment
 # Month will be the slide progression variable (1-12 months)
+# This uses the SAME dataset as the Path examples above - business metrics over 12 months
 financial_slides = Slides(
     :monthly_financial,
     df_slides,
-    :financial_data,
-    [:product, :region, :segment],  # Filter dimensions
-    :month,                           # Slide progression dimension
+    :business_path_data,
+    [:Product, :Region, :Segment],  # Filter dimensions
+    :Month,                           # Slide progression dimension
     make_financial_breakdown_chart;
     output_format = :svg,
     default_filters = Dict{Symbol,Any}(
-        :product => "Laptop",
-        :region => "North",
-        :segment => "Enterprise"
+        :Product => "Widget",
+        :Region => "North",
+        :Segment => "Consumer"
     ),
     title = "Monthly Financial Breakdown",
-    notes = "Slides can be used to display static images in order. If there is a short time between slides you can animate too.",
+    notes = "Slides display a sequence of charts, one for each month. This uses the same business data (Sales/Cost/Profit by Product/Region/Segment) as the Path examples - where Path shows the entire trajectory, Slides shows individual snapshots for each month. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html\" style=\"color: blue; font-weight: bold;\">See here for Slides examples</a>",
     autoplay = false,
     delay = 1.0
 )
@@ -785,18 +831,20 @@ all_data = Dict{Symbol, DataFrame}(
     :product_summary => product_summary,
     :daily_product => daily_product,
     :surface_df => surface_df,
+    :business_path_data => df_business_path,
 )
 
 tabular_plot_page =  JSPlotPage(
     all_data,
-    [tabular_section, dataset_intro,
+    [dataset_intro,
         code_chart,
         pivot_chart,
         table_chart,
+        linklist_intro,
         linklist_chart,
         textblock_example],
-    tab_title="Tabular and Text Data page",
-    page_header = "Tabular and Text Data page",
+    tab_title="Tabular and Text Data",
+    page_header = "Tabular and Text Data",
     notes = "This shows examples of TextBlock, LinkList, CodeBlock, DataTable and PivotTable.",
     dataformat = :parquet
 )
@@ -804,32 +852,26 @@ tabular_plot_page =  JSPlotPage(
 two_d_plot_page =  JSPlotPage(
     all_data,
     [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
-    tab_title="2D Chart page",
-    page_header = "2D Chart page",
+    tab_title="2D Charts",
+    page_header = "2D Charts",
     notes = "This shows examples of LinePlot, AreaChart, ScatterPlot and Path.",
     dataformat = :parquet
 )
 
 distributional_plot_page =  JSPlotPage(
     all_data,
-    [distribution_section,
-        dist_chart,
-        kde_chart,
-        pie_chart],
-    tab_title="Distributional Chart page",
-    page_header = "Distributional Chart page",
+    [distribution_section, dist_chart, kde_chart, pie_chart],
+    tab_title="Distributional Charts",
+    page_header = "Distributional Charts",
     notes = "This shows examples of DistPlot, KernelDensity and PieChart.",
     dataformat = :parquet
 )
 
 three_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_3d_section,
-        scatter3d_chart,
-        surface3d_chart,
-        scattersurface_chart],
-    tab_title="3D Chart page",
-    page_header = "3D Chart page",
+    [plotting_3d_section, scatter3d_chart, surface3d_chart, scattersurface_chart],
+    tab_title="3D Charts",
+    page_header = "3D Charts",
     notes = "This shows examples of Scatter3D, Surface3D and ScatterSurface3D.",
     dataformat = :parquet
 )
@@ -837,8 +879,8 @@ three_d_plot_page =  JSPlotPage(
 images_page =  JSPlotPage(
     all_data,
     [picture_chart, integration_section, financial_slides],
-    tab_title="Images page",
-    page_header = "Images page",
+    tab_title="Images and Slides",
+    page_header = "Images and Slides",
     notes = "This shows examples of Picture. For Slides examples, see the Financial Slides page.",
     dataformat = :parquet
 )

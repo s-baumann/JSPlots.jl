@@ -230,16 +230,17 @@ $style_html        </div>
                     v1[0]*v2[1] - v1[1]*v2[0]
                 ];
 
-                // Compute fixed scale (20% of average data range)
+                // Compute data ranges for normalization
                 const xRange = Math.max(...xs) - Math.min(...xs);
                 const yRange = Math.max(...ys) - Math.min(...ys);
                 const zRange = Math.max(...zs) - Math.min(...zs);
-                const fixedScale = (xRange + yRange + zRange) / 3 * 0.2;
+                const fixedScale = Math.min(xRange, yRange, zRange) * 0.3;
 
                 return {
                     center: [meanX, meanY, meanZ],
                     vectors: [v1, v2, v3],
-                    scale: fixedScale
+                    scale: fixedScale,
+                    ranges: [xRange, yRange, zRange]
                 };
             }
 
@@ -247,12 +248,35 @@ $style_html        </div>
                 const traces = [];
                 const colors = ['red', 'green', 'blue'];
                 const [cx, cy, cz] = eigData.center;
+                const [xRange, yRange, zRange] = eigData.ranges;
 
                 eigData.vectors.forEach((vec, idx) => {
+                    // Normalize vector components by their axis ranges for visual consistency
+                    const normalized = [
+                        vec[0] / xRange,
+                        vec[1] / yRange,
+                        vec[2] / zRange
+                    ];
+
+                    // Renormalize to unit length in normalized space
+                    const norm = Math.sqrt(normalized[0]**2 + normalized[1]**2 + normalized[2]**2);
+                    const unit = [
+                        normalized[0] / norm,
+                        normalized[1] / norm,
+                        normalized[2] / norm
+                    ];
+
+                    // Scale back to data space for display
+                    const display = [
+                        unit[0] * xRange * eigData.scale / Math.min(xRange, yRange, zRange),
+                        unit[1] * yRange * eigData.scale / Math.min(xRange, yRange, zRange),
+                        unit[2] * zRange * eigData.scale / Math.min(xRange, yRange, zRange)
+                    ];
+
                     traces.push({
-                        x: [cx, cx + vec[0] * eigData.scale],
-                        y: [cy, cy + vec[1] * eigData.scale],
-                        z: [cz, cz + vec[2] * eigData.scale],
+                        x: [cx, cx + display[0]],
+                        y: [cy, cy + display[1]],
+                        z: [cz, cz + display[2]],
                         mode: 'lines+markers',
                         type: 'scatter3d',
                         name: \`PC\${idx + 1}\`,
