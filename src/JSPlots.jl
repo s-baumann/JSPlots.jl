@@ -380,6 +380,15 @@ module JSPlots
     include("slides.jl")
     export Slides
 
+    include("gif.jl")
+    export Gif
+
+    include("waterfall.jl")
+    export Waterfall
+
+    include("ribbonplot.jl")
+    export RibbonPlot
+
     include("table.jl")
     export Table
 

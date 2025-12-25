@@ -26,6 +26,10 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[CodeBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html)** - Display code in multiple languages (Julia, Python, R, C++, C, Java, JavaScript, Rust, SQL, PostgreSQL) with syntax highlighting; only Julia code can be executed
 - **[LinkList](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples/auto_grouped.html)** - Styled lists of hyperlinks for multi-page navigation with optional subheadings
 
+#### Pictures, Plots from plotting packages and Slides/Animations
+- **[Picture](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html)** - Display static images or plots from VegaLite.jl, Plots.jl or Makie.jl
+- **[Slides](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html)** - Slideshows and animations from sequences of images or generated plots
+
 #### 2D Plotting
 - **[LineChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html)** - Time series and trend visualization with faceting
 - **[AreaChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html)** - Stacked area charts or bar charts (auto-detects continuous vs discrete x-axis)
@@ -42,14 +46,10 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[Surface3D](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html)** - 3D surface visualization
 - **[ScatterSurface3D](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html)** - 3D scatter plots with fitted surfaces (L1/L2 minimization)
 
-#### Plots from Other Julia Packages
-- **[Picture](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html)** - Display static images or plots from VegaLite.jl, Plots.jl or Makie.jl
-- **[Slides](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html)** - Slideshows and animations from sequences of images or generated plots
-
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 
 
 ## About
 
-The pivot table functionality wraps [PivotTable.js](https://pivottable.js.org/), similar to the [Python pivottablejs module](https://pypi.org/project/pivottablejs/). Plotly visualizations use [Plotly.js](https://plotly.com/javascript/). Credit to Claude code for doing all of the testing, documentation and a couple of the chart types.
+The pivot table functionality wraps [PivotTable.js](https://pivottable.js.org/), similar to the [Python pivottablejs module](https://pypi.org/project/pivottablejs/). Plotly visualizations use [Plotly.js](https://plotly.com/javascript/). Credit to Claude code for doing all of the testing and a couple of the chart types.
 
 Pull Requests welcome if you want to add a new plot type.

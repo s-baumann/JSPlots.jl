@@ -644,6 +644,28 @@ path_chart = Path(:path, df_business_path, :business_path_data;
     use_alpharange=true,
     notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
 
+# More Exotic Plot Types
+# Waterfall
+# Create waterfall data showing profit breakdown
+waterfall_data = DataFrame(
+    category = ["Revenue", "COGS", "Operating Expenses", "Marketing", "R&D", "EBIT", "Taxes", "Net Income"],
+    value = [sum(df.sales), -sum(df.cost), -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.4,
+             -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.2, -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.15,
+             sum(df.profit), -sum(df.profit) * 0.25, sum(df.profit) * 0.75]
+)
+
+waterfall_chart = Waterfall(:waterfall, waterfall_data, :waterfall_data;
+    color_cols = :category,
+    value_col = :value,
+    title = "Profit & Loss Waterfall",
+    show_table = true,
+    show_totals = false,
+    notes="A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement, breaking down revenue into net income through various cost components. The chart automatically calculates cumulative totals. Click on any bar to temporarily remove it and see the impact on the final value. The side-by-side table shows exact values and running totals. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Waterfall examples</a>")
+
+# RibbonPlot
+
+##### Put RibbonPlot here #
+
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
 
@@ -832,6 +854,7 @@ all_data = Dict{Symbol, DataFrame}(
     :daily_product => daily_product,
     :surface_df => surface_df,
     :business_path_data => df_business_path,
+    :waterfall_data => waterfall_data,
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -851,10 +874,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, waterfall_chart],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot and Path.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path and Waterfall.",
     dataformat = :parquet
 )
 
@@ -881,14 +904,22 @@ images_page =  JSPlotPage(
     [picture_chart, integration_section, financial_slides],
     tab_title="Images and Slides",
     page_header = "Images and Slides",
-    notes = "This shows examples of Picture. For Slides examples, see the Financial Slides page.",
+    notes = "This shows examples of Pictures, Gifs and Slides.",
+    dataformat = :parquet
+)
+
+situational_plot_page =  JSPlotPage(
+    all_data,
+    [waterfall_chart],
+    tab_title="Situational Charts",
+    page_header = "Situational Charts",
+    notes = "This shows examples of Waterfall and RibbonPlot.",
     dataformat = :parquet
 )
 
 
-
 subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page],
-    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page])
+    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, situational_plot_page])
 
 
 # Create final Pages object with all pages including the new theoretical ones

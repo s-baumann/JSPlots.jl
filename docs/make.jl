@@ -1,6 +1,5 @@
-using Documenter, JSPlots
-
-# Copy generated HTML examples to docs/src so Documenter includes them in build
+# Copy generated HTML examples to docs/src so Documenter includes them in build.
+# That is all we need to do as these example htmls are the documentation
 examples_src = joinpath(@__DIR__, "..", "generated_html_examples")
 examples_dest = joinpath(@__DIR__, "src", "examples_html")
 if isdir(examples_src)
@@ -9,22 +8,3 @@ if isdir(examples_src)
 else
     @warn "Generated HTML examples directory not found at: $examples_src"
 end
-
-# makedocs(
-#     format = Documenter.HTML(),
-#     sitename = "JSPlots",
-#     modules = [JSPlots],
-#     checkdocs = :exports,  # Only check exported functions, not internal helpers
-#     warnonly = [:cross_references, :missing_docs],  # Don't fail on link warnings
-#     pages = Any[
-#         "Introduction" => "index.md",
-#         "Examples" => "examples.md",
-#         "API" => "api.md"]
-# )
-
-# deploydocs(
-#     repo   = "github.com/s-baumann/JSPlots.jl.git",
-#     target = "build",
-#     deps   = nothing,
-#     make   = nothing
-# )
