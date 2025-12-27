@@ -536,30 +536,37 @@ linklist_intro = TextBlock("""
 <h1>LinkList</h1>
 """)
 
-
-linklist_chart = LinkList([
-    ("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code"),
+od = OrderedCollections.OrderedDict{String, Vector{Tuple{String,String,String}}}()
+od["OverView"] = [("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code"),
     ("Documentation", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html", "General tutorial and overview"),
-    ("PivotTable Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
-    ("Table Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
-    ("TextBlock Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
-    ("CodeBlock Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks"),
-    ("LinkList Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html", "Navigation and link lists"),
-    ("LineChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
-    ("AreaChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
-    ("ScatterPlot Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
-    ("Path Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows"),
-    ("DistPlot Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
-    ("KernelDensity Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
-    ("PieChart Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering"),
-    ("Scatter3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
-    ("Surface3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
-    ("ScatterSurface3D Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces"),
-    ("Picture Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display plots from VegaLite, Plots.jl, or Makie"),
-    ("Slides Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations"),
-    ("Pages Examples", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html", "Multi-page reports with navigation")
-], chart_title=:links,
-notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
+    ("Pages", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html", "Multi-page reports with navigation")]
+od["Tabular Data and Text"] = [("PivotTable", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
+    ("Table", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
+    ("TextBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
+    ("CodeBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks"),
+    ("LinkList", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html", "Navigation and link lists")]
+od["Multimedia"] = [
+    ("Picture", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display images, GIFs, and filtered charts from VegaLite, Plots.jl, or Makie"),
+    ("Slides", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations")]
+od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
+    ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
+    ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
+od["Distributional Plots"] = [
+    ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
+    ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+od["3D Plots"] = [
+    ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
+    ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
+    ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
+od["Situational Charts"] = [
+    ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
+    ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves."),
+    ("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations.")]
+
+
+linklist_chart = LinkList(od, chart_title=:links, notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
 
 # TextBlock
 textblock_example = TextBlock("""
@@ -648,23 +655,214 @@ path_chart = Path(:path, df_business_path, :business_path_data;
 # Waterfall
 # Create waterfall data showing profit breakdown
 waterfall_data = DataFrame(
-    category = ["Revenue", "COGS", "Operating Expenses", "Marketing", "R&D", "EBIT", "Taxes", "Net Income"],
-    value = [sum(df.sales), -sum(df.cost), -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.4,
-             -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.2, -(sum(df.sales) - sum(df.cost) - sum(df.profit)) * 0.15,
-             sum(df.profit), -sum(df.profit) * 0.25, sum(df.profit) * 0.75]
+    item = ["Good Sales", "Renting Spare Office", "Vending Machine Revenue", "COGS", "Staff Expenses", "Marketing", "Depreciation", "Taxes"],
+    category = ["Income", "Income", "Income", "Costs", "Costs", "Costs", "Costs", "Taxes"],
+    value = [1500, 200, 50, -800, -400, -100, -50, -150]
 )
 
 waterfall_chart = Waterfall(:waterfall, waterfall_data, :waterfall_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
     title = "Profit & Loss Waterfall",
     show_table = true,
-    show_totals = false,
-    notes="A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement, breaking down revenue into net income through various cost components. The chart automatically calculates cumulative totals. Click on any bar to temporarily remove it and see the impact on the final value. The side-by-side table shows exact values and running totals. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Waterfall examples</a>")
+    show_totals = true,
+    notes="A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement. <strong>Features:</strong> Automatic cumulative calculation, side-by-side table grouped by category, click bars or table rows to exclude items, toggle categories with checkboxes, switch between value-based (green/red) and category-based coloring, black total bar (toggleable). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Waterfall examples</a>")
 
-# RibbonPlot
 
-##### Put RibbonPlot here #
+    # SanKey
+# Create Sankey diagram data showing crypto/stock holdings evolution for traders
+sankey_data_rows = []
+
+# Define possible holdings
+crypto_holdings_by_year = Dict(
+    2015 => ["Bitcoin"],
+    2018 => ["Bitcoin", "Ethereum", "Dogecoin"],
+    2020 => ["Bitcoin", "Ethereum", "Dogecoin", "Cardano", "Solana"],
+    2023 => ["Bitcoin", "Ethereum", "Solana", "Cardano", "Polkadot"]
+)
+
+stock_holdings_by_year = Dict(
+    2015 => ["Tech Stocks", "Index Funds"],
+    2018 => ["Tech Stocks", "Index Funds", "Growth Stocks"],
+    2020 => ["Tech Stocks", "Index Funds", "Growth Stocks", "Dividend Stocks"],
+    2023 => ["Tech Stocks", "Growth Stocks", "Dividend Stocks", "Crypto Stocks"]
+)
+
+# Create 50 traders with realistic portfolio evolution
+using Random
+rng = Random.MersenneTwister(12345)
+trader_count = 50
+for trader_id in 1:trader_count
+    # 2015: Everyone holding Bitcoin
+    crypto_2015 = "Bitcoin"
+    stock_2015 = rand(rng, ["Tech Stocks", "Index Funds"])
+
+    # 2018: Some diversification
+    crypto_2018 = if rand(rng) < 0.3
+        "Ethereum"
+    elseif rand(rng) < 0.2
+        "Dogecoin"
+    else
+        "Bitcoin"
+    end
+    stock_2018 = if stock_2015 == "Tech Stocks"
+        rand(rng, ["Tech Stocks", "Growth Stocks"])
+    else
+        rand(rng, ["Index Funds", "Tech Stocks"])
+    end
+
+    # 2020: More diversification
+    crypto_2020 = if crypto_2018 == "Ethereum"
+        rand(rng, ["Ethereum", "Cardano", "Solana"])
+    elseif crypto_2018 == "Dogecoin"
+        rand(rng, ["Dogecoin", "Bitcoin"])
+    else
+        rand(rng, ["Bitcoin", "Ethereum", "Cardano"])
+    end
+    stock_2020 = if stock_2018 == "Growth Stocks"
+        rand(rng, ["Growth Stocks", "Tech Stocks"])
+    else
+        rand(rng, ["Index Funds", "Dividend Stocks", "Tech Stocks"])
+    end
+
+    # 2023: Current holdings
+    crypto_2023 = if crypto_2020 in ["Solana", "Cardano"]
+        rand(rng, ["Solana", "Cardano", "Polkadot"])
+    elseif crypto_2020 == "Ethereum"
+        rand(rng, ["Ethereum", "Solana", "Bitcoin"])
+    else
+        rand(rng, ["Bitcoin", "Ethereum"])
+    end
+    stock_2023 = if stock_2020 == "Dividend Stocks"
+        rand(rng, ["Dividend Stocks", "Crypto Stocks"])
+    else
+        rand(rng, ["Tech Stocks", "Growth Stocks", "Crypto Stocks"])
+    end
+
+    # Portfolio values (growing over time with some variation)
+    value_2015 = Float64(rand(rng, 5000:10000))
+    value_2018 = value_2015 * rand(rng, 1.5:0.1:3.0)
+    value_2020 = value_2018 * rand(rng, 0.8:0.1:2.5)
+    value_2023 = value_2020 * rand(rng, 1.0:0.1:4.0)
+
+    for (year, crypto, stock, value) in [
+        (2015, crypto_2015, stock_2015, value_2015),
+        (2018, crypto_2018, stock_2018, value_2018),
+        (2020, crypto_2020, stock_2020, value_2020),
+        (2023, crypto_2023, stock_2023, value_2023)
+    ]
+        push!(sankey_data_rows, (
+            trader_id = trader_id,
+            year = year,
+            crypto_holding = crypto,
+            stock_holding = stock,
+            portfolio_value = value
+        ))
+    end
+end
+
+sankey_df = DataFrame(sankey_data_rows)
+
+sankey_chart = SanKey(:ribbon, sankey_df, :sankey_data;
+    id_col = :trader_id,
+    time_col = :year,
+    color_cols = [:crypto_holding, :stock_holding],
+    value_cols = [:portfolio_value],
+    title = "Trader Portfolio Evolution (2015-2023)",
+    notes="A SanKey diagram showing how 50 traders' portfolios evolved from 2015 to 2023. Use the 'Affiliation' dropdown to switch between crypto holdings and stock holdings. The ribbon width represents portfolio value. In 2015, all traders held Bitcoin; by 2023, holdings diversified into various cryptocurrencies and stock categories. Notice migration patterns: early Bitcoin holders moving to Ethereum/Solana, and tech stock investors shifting to growth/crypto stocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html\" style=\"color: blue; font-weight: bold;\">See here for SanKey examples</a>")
+
+
+
+# =============================================================================
+# Example 5: Advanced CorrPlot with Multiple Scenarios and Variable Selection
+# =============================================================================
+
+example5_text = TextBlock("""
+<h2>Example 5: Advanced CorrPlot - Stock Market Analysis with Multiple Scenarios</h2>
+<p>This example demonstrates the advanced CorrPlot features with multiple correlation scenarios:</p>
+<ul>
+    <li><strong>Multiple scenarios:</strong> Switch between different correlation analyses (Short-term, Long-term, Volatility)</li>
+    <li><strong>Variable selection:</strong> Multi-select box to choose which stocks to display</li>
+    <li><strong>Manual ordering:</strong> Toggle between dendrogram ordering and drag-drop manual ordering</li>
+    <li>Interactive exploration of different time horizons and metrics</li>
+</ul>
+<p><strong>Try this:</strong></p>
+<ol>
+    <li>Switch scenarios using the dropdown to compare short-term vs long-term correlations</li>
+    <li>Select specific stocks to focus on particular sectors</li>
+    <li>Uncheck "Order by Dendrogram" and drag stocks to create your own ordering</li>
+</ol>
+""")
+
+# Generate stock market data for different time horizons
+n_days = 250  # Trading days
+stock_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "JPM", "BAC", "GS", "JNJ", "PFE"]
+n_stocks = length(stock_symbols)
+
+# Generate returns for each stock (correlated within sectors)
+# Tech: AAPL, MSFT, GOOGL, AMZN, TSLA
+# Finance: JPM, BAC, GS
+# Healthcare: JNJ, PFE
+
+stock_returns = zeros(n_days, n_stocks)
+for day in 1:n_days
+    # Tech sector common factor
+    tech_factor = randn(rng) * 0.02
+    # Finance sector common factor
+    finance_factor = randn(rng) * 0.015
+    # Healthcare sector common factor
+    health_factor = randn(rng) * 0.01
+
+    stock_returns[day, 1:5] .= tech_factor .+ randn(rng, 5) .* 0.015  # Tech stocks
+    stock_returns[day, 6:8] .= finance_factor .+ randn(rng, 3) .* 0.012  # Finance
+    stock_returns[day, 9:10] .= health_factor .+ randn(rng, 2) .* 0.008  # Healthcare
+end
+
+# Create DataFrame
+df_stocks = DataFrame(stock_returns, stock_symbols)
+
+# Scenario 1: Short-term returns (daily)
+short_vars = Symbol.(stock_symbols)
+cors_short = compute_correlations(df_stocks, short_vars)
+hc_short = cluster_from_correlation(cors_short.pearson, linkage=:ward)
+scenario_short = CorrelationScenario("Short-term Returns (Daily)",
+    cors_short.pearson, cors_short.spearman, hc_short, stock_symbols)
+
+# Scenario 2: Long-term returns (20-day rolling)
+df_longterm = DataFrame()
+for sym in stock_symbols
+    df_longterm[!, Symbol(sym)] = [sum(df_stocks[max(1, i-19):i, Symbol(sym)])
+                                    for i in 20:n_days]
+end
+long_vars = Symbol.(stock_symbols)
+cors_long = compute_correlations(df_longterm, long_vars)
+hc_long = cluster_from_correlation(cors_long.pearson, linkage=:ward)
+scenario_long = CorrelationScenario("Long-term Returns (20-day)",
+    cors_long.pearson, cors_long.spearman, hc_long, stock_symbols)
+
+# Scenario 3: Volatility correlations (rolling std deviation)
+df_volatility = DataFrame()
+for sym in stock_symbols
+    volatilities = [std(df_stocks[max(1, i-19):i, Symbol(sym)])
+                   for i in 20:n_days]
+    df_volatility[!, Symbol(sym)] = volatilities
+end
+vol_vars = Symbol.(stock_symbols)
+cors_vol = compute_correlations(df_volatility, vol_vars)
+hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
+scenario_vol = CorrelationScenario("Volatility Correlations",
+    cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
+
+# Create advanced CorrPlot with multiple scenarios
+corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol];
+    title = "Stock Market Correlation Analysis - Multiple Scenarios",
+    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
+    default_scenario = "Short-term Returns (Daily)",
+    default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
+    allow_manual_order = true
+)
+
 
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
@@ -748,16 +946,59 @@ scattersurface_chart = ScatterSurface3D(:scattersurface, df, :sales_data,
 # ===== Integration Charts =====
 integration_section = TextBlock("""
 <h1> Pictures and Slides</h1>
-<p><strong>Picture</strong> and <strong>Slides</strong> allow you to embed plots from Plots.jl, Makie.jl, and VegaLite.jl and indeed any picture type.</p>
+<p><strong>Picture</strong> and <strong>Slides</strong> allow you to embed plots from Plots.jl, Makie.jl, and VegaLite.jl. Pictures can also display static images, animated GIFs, and can be filtered to show different charts based on user selections.</p>
 """)
 
-# Picture
+# Picture with filtering - create VegaLite charts for different regions and products
+println("Creating filtered Picture example...")
+picture_charts_dir = mktempdir()
+
+# Generate charts for different combinations
+for region in ["North", "South", "East"]
+    for product in ["Widget", "Gadget"]
+        # Filter business data for this combination
+        chart_data = filter(row -> row.Region == region && row.Product == product, df_business_path)
+        if nrow(chart_data) > 0
+            # Group by month and sum sales
+            monthly_data = combine(groupby(chart_data, :Month), :Sales => sum => :Sales)
+            sort!(monthly_data, :Month)
+
+            # Create VegaLite chart
+            chart = monthly_data |> @vlplot(
+                :bar,
+                x={:Month, axis={title="Month", labelAngle=-45}},
+                y={:Sales, axis={title="Sales (thousands)"}},
+                title="$(product) Sales - $(region) Region",
+                width=500,
+                height=300,
+                color={value="#4682B4"}
+            )
+
+            # Save with pattern: sales!Region!Product.png
+            filename = "sales!$(region)!$(product).png"
+            filepath = joinpath(picture_charts_dir, filename)
+            VegaLite.save(filepath, chart)
+        end
+    end
+end
+
+# Create filtered Picture viewer
 picture_chart = Picture(
     :Picture,
-    "examples/pictures/Linux2.jpeg",
-    notes="There are two uses for picture. One is if you have a particular picture you want on the html. This could be anything.
-            The other use is if you want to save a static chart from another charting package into the html (VegaLite, Plots.jl and Makie are directly supported or if there is another charting library you are using you could save it first and then input it as a picture).
-            Below I will just include Tux the linux mascot picture but you can see more interesting examples on the relevent examples page. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Picture examples</a>")
+    picture_charts_dir,
+    "sales";
+    filters = Dict{Symbol,Any}(
+        :group_1 => "North",   # Default region
+        :group_2 => "Widget"   # Default product
+    ),
+    title="Regional Sales Analysis",
+    notes="<strong>Picture has three main uses:</strong><br>
+           <strong>1. Static Images:</strong> Display any image file (PNG, JPEG, SVG, etc.)<br>
+           <strong>2. Animated GIFs:</strong> Embed animated visualizations<br>
+           <strong>3. Filtered Viewing:</strong> Generate multiple charts and let users switch between them using filters.<br><br>
+           This example shows filtered viewing - use the dropdowns above to explore sales data across different regions and products. The charts are generated with VegaLite.
+           <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Picture examples</a>"
+)
 
 # Prepare aggregated data for slides using the same business metrics as Path examples
 # This is the same dataset structure used in the Path chart above
@@ -829,7 +1070,7 @@ end
 # Month will be the slide progression variable (1-12 months)
 # This uses the SAME dataset as the Path examples above - business metrics over 12 months
 financial_slides = Slides(
-    :monthly_financial,
+    :Slides,
     df_slides,
     :business_path_data,
     [:Product, :Region, :Segment],  # Filter dimensions
@@ -855,6 +1096,7 @@ all_data = Dict{Symbol, DataFrame}(
     :surface_df => surface_df,
     :business_path_data => df_business_path,
     :waterfall_data => waterfall_data,
+    :sankey_data => sankey_df,
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -874,10 +1116,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, waterfall_chart],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path and Waterfall.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, and Path.",
     dataformat = :parquet
 )
 
@@ -904,16 +1146,16 @@ images_page =  JSPlotPage(
     [picture_chart, integration_section, financial_slides],
     tab_title="Images and Slides",
     page_header = "Images and Slides",
-    notes = "This shows examples of Pictures, Gifs and Slides.",
+    notes = "This shows examples of filtered Pictures and Slides. Pictures can display static images, animated GIFs, or provide interactive filtering between multiple charts.",
     dataformat = :parquet
 )
 
 situational_plot_page =  JSPlotPage(
     all_data,
-    [waterfall_chart],
+    [waterfall_chart, sankey_chart, corrplot5],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
-    notes = "This shows examples of Waterfall and RibbonPlot.",
+    notes = "This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
     dataformat = :parquet
 )
 

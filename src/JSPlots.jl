@@ -1,6 +1,6 @@
 module JSPlots
 
-    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite, Statistics, OrderedCollections
+    using CSV, DataFrames, JSON, Dates, DuckDB, DBInterface, Base64, LinearAlgebra, TimeZones, Infiltrator, VegaLite, Statistics, OrderedCollections, Clustering, Distances, StatsBase
 
     abstract type JSPlotsType end
 
@@ -380,14 +380,15 @@ module JSPlots
     include("slides.jl")
     export Slides
 
-    include("gif.jl")
-    export Gif
-
     include("waterfall.jl")
     export Waterfall
 
-    include("ribbonplot.jl")
-    export RibbonPlot
+    include("sankey.jl")
+    export SanKey
+
+    include("corrplot.jl")
+    include("corrplot_advanced.jl")
+    export CorrPlot, CorrelationScenario, compute_correlations, cluster_from_correlation
 
     include("table.jl")
     export Table

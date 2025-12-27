@@ -9,7 +9,7 @@ Create an interactive waterfall chart visualization with side-by-side calculatio
 - `data_label::Symbol`: Symbol referencing the DataFrame in the page's data dictionary
 
 # Keyword Arguments
-- `color_cols::Union{Symbol, Vector{Symbol}}`: Column(s) containing category names (default: `:category`). If multiple columns provided, a dropdown will allow switching between them.
+- `color_cols::Vector{Symbol}`: Column(s) containing category names (default: `[:category]`). If multiple columns provided, a dropdown will allow switching between them.
 - `value_col::Symbol`: Column containing values (default: `:value`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
@@ -35,7 +35,7 @@ df = DataFrame(
 )
 
 wf = Waterfall(:pnl, df, :pnl_data;
-    color_cols = :category,
+    color_cols = [:category],
     value_col = :value,
     filters = Dict(:region => ["North", "South"]),
     title = "Profit & Loss Statement",
@@ -58,11 +58,10 @@ struct Waterfall <: JSPlotsType
     appearance_html::String
 
     function Waterfall(chart_title::Symbol, df::DataFrame, data_label::Symbol;
-                       color_cols::Union{Symbol, Vector{Symbol}} = :category,
+                       item_col::Symbol = :item,
+                       color_cols::Vector{Symbol} = [:category],
                        value_col::Symbol = :value,
                        filters::Union{Vector{Symbol}, Dict} = Dict{Symbol,Any}(),
-                       facet_cols::Union{Nothing, Symbol, Vector{Symbol}} = nothing,
-                       default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}} = nothing,
                        show_table::Bool = true,
                        show_totals::Bool = true,
                        title::String = "Waterfall Chart",
@@ -71,46 +70,72 @@ struct Waterfall <: JSPlotsType
         # Normalize filters to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
 
-        # Normalize color_cols to vector
-        color_cols_vec = color_cols isa Symbol ? [color_cols] : color_cols
+        # Validate item_col
+        if !(item_col in Symbol.(names(df)))
+            error("item_col :$item_col not found in DataFrame. Available columns: $(names(df))")
+        end
+
+        # Validate color_cols
+        if isempty(color_cols)
+            error("color_cols must contain at least one column")
+        end
 
         # Validate that all color columns exist
-        for col in color_cols_vec
+        for col in color_cols
             if !(col in Symbol.(names(df)))
                 error("color_cols :$col not found in DataFrame. Available columns: $(names(df))")
             end
         end
 
         # Set default color column
-        default_color_col = color_cols_vec[1]
+        default_color_col = color_cols[1]
         if !(value_col in Symbol.(names(df)))
             error("value_col :$value_col not found in DataFrame. Available columns: $(names(df))")
         end
 
-        # Normalize and validate facets using centralized helper
-        facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
-
-        # Get unique values for each filter column
-        filter_options = build_filter_options(normalized_filters, df)
-
-        # Build filter dropdowns using html_controls abstraction
+        # Build filter dropdowns (single-select only)
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
-        filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
-        # Build faceting dropdowns
-        facet_dropdowns = build_facet_dropdowns(chart_title_str, facet_choices, default_facet_array, update_function)
+        # Build single-select filter dropdowns manually
+        filter_dropdowns = DropdownControl[]
+        for (col, default_vals) in normalized_filters
+            col_str = string(col)
+            unique_vals = unique(df[!, col])
+            default_val = isempty(default_vals) ? string(unique_vals[1]) : string(default_vals[1])
+
+            push!(filter_dropdowns, DropdownControl(
+                col_str * "_select_" * chart_title_str,
+                col_str,
+                string.(unique_vals),  # Use string.() not String.() to handle all types
+                default_val,
+                update_function
+            ))
+        end
+
+        # Build color maps for category-based coloring
+        color_maps, _ = build_color_maps(color_cols, df, DEFAULT_COLOR_PALETTE)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
-        color_cols_js = build_js_array(String.(color_cols_vec))
+        color_cols_js = build_js_array(String.(color_cols))
+        color_maps_js = JSON.json(color_maps)
+
+        # Build color mode dropdown (always shown)
+        color_mode_dropdown = [DropdownControl(
+            "color_mode_$chart_title_str",
+            "Color By",
+            ["Value (Positive/Negative)", "Category"],
+            "Value (Positive/Negative)",
+            update_function
+        )]
 
         # Build color column dropdown if multiple color columns provided
-        color_col_dropdown = if length(color_cols_vec) > 1
+        color_col_dropdown = if length(color_cols) > 1
             [DropdownControl(
-                "color_col",
-                "Color Column",
-                String.(color_cols_vec),
+                "color_col_$chart_title_str",
+                "Category Column",
+                String.(color_cols),
                 string(default_color_col),
                 update_function
             )]
@@ -124,13 +149,13 @@ struct Waterfall <: JSPlotsType
             chart_title_str,
             update_function,
             filter_dropdowns,
-            filter_sliders,
-            color_col_dropdown,  # Color column dropdown
-            facet_dropdowns,
+            DropdownControl[],  # No sliders
+            vcat(color_mode_dropdown, color_col_dropdown),  # Color mode + category column dropdowns
+            DropdownControl[],  # No faceting
             title,
             notes
         )
-        appearance_html_base = generate_appearance_html(controls)
+        appearance_html_base = generate_appearance_html(controls; multiselect_filters=false)
 
         # Add waterfall-specific styles and layout
         waterfall_styles = """
@@ -226,18 +251,10 @@ struct Waterfall <: JSPlotsType
             </div>
             $(show_table ? "<div class=\"waterfall-table-section-$chart_title_str\">
                 <h4>Calculation Table</h4>
-                <p style=\"font-size: 0.85em; color: #666; margin-top: 0;\">Click on rows or chart bars to exclude from calculation</p>
-                <table class=\"waterfall-table-$chart_title_str\" id=\"waterfall_table_$chart_title_str\">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id=\"waterfall_tbody_$chart_title_str\">
-                    </tbody>
-                </table>
+                <p style=\"font-size: 0.85em; color: #666; margin-top: 0;\">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id=\"waterfall_table_container_$chart_title_str\">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class=\"waterfall-reset-btn-$chart_title_str\" onclick=\"resetWaterfall_$chart_title()\">🔄 Reset All</button>
             </div>" : "")
         </div>
@@ -249,50 +266,46 @@ struct Waterfall <: JSPlotsType
             // Configuration
             const FILTER_COLS = $filter_cols_js;
             const COLOR_COLS = $color_cols_js;
+            const ITEM_COL = '$(string(item_col))';
             let CATEGORY_COL = '$(string(default_color_col))';
             const VALUE_COL = '$(string(value_col))';
             const SHOW_TABLE = $(show_table);
             const SHOW_TOTALS = $(show_totals);
+            const COLOR_MAPS = $color_maps_js;
 
             // Store data globally
             let allData = [];
-            let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-            function getFacetKey_$chart_title() {
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-                return (facet1 || 'none') + '|' + (facet2 || 'none');
-            }
-
-            function getRemovedSet_$chart_title() {
-                const key = getFacetKey_$chart_title();
-                if (!removedCategories[key]) {
-                    removedCategories[key] = new Set();
-                }
-                return removedCategories[key];
-            }
+            let removedItems = new Set();  // Set of removed item names
+            let removedCategories = new Set();  // Set of removed category names
 
             function calculateWaterfall_$chart_title(data) {
-                const removed = getRemovedSet_$chart_title();
-                const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+                const activeData = data.filter(row => {
+                    const item = String(row[ITEM_COL]);
+                    const category = String(row[CATEGORY_COL]);
+                    return !removedItems.has(item) && !removedCategories.has(category);
+                });
 
                 let runningTotal = 0;
                 const processed = [];
 
-                for (const row of activeData) {
+                for (let i = 0; i < activeData.length; i++) {
+                    const row = activeData[i];
+                    const item = String(row[ITEM_COL]);
                     const category = String(row[CATEGORY_COL]);
                     const value = Number(row[VALUE_COL]) || 0;
                     const start = runningTotal;
                     const end = runningTotal + value;
 
+                    // All items are 'relative' (floating bars showing individual changes)
+                    // First item starts from 0 but still uses relative measure
                     processed.push({
+                        item: item,
                         category: category,
                         value: value,
                         start: start,
                         end: end,
-                        type: value >= 0 ? 'increasing' : 'decreasing'
+                        type: value >= 0 ? 'increasing' : 'decreasing',
+                        isFirst: i === 0
                     });
 
                     runningTotal = end;
@@ -301,96 +314,139 @@ struct Waterfall <: JSPlotsType
                 // Add total if enabled
                 if (SHOW_TOTALS && processed.length > 0) {
                     processed.push({
+                        item: 'Total',
                         category: 'Total',
                         value: runningTotal,
                         start: 0,
                         end: runningTotal,
-                        type: 'total'
+                        type: 'total',
+                        isFirst: false
                     });
                 }
 
                 return processed;
             }
 
-            function updateTable_$chart_title(processedData, allCategories) {
+            function updateTable_$chart_title(processedData, allItemsData) {
                 if (!SHOW_TABLE) return;
 
-                const tbody = document.getElementById('waterfall_tbody_$chart_title');
-                if (!tbody) return;
+                const container = document.getElementById('waterfall_table_container_$chart_title');
+                if (!container) return;
 
-                const removed = getRemovedSet_$chart_title();
-                tbody.innerHTML = '';
-
-                // Build a map for quick lookup
+                // Build a map for quick lookup by item name
                 const dataMap = {};
                 for (const item of processedData) {
-                    dataMap[item.category] = item;
+                    dataMap[item.item] = item;
                 }
 
-                // Show all original categories (including removed ones)
-                for (const cat of allCategories) {
-                    const row = document.createElement('tr');
-                    const isRemoved = removed.has(cat);
-                    const item = dataMap[cat];
-
-                    if (isRemoved) {
-                        row.classList.add('removed');
-                    } else if (item) {
-                        if (item.type === 'increasing') {
-                            row.classList.add('positive');
-                        } else if (item.type === 'decreasing') {
-                            row.classList.add('negative');
-                        } else if (item.type === 'total') {
-                            row.classList.add('total');
-                        }
+                // Group items by category
+                const categoryGroups = {};
+                for (const row of allItemsData) {
+                    const cat = String(row[CATEGORY_COL]);
+                    const item = String(row[ITEM_COL]);
+                    if (!categoryGroups[cat]) {
+                        categoryGroups[cat] = [];
                     }
-
-                    row.dataset.category = cat;
-                    row.onclick = function() {
-                        if (cat !== 'Total') {
-                            toggleCategory_$chart_title(cat);
-                        }
-                    };
-
-                    const categoryCell = document.createElement('td');
-                    categoryCell.textContent = cat;
-                    row.appendChild(categoryCell);
-
-                    const valueCell = document.createElement('td');
-                    if (item) {
-                        valueCell.textContent = item.value.toFixed(2);
-                        valueCell.style.textAlign = 'right';
-                    } else {
-                        valueCell.textContent = '-';
-                    }
-                    row.appendChild(valueCell);
-
-                    const totalCell = document.createElement('td');
-                    if (item) {
-                        totalCell.textContent = item.end.toFixed(2);
-                        totalCell.style.textAlign = 'right';
-                    } else {
-                        totalCell.textContent = '-';
-                    }
-                    row.appendChild(totalCell);
-
-                    tbody.appendChild(row);
+                    categoryGroups[cat].push(item);
                 }
+
+                // Build table HTML
+                let html = '<table class="waterfall-table-$chart_title_str">';
+                html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+                html += '<tbody>';
+
+                // Iterate through categories
+                for (const [category, items] of Object.entries(categoryGroups)) {
+                    const catRemoved = removedCategories.has(category);
+
+                    // Category header row
+                    html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                             onclick="toggleCategoryGroup_$chart_title('\${category}')">`;
+                    html += `<td colspan="3">`;
+                    html += `<input type="checkbox" \${!catRemoved ? 'checked' : ''}
+                             onclick="event.stopPropagation(); toggleCategoryGroup_$chart_title('\${category}')"
+                             style="margin-right: 8px;">`;
+                    html += `\${category}</td></tr>`;
+
+                    // Item rows within category
+                    for (const item of items) {
+                        const itemRemoved = removedItems.has(item) || catRemoved;
+                        const data = dataMap[item];
+
+                        let rowClass = '';
+                        if (itemRemoved) {
+                            rowClass = 'removed';
+                        } else if (data) {
+                            if (data.type === 'absolute' || data.type === 'increasing') {
+                                rowClass = 'positive';
+                            } else if (data.type === 'decreasing') {
+                                rowClass = 'negative';
+                            } else if (data.type === 'total') {
+                                rowClass = 'total';
+                            }
+                        }
+
+                        html += `<tr class="\${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                                 onclick="toggleItem_$chart_title('\${item}')">`;
+                        html += `<td style="padding-left: 20px;">\${item}</td>`;
+
+                        if (data && !itemRemoved) {
+                            html += `<td style="text-align: right;">\${data.value.toFixed(2)}</td>`;
+                            html += `<td style="text-align: right;">\${data.end.toFixed(2)}</td>`;
+                        } else {
+                            html += `<td style="text-align: right;">-</td>`;
+                            html += `<td style="text-align: right;">-</td>`;
+                        }
+                        html += '</tr>';
+                    }
+                }
+
+                // Add Total row if it exists in processed data
+                const totalData = processedData.find(d => d.type === 'total');
+                if (totalData) {
+                    const totalRemoved = removedItems.has('Total');
+                    const rowClass = totalRemoved ? 'removed' : 'total';
+
+                    html += `<tr class="\${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                             onclick="toggleItem_$chart_title('Total')">`;
+                    html += `<td style="padding-left: 20px;">Total</td>`;
+
+                    if (!totalRemoved) {
+                        html += `<td style="text-align: right;">\${totalData.value.toFixed(2)}</td>`;
+                        html += `<td style="text-align: right;">\${totalData.end.toFixed(2)}</td>`;
+                    } else {
+                        html += `<td style="text-align: right;">-</td>`;
+                        html += `<td style="text-align: right;">-</td>`;
+                    }
+                    html += '</tr>';
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
             }
 
-            function toggleCategory_$chart_title(category) {
-                const removed = getRemovedSet_$chart_title();
-                if (removed.has(category)) {
-                    removed.delete(category);
+            window.toggleItem_$chart_title = function(item) {
+                // Allow toggling of all items including Total
+                if (removedItems.has(item)) {
+                    removedItems.delete(item);
                 } else {
-                    removed.add(category);
+                    removedItems.add(item);
                 }
                 window.updateChart_$chart_title();
-            }
+            };
+
+            window.toggleCategoryGroup_$chart_title = function(category) {
+                if (removedCategories.has(category)) {
+                    removedCategories.delete(category);
+                } else {
+                    removedCategories.add(category);
+                }
+                window.updateChart_$chart_title();
+            };
 
             window.resetWaterfall_$chart_title = function() {
-                const key = getFacetKey_$chart_title();
-                removedCategories[key] = new Set();
+                removedItems = new Set();
+                removedCategories = new Set();
                 window.updateChart_$chart_title();
             };
 
@@ -401,143 +457,137 @@ struct Waterfall <: JSPlotsType
                     return;
                 }
 
-                // Update color column if dropdown exists
-                const colorColSelect = document.getElementById('color_col_select_$chart_title');
+                // Update category column if dropdown exists
+                const colorColSelect = document.getElementById('color_col_$chart_title_str');
                 if (colorColSelect) {
                     CATEGORY_COL = colorColSelect.value;
                 }
 
-                // Get current filter values (multiple selections)
+                // Get color mode
+                const colorModeSelect = document.getElementById('color_mode_$chart_title_str');
+                const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+                console.log('Color mode:', colorMode);
+                console.log('CATEGORY_COL:', CATEGORY_COL);
+                console.log('COLOR_MAPS:', COLOR_MAPS);
+
+                // Get current filter values (single selection)
                 const filters = {};
                 FILTER_COLS.forEach(col => {
                     const select = document.getElementById(col + '_select_$chart_title');
                     if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                        filters[col] = select.value;
                     }
                 });
 
-                // Filter data (support multiple selections per filter)
+                // Filter data (single selection per filter)
                 const filteredData = allData.filter(row => {
                     for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                        if (String(row[col]) !== filters[col]) {
                             return false;
                         }
                     }
                     return true;
                 });
 
-                // Get all categories for table (before removal)
-                const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+                // Calculate waterfall (includes all items)
+                const processed = calculateWaterfall_$chart_title(filteredData);
 
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+                // Filter processed data for chart display (remove toggled items like Total)
+                const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-                if (!facet1) {
-                    // No faceting - single waterfall chart
-                    const processed = calculateWaterfall_$chart_title(filteredData);
+                const items = processedForChart.map(d => d.item);
+                const values = processedForChart.map(d => d.value);
+                const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-                    const categories = processed.map(d => d.category);
-                    const values = processed.map(d => d.value);
-                    const starts = processed.map(d => d.start);
-                    const measure = processed.map(d =>
-                        d.type === 'total' ? 'total' :
-                        d.type === 'increasing' ? 'relative' : 'relative'
-                    );
-
-                    const trace = {
-                        type: 'waterfall',
-                        orientation: 'v',
-                        x: categories,
-                        y: values,
-                        base: starts,
-                        measure: measure,
-                        text: values.map(v => v.toFixed(2)),
-                        textposition: 'outside',
-                        connector: {
-                            line: { color: 'rgb(63, 63, 63)', width: 2 }
-                        },
-                        increasing: { marker: { color: '#2ecc71' } },
-                        decreasing: { marker: { color: '#e74c3c' } },
-                        totals: { marker: { color: '#3498db' } },
-                        hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-                    };
-
-                    const layout = {
-                        showlegend: false,
-                        xaxis: { title: CATEGORY_COL },
-                        yaxis: { title: VALUE_COL },
-                        height: 500,
-                        margin: {l: 80, r: 50, t: 50, b: 100}
-                    };
-
-                    Plotly.newPlot('$chart_title', [trace], layout, {responsive: true});
-
-                    // Add click handler
-                    document.getElementById('$chart_title').on('plotly_click', function(data) {
-                        const clickedCategory = data.points[0].x;
-                        if (clickedCategory !== 'Total') {
-                            toggleCategory_$chart_title(clickedCategory);
-                        }
+                // Determine colors based on mode
+                let markerColors;
+                if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+                    // Category-based coloring
+                    markerColors = processedForChart.map(d => {
+                        if (d.type === 'total') return '#000000';  // Total is always black
+                        const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                        return categoryColor || '#4285F4';
                     });
-
-                    // Update table
-                    updateTable_$chart_title(processed, allCategories);
-
+                    console.log('Using category-based colors:', markerColors);
                 } else {
-                    // Faceting not implemented for waterfall yet
-                    // (could be added in future enhancement)
-                    const processed = calculateWaterfall_$chart_title(filteredData);
-
-                    const categories = processed.map(d => d.category);
-                    const values = processed.map(d => d.value);
-                    const starts = processed.map(d => d.start);
-                    const measure = processed.map(d =>
-                        d.type === 'total' ? 'total' :
-                        d.type === 'increasing' ? 'relative' : 'relative'
-                    );
-
-                    const trace = {
-                        type: 'waterfall',
-                        orientation: 'v',
-                        x: categories,
-                        y: values,
-                        base: starts,
-                        measure: measure,
-                        text: values.map(v => v.toFixed(2)),
-                        textposition: 'outside',
-                        connector: {
-                            line: { color: 'rgb(63, 63, 63)', width: 2 }
-                        },
-                        increasing: { marker: { color: '#2ecc71' } },
-                        decreasing: { marker: { color: '#e74c3c' } },
-                        totals: { marker: { color: '#3498db' } },
-                        hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-                    };
-
-                    const layout = {
-                        showlegend: false,
-                        xaxis: { title: CATEGORY_COL },
-                        yaxis: { title: VALUE_COL },
-                        height: 500,
-                        margin: {l: 80, r: 50, t: 50, b: 100}
-                    };
-
-                    Plotly.newPlot('$chart_title', [trace], layout, {responsive: true});
-
-                    document.getElementById('$chart_title').on('plotly_click', function(data) {
-                        const clickedCategory = data.points[0].x;
-                        if (clickedCategory !== 'Total') {
-                            toggleCategory_$chart_title(clickedCategory);
-                        }
+                    // Value-based coloring (positive/negative)
+                    markerColors = processedForChart.map(d => {
+                        if (d.type === 'total') return '#000000';  // Total is always black
+                        return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
                     });
-
-                    updateTable_$chart_title(processed, allCategories);
+                    console.log('Using value-based colors (positive/negative):', markerColors);
                 }
+
+                // Build waterfall using bar chart with base values
+                // This gives us full control over colors
+                const trace = {
+                    type: 'bar',
+                    orientation: 'v',
+                    x: items,
+                    y: values,
+                    base: bases,
+                    text: values.map(v => v.toFixed(2)),
+                    textposition: 'outside',
+                    hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+                    marker: {
+                        color: markerColors,
+                        line: { width: 1, color: '#333' }
+                    }
+                };
+
+                // Add connector lines as shapes
+                const shapes = [];
+                for (let i = 0; i < processedForChart.length - 1; i++) {
+                    if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                        const endY = processedForChart[i].end;
+                        shapes.push({
+                            type: 'line',
+                            x0: i + 0.4,
+                            x1: i + 1 - 0.4,
+                            y0: endY,
+                            y1: endY,
+                            line: {
+                                color: 'rgb(63, 63, 63)',
+                                width: 2,
+                                dash: 'dot'
+                            }
+                        });
+                    }
+                }
+
+                const layout = {
+                    showlegend: false,
+                    xaxis: { title: ITEM_COL },
+                    yaxis: { title: VALUE_COL },
+                    height: 500,
+                    margin: {l: 80, r: 50, t: 50, b: 100},
+                    shapes: shapes
+                };
+
+                // Use newPlot to ensure colors update properly
+                // (react sometimes doesn't update all trace properties)
+                Plotly.newPlot('$chart_title', [trace], layout, {responsive: true}).then(function() {
+                    // Initialize click handler after first plot is created
+                    initClickHandler_$chart_title();
+                });
+
+                // Update table
+                updateTable_$chart_title(processed, filteredData);
             };
+
+            // Track if click handler has been initialized
+            let clickHandlerInitialized = false;
+
+            // Initialize click handler after first plot is created
+            function initClickHandler_$chart_title() {
+                if (clickHandlerInitialized) return;
+                const chartDiv = document.getElementById('$chart_title');
+                chartDiv.on('plotly_click', function(data) {
+                    const clickedItem = data.points[0].x;
+                    window.toggleItem_$chart_title(clickedItem);
+                });
+                clickHandlerInitialized = true;
+            }
 
             // Load and parse data
             loadDataset('$data_label').then(function(data) {

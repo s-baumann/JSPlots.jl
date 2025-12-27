@@ -533,7 +533,7 @@ struct UnknownChart end
         end
 
         @testset "Internal constructor" begin
-            pic = JSPlots.Picture(:internal, test_png, "Internal notes", true)
+            pic = JSPlots.Picture(:internal, test_png, "Internal Title", "Internal notes", true)
             @test pic.chart_title == :internal
             @test pic.image_path == test_png
             @test pic.notes == "Internal notes"

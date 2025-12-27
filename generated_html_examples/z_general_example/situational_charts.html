@@ -49,8 +49,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     
 
-    <!-- libgif.js for GIF frame control -->
-    <script src="https://unpkg.com/libgif-js@0.0.3/libgif.js"></script>
 </head>
 
 <body>
@@ -269,50 +267,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = [];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
-    const SHOW_TOTALS = false;
+    const SHOW_TOTALS = true;
+    const COLOR_MAPS = {"category":{"Income":"#636efa","Costs":"#EF553B","Taxes":"#00cc96"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_waterfall() {
-        const facet1Select = document.getElementById('facet1_select_waterfall');
-        const facet2Select = document.getElementById('facet2_select_waterfall');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_waterfall() {
-        const key = getFacetKey_waterfall();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_waterfall(data) {
-        const removed = getRemovedSet_waterfall();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -321,96 +315,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_waterfall(processedData, allCategories) {
+    function updateTable_waterfall(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_waterfall');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_waterfall');
+        if (!container) return;
 
-        const removed = getRemovedSet_waterfall();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_waterfall(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-waterfall">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_waterfall('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_waterfall('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_waterfall('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_waterfall('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_waterfall(category) {
-        const removed = getRemovedSet_waterfall();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_waterfall = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_waterfall();
-    }
+    };
+
+    window.toggleCategoryGroup_waterfall = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_waterfall();
+    };
 
     window.resetWaterfall_waterfall = function() {
-        const key = getFacetKey_waterfall();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_waterfall();
     };
 
@@ -421,22 +458,299 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_waterfall');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_waterfall');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_waterfall');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_waterfall');
+            if (select) {
+                filters[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_waterfall(filteredData);
+
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
+
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
+
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
+            });
+            console.log('Using category-based colors:', markerColors);
+        } else {
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
+            });
+            console.log('Using value-based colors (positive/negative):', markerColors);
+        }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('waterfall', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_waterfall();
+        });
+
+        // Update table
+        updateTable_waterfall(processed, filteredData);
+    };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_waterfall() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('waterfall');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_waterfall(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
+
+    // Load and parse data
+    loadDataset('waterfall_data').then(function(data) {
+        allData = data;
+        window.updateChart_waterfall();
+    }).catch(function(error) {
+        console.error('Error loading data for chart waterfall:', error);
+    });
+})();
+(function() {
+    const FILTER_COLS = [];
+    const COLOR_COLS = ['crypto_holding', 'stock_holding'];
+    const VALUE_COLS = ['portfolio_value'];
+    const ID_COL = 'trader_id';
+    const TIME_COL = 'year';
+    let COLOR_COL = 'crypto_holding';
+    let VALUE_COL = 'portfolio_value';
+    const USE_COUNT = false;
+
+    let allData = [];
+
+    function processSankeyData_ribbon(data) {
+        // Update columns from dropdowns if they exist
+        const colorColSelect = document.getElementById('color_col_ribbon');
+        if (colorColSelect) {
+            COLOR_COL = colorColSelect.value;
+        }
+
+        const valueColSelect = document.getElementById('value_col_ribbon');
+        if (valueColSelect) {
+            VALUE_COL = valueColSelect.value;
+        }
+
+        // Get unique time values preserving order of first appearance
+        // This respects categorical ordering from the data
+        const uniqueTimes = [];
+        const seen = new Set();
+        for (const row of data) {
+            const time = row[TIME_COL];
+            if (!seen.has(time)) {
+                seen.add(time);
+                uniqueTimes.push(time);
+            }
+        }
+
+        // Only sort if values are dates or numbers (not categorical strings)
+        const firstTime = uniqueTimes[0];
+        if (firstTime instanceof Date || typeof firstTime === 'number') {
+            uniqueTimes.sort((a, b) => {
+                if (a instanceof Date && b instanceof Date) {
+                    return a - b;
+                } else {
+                    return a - b;
+                }
+            });
+        }
+        // For strings (categorical), keep first-occurrence order
+
+        if (uniqueTimes.length < 2) {
+            console.error('Need at least 2 time periods for Sankey diagram');
+            return { nodes: [], links: [] };
+        }
+
+        // Build nodes and links for Sankey diagram
+        const nodeMap = new Map();  // name -> index
+        const nodes = [];
+        const links = [];
+
+        // Create nodes for each (time, affiliation) pair
+        uniqueTimes.forEach((time, timeIdx) => {
+            const timeData = data.filter(row => row[TIME_COL] === time);
+            const uniqueAffiliations = [...new Set(timeData.map(row => String(row[COLOR_COL])))];
+
+            uniqueAffiliations.forEach(affiliation => {
+                const nodeName = `${time}__${affiliation}`;
+                if (!nodeMap.has(nodeName)) {
+                    nodeMap.set(nodeName, nodes.length);
+                    nodes.push({
+                        name: affiliation,
+                        fullName: nodeName,
+                        time: time,
+                        timeIdx: timeIdx
+                    });
+                }
+            });
+        });
+
+        // Build links between consecutive time periods
+        for (let i = 0; i < uniqueTimes.length - 1; i++) {
+            const time1 = uniqueTimes[i];
+            const time2 = uniqueTimes[i + 1];
+
+            // Get data for both time periods
+            const time1Data = data.filter(row => row[TIME_COL] === time1);
+            const time2Data = data.filter(row => row[TIME_COL] === time2);
+
+            // Build lookup by ID for time2
+            const time2Lookup = new Map();
+            time2Data.forEach(row => {
+                time2Lookup.set(row[ID_COL], row);
+            });
+
+            // Track flows: (affiliation1, affiliation2) -> total value
+            const flowMap = new Map();
+
+            time1Data.forEach(row1 => {
+                const id = row1[ID_COL];
+                const affiliation1 = String(row1[COLOR_COL]);
+
+                // Find matching record at time2
+                const row2 = time2Lookup.get(id);
+                if (row2) {
+                    const affiliation2 = String(row2[COLOR_COL]);
+                    const flowKey = `${affiliation1}→${affiliation2}`;
+
+                    const value = USE_COUNT ? 1 : (Number(row1[VALUE_COL]) || 0);
+
+                    if (flowMap.has(flowKey)) {
+                        flowMap.set(flowKey, flowMap.get(flowKey) + value);
+                    } else {
+                        flowMap.set(flowKey, value);
+                    }
+                }
+            });
+
+            // Create links from flow map
+            flowMap.forEach((value, flowKey) => {
+                const [affiliation1, affiliation2] = flowKey.split('→');
+                const sourceName = `${time1}__${affiliation1}`;
+                const targetName = `${time2}__${affiliation2}`;
+
+                const sourceIdx = nodeMap.get(sourceName);
+                const targetIdx = nodeMap.get(targetName);
+
+                if (sourceIdx !== undefined && targetIdx !== undefined && value > 0) {
+                    links.push({
+                        source: sourceIdx,
+                        target: targetIdx,
+                        value: value
+                    });
+                }
+            });
+        }
+
+        return { nodes, links, uniqueTimes };
+    }
+
+    window.updateChart_ribbon = function() {
+        if (!allData || allData.length === 0) {
+            return;
+        }
+
+        // Get current filter values
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select_ribbon');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 const selectedValues = filters[col];
@@ -447,125 +761,304 @@ $(function(){
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        if (filteredData.length === 0) {
+            console.warn('No data after filtering');
+            return;
+        }
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_waterfall');
-        const facet2Select = document.getElementById('facet2_select_waterfall');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Process data into Sankey format
+        const { nodes, links, uniqueTimes } = processSankeyData_ribbon(filteredData);
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_waterfall(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
+        // Create Sankey diagram
+        const data = [{
+            type: "sankey",
+            orientation: "h",
+            node: {
+                pad: 15,
+                thickness: 20,
+                line: {
+                    color: "black",
+                    width: 0.5
                 },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
+                label: nodes.map(n => n.name),
+                color: nodes.map((n, i) => {
+                    // Color by time stage
+                    const colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+                    return colors[n.timeIdx % colors.length];
+                }),
+                // Add x positions based on time
+                x: nodes.map(n => n.timeIdx / (Math.max(...nodes.map(node => node.timeIdx)) || 1)),
+                y: Array(nodes.length).fill(null)  // Let Plotly auto-position vertically
+            },
+            link: {
+                source: links.map(l => l.source),
+                target: links.map(l => l.target),
+                value: links.map(l => l.value),
+                color: links.map(l => {
+                    // Semi-transparent based on source color
+                    const sourceNode = nodes[l.source];
+                    const colors = ['rgba(31,119,180,0.3)', 'rgba(255,127,14,0.3)', 'rgba(44,160,44,0.3)',
+                                  'rgba(214,39,40,0.3)', 'rgba(148,103,189,0.3)', 'rgba(140,86,75,0.3)',
+                                  'rgba(227,119,194,0.3)', 'rgba(127,127,127,0.3)', 'rgba(188,189,34,0.3)', 'rgba(23,190,207,0.3)'];
+                    return colors[sourceNode.timeIdx % colors.length];
+                })
+            }
+        }];
+
+        // Create time labels annotations
+        const timeAnnotations = uniqueTimes.map((time, idx) => {
+            const xPos = idx / (uniqueTimes.length - 1 || 1);
+            return {
+                x: xPos,
+                y: 1.05,
+                xref: 'paper',
+                yref: 'paper',
+                text: String(time),
+                showarrow: false,
+                font: {
+                    size: 14,
+                    color: '#333'
+                },
+                xanchor: 'center'
             };
+        });
 
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
+        const layout = {
+            font: {
+                size: 12
+            },
+            height: 600,
+            margin: { l: 50, r: 50, t: 70, b: 50 },
+            annotations: timeAnnotations
+        };
 
-            Plotly.newPlot('waterfall', [trace], layout, {responsive: true});
+        Plotly.newPlot('ribbon', data, layout, {responsive: true});
+    };
 
-            // Add click handler
-            document.getElementById('waterfall').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_waterfall(clickedCategory);
+    // Load data
+    loadDataset('sankey_data').then(function(data) {
+        allData = data;
+        window.updateChart_ribbon();
+    }).catch(function(error) {
+        console.error('Error loading data for chart ribbon:', error);
+    });
+})();
+(function() {
+    const scenarios = [{"name":"Short-term Returns (Daily)","allLabels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"],"corrData":[{"var1":"AAPL","spearman":0.6336374021984352,"var2":"GOOGL","pearson":0.6516741336195622},{"var1":"AAPL","spearman":0.60915624249988,"var2":"AMZN","pearson":0.5945935909315849},{"var1":"AAPL","spearman":0.5888331013296213,"var2":"MSFT","pearson":0.6116290205994662},{"var1":"AAPL","spearman":0.6156774348389574,"var2":"TSLA","pearson":0.6270232389108427},{"var1":"AAPL","spearman":0.0684640714251428,"var2":"GS","pearson":0.06508379369816161},{"var1":"AAPL","spearman":-0.018331301300820814,"var2":"JPM","pearson":-0.00524822015253172},{"var1":"AAPL","spearman":0.04702347237555801,"var2":"BAC","pearson":0.04438925425809592},{"var1":"AAPL","spearman":-0.06286756588105409,"var2":"JNJ","pearson":-0.05811649563261194},{"var1":"AAPL","spearman":-0.09869073105169683,"var2":"PFE","pearson":-0.10280238204390439},{"var1":"GOOGL","spearman":0.572722507560121,"var2":"AMZN","pearson":0.5949936784809394},{"var1":"GOOGL","spearman":0.582718955503288,"var2":"MSFT","pearson":0.5890493488857603},{"var1":"GOOGL","spearman":0.5894736235779773,"var2":"TSLA","pearson":0.6106617768315095},{"var1":"GOOGL","spearman":0.05709748955983296,"var2":"GS","pearson":0.06274668933657052},{"var1":"GOOGL","spearman":0.011250996015936255,"var2":"JPM","pearson":-0.018040410028340274},{"var1":"GOOGL","spearman":-0.0060177602841645465,"var2":"BAC","pearson":-0.021231679123563094},{"var1":"GOOGL","spearman":-0.07746594345509528,"var2":"JNJ","pearson":-0.07297433588421008},{"var1":"GOOGL","spearman":-0.13346095137522201,"var2":"PFE","pearson":-0.1473546105948724},{"var1":"AMZN","spearman":0.5833740699851198,"var2":"MSFT","pearson":0.5972569227723081},{"var1":"AMZN","spearman":0.6046349541592666,"var2":"TSLA","pearson":0.6064334518054134},{"var1":"AMZN","spearman":0.04134094945519128,"var2":"GS","pearson":0.06299943248771957},{"var1":"AMZN","spearman":0.026278692459079347,"var2":"JPM","pearson":0.03425428601876971},{"var1":"AMZN","spearman":0.008079873277972447,"var2":"BAC","pearson":0.01288063973258582},{"var1":"AMZN","spearman":-0.018848173570777133,"var2":"JNJ","pearson":-0.0267847995011914},{"var1":"AMZN","spearman":-0.07175577209235348,"var2":"PFE","pearson":-0.09721458116100729},{"var1":"MSFT","spearman":0.6431860989775836,"var2":"TSLA","pearson":0.6578890756430101},{"var1":"MSFT","spearman":0.07187097393558296,"var2":"GS","pearson":0.05714867985793121},{"var1":"MSFT","spearman":0.0021362261796188738,"var2":"JPM","pearson":0.014999716199700036},{"var1":"MSFT","spearman":0.04194691115057841,"var2":"BAC","pearson":0.036611766834892735},{"var1":"MSFT","spearman":-0.10417280276484424,"var2":"JNJ","pearson":-0.060844333413680854},{"var1":"MSFT","spearman":-0.11107646522344357,"var2":"PFE","pearson":-0.111309206335018},{"var1":"TSLA","spearman":-0.011409206547304757,"var2":"GS","pearson":-0.016292332414924806},{"var1":"TSLA","spearman":-0.04794355109681755,"var2":"JPM","pearson":-0.046942843742843736},{"var1":"TSLA","spearman":-0.06766533864541832,"var2":"BAC","pearson":-0.07892857041397754},{"var1":"TSLA","spearman":-0.06009734555752892,"var2":"JNJ","pearson":-0.05781440484189723},{"var1":"TSLA","spearman":-0.06945327125234003,"var2":"PFE","pearson":-0.07575536937757736},{"var1":"GS","spearman":0.5754758316133058,"var2":"JPM","pearson":0.6130815119381438},{"var1":"GS","spearman":0.5637198675178803,"var2":"BAC","pearson":0.5986846302344158},{"var1":"GS","spearman":0.010559016944271108,"var2":"JNJ","pearson":0.008942875238763944},{"var1":"GS","spearman":0.04447751164018624,"var2":"PFE","pearson":0.024601866080198848},{"var1":"JPM","spearman":0.6045020880334085,"var2":"BAC","pearson":0.6432950957225311},{"var1":"JPM","spearman":-0.05506072097153555,"var2":"JNJ","pearson":-0.04706998044639289},{"var1":"JPM","spearman":-0.021004752076033216,"var2":"PFE","pearson":0.015693691873024846},{"var1":"BAC","spearman":-0.03294043104689675,"var2":"JNJ","pearson":-0.020581296081039226},{"var1":"BAC","spearman":-0.03865290644650314,"var2":"PFE","pearson":-0.05262714941901681},{"var1":"JNJ","spearman":0.47426563625018,"var2":"PFE","pearson":0.4909817542223344}],"labels":["AAPL","GOOGL","AMZN","MSFT","TSLA","GS","JPM","BAC","JNJ","PFE"],"dendroData":{"maxHeight":2.1527781721353603,"leafLabels":["AAPL","GOOGL","AMZN","MSFT","TSLA","GS","JPM","BAC","JNJ","PFE"],"leafPositions":[0,1,2,3,4,5,6,7,8,9],"shapes":[{"line":{"color":"#636efa","width":2},"x1":3.0,"y1":0.5876247324368042,"x0":3.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":4.0,"y1":0.5876247324368042,"x0":3.0,"type":"line","y0":0.5876247324368042},{"line":{"color":"#636efa","width":2},"x1":4.0,"y1":0.0,"x0":4.0,"type":"line","y0":0.5876247324368042},{"line":{"color":"#636efa","width":2},"x1":0.0,"y1":0.5910882552729966,"x0":0.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":1.0,"y1":0.5910882552729966,"x0":0.0,"type":"line","y0":0.5910882552729966},{"line":{"color":"#636efa","width":2},"x1":1.0,"y1":0.0,"x0":1.0,"type":"line","y0":0.5910882552729966},{"line":{"color":"#636efa","width":2},"x1":6.0,"y1":0.5983165612090156,"x0":6.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":7.0,"y1":0.5983165612090156,"x0":6.0,"type":"line","y0":0.5983165612090156},{"line":{"color":"#636efa","width":2},"x1":7.0,"y1":0.0,"x0":7.0,"type":"line","y0":0.5983165612090156},{"line":{"color":"#636efa","width":2},"x1":5.0,"y1":0.6404049854117266,"x0":5.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":6.5,"y1":0.6404049854117266,"x0":5.0,"type":"line","y0":0.6404049854117266},{"line":{"color":"#636efa","width":2},"x1":6.5,"y1":0.5983165612090156,"x0":6.5,"type":"line","y0":0.6404049854117266},{"line":{"color":"#636efa","width":2},"x1":2.0,"y1":0.6477711893582677,"x0":2.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":3.5,"y1":0.6477711893582677,"x0":2.0,"type":"line","y0":0.6477711893582677},{"line":{"color":"#636efa","width":2},"x1":3.5,"y1":0.5876247324368042,"x0":3.5,"type":"line","y0":0.6477711893582677},{"line":{"color":"#636efa","width":2},"x1":0.5,"y1":0.6629454561688537,"x0":0.5,"type":"line","y0":0.5910882552729966},{"line":{"color":"#636efa","width":2},"x1":2.75,"y1":0.6629454561688537,"x0":0.5,"type":"line","y0":0.6629454561688537},{"line":{"color":"#636efa","width":2},"x1":2.75,"y1":0.6477711893582677,"x0":2.75,"type":"line","y0":0.6629454561688537},{"line":{"color":"#636efa","width":2},"x1":8.0,"y1":0.7151413820074399,"x0":8.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.7151413820074399,"x0":8.0,"type":"line","y0":0.7151413820074399},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.0,"x0":9.0,"type":"line","y0":0.7151413820074399},{"line":{"color":"#636efa","width":2},"x1":5.75,"y1":1.5158061004421302,"x0":5.75,"type":"line","y0":0.6404049854117266},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":1.5158061004421302,"x0":5.75,"type":"line","y0":1.5158061004421302},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":0.7151413820074399,"x0":8.5,"type":"line","y0":1.5158061004421302},{"line":{"color":"#636efa","width":2},"x1":1.625,"y1":2.1527781721353603,"x0":1.625,"type":"line","y0":0.6629454561688537},{"line":{"color":"#636efa","width":2},"x1":7.125,"y1":2.1527781721353603,"x0":1.625,"type":"line","y0":2.1527781721353603},{"line":{"color":"#636efa","width":2},"x1":7.125,"y1":1.5158061004421302,"x0":7.125,"type":"line","y0":2.1527781721353603}]}},{"name":"Long-term Returns (20-day)","allLabels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"],"corrData":[{"var1":"GOOGL","spearman":0.7274469907903192,"var2":"MSFT","pearson":0.7494935499689303},{"var1":"GOOGL","spearman":0.6567709651667673,"var2":"AMZN","pearson":0.6642604107214163},{"var1":"GOOGL","spearman":0.6785266457680251,"var2":"AAPL","pearson":0.6843045168544025},{"var1":"GOOGL","spearman":0.6352245954944605,"var2":"TSLA","pearson":0.6572493697437773},{"var1":"GOOGL","spearman":-0.31450670768511846,"var2":"BAC","pearson":-0.33977843620735515},{"var1":"GOOGL","spearman":-0.45743686598259314,"var2":"GS","pearson":-0.502763750046927},{"var1":"GOOGL","spearman":-0.17648416051714402,"var2":"JPM","pearson":-0.14419287657854057},{"var1":"GOOGL","spearman":-0.271606729102981,"var2":"JNJ","pearson":-0.246106388752653},{"var1":"GOOGL","spearman":-0.5146916801339589,"var2":"PFE","pearson":-0.4846123123206976},{"var1":"MSFT","spearman":0.8193812184816682,"var2":"AMZN","pearson":0.8546581360050356},{"var1":"MSFT","spearman":0.7229190599505442,"var2":"AAPL","pearson":0.7310231619504511},{"var1":"MSFT","spearman":0.6818318113670437,"var2":"TSLA","pearson":0.7472005080225599},{"var1":"MSFT","spearman":-0.1808095952023988,"var2":"BAC","pearson":-0.20399684016135658},{"var1":"MSFT","spearman":-0.4461554936817306,"var2":"GS","pearson":-0.4736586581153957},{"var1":"MSFT","spearman":-0.009692556319242976,"var2":"JPM","pearson":0.11551897499451269},{"var1":"MSFT","spearman":-0.2537695437995288,"var2":"JNJ","pearson":-0.26481845702512635},{"var1":"MSFT","spearman":-0.2797902996553671,"var2":"PFE","pearson":-0.2421568898578632},{"var1":"AMZN","spearman":0.7781810393504547,"var2":"AAPL","pearson":0.7710589107023219},{"var1":"AMZN","spearman":0.8034064136762787,"var2":"TSLA","pearson":0.8175013316196483},{"var1":"AMZN","spearman":-0.31665725578769055,"var2":"BAC","pearson":-0.3615270395810933},{"var1":"AMZN","spearman":-0.3712698845382503,"var2":"GS","pearson":-0.40729871997081557},{"var1":"AMZN","spearman":0.07764753986643042,"var2":"JPM","pearson":0.14809478050707617},{"var1":"AMZN","spearman":-0.10797718024104831,"var2":"JNJ","pearson":-0.11449575755062846},{"var1":"AMZN","spearman":-0.2713545824490352,"var2":"PFE","pearson":-0.2507219274087091},{"var1":"AAPL","spearman":0.7508440584902354,"var2":"TSLA","pearson":0.780480225284467},{"var1":"AAPL","spearman":-0.28036760840359043,"var2":"BAC","pearson":-0.3894056243368007},{"var1":"AAPL","spearman":-0.26210401292860064,"var2":"GS","pearson":-0.311407832876203},{"var1":"AAPL","spearman":-0.0808543780058023,"var2":"JPM","pearson":-0.03058034704271806},{"var1":"AAPL","spearman":-0.2327469382192021,"var2":"JNJ","pearson":-0.21625415218417696},{"var1":"AAPL","spearman":-0.4333125644969723,"var2":"PFE","pearson":-0.43957586969767093},{"var1":"TSLA","spearman":-0.3220467688233805,"var2":"BAC","pearson":-0.3676645990425437},{"var1":"TSLA","spearman":-0.3078827469382192,"var2":"GS","pearson":-0.3392573045638011},{"var1":"TSLA","spearman":0.26576452033723397,"var2":"JPM","pearson":0.27902696165298024},{"var1":"TSLA","spearman":-0.061970638057594576,"var2":"JNJ","pearson":-0.09091464829088265},{"var1":"TSLA","spearman":-0.07279055277556028,"var2":"PFE","pearson":-0.10653615529832315},{"var1":"BAC","spearman":0.4857668568313246,"var2":"GS","pearson":0.5268750396645713},{"var1":"BAC","spearman":0.2660526879417434,"var2":"JPM","pearson":0.2710732037098838},{"var1":"BAC","spearman":-0.0785110691407543,"var2":"JNJ","pearson":-0.021121800493315565},{"var1":"BAC","spearman":0.09998929106875133,"var2":"PFE","pearson":0.20603905557735652},{"var1":"GS","spearman":0.27154831675071556,"var2":"JPM","pearson":0.2674135724222846},{"var1":"GS","spearman":0.07457212951965575,"var2":"JNJ","pearson":0.09190766305547547},{"var1":"GS","spearman":0.28450222940477815,"var2":"PFE","pearson":0.2765650929125044},{"var1":"JPM","spearman":0.23905449872466364,"var2":"JNJ","pearson":0.2436132798722212},{"var1":"JPM","spearman":0.4903921415915419,"var2":"PFE","pearson":0.47487567085716625},{"var1":"JNJ","spearman":0.6140082556124535,"var2":"PFE","pearson":0.6290314029185209}],"labels":["GOOGL","MSFT","AMZN","AAPL","TSLA","BAC","GS","JPM","JNJ","PFE"],"dendroData":{"maxHeight":2.9578078588132124,"leafLabels":["GOOGL","MSFT","AMZN","AAPL","TSLA","BAC","GS","JPM","JNJ","PFE"],"leafPositions":[0,1,2,3,4,5,6,7,8,9],"shapes":[{"line":{"color":"#636efa","width":2},"x1":1.0,"y1":0.39681119775416207,"x0":1.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":2.0,"y1":0.39681119775416207,"x0":1.0,"type":"line","y0":0.39681119775416207},{"line":{"color":"#636efa","width":2},"x1":2.0,"y1":0.0,"x0":2.0,"type":"line","y0":0.39681119775416207},{"line":{"color":"#636efa","width":2},"x1":3.0,"y1":0.49778055817640493,"x0":3.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":4.0,"y1":0.49778055817640493,"x0":3.0,"type":"line","y0":0.49778055817640493},{"line":{"color":"#636efa","width":2},"x1":4.0,"y1":0.0,"x0":4.0,"type":"line","y0":0.49778055817640493},{"line":{"color":"#636efa","width":2},"x1":1.5,"y1":0.5476858203181392,"x0":1.5,"type":"line","y0":0.39681119775416207},{"line":{"color":"#636efa","width":2},"x1":3.5,"y1":0.5476858203181392,"x0":1.5,"type":"line","y0":0.5476858203181392},{"line":{"color":"#636efa","width":2},"x1":3.5,"y1":0.49778055817640493,"x0":3.5,"type":"line","y0":0.5476858203181392},{"line":{"color":"#636efa","width":2},"x1":8.0,"y1":0.6370467251518591,"x0":8.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.6370467251518591,"x0":8.0,"type":"line","y0":0.6370467251518591},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.0,"x0":9.0,"type":"line","y0":0.6370467251518591},{"line":{"color":"#636efa","width":2},"x1":0.0,"y1":0.6479985159820655,"x0":0.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":2.5,"y1":0.6479985159820655,"x0":0.0,"type":"line","y0":0.6479985159820655},{"line":{"color":"#636efa","width":2},"x1":2.5,"y1":0.5476858203181392,"x0":2.5,"type":"line","y0":0.6479985159820655},{"line":{"color":"#636efa","width":2},"x1":5.0,"y1":0.6968327856266529,"x0":5.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":6.0,"y1":0.6968327856266529,"x0":5.0,"type":"line","y0":0.6968327856266529},{"line":{"color":"#636efa","width":2},"x1":6.0,"y1":0.0,"x0":6.0,"type":"line","y0":0.6968327856266529},{"line":{"color":"#636efa","width":2},"x1":7.0,"y1":0.9200121787161797,"x0":7.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":0.9200121787161797,"x0":7.0,"type":"line","y0":0.9200121787161797},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":0.6370467251518591,"x0":8.5,"type":"line","y0":0.9200121787161797},{"line":{"color":"#636efa","width":2},"x1":5.5,"y1":1.209408157655168,"x0":5.5,"type":"line","y0":0.6968327856266529},{"line":{"color":"#636efa","width":2},"x1":7.75,"y1":1.209408157655168,"x0":5.5,"type":"line","y0":1.209408157655168},{"line":{"color":"#636efa","width":2},"x1":7.75,"y1":0.9200121787161797,"x0":7.75,"type":"line","y0":1.209408157655168},{"line":{"color":"#636efa","width":2},"x1":1.25,"y1":2.9578078588132124,"x0":1.25,"type":"line","y0":0.6479985159820655},{"line":{"color":"#636efa","width":2},"x1":6.625,"y1":2.9578078588132124,"x0":1.25,"type":"line","y0":2.9578078588132124},{"line":{"color":"#636efa","width":2},"x1":6.625,"y1":1.209408157655168,"x0":6.625,"type":"line","y0":2.9578078588132124}]}},{"name":"Volatility Correlations","allLabels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"],"corrData":[{"var1":"PFE","spearman":0.35879300609435544,"var2":"GS","pearson":0.3303536981100051},{"var1":"PFE","spearman":0.20533986253626432,"var2":"JPM","pearson":0.24738606722852097},{"var1":"PFE","spearman":0.21772620183414787,"var2":"BAC","pearson":0.24171079560264971},{"var1":"PFE","spearman":-0.2852129130240075,"var2":"MSFT","pearson":-0.329794102166203},{"var1":"PFE","spearman":0.03806732997137795,"var2":"AAPL","pearson":0.07611748435505832},{"var1":"PFE","spearman":0.004645729083510193,"var2":"GOOGL","pearson":0.014550961934253762},{"var1":"PFE","spearman":-0.26275239003874684,"var2":"JNJ","pearson":-0.2866834400726653},{"var1":"PFE","spearman":-0.1591152475710197,"var2":"AMZN","pearson":-0.14044270788152233},{"var1":"PFE","spearman":-0.04317646371619385,"var2":"TSLA","pearson":0.05225612713716435},{"var1":"GS","spearman":0.5817373780642147,"var2":"JPM","pearson":0.5726946339188346},{"var1":"GS","spearman":0.6659387838548259,"var2":"BAC","pearson":0.682373562894684},{"var1":"GS","spearman":-0.19501547927335033,"var2":"MSFT","pearson":-0.25778025265715077},{"var1":"GS","spearman":-0.13502307287914483,"var2":"AAPL","pearson":-0.19827768041756594},{"var1":"GS","spearman":-0.08291341342315856,"var2":"GOOGL","pearson":-0.10834892385178248},{"var1":"GS","spearman":-0.22328121653458985,"var2":"JNJ","pearson":-0.15816288174207233},{"var1":"GS","spearman":0.1335432932884207,"var2":"AMZN","pearson":0.11143959948142754},{"var1":"GS","spearman":0.2046379407698748,"var2":"TSLA","pearson":0.1759140187423296},{"var1":"JPM","spearman":0.7165443252399775,"var2":"BAC","pearson":0.7360616493563509},{"var1":"JPM","spearman":0.09436126092797757,"var2":"MSFT","pearson":0.09562071737545305},{"var1":"JPM","spearman":-0.209251543059639,"var2":"AAPL","pearson":-0.265319723329185},{"var1":"JPM","spearman":-0.03639771023579119,"var2":"GOOGL","pearson":-0.0264413898758714},{"var1":"JPM","spearman":-0.02736034580112541,"var2":"JNJ","pearson":0.013391318275610218},{"var1":"JPM","spearman":0.19805097451274362,"var2":"AMZN","pearson":0.17169186813343293},{"var1":"JPM","spearman":0.27641017153760783,"var2":"TSLA","pearson":0.3098409541232968},{"var1":"BAC","spearman":-0.2029381413189509,"var2":"MSFT","pearson":-0.21128653522460614},{"var1":"BAC","spearman":-0.3658998422866489,"var2":"AAPL","pearson":-0.3782999445518436},{"var1":"BAC","spearman":-0.25131330438676763,"var2":"GOOGL","pearson":-0.2729469183723107},{"var1":"BAC","spearman":-0.07567514943826788,"var2":"JNJ","pearson":-0.06915705019582716},{"var1":"BAC","spearman":0.04771510348721743,"var2":"AMZN","pearson":0.014260194108668297},{"var1":"BAC","spearman":0.28043478260869564,"var2":"TSLA","pearson":0.2587781882488816},{"var1":"MSFT","spearman":0.2622549115052863,"var2":"AAPL","pearson":0.2862765709391279},{"var1":"MSFT","spearman":0.5149779006600596,"var2":"GOOGL","pearson":0.5188539618545588},{"var1":"MSFT","spearman":0.06107498198952472,"var2":"JNJ","pearson":0.10326300190980557},{"var1":"MSFT","spearman":0.3574855429428143,"var2":"AMZN","pearson":0.3756537212510718},{"var1":"MSFT","spearman":-0.040052376409197996,"var2":"TSLA","pearson":-0.0738259129951002},{"var1":"AAPL","spearman":0.5262670612745576,"var2":"GOOGL","pearson":0.5687954403223915},{"var1":"AAPL","spearman":-0.03069277049786795,"var2":"JNJ","pearson":0.005836520210929891},{"var1":"AAPL","spearman":0.1957271364317841,"var2":"AMZN","pearson":0.1560050238769814},{"var1":"AAPL","spearman":0.1853414201989914,"var2":"TSLA","pearson":0.0654919260685948},{"var1":"GOOGL","spearman":0.043703148425787104,"var2":"JNJ","pearson":0.11020133847340984},{"var1":"GOOGL","spearman":0.4802274187581534,"var2":"AMZN","pearson":0.45597559202934007},{"var1":"GOOGL","spearman":0.1007992756868319,"var2":"TSLA","pearson":0.0709932565358218},{"var1":"JNJ","spearman":-0.1372505305788664,"var2":"AMZN","pearson":-0.17809067753670604},{"var1":"JNJ","spearman":0.20284468155532623,"var2":"TSLA","pearson":0.19364917474640128},{"var1":"AMZN","spearman":0.4415428649311708,"var2":"TSLA","pearson":0.4110328564426454}],"labels":["PFE","GS","JPM","BAC","MSFT","AAPL","GOOGL","JNJ","AMZN","TSLA"],"dendroData":{"maxHeight":1.909133366691288,"leafLabels":["PFE","GS","JPM","BAC","MSFT","AAPL","GOOGL","JNJ","AMZN","TSLA"],"leafPositions":[0,1,2,3,4,5,6,7,8,9],"shapes":[{"line":{"color":"#636efa","width":2},"x1":2.0,"y1":0.5401226383729929,"x0":2.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":3.0,"y1":0.5401226383729929,"x0":2.0,"type":"line","y0":0.5401226383729929},{"line":{"color":"#636efa","width":2},"x1":3.0,"y1":0.0,"x0":3.0,"type":"line","y0":0.5401226383729929},{"line":{"color":"#636efa","width":2},"x1":1.0,"y1":0.6556733769774066,"x0":1.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":2.5,"y1":0.6556733769774066,"x0":1.0,"type":"line","y0":0.6556733769774066},{"line":{"color":"#636efa","width":2},"x1":2.5,"y1":0.5401226383729929,"x0":2.5,"type":"line","y0":0.6556733769774066},{"line":{"color":"#636efa","width":2},"x1":5.0,"y1":0.6849414709314915,"x0":5.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":6.0,"y1":0.6849414709314915,"x0":5.0,"type":"line","y0":0.6849414709314915},{"line":{"color":"#636efa","width":2},"x1":6.0,"y1":0.0,"x0":6.0,"type":"line","y0":0.6849414709314915},{"line":{"color":"#636efa","width":2},"x1":8.0,"y1":0.8249095016996569,"x0":8.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.8249095016996569,"x0":8.0,"type":"line","y0":0.8249095016996569},{"line":{"color":"#636efa","width":2},"x1":9.0,"y1":0.0,"x0":9.0,"type":"line","y0":0.8249095016996569},{"line":{"color":"#636efa","width":2},"x1":4.0,"y1":0.8361737435629067,"x0":4.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":5.5,"y1":0.8361737435629067,"x0":4.0,"type":"line","y0":0.8361737435629067},{"line":{"color":"#636efa","width":2},"x1":5.5,"y1":0.6849414709314915,"x0":5.5,"type":"line","y0":0.8361737435629067},{"line":{"color":"#636efa","width":2},"x1":0.0,"y1":1.0485821778536786,"x0":0.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":1.75,"y1":1.0485821778536786,"x0":0.0,"type":"line","y0":1.0485821778536786},{"line":{"color":"#636efa","width":2},"x1":1.75,"y1":0.6556733769774066,"x0":1.75,"type":"line","y0":1.0485821778536786},{"line":{"color":"#636efa","width":2},"x1":7.0,"y1":1.1000513001920793,"x0":7.0,"type":"line","y0":0.0},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":1.1000513001920793,"x0":7.0,"type":"line","y0":1.1000513001920793},{"line":{"color":"#636efa","width":2},"x1":8.5,"y1":0.8249095016996569,"x0":8.5,"type":"line","y0":1.1000513001920793},{"line":{"color":"#636efa","width":2},"x1":4.75,"y1":1.1891062142583941,"x0":4.75,"type":"line","y0":0.8361737435629067},{"line":{"color":"#636efa","width":2},"x1":7.75,"y1":1.1891062142583941,"x0":4.75,"type":"line","y0":1.1891062142583941},{"line":{"color":"#636efa","width":2},"x1":7.75,"y1":1.1000513001920793,"x0":7.75,"type":"line","y0":1.1891062142583941},{"line":{"color":"#636efa","width":2},"x1":0.875,"y1":1.909133366691288,"x0":0.875,"type":"line","y0":1.0485821778536786},{"line":{"color":"#636efa","width":2},"x1":6.25,"y1":1.909133366691288,"x0":0.875,"type":"line","y0":1.909133366691288},{"line":{"color":"#636efa","width":2},"x1":6.25,"y1":1.1891062142583941,"x0":6.25,"type":"line","y0":1.909133366691288}]}}];
+    let currentScenario = scenarios[0];
+    let selectedVars = ["AAPL","MSFT","JPM","JNJ"];
+    let manualOrder = null;
+
+    // Initialize variable selector
+    function populateVarSelector() {
+        const select = document.getElementById('var_select_stock_advanced');
+        select.innerHTML = '';
+        currentScenario.allLabels.forEach(v => {
+            const option = document.createElement('option');
+            option.value = v;
+            option.text = v;
+            option.selected = selectedVars.includes(v);
+            select.appendChild(option);
+        });
+    }
+
+    // Initialize sortable list
+    function initializeSortable() {
+        const container = document.getElementById('sortable_vars_stock_advanced');
+        container.innerHTML = '';
+        // Show all variables in the manual order list
+        const orderToUse = manualOrder || currentScenario.allLabels;
+        orderToUse.forEach(v => {
+            const div = document.createElement('div');
+            div.className = 'sortable-item';
+            div.textContent = v;
+            div.setAttribute('data-var', v);
+            container.appendChild(div);
+        });
+
+        if (typeof Sortable !== 'undefined') {
+            Sortable.create(container, {
+                animation: 150,
+                onEnd: function() {
+                    manualOrder = Array.from(container.children).map(el => el.getAttribute('data-var'));
+                    updateChart_stock_advanced();
                 }
             });
+        }
+    }
 
-            // Update table
-            updateTable_waterfall(processed, allCategories);
+    window.updateChart_stock_advanced = function() {
+        // Update scenario
+        const scenarioSelect = document.getElementById('scenario_select_stock_advanced');
+        if (scenarioSelect) {
+            const scenarioName = scenarioSelect.value;
+            currentScenario = scenarios.find(s => s.name === scenarioName);
+        }
 
+        // Update selected variables
+        const varSelect = document.getElementById('var_select_stock_advanced');
+        selectedVars = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+        if (selectedVars.length < 2) {
+            console.warn('Select at least 2 variables');
+            return;
+        }
+
+        // Check order mode
+        const useDendroOrder = document.getElementById('use_dendro_order_stock_advanced');
+        const useManual = useDendroOrder && !useDendroOrder.checked;
+
+        // Show/hide manual ordering UI
+        const manualDiv = document.getElementById('manual_order_stock_advanced');
+        if (manualDiv) {
+            manualDiv.style.display = useManual ? 'block' : 'none';
+        }
+
+        if (useManual) {
+            initializeSortable();
+        }
+
+        // Determine variable order
+        let orderedVars;
+        if (useManual && manualOrder) {
+            // Use manual order, filtered to selected vars
+            orderedVars = manualOrder.filter(v => selectedVars.includes(v));
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_waterfall(filteredData);
+            // Use dendrogram order
+            orderedVars = currentScenario.labels.filter(v => selectedVars.includes(v));
+        }
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
+        const n = orderedVars.length;
 
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
+        // Build correlation matrix for selected variables
+        const zValues = [];
+        const textValues = [];
+        const hoverText = [];
 
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
+        for (let i = 0; i < n; i++) {
+            zValues[i] = [];
+            textValues[i] = [];
+            hoverText[i] = [];
+            for (let j = 0; j < n; j++) {
+                if (i === j) {
+                    // Diagonal
+                    zValues[i][j] = 1.0;
+                    textValues[i][j] = '1.00';
+                    hoverText[i][j] = orderedVars[i];
+                } else {
+                    // Find correlation pair in either direction
+                    const item = currentScenario.corrData.find(d =>
+                        (d.var1 === orderedVars[i] && d.var2 === orderedVars[j]) ||
+                        (d.var1 === orderedVars[j] && d.var2 === orderedVars[i]));
 
-            Plotly.newPlot('waterfall', [trace], layout, {responsive: true});
-
-            document.getElementById('waterfall').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_waterfall(clickedCategory);
+                    if (i < j) {
+                        // Upper-right triangle: always show Pearson
+                        const corr = item ? item.pearson : 0;
+                        zValues[i][j] = corr;
+                        textValues[i][j] = 'P: ' + corr.toFixed(2);
+                        hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Pearson: ' + corr.toFixed(3);
+                    } else {
+                        // Lower-left triangle: always show Spearman
+                        const corr = item ? item.spearman : 0;
+                        zValues[i][j] = corr;
+                        textValues[i][j] = 'S: ' + corr.toFixed(2);
+                        hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Spearman: ' + corr.toFixed(3);
+                    }
                 }
-            });
+            }
+        }
 
-            updateTable_waterfall(processed, allCategories);
+        // Create heatmap
+        const heatmapTrace = {
+            z: zValues,
+            x: orderedVars,
+            y: orderedVars,
+            type: 'heatmap',
+            colorscale: [
+                [0, '#ff0000'],
+                [0.5, '#ffffff'],
+                [1, '#0000ff']
+            ],
+            zmin: -1,
+            zmax: 1,
+            text: hoverText,
+            hovertemplate: '%{text}<extra></extra>',
+            colorbar: {
+                title: 'Correlation',
+                titleside: 'right'
+            }
+        };
+
+        const heatmapLayout = {
+            xaxis: { side: 'bottom', tickangle: -45 },
+            yaxis: { autorange: 'reversed' },
+            annotations: [],
+            margin: { l: 150, r: 50, b: 150, t: 50 }
+        };
+
+        // Add text annotations
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                heatmapLayout.annotations.push({
+                    x: orderedVars[j],
+                    y: orderedVars[i],
+                    text: textValues[i][j],
+                    showarrow: false,
+                    font: {
+                        size: 10,
+                        color: Math.abs(zValues[i][j]) > 0.5 ? 'white' : 'black'
+                    }
+                });
+            }
+        }
+
+        Plotly.newPlot('corrmatrix_stock_advanced', [heatmapTrace], heatmapLayout, {responsive: true});
+
+        // Draw dendrogram (only if using dendrogram order and all variables are selected)
+        const dendroDiv = document.getElementById('dendrogram_stock_advanced');
+        const allVarsSelected = selectedVars.length === currentScenario.allLabels.length;
+
+        if (!useManual && allVarsSelected && currentScenario.dendroData.shapes && currentScenario.dendroData.shapes.length > 0) {
+            dendroDiv.style.display = 'block';
+
+            // Show full dendrogram with all variables
+            const selectedIndices = orderedVars.map(v => currentScenario.labels.indexOf(v));
+            const leafTrace = {
+                x: selectedIndices,
+                y: Array(n).fill(0),
+                mode: 'text',
+                type: 'scatter',
+                text: orderedVars,
+                textposition: 'bottom center',
+                textfont: { size: 10 },
+                hoverinfo: 'text',
+                showlegend: false
+            };
+
+            const dendroLayout = {
+                title: 'Hierarchical Clustering Dendrogram',
+                xaxis: {
+                    visible: false,
+                    range: [Math.min(...selectedIndices) - 0.5, Math.max(...selectedIndices) + 0.5]
+                },
+                yaxis: {
+                    title: 'Height',
+                    range: [0, currentScenario.dendroData.maxHeight * 1.15]
+                },
+                margin: { l: 80, r: 50, b: 120, t: 50 },
+                showlegend: false,
+                shapes: currentScenario.dendroData.shapes
+            };
+
+            Plotly.newPlot('dendrogram_stock_advanced', [leafTrace], dendroLayout, {responsive: true});
+        } else {
+            dendroDiv.style.display = 'none';
         }
     };
 
-    // Load and parse data
-    loadDataset('waterfall_data').then(function(data) {
-        allData = data;
-        window.updateChart_waterfall();
-    }).catch(function(error) {
-        console.error('Error loading data for chart waterfall:', error);
-    });
+    // Initial setup
+    populateVarSelector();
+    updateChart_stock_advanced();
 })();
 
 
@@ -574,17 +1067,28 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script>
+<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Situational Charts</h1>
-<p>This shows examples of Waterfall and RibbonPlot.</p>
+<p>This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.</p>
 
 <h2>Profit & Loss Waterfall</h2>
-<p>A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement, breaking down revenue into net income through various cost components. The chart automatically calculates cumulative totals. Click on any bar to temporarily remove it and see the impact on the final value. The side-by-side table shows exact values and running totals. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html" style="color: blue; font-weight: bold;">See here for Waterfall examples</a></p>
+<p>A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement. <strong>Features:</strong> Automatic cumulative calculation, side-by-side table grouped by category, click bars or table rows to exclude items, toggle categories with checkboxes, switch between value-based (green/red) and category-based coloring, black total bar (toggleable). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html" style="color: blue; font-weight: bold;">See here for more Waterfall examples</a></p>
 
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_waterfall">Color By: </label>
+            <select id="color_mode_waterfall" onchange="updateChart_waterfall()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -677,22 +1181,97 @@ $(function(){
     </div>
     <div class="waterfall-table-section-waterfall">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-waterfall" id="waterfall_table_waterfall">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_waterfall">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_waterfall">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-waterfall" onclick="resetWaterfall_waterfall()">🔄 Reset All</button>
             </div>
 </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: waterfall_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: waterfall_data.parquet</p><br>
+<hr>
+<br>
+<h2>Trader Portfolio Evolution (2015-2023)</h2>
+<p>A SanKey diagram showing how 50 traders' portfolios evolved from 2015 to 2023. Use the 'Affiliation' dropdown to switch between crypto holdings and stock holdings. The ribbon width represents portfolio value. In 2015, all traders held Bitcoin; by 2023, holdings diversified into various cryptocurrencies and stock categories. Notice migration patterns: early Bitcoin holders moving to Ethereum/Solana, and tech stock investors shifting to growth/crypto stocks. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html" style="color: blue; font-weight: bold;">See here for SanKey examples</a></p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_col_ribbon">Affiliation: </label>
+            <select id="color_col_ribbon" onchange="updateChart_ribbon()">
+                <option value="crypto_holding" selected>crypto_holding</option>
+                <option value="stock_holding">stock_holding</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="ribbon"></div>
+<style>
+    .sankey-container-ribbon {
+        width: 100%;
+        max-width: 1200px;
+        margin: 20px auto;
+    }
+</style>
+<div class="sankey-container-ribbon">
+    <div id="ribbon"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sankey_data.parquet</p><br>
+<hr>
+<br>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<div class="corrplot-container">
+    <h2>Stock Market Correlation Analysis - Multiple Scenarios</h2>
+    <p>A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html" style="color: blue; font-weight: bold;">See here for CorrPlot examples</a></p>
+    <div style="margin-bottom: 15px;">
+    <label for="scenario_select_stock_advanced"><strong>Scenario:</strong></label>
+    <select id="scenario_select_stock_advanced" onchange="updateChart_stock_advanced()">
+        <option value="Short-term Returns (Daily)" selected>Short-term Returns (Daily)</option>
+                <option value="Long-term Returns (20-day)" >Long-term Returns (20-day)</option>
+                <option value="Volatility Correlations" >Volatility Correlations</option>
+    </select>
+</div>
+
+    <div style="margin-bottom: 15px;">
+        <label for="var_select_stock_advanced"><strong>Select Variables:</strong></label><br>
+        <select id="var_select_stock_advanced" multiple size="8" style="width: 300px;" onchange="updateChart_stock_advanced()">
+        </select>
+    </div>
+    <div style="margin-bottom: 15px;">
+    <label>
+        <input type="checkbox" id="use_dendro_order_stock_advanced" checked onchange="updateChart_stock_advanced()">
+        <strong>Order by Dendrogram</strong>
+    </label>
+</div>
+
+    <div id="manual_order_stock_advanced" style="margin-bottom: 15px; display: none;">
+    <label><strong>Drag to Reorder:</strong></label>
+    <div id="sortable_vars_stock_advanced" style="padding: 10px; border: 1px solid #ccc; min-height: 50px;">
+    </div>
+</div>
+
+    <div id="dendrogram_stock_advanced" style="width: 100%; height: 300px;"></div>
+    <div id="corrmatrix_stock_advanced" style="width: 100%; height: 600px;"></div>
+</div>
+<style>
+#sortable_vars_stock_advanced .sortable-item {
+    padding: 5px 10px;
+    margin: 2px;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    cursor: move;
+    display: inline-block;
+}
+#sortable_vars_stock_advanced .sortable-item:hover {
+    background-color: #e0e0e0;
+}
+</style>
+
+
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
 </body>

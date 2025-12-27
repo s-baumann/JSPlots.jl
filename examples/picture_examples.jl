@@ -1,139 +1,220 @@
-using JSPlots, DataFrames, Dates
+# Picture Examples - Single Images, Animated GIFs, and Filtered Image Viewing
+# This file demonstrates various ways to use the Picture type in JSPlots.jl
+
+using JSPlots
+using DataFrames
+using VegaLite
+using StableRNGs
 
 println("Creating Picture examples...")
 
-# Get the path to the example image
+# Set up consistent RNG for reproducible examples
+rng = StableRNG(123)
+
+# ========================================
+# Example 1: Simple Picture from file path
+# ========================================
+# Note: This would work with any existing image file
+
 example_image_path = joinpath(@__DIR__, "pictures", "images.jpeg")
-
-# Prepare header
-header = TextBlock("""
-<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/picture_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
-<h1>Picture Examples</h1>
-<p>This page demonstrates how to include images in JSPlots pages.</p>
-<ul>
-    <li><strong>File-based images:</strong> Load JPEG, PNG, SVG, and other formats</li>
-    <li><strong>Custom save functions:</strong> Generate images dynamically</li>
-    <li><strong>Embedded vs External:</strong> Choose between embedded (default) and external storage</li>
-    <li><strong>Integration:</strong> Combine images with interactive plots and text</li>
-</ul>
-""")
-
-# Example 1: Basic Picture from file path
 pic1 = Picture(:example_image, example_image_path;
                notes="This is an example image loaded from a file path")
 
-# Example 2: Create an SVG file and display it
-test_svg_path = tempname() * ".svg"
-svg_content = """
-<svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
-  <rect width="400" height="300" fill="#f0f0f0"/>
-  <circle cx="100" cy="150" r="50" fill="#4CAF50"/>
-  <circle cx="200" cy="150" r="50" fill="#2196F3"/>
-  <circle cx="300" cy="150" r="50" fill="#FF9800"/>
-  <text x="200" y="270" text-anchor="middle" font-size="24" fill="#333">
-    JSPlots Picture Example
-  </text>
-</svg>
-"""
-write(test_svg_path, svg_content)
+# ========================================
+# Example 2: Animated GIF as a Picture
+# ========================================
+println("Creating animated GIF example...")
 
-pic2 = Picture(:svg_diagram, test_svg_path;
-               notes="SVG images are embedded as XML for best quality")
 
-# Example 3: Using custom save function (mock example)
-# This demonstrates how you would use a custom plotting library
-mock_chart = Dict(:type => "bar", :data => [1, 2, 3, 4, 5])
+# Create a simple animated GIF using Plots.jl
+using Plots
+gr()  # Use GR backend
 
-# Custom save function that creates a simple HTML-based chart
-function save_mock_chart(chart, path)
-    html_chart = """
-    <svg width="400" height="300" xmlns="http://www.w3.org/2000/svg">
-      <rect width="400" height="300" fill="#ffffff"/>
-      <text x="200" y="30" text-anchor="middle" font-size="20" fill="#333">
-        Mock Chart: $(chart[:type])
-      </text>
-      <rect x="50" y="100" width="50" height="100" fill="#3498db"/>
-      <rect x="125" y="80" width="50" height="120" fill="#3498db"/>
-      <rect x="200" y="60" width="50" height="140" fill="#3498db"/>
-      <rect x="275" y="70" width="50" height="130" fill="#3498db"/>
-      <text x="200" y="250" text-anchor="middle" font-size="14" fill="#666">
-        Data: $(join(chart[:data], ", "))
-      </text>
-    </svg>
-    """
-    write(path, html_chart)
+
+
+
+# Generate animation data
+anim_data = @animate for i in 1:20
+    x = range(0, 2π, length=100)
+    y = sin.(x .+ i/3)
+    plot(x, y, ylim=(-1.2, 1.2),
+         title="Sine Wave Animation",
+         xlabel="x", ylabel="sin(x + t)",
+         legend=false, linewidth=2)
 end
 
-pic3 = Picture(:custom_chart, mock_chart, save_mock_chart;
-               format=:svg,
-               notes="This demonstrates using a custom save function")
+# Save as GIF
+temp_gif_path = tempname() * ".gif"
+gif(anim_data, temp_gif_path, fps=10)
 
-# Example 4: Create a line chart to combine with pictures
-df = DataFrame(
-    category = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
-    value = [45, 52, 48, 61, 58, 67],
-    color = repeat(["A"], 6)
-)
+gif_pic = Picture(:animated_sine_wave, temp_gif_path;
+                  title="Animated Sine Wave",
+                  notes="This is an animated GIF created with Plots.jl.")
 
-# Create a chart
-line_chart = LineChart(:trend, df, :df;
-    x_cols = [:category],
-    y_cols = [:value],
-    color_cols = [:color],
-    title = "Monthly Trend",
-)
+# Note: Don't delete the temp file - Picture will handle cleanup automatically
 
-mixed_text = TextBlock("""
-<h2>Mixed Content Example</h2>
-<p>Below you can see how to combine static images with interactive charts.</p>
-""")
+# ========================================
+# Example 3: Filtered Picture Viewer with VegaLite Charts
+# ========================================
+println("Creating VegaLite charts for filtered viewing...")
 
-comparison_text = TextBlock("""
-<h2>Embedded vs External Image Storage</h2>
-<h3>Embedded Format (default)</h3>
-<p>Images are base64-encoded and embedded directly in the HTML file.</p>
-<p><strong>Pros:</strong> Single file, easy to share, no external dependencies</p>
-<p><strong>Cons:</strong> Larger file size (especially for PNG/JPEG)</p>
+# Create sample sales data
+regions = ["North", "South", "East", "West"]
+quarters = ["Q1", "Q2", "Q3", "Q4"]
+products = ["Widget", "Gadget", "Doohickey"]
 
-<h3>External Format</h3>
-<p>Images are saved to a pictures/ subdirectory and referenced by the HTML.</p>
-<p><strong>Pros:</strong> Smaller HTML file, easier to update images separately</p>
-<p><strong>Cons:</strong> Multiple files to manage</p>
-""")
+# Create a temporary directory for our charts
+charts_dir = mktempdir()
 
-conclusion = TextBlock("""
-<h2>Summary</h2>
-<p>This page demonstrated all key Picture features:</p>
-<ul>
-    <li>Loading images from file paths (JPEG, SVG)</li>
-    <li>Using custom save functions to generate images dynamically</li>
-    <li>Combining images with interactive charts</li>
-    <li>Understanding embedded vs external storage options</li>
-</ul>
-<p><strong>Tip:</strong> For external format examples, use the provided open.sh or open.bat scripts to avoid CORS errors when viewing locally.</p>
-""")
+# Generate VegaLite charts for each region/quarter/product combination
+chart_count = 0
+for region in regions
+    for quarter in quarters
+        for product in products
+            global chart_count
+            # Generate random sales data for this combination
+            months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            # Determine which months are in this quarter
+            q_num = parse(Int, quarter[2:2])
+            quarter_months = months[(q_num-1)*3+1:q_num*3]
 
-# Create single combined page with all picture examples
+            # Create sales data with some variation
+            sales_values = Float64[]
+            for (i, month) in enumerate(quarter_months)
+                base = if region == "North"
+                    rand(rng, 80:120)
+                elseif region == "South"
+                    rand(rng, 60:100)
+                elseif region == "East"
+                    rand(rng, 90:130)
+                else  # West
+                    rand(rng, 70:110)
+                end
+
+                # Product multiplier
+                multiplier = if product == "Widget"
+                    1.2
+                elseif product == "Gadget"
+                    1.0
+                else  # Doohickey
+                    0.8
+                end
+
+                push!(sales_values, base * multiplier)
+            end
+
+            # Create VegaLite chart
+            df_sales = DataFrame(
+                Month = quarter_months,
+                Sales = sales_values
+            )
+
+            chart = df_sales |> @vlplot(
+                :bar,
+                x={:Month, axis={title="Month"}},
+                y={:Sales, axis={title="Sales (thousands)"}},
+                title="$(product) Sales - $(region) Region - $(quarter)",
+                width=400,
+                height=300,
+                color={value="#4682B4"}
+            )
+
+            # Save chart with pattern: chart!Region!Quarter!Product.png
+            filename = "chart!$(region)!$(quarter)!$(product).png"
+            filepath = joinpath(charts_dir, filename)
+            VegaLite.save(filepath, chart)
+            chart_count += 1
+        end
+    end
+end
+
+println("  Created $chart_count VegaLite charts")
+
+# Create filtered Picture viewer
+# Files follow pattern: chart!Region!Quarter!Product.png
+filtered_pic = Picture(:regional_sales_charts, charts_dir, "chart";
+                       filters = Dict{Symbol,Any}(
+                           :group_1 => "North",  # Region
+                           :group_2 => "Q1",      # Quarter
+                           :group_3 => "Widget"   # Product
+                       ),
+                       title="Regional Sales Dashboard",
+                       notes="Use the filters above to explore sales data across different regions, quarters, and products. " *
+                             "The charts are generated with VegaLite and show monthly sales trends.")
+
+# ========================================
+# Example 4: Simpler Filtered Example - Region and Quarter only
+# ========================================
+println("Creating simpler filtered example...")
+
+# Create charts dir for simpler example
+simple_charts_dir = mktempdir()
+
+for region in ["North", "South"]
+    for quarter in ["Q1", "Q2"]
+        # Generate summary data
+        q_num = parse(Int, quarter[2:2])
+
+        # Create quarterly summary
+        metrics = ["Revenue", "Costs", "Profit"]
+        values = if region == "North"
+            [rand(rng, 400:600), rand(rng, 200:300), rand(rng, 150:300)]
+        else  # South
+            [rand(rng, 300:500), rand(rng, 150:250), rand(rng, 100:250)]
+        end
+
+        df_summary = DataFrame(
+            Metric = metrics,
+            Amount = values
+        )
+
+        chart = df_summary |> @vlplot(
+            :bar,
+            x={:Metric, axis={title=""}},
+            y={:Amount, axis={title="Amount (thousands)"}},
+            title="$(region) Region - $(quarter) Summary",
+            width=350,
+            height=250,
+            color={:Metric, scale={scheme="category10"}}
+        )
+
+        # Save with pattern: summary!Region!Quarter.png
+        filename = "summary!$(region)!$(quarter).png"
+        filepath = joinpath(simple_charts_dir, filename)
+        VegaLite.save(filepath, chart)
+    end
+end
+
+simple_filtered_pic = Picture(:quarterly_summary, simple_charts_dir, "summary";
+                               filters = Dict{Symbol,Any}(
+                                   :group_1 => "North",  # Region
+                                   :group_2 => "Q1"      # Quarter
+                               ),
+                               title="Quarterly Business Summary",
+                               notes="Compare quarterly performance across regions. Use the filters to switch between regions and quarters.")
+
+# ========================================
+# Create HTML page with all examples
+# ========================================
+println("Creating HTML page...")
+
+# Create page with all picture examples
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(:df => df),
-    [header, pic1, pic2, pic3, mixed_text, line_chart, comparison_text, conclusion],
-    tab_title = "Picture Examples"
+    Dict{Symbol,DataFrame}(),
+    [pic1, gif_pic, filtered_pic, simple_filtered_pic],
+    dataformat=:csv_embedded
 )
 
-create_html(page, "generated_html_examples/picture_examples.html")
+output_path = "generated_html_examples/picture_examples.html"
+create_html(page, output_path)
 
-# Clean up temporary SVG file
-rm(test_svg_path, force=true)
-
-println("\n" * "="^60)
-println("Picture examples created successfully!")
-println("="^60)
-println("\nFile created: generated_html_examples/picture_examples.html")
-println("\nThis page includes:")
-println("  • Simple image loaded from file path")
-println("  • SVG image example")
-println("  • Custom save function demonstration")
-println("  • Pictures combined with interactive charts")
-println("  • Embedded vs external storage comparison")
-println("\nTip: For external format examples, use the provided open.sh or open.bat scripts")
-println("     to avoid CORS errors when viewing locally.")
+println("Created: $output_path")
+println()
+println("Picture examples complete!")
+println("Open the HTML file in a browser to see:")
+println("  1. Animated GIF (sine wave)")
+println("  2. Filtered VegaLite charts with 3 dimensions (Region × Quarter × Product)")
+println("  3. Simpler filtered example with 2 dimensions (Region × Quarter)")
+println()
+println("The filtering feature allows you to generate multiple charts for different")
+println("scenarios and let users interactively switch between them!")

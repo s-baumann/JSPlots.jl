@@ -60,8 +60,6 @@ const FULL_PAGE_TEMPLATE = raw"""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     ___PRISM_LANGUAGES___
 
-    <!-- libgif.js for GIF frame control -->
-    <script src="https://unpkg.com/libgif-js@0.0.3/libgif.js"></script>
 </head>
 
 <body>
@@ -661,10 +659,14 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             sp = i == 1 ? "" : SEGMENT_SEPARATOR
             if isa(pti, Picture)
                 # Generate Picture HTML based on dataformat
+                if !isempty(pti.functional_html)
+                    functional_bit *= pti.functional_html
+                end
                 table_bit *= sp * generate_picture_html(pti, pt.dataformat, project_dir)
-                # Add picture attribution
-                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
-                # Picture has no functional HTML
+                # Add picture attribution only for single-image Pictures
+                if pti.image_path !== nothing
+                    table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+                end
             elseif isa(pti, TextBlock)
                 # Generate TextBlock HTML, handling images if present
                 if !isempty(pti.images)
@@ -679,11 +681,6 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                 functional_bit *= pti.functional_html
                 table_bit *= sp * generate_slides_html(pti, pt.dataformat, project_dir)
                 # Slides has no data attribution (uses :no_data label)
-            elseif isa(pti, Gif)
-                # Generate Gif HTML based on dataformat
-                functional_bit *= pti.functional_html
-                table_bit *= sp * generate_gif_html(pti, pt.dataformat, project_dir)
-                # Gif has no data attribution (uses :no_data label)
             elseif isa(pti, Table)
                 functional_bit *= pti.functional_html
                 table_bit *= sp * pti.appearance_html
@@ -750,10 +747,14 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             sp = i == 1 ? "" : SEGMENT_SEPARATOR
             if isa(pti, Picture)
                 # Generate Picture HTML based on dataformat (embedded)
+                if !isempty(pti.functional_html)
+                    functional_bit *= pti.functional_html
+                end
                 table_bit *= sp * generate_picture_html(pti, pt.dataformat, "")
-                # Add picture attribution
-                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
-                # Picture has no functional HTML
+                # Add picture attribution only for single-image Pictures
+                if pti.image_path !== nothing
+                    table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+                end
             elseif isa(pti, TextBlock)
                 # Generate TextBlock HTML, handling images if present
                 if !isempty(pti.images)
@@ -768,11 +769,6 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                 functional_bit *= pti.functional_html
                 table_bit *= sp * generate_slides_html(pti, pt.dataformat, "")
                 # Slides has no data attribution (uses :no_data label)
-            elseif isa(pti, Gif)
-                # Generate Gif HTML based on dataformat (embedded)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * generate_gif_html(pti, pt.dataformat, "")
-                # Gif has no data attribution (uses :no_data label)
             elseif isa(pti, Table)
                 functional_bit *= pti.functional_html
                 table_bit *= sp * pti.appearance_html
@@ -825,24 +821,6 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             # Try to remove the temp directory if empty
             try
                 temp_dir = dirname(first(pti.image_files))
-                if isdir(temp_dir)
-                    rm(temp_dir, force=true, recursive=true)
-                end
-            catch e
-                @warn "Could not delete temporary directory: $e"
-            end
-        elseif isa(pti, Gif) && pti.is_temp
-            # Clean up temp directory with all generated GIFs
-            for gif_file in pti.gif_files
-                try
-                    rm(gif_file, force=true)
-                catch e
-                    @warn "Could not delete temporary GIF file $(gif_file): $e"
-                end
-            end
-            # Try to remove the temp directory if empty
-            try
-                temp_dir = dirname(first(pti.gif_files))
                 if isdir(temp_dir)
                     rm(temp_dir, force=true, recursive=true)
                 end
@@ -914,8 +892,13 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
 
         if isa(pti, Picture)
             # Pictures are embedded as base64 for simplicity in multi-page context
+            if !isempty(pti.functional_html)
+                functional_bit *= pti.functional_html
+            end
             table_bit *= sp * generate_picture_html(pti, :csv_embedded, "")
-            table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+            if pti.image_path !== nothing
+                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+            end
         elseif isa(pti, TextBlock)
             if !isempty(pti.images)
                 table_bit *= sp * generate_textblock_html(pti, :csv_embedded, "")
@@ -926,10 +909,6 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
             # Slides always use external images in slides/ directory
             functional_bit *= pti.functional_html
             table_bit *= sp * generate_slides_html(pti, dataformat, project_dir)
-        elseif isa(pti, Gif)
-            # Gif always uses external GIFs in gifs/ directory
-            functional_bit *= pti.functional_html
-            table_bit *= sp * generate_gif_html(pti, dataformat, project_dir)
         elseif isa(pti, Table)
             functional_bit *= pti.functional_html
             table_bit *= sp * pti.appearance_html

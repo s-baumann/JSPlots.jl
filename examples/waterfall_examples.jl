@@ -13,8 +13,8 @@ header = TextBlock("""
     <li><strong>Side-by-side calculation table:</strong> See exact values and running totals</li>
     <li><strong>Click-to-remove interaction:</strong> Click on bars or table rows to temporarily exclude from calculation</li>
     <li><strong>Reset functionality:</strong> Restore all removed segments with one click</li>
-    <li><strong>Color coding:</strong> Green for positive values, red for negative, blue for totals</li>
-    <li><strong>Filtering:</strong> Switch between different datasets</li>
+    <li><strong>Color coding:</strong> Green for positive values, red for negative, black for totals. Or switch to category-based coloring</li>
+    <li><strong>Filtering:</strong> Switch between different datasets using single-select dropdowns</li>
 </ul>
 """)
 
@@ -36,13 +36,26 @@ example1_text = TextBlock("""
 """)
 
 df_pnl = DataFrame(
-    category = ["Revenue", "COGS", "Gross Profit", "Marketing", "R&D", "Admin", "EBIT", "Taxes", "Net Income"],
-    value = [10000, -4000, 6000, -1500, -800, -700, 3000, -600, 2400]
+    item = ["Revenue", "COGS", "Gross Profit", "Marketing", "R&D", "Admin", "EBIT", "Profit Taxes", "Death Tax", "Deficit Tax", "Other Taxes"],
+    category = ["PnL", "PnL", "PnL", "PnL", "PnL", "PnL", "PnL", "Taxation", "Taxation", "Taxation", "Taxation"],
+    value = [10000, -4000, 6000, -1500, -800, -700, 3000, -600, -200, -300, -200]
 )
+df_pnl_gaap = deepcopy(df_pnl)
+df_pnl_gaap[!, :value] .= df_pnl_gaap.value .* (0.9 .+ 0.2 .* rand(rng, length(df_pnl_gaap.value)))  # Slightly different values for GAAP
+df_pnl_gaap[!, :accounting] .= "GAAP"
+df_pnl[!, :accounting] .= "Non-GAAP"
+df_pnl = vcat(df_pnl, df_pnl_gaap)
+usd_accounting = deepcopy(df_pnl)
+usd_accounting[!, :value] .= usd_accounting.value .* 1.1
+usd_accounting[!, :currency] .= "USD"
+df_pnl[!, :currency] .= "EUR"
+df_pnl = vcat(df_pnl, usd_accounting)
 
 wf1 = Waterfall(:pnl, df_pnl, :pnl_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
+    filters = Dict{Symbol,Any}(:accounting => ["Non-GAAP"], :currency => ["EUR"]),
     title = "Profit & Loss Statement",
     notes = "Click on bars or table rows to exclude items from the calculation. Use Reset to restore.",
     show_table = true,
@@ -65,12 +78,14 @@ example2_text = TextBlock("""
 """)
 
 df_cashflow = DataFrame(
-    category = ["Opening Cash", "Operating CF", "Investing CF", "Financing CF"],
+    item = ["Opening Cash", "Operating CF", "Investing CF", "Financing CF"],
+    category = ["Cash Flow", "Cash Flow", "Cash Flow", "Cash Flow"],
     value = [5000, 3000, -1500, 1000]
 )
 
 wf2 = Waterfall(:cashflow, df_cashflow, :cash_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
     title = "Cash Flow Bridge - Q1 2024",
     notes = "Waterfall showing cash flow changes. Total bar shows ending cash position.",
@@ -106,7 +121,8 @@ for region in regions
     mix_impact = region == "North" ? 200 : region == "South" ? 100 : region == "East" ? 300 : -100
 
     region_df = DataFrame(
-        category = ["Base Sales", "Price Impact", "Volume Impact", "Mix Impact", "Actual Sales"],
+        item = ["Base Sales", "Price Impact", "Volume Impact", "Mix Impact", "Actual Sales"],
+        category = ["Variance", "Variance", "Variance", "Variance", "Variance"],
         value = [base, price_impact, volume_impact, mix_impact, base + price_impact + volume_impact + mix_impact],
         region = repeat([region], 5)
     )
@@ -114,7 +130,8 @@ for region in regions
 end
 
 wf3 = Waterfall(:variance, variance_data, :variance_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
     filters = Dict{Symbol,Any}(:region => ["North"]),
     title = "Sales Variance Analysis by Region",
@@ -151,7 +168,8 @@ for dept in departments
         variance = actual - budget
 
         dept_df = DataFrame(
-            category = ["Budget", "Actual Spending", "Variance"],
+            item = ["Budget", "Actual Spending", "Variance"],
+            category = ["Budget Analysis", "Budget Analysis", "Budget Analysis"],
             value = [budget, actual - budget, variance],
             department = repeat([dept], 3),
             year = repeat([year], 3)
@@ -161,7 +179,8 @@ for dept in departments
 end
 
 wf4 = Waterfall(:budget, budget_data, :budget_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
     filters = Dict{Symbol,Any}(
         :department => ["Sales"],
@@ -184,12 +203,14 @@ example5_text = TextBlock("""
 """)
 
 df_simple = DataFrame(
-    category = ["Starting Value", "Increase 1", "Increase 2", "Decrease 1", "Decrease 2"],
+    item = ["Starting Value", "Increase 1", "Increase 2", "Decrease 1", "Decrease 2"],
+    category = ["Simple", "Simple", "Simple", "Simple", "Simple"],
     value = [1000, 300, 200, -150, -100]
 )
 
 wf5 = Waterfall(:simple, df_simple, :simple_data;
-    color_cols = :category,
+    item_col = :item,
+    color_cols = [:category],
     value_col = :value,
     title = "Simple Waterfall - Chart Only",
     notes = "This waterfall chart has show_table=false, so only the visualization is displayed.",
@@ -215,12 +236,14 @@ example6_text = TextBlock("""
 
 # Create data with two possible category columns
 df_multi_color = DataFrame(
-    financial_category = ["Revenue", "Direct Costs", "Overhead", "Marketing", "Net Income"],
+    item = ["Revenue", "Direct Costs", "Overhead", "Marketing", "Net Income"],
+    financial_category = ["Income", "Expense", "Expense", "Expense", "Net"],
     department = ["Sales", "Operations", "Admin", "Marketing", "All Depts"],
     value = [5000, -2000, -800, -600, 1600]
 )
 
 wf6 = Waterfall(:multi_color, df_multi_color, :multi_color_data;
+    item_col = :item,
     color_cols = [:financial_category, :department],
     value_col = :value,
     title = "Multi-Perspective Waterfall Analysis",
@@ -238,22 +261,25 @@ summary = TextBlock("""
 <p>The Waterfall chart type provides:</p>
 <ul>
     <li><strong>Automatic calculation:</strong> Just provide categories and values, cumulative sums are calculated automatically</li>
-    <li><strong>Side-by-side table:</strong> Optional calculation table showing each step and running total</li>
+    <li><strong>Side-by-side table:</strong> Optional calculation table showing each step and running total, grouped by category</li>
     <li><strong>Interactive removal:</strong> Click on bars or table rows to temporarily exclude from calculation</li>
+    <li><strong>Category grouping:</strong> Toggle entire categories on/off using category checkboxes in the table</li>
     <li><strong>Reset functionality:</strong> Restore all removed segments with the reset button</li>
     <li><strong>Color coding:</strong>
         <ul>
-            <li>Green: Positive values (increases)</li>
-            <li>Red: Negative values (decreases)</li>
-            <li>Blue: Total bars</li>
+            <li>Value mode: Green for positive values, Red for negative values</li>
+            <li>Category mode: Different color for each category from the color palette</li>
+            <li>Total bar: Always black regardless of color mode</li>
         </ul>
     </li>
-    <li><strong>Filtering:</strong> Standard multi-select filters to switch between datasets</li>
+    <li><strong>Filtering:</strong> Single-select filters to switch between datasets</li>
     <li><strong>Customization:</strong>
         <ul>
+            <li><code>item_col</code>: Column containing item labels for the x-axis</li>
+            <li><code>color_cols</code>: Column(s) for grouping items by category</li>
+            <li><code>value_col</code>: Column containing numeric values</li>
             <li><code>show_table</code>: Toggle calculation table display</li>
-            <li><code>show_totals</code>: Add a total bar at the end</li>
-            <li><code>color_cols</code> and <code>value_col</code>: Specify data columns</li>
+            <li><code>show_totals</code>: Add a total bar at the end (toggleable from table)</li>
         </ul>
     </li>
 </ul>
@@ -271,10 +297,12 @@ summary = TextBlock("""
 <h3>Tips</h3>
 <ul>
     <li>Click on any bar or table row to see the impact of removing that component</li>
+    <li>Click category checkboxes to toggle entire groups on/off</li>
+    <li>Use the Color By dropdown to switch between value-based and category-based coloring</li>
     <li>Use the Reset button to quickly restore all segments</li>
     <li>Combine with filters to compare waterfalls across different dimensions</li>
-    <li>Set <code>show_totals=false</code> when your last category is already a total</li>
-    <li>The table maintains the same row order as your input DataFrame</li>
+    <li>Set <code>show_totals=false</code> when your last item is already a total</li>
+    <li>The total bar can be toggled on/off by clicking its row in the table</li>
 </ul>
 """)
 

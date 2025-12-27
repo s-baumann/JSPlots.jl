@@ -2,10 +2,14 @@ using Test
 using JSPlots
 using DataFrames
 
+# Explicitly import JSPlots types to avoid conflict with Makie
+import JSPlots: Waterfall
+
 @testset "Waterfall" begin
     # Create simple test data
     df = DataFrame(
-        category = ["Revenue", "COGS", "OpEx", "Net"],
+        item = ["Revenue", "COGS", "OpEx", "Net"],
+        category = ["Income", "Costs", "Costs", "Total"],
         value = [1000, -400, -200, 400],
         region = repeat(["North"], 4),
         year = repeat([2024], 4)
@@ -13,7 +17,8 @@ using DataFrames
 
     @testset "Basic waterfall creation" begin
         wf = Waterfall(:test_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
         @test wf.chart_title == :test_wf
@@ -22,38 +27,41 @@ using DataFrames
         @test !isempty(wf.appearance_html)
 
         # Check for waterfall-specific elements
-        @test occursin("waterfall", wf.functional_html)
+        @test occursin("type: 'bar'", wf.functional_html)  # Now uses bar chart
         @test occursin("calculateWaterfall", wf.functional_html)
-        @test occursin("category", wf.functional_html)
-        @test occursin("value", wf.functional_html)
+        @test occursin("ITEM_COL", wf.functional_html)
+        @test occursin("CATEGORY_COL", wf.functional_html)
+        @test occursin("VALUE_COL", wf.functional_html)
     end
 
     @testset "Waterfall with table" begin
         wf = Waterfall(:table_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             show_table = true)
 
         @test occursin("waterfall-table", wf.appearance_html)
-        @test occursin("Category", wf.appearance_html)
-        @test occursin("Change", wf.appearance_html)
-        @test occursin("Running Total", wf.appearance_html)
-        @test occursin("Reset All", wf.appearance_html)
+        @test occursin("Calculation Table", wf.appearance_html)
+        @test occursin("Reset", wf.appearance_html)
+        @test occursin("updateTable", wf.functional_html)
     end
 
     @testset "Waterfall without table" begin
         wf = Waterfall(:no_table_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             show_table = false)
 
         @test !occursin("Calculation Table", wf.appearance_html)
-        @test !occursin("Reset All", wf.appearance_html)
+        @test !occursin("Reset", wf.appearance_html)
     end
 
     @testset "Waterfall with totals" begin
         wf = Waterfall(:totals_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             show_totals = true)
 
@@ -63,7 +71,8 @@ using DataFrames
 
     @testset "Waterfall without totals" begin
         wf = Waterfall(:no_totals_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             show_totals = false)
 
@@ -72,7 +81,8 @@ using DataFrames
 
     @testset "Waterfall with custom title and notes" begin
         wf = Waterfall(:custom_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             title = "Custom Waterfall Title",
             notes = "These are custom notes")
@@ -81,31 +91,44 @@ using DataFrames
         @test occursin("These are custom notes", wf.appearance_html)
     end
 
-    @testset "Waterfall with filters" begin
+    @testset "Waterfall with filters (single-select)" begin
         wf = Waterfall(:filtered_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
-            filters = Dict{Symbol,Any}(:region => ["North", "South"]))
+            filters = Dict{Symbol,Any}(:region => ["North"]))
 
         @test occursin("region", wf.functional_html)
         @test occursin("region_select", wf.appearance_html)
+        # Check it's single-select (no multiple attribute)
+        @test !occursin("multiple", wf.appearance_html)
+    end
+
+    @testset "Waterfall error - missing item column" begin
+        @test_throws ErrorException Waterfall(:error_wf, df, :test_data;
+            item_col = :nonexistent,
+            color_cols = [:category],
+            value_col = :value)
     end
 
     @testset "Waterfall error - missing category column" begin
         @test_throws ErrorException Waterfall(:error_wf, df, :test_data;
-            color_cols = :nonexistent,
+            item_col = :item,
+            color_cols = [:nonexistent],
             value_col = :value)
     end
 
     @testset "Waterfall error - missing value column" begin
         @test_throws ErrorException Waterfall(:error_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :nonexistent)
     end
 
     @testset "Waterfall dependencies function" begin
         wf = Waterfall(:dep_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
         deps = JSPlots.dependencies(wf)
@@ -114,30 +137,36 @@ using DataFrames
 
     @testset "Waterfall click-to-remove functionality" begin
         wf = Waterfall(:clickable_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
         # Check for click handler functions
-        @test occursin("toggleCategory", wf.functional_html)
+        @test occursin("toggleItem", wf.functional_html)
+        @test occursin("toggleCategoryGroup", wf.functional_html)
         @test occursin("resetWaterfall", wf.functional_html)
+        @test occursin("removedItems", wf.functional_html)
         @test occursin("removedCategories", wf.functional_html)
         @test occursin("plotly_click", wf.functional_html)
     end
 
     @testset "Waterfall color scheme" begin
         wf = Waterfall(:colors_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
-        # Check for color definitions
-        @test occursin("#2ecc71", wf.functional_html)  # Green for positive
-        @test occursin("#e74c3c", wf.functional_html)  # Red for negative
-        @test occursin("#3498db", wf.functional_html)  # Blue for total
+        # Check for new color definitions
+        @test occursin("#4CAF50", wf.functional_html)  # Green for positive
+        @test occursin("#F44336", wf.functional_html)  # Red for negative
+        @test occursin("#000000", wf.functional_html)  # Black for total
+        @test occursin("Color By", wf.appearance_html)  # Color mode dropdown
     end
 
     @testset "Waterfall styles" begin
         wf = Waterfall(:styles_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
         # Check for CSS styles
@@ -150,7 +179,8 @@ using DataFrames
 
     @testset "Waterfall create_html integration test" begin
         wf = Waterfall(:integration_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             title = "Integration Test Waterfall",
             show_table = true)
@@ -169,7 +199,7 @@ using DataFrames
 
             html_content = read(output_file, String)
             @test occursin("Integration Test Waterfall", html_content)
-            @test occursin("waterfall", html_content)
+            @test occursin("type: 'bar'", html_content)
             @test occursin("plotly", html_content)
             @test occursin("calculateWaterfall", html_content)
             @test occursin("waterfall-table", html_content)
@@ -178,12 +208,14 @@ using DataFrames
 
     @testset "Waterfall multiple on same page" begin
         wf1 = Waterfall(:wf_one, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             title = "First Waterfall")
 
         wf2 = Waterfall(:wf_two, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
             title = "Second Waterfall")
 
@@ -216,7 +248,8 @@ using DataFrames
 
     @testset "Waterfall external format" begin
         wf = Waterfall(:external_wf, df, :test_data;
-            color_cols = :category,
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value)
 
         page = JSPlotPage(
@@ -243,14 +276,16 @@ using DataFrames
         end
     end
 
-    @testset "Waterfall with faceting" begin
-        # Note: Faceting support is basic for waterfall (just shows single chart)
-        wf = Waterfall(:facet_wf, df, :test_data;
-            color_cols = :category,
+    @testset "Waterfall with integer filters" begin
+        # Test that integer filter values work correctly
+        wf = Waterfall(:int_filter_wf, df, :test_data;
+            item_col = :item,
+            color_cols = [:category],
             value_col = :value,
-            facet_cols = :region)
+            filters = Dict{Symbol,Any}(:year => [2024]))
 
-        @test occursin("facet1_select", wf.appearance_html)
+        @test occursin("year_select", wf.appearance_html)
+        @test occursin("2024", wf.appearance_html)
     end
 end
 

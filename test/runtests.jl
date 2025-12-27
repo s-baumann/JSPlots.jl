@@ -81,8 +81,12 @@ using Dates
         include("chart_tests/test_waterfall.jl")
     end
 
-    @testset "RibbonPlot Tests" begin
-        include("chart_tests/test_ribbonplot.jl")
+    @testset "SanKey Tests" begin
+        include("chart_tests/test_sankey.jl")
+    end
+
+    @testset "CorrPlot Tests" begin
+        include("chart_tests/test_corrplot.jl")
     end
 
     @testset "Table Tests" begin

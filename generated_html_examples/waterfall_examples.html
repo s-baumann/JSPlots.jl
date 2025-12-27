@@ -141,8 +141,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     
 
-    <!-- libgif.js for GIF frame control -->
-    <script src="https://unpkg.com/libgif-js@0.0.3/libgif.js"></script>
 </head>
 
 <body>
@@ -359,52 +357,48 @@ $(function(){
 
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const FILTER_COLS = ['currency', 'accounting'];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
     const SHOW_TOTALS = false;
+    const COLOR_MAPS = {"category":{"PnL":"#636efa","Taxation":"#EF553B"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_pnl() {
-        const facet1Select = document.getElementById('facet1_select_pnl');
-        const facet2Select = document.getElementById('facet2_select_pnl');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_pnl() {
-        const key = getFacetKey_pnl();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_pnl(data) {
-        const removed = getRemovedSet_pnl();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -413,96 +407,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_pnl(processedData, allCategories) {
+    function updateTable_pnl(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_pnl');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_pnl');
+        if (!container) return;
 
-        const removed = getRemovedSet_pnl();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_pnl(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-pnl">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_pnl('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_pnl('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_pnl('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_pnl('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_pnl(category) {
-        const removed = getRemovedSet_pnl();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_pnl = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_pnl();
-    }
+    };
+
+    window.toggleCategoryGroup_pnl = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_pnl();
+    };
 
     window.resetWaterfall_pnl = function() {
-        const key = getFacetKey_pnl();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_pnl();
     };
 
@@ -513,143 +550,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_pnl');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_pnl');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_pnl');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_pnl');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_pnl(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_pnl');
-        const facet2Select = document.getElementById('facet2_select_pnl');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_pnl(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('pnl', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('pnl').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_pnl(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_pnl(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_pnl(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('pnl', [trace], layout, {responsive: true});
-
-            document.getElementById('pnl').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_pnl(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_pnl(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('pnl', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_pnl();
+        });
+
+        // Update table
+        updateTable_pnl(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_pnl() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('pnl');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_pnl(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('pnl_data').then(function(data) {
@@ -663,50 +694,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = [];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
     const SHOW_TOTALS = true;
+    const COLOR_MAPS = {"category":{"Cash Flow":"#636efa"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_cashflow() {
-        const facet1Select = document.getElementById('facet1_select_cashflow');
-        const facet2Select = document.getElementById('facet2_select_cashflow');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_cashflow() {
-        const key = getFacetKey_cashflow();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_cashflow(data) {
-        const removed = getRemovedSet_cashflow();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -715,96 +742,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_cashflow(processedData, allCategories) {
+    function updateTable_cashflow(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_cashflow');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_cashflow');
+        if (!container) return;
 
-        const removed = getRemovedSet_cashflow();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_cashflow(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-cashflow">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_cashflow('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_cashflow('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_cashflow('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_cashflow('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_cashflow(category) {
-        const removed = getRemovedSet_cashflow();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_cashflow = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_cashflow();
-    }
+    };
+
+    window.toggleCategoryGroup_cashflow = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_cashflow();
+    };
 
     window.resetWaterfall_cashflow = function() {
-        const key = getFacetKey_cashflow();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_cashflow();
     };
 
@@ -815,143 +885,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_cashflow');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_cashflow');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_cashflow');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_cashflow');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_cashflow(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_cashflow');
-        const facet2Select = document.getElementById('facet2_select_cashflow');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_cashflow(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('cashflow', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('cashflow').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_cashflow(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_cashflow(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_cashflow(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('cashflow', [trace], layout, {responsive: true});
-
-            document.getElementById('cashflow').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_cashflow(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_cashflow(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('cashflow', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_cashflow();
+        });
+
+        // Update table
+        updateTable_cashflow(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_cashflow() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('cashflow');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_cashflow(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('cash_data').then(function(data) {
@@ -965,50 +1029,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = ['region'];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
     const SHOW_TOTALS = false;
+    const COLOR_MAPS = {"category":{"Variance":"#636efa"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_variance() {
-        const facet1Select = document.getElementById('facet1_select_variance');
-        const facet2Select = document.getElementById('facet2_select_variance');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_variance() {
-        const key = getFacetKey_variance();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_variance(data) {
-        const removed = getRemovedSet_variance();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -1017,96 +1077,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_variance(processedData, allCategories) {
+    function updateTable_variance(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_variance');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_variance');
+        if (!container) return;
 
-        const removed = getRemovedSet_variance();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_variance(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-variance">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_variance('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_variance('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_variance('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_variance('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_variance(category) {
-        const removed = getRemovedSet_variance();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_variance = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_variance();
-    }
+    };
+
+    window.toggleCategoryGroup_variance = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_variance();
+    };
 
     window.resetWaterfall_variance = function() {
-        const key = getFacetKey_variance();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_variance();
     };
 
@@ -1117,143 +1220,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_variance');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_variance');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_variance');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_variance');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_variance(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_variance');
-        const facet2Select = document.getElementById('facet2_select_variance');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_variance(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('variance', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('variance').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_variance(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_variance(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_variance(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('variance', [trace], layout, {responsive: true});
-
-            document.getElementById('variance').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_variance(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_variance(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('variance', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_variance();
+        });
+
+        // Update table
+        updateTable_variance(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_variance() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('variance');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_variance(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('variance_data').then(function(data) {
@@ -1267,50 +1364,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = ['year', 'department'];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
     const SHOW_TOTALS = true;
+    const COLOR_MAPS = {"category":{"Budget Analysis":"#636efa"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_budget() {
-        const facet1Select = document.getElementById('facet1_select_budget');
-        const facet2Select = document.getElementById('facet2_select_budget');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_budget() {
-        const key = getFacetKey_budget();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_budget(data) {
-        const removed = getRemovedSet_budget();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -1319,96 +1412,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_budget(processedData, allCategories) {
+    function updateTable_budget(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_budget');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_budget');
+        if (!container) return;
 
-        const removed = getRemovedSet_budget();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_budget(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-budget">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_budget('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_budget('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_budget('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_budget('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_budget(category) {
-        const removed = getRemovedSet_budget();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_budget = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_budget();
-    }
+    };
+
+    window.toggleCategoryGroup_budget = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_budget();
+    };
 
     window.resetWaterfall_budget = function() {
-        const key = getFacetKey_budget();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_budget();
     };
 
@@ -1419,143 +1555,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_budget');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_budget');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_budget');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_budget');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_budget(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_budget');
-        const facet2Select = document.getElementById('facet2_select_budget');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_budget(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('budget', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('budget').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_budget(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_budget(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_budget(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('budget', [trace], layout, {responsive: true});
-
-            document.getElementById('budget').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_budget(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_budget(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('budget', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_budget();
+        });
+
+        // Update table
+        updateTable_budget(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_budget() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('budget');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_budget(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('budget_data').then(function(data) {
@@ -1569,50 +1699,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = [];
     const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = false;
     const SHOW_TOTALS = true;
+    const COLOR_MAPS = {"category":{"Simple":"#636efa"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_simple() {
-        const facet1Select = document.getElementById('facet1_select_simple');
-        const facet2Select = document.getElementById('facet2_select_simple');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_simple() {
-        const key = getFacetKey_simple();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_simple(data) {
-        const removed = getRemovedSet_simple();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -1621,96 +1747,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_simple(processedData, allCategories) {
+    function updateTable_simple(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_simple');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_simple');
+        if (!container) return;
 
-        const removed = getRemovedSet_simple();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_simple(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-simple">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_simple('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_simple('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_simple('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_simple('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_simple(category) {
-        const removed = getRemovedSet_simple();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_simple = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_simple();
-    }
+    };
+
+    window.toggleCategoryGroup_simple = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_simple();
+    };
 
     window.resetWaterfall_simple = function() {
-        const key = getFacetKey_simple();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_simple();
     };
 
@@ -1721,143 +1890,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_simple');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_simple');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_simple');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_simple');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_simple(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_simple');
-        const facet2Select = document.getElementById('facet2_select_simple');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_simple(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('simple', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('simple').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_simple(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_simple(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_simple(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('simple', [trace], layout, {responsive: true});
-
-            document.getElementById('simple').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_simple(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_simple(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('simple', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_simple();
+        });
+
+        // Update table
+        updateTable_simple(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_simple() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('simple');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_simple(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('simple_data').then(function(data) {
@@ -1871,50 +2034,46 @@ $(function(){
     // Configuration
     const FILTER_COLS = [];
     const COLOR_COLS = ['financial_category', 'department'];
+    const ITEM_COL = 'item';
     let CATEGORY_COL = 'financial_category';
     const VALUE_COL = 'value';
     const SHOW_TABLE = true;
     const SHOW_TOTALS = false;
+    const COLOR_MAPS = {"financial_category":{"Net":"#00cc96","Income":"#636efa","Expense":"#EF553B"},"department":{"Admin":"#00cc96","Sales":"#636efa","All Depts":"#FFA15A","Operations":"#EF553B","Marketing":"#ab63fa"}};
 
     // Store data globally
     let allData = [];
-    let removedCategories = {};  // Map from facet_key to Set of removed categories
-
-    function getFacetKey_multi_color() {
-        const facet1Select = document.getElementById('facet1_select_multi_color');
-        const facet2Select = document.getElementById('facet2_select_multi_color');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-        return (facet1 || 'none') + '|' + (facet2 || 'none');
-    }
-
-    function getRemovedSet_multi_color() {
-        const key = getFacetKey_multi_color();
-        if (!removedCategories[key]) {
-            removedCategories[key] = new Set();
-        }
-        return removedCategories[key];
-    }
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
 
     function calculateWaterfall_multi_color(data) {
-        const removed = getRemovedSet_multi_color();
-        const activeData = data.filter(row => !removed.has(String(row[CATEGORY_COL])));
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
 
         let runningTotal = 0;
         const processed = [];
 
-        for (const row of activeData) {
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
             const category = String(row[CATEGORY_COL]);
             const value = Number(row[VALUE_COL]) || 0;
             const start = runningTotal;
             const end = runningTotal + value;
 
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
             processed.push({
+                item: item,
                 category: category,
                 value: value,
                 start: start,
                 end: end,
-                type: value >= 0 ? 'increasing' : 'decreasing'
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
             });
 
             runningTotal = end;
@@ -1923,96 +2082,139 @@ $(function(){
         // Add total if enabled
         if (SHOW_TOTALS && processed.length > 0) {
             processed.push({
+                item: 'Total',
                 category: 'Total',
                 value: runningTotal,
                 start: 0,
                 end: runningTotal,
-                type: 'total'
+                type: 'total',
+                isFirst: false
             });
         }
 
         return processed;
     }
 
-    function updateTable_multi_color(processedData, allCategories) {
+    function updateTable_multi_color(processedData, allItemsData) {
         if (!SHOW_TABLE) return;
 
-        const tbody = document.getElementById('waterfall_tbody_multi_color');
-        if (!tbody) return;
+        const container = document.getElementById('waterfall_table_container_multi_color');
+        if (!container) return;
 
-        const removed = getRemovedSet_multi_color();
-        tbody.innerHTML = '';
-
-        // Build a map for quick lookup
+        // Build a map for quick lookup by item name
         const dataMap = {};
         for (const item of processedData) {
-            dataMap[item.category] = item;
+            dataMap[item.item] = item;
         }
 
-        // Show all original categories (including removed ones)
-        for (const cat of allCategories) {
-            const row = document.createElement('tr');
-            const isRemoved = removed.has(cat);
-            const item = dataMap[cat];
-
-            if (isRemoved) {
-                row.classList.add('removed');
-            } else if (item) {
-                if (item.type === 'increasing') {
-                    row.classList.add('positive');
-                } else if (item.type === 'decreasing') {
-                    row.classList.add('negative');
-                } else if (item.type === 'total') {
-                    row.classList.add('total');
-                }
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
             }
-
-            row.dataset.category = cat;
-            row.onclick = function() {
-                if (cat !== 'Total') {
-                    toggleCategory_multi_color(cat);
-                }
-            };
-
-            const categoryCell = document.createElement('td');
-            categoryCell.textContent = cat;
-            row.appendChild(categoryCell);
-
-            const valueCell = document.createElement('td');
-            if (item) {
-                valueCell.textContent = item.value.toFixed(2);
-                valueCell.style.textAlign = 'right';
-            } else {
-                valueCell.textContent = '-';
-            }
-            row.appendChild(valueCell);
-
-            const totalCell = document.createElement('td');
-            if (item) {
-                totalCell.textContent = item.end.toFixed(2);
-                totalCell.style.textAlign = 'right';
-            } else {
-                totalCell.textContent = '-';
-            }
-            row.appendChild(totalCell);
-
-            tbody.appendChild(row);
+            categoryGroups[cat].push(item);
         }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-multi_color">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_multi_color('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_multi_color('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_multi_color('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_multi_color('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
     }
 
-    function toggleCategory_multi_color(category) {
-        const removed = getRemovedSet_multi_color();
-        if (removed.has(category)) {
-            removed.delete(category);
+    window.toggleItem_multi_color = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
         } else {
-            removed.add(category);
+            removedItems.add(item);
         }
         window.updateChart_multi_color();
-    }
+    };
+
+    window.toggleCategoryGroup_multi_color = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_multi_color();
+    };
 
     window.resetWaterfall_multi_color = function() {
-        const key = getFacetKey_multi_color();
-        removedCategories[key] = new Set();
+        removedItems = new Set();
+        removedCategories = new Set();
         window.updateChart_multi_color();
     };
 
@@ -2023,143 +2225,137 @@ $(function(){
             return;
         }
 
-        // Update color column if dropdown exists
-        const colorColSelect = document.getElementById('color_col_select_multi_color');
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_multi_color');
         if (colorColSelect) {
             CATEGORY_COL = colorColSelect.value;
         }
 
-        // Get current filter values (multiple selections)
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_multi_color');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
         const filters = {};
         FILTER_COLS.forEach(col => {
             const select = document.getElementById(col + '_select_multi_color');
             if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                filters[col] = select.value;
             }
         });
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (single selection per filter)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                if (String(row[col]) !== filters[col]) {
                     return false;
                 }
             }
             return true;
         });
 
-        // Get all categories for table (before removal)
-        const allCategories = [...new Set(filteredData.map(row => String(row[CATEGORY_COL])))];
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_multi_color(filteredData);
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_multi_color');
-        const facet2Select = document.getElementById('facet2_select_multi_color');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
 
-        if (!facet1) {
-            // No faceting - single waterfall chart
-            const processed = calculateWaterfall_multi_color(filteredData);
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
 
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('multi_color', [trace], layout, {responsive: true});
-
-            // Add click handler
-            document.getElementById('multi_color').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_multi_color(clickedCategory);
-                }
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
             });
-
-            // Update table
-            updateTable_multi_color(processed, allCategories);
-
+            console.log('Using category-based colors:', markerColors);
         } else {
-            // Faceting not implemented for waterfall yet
-            // (could be added in future enhancement)
-            const processed = calculateWaterfall_multi_color(filteredData);
-
-            const categories = processed.map(d => d.category);
-            const values = processed.map(d => d.value);
-            const starts = processed.map(d => d.start);
-            const measure = processed.map(d =>
-                d.type === 'total' ? 'total' :
-                d.type === 'increasing' ? 'relative' : 'relative'
-            );
-
-            const trace = {
-                type: 'waterfall',
-                orientation: 'v',
-                x: categories,
-                y: values,
-                base: starts,
-                measure: measure,
-                text: values.map(v => v.toFixed(2)),
-                textposition: 'outside',
-                connector: {
-                    line: { color: 'rgb(63, 63, 63)', width: 2 }
-                },
-                increasing: { marker: { color: '#2ecc71' } },
-                decreasing: { marker: { color: '#e74c3c' } },
-                totals: { marker: { color: '#3498db' } },
-                hovertemplate: '%{x}<br>Value: %{y}<br>Total: %{base}+%{y}<extra></extra>'
-            };
-
-            const layout = {
-                showlegend: false,
-                xaxis: { title: CATEGORY_COL },
-                yaxis: { title: VALUE_COL },
-                height: 500,
-                margin: {l: 80, r: 50, t: 50, b: 100}
-            };
-
-            Plotly.newPlot('multi_color', [trace], layout, {responsive: true});
-
-            document.getElementById('multi_color').on('plotly_click', function(data) {
-                const clickedCategory = data.points[0].x;
-                if (clickedCategory !== 'Total') {
-                    toggleCategory_multi_color(clickedCategory);
-                }
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
             });
-
-            updateTable_multi_color(processed, allCategories);
+            console.log('Using value-based colors (positive/negative):', markerColors);
         }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('multi_color', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_multi_color();
+        });
+
+        // Update table
+        updateTable_multi_color(processed, filteredData);
     };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_multi_color() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('multi_color');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_multi_color(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
 
     // Load and parse data
     loadDataset('multi_color_data').then(function(data) {
@@ -2177,89 +2373,124 @@ $(function(){
 <!-- DATASETS -->
 
 <script type="text/plain" id="cash_data" data-format="csv_embedded" data-src="">
-category,value
-Opening Cash,5000
-Operating CF,3000
-Investing CF,-1500
-Financing CF,1000
+item,category,value
+Opening Cash,Cash Flow,5000
+Operating CF,Cash Flow,3000
+Investing CF,Cash Flow,-1500
+Financing CF,Cash Flow,1000
 
 </script><script type="text/plain" id="pnl_data" data-format="csv_embedded" data-src="">
-category,value
-Revenue,10000
-COGS,-4000
-Gross Profit,6000
-Marketing,-1500
-R&D,-800
-Admin,-700
-EBIT,3000
-Taxes,-600
-Net Income,2400
+item,category,value,accounting,currency
+Revenue,PnL,10000.0,Non-GAAP,EUR
+COGS,PnL,-4000.0,Non-GAAP,EUR
+Gross Profit,PnL,6000.0,Non-GAAP,EUR
+Marketing,PnL,-1500.0,Non-GAAP,EUR
+R&D,PnL,-800.0,Non-GAAP,EUR
+Admin,PnL,-700.0,Non-GAAP,EUR
+EBIT,PnL,3000.0,Non-GAAP,EUR
+Profit Taxes,Taxation,-600.0,Non-GAAP,EUR
+Death Tax,Taxation,-200.0,Non-GAAP,EUR
+Deficit Tax,Taxation,-300.0,Non-GAAP,EUR
+Other Taxes,Taxation,-200.0,Non-GAAP,EUR
+Revenue,PnL,10434.16499866476,GAAP,EUR
+COGS,PnL,-4112.652081675686,GAAP,EUR
+Gross Profit,PnL,5469.589880151087,GAAP,EUR
+Marketing,PnL,-1441.668411275839,GAAP,EUR
+R&D,PnL,-804.604344977528,GAAP,EUR
+Admin,PnL,-718.9512015424384,GAAP,EUR
+EBIT,PnL,2791.760679575874,GAAP,EUR
+Profit Taxes,Taxation,-608.0651269333594,GAAP,EUR
+Death Tax,Taxation,-185.70285510497396,GAAP,EUR
+Deficit Tax,Taxation,-311.2934448844502,GAAP,EUR
+Other Taxes,Taxation,-199.94959224223663,GAAP,EUR
+Revenue,PnL,11000.0,Non-GAAP,USD
+COGS,PnL,-4400.0,Non-GAAP,USD
+Gross Profit,PnL,6600.000000000001,Non-GAAP,USD
+Marketing,PnL,-1650.0000000000002,Non-GAAP,USD
+R&D,PnL,-880.0000000000001,Non-GAAP,USD
+Admin,PnL,-770.0000000000001,Non-GAAP,USD
+EBIT,PnL,3300.0000000000005,Non-GAAP,USD
+Profit Taxes,Taxation,-660.0,Non-GAAP,USD
+Death Tax,Taxation,-220.00000000000003,Non-GAAP,USD
+Deficit Tax,Taxation,-330.0,Non-GAAP,USD
+Other Taxes,Taxation,-220.00000000000003,Non-GAAP,USD
+Revenue,PnL,11477.581498531237,GAAP,USD
+COGS,PnL,-4523.917289843254,GAAP,USD
+Gross Profit,PnL,6016.5488681661955,GAAP,USD
+Marketing,PnL,-1585.835252403423,GAAP,USD
+R&D,PnL,-885.0647794752808,GAAP,USD
+Admin,PnL,-790.8463216966824,GAAP,USD
+EBIT,PnL,3070.9367475334616,GAAP,USD
+Profit Taxes,Taxation,-668.8716396266954,GAAP,USD
+Death Tax,Taxation,-204.27314061547136,GAAP,USD
+Deficit Tax,Taxation,-342.42278937289524,GAAP,USD
+Other Taxes,Taxation,-219.94455146646033,GAAP,USD
 
 </script><script type="text/plain" id="budget_data" data-format="csv_embedded" data-src="">
-category,value,department,year
-Budget,1000.0,Sales,2023
-Actual Spending,43.41649986647599,Sales,2023
-Variance,43.41649986647599,Sales,2023
-Budget,1000.0,Sales,2024
-Actual Spending,28.163020418921406,Sales,2024
-Variance,28.163020418921406,Sales,2024
-Budget,500.0,Marketing,2023
-Actual Spending,-88.40168664148558,Marketing,2023
-Variance,-88.40168664148558,Marketing,2023
-Budget,500.0,Marketing,2024
-Actual Spending,-38.88772581610749,Marketing,2024
-Variance,-38.88772581610749,Marketing,2024
-Budget,1500.0,Engineering,2023
-Actual Spending,5.75543122190993,Engineering,2023
-Variance,5.75543122190993,Engineering,2023
-Budget,1500.0,Engineering,2024
-Actual Spending,27.073145060626302,Engineering,2024
-Variance,27.073145060626302,Engineering,2024
-Budget,800.0,Operations,2023
-Actual Spending,-69.41310680804213,Operations,2023
-Variance,-69.41310680804213,Operations,2023
-Budget,800.0,Operations,2024
-Actual Spending,13.441878222265586,Operations,2024
-Variance,13.441878222265586,Operations,2024
+item,category,value,department,year
+Budget,Budget Analysis,1000.0,Sales,2023
+Actual Spending,Budget Analysis,-90.64330805766372,Sales,2023
+Variance,Budget Analysis,-90.64330805766372,Sales,2023
+Budget,Budget Analysis,1000.0,Sales,2024
+Actual Spending,Budget Analysis,63.18953687445401,Sales,2024
+Variance,Budget Analysis,63.18953687445401,Sales,2024
+Budget,Budget Analysis,500.0,Marketing,2023
+Actual Spending,Budget Analysis,44.961661768340946,Marketing,2023
+Variance,Budget Analysis,44.961661768340946,Marketing,2023
+Budget,Budget Analysis,500.0,Marketing,2024
+Actual Spending,Budget Analysis,64.58719832725194,Marketing,2024
+Variance,Budget Analysis,64.58719832725194,Marketing,2024
+Budget,Budget Analysis,1500.0,Engineering,2023
+Actual Spending,Budget Analysis,-1.4946345987200402,Engineering,2023
+Variance,Budget Analysis,-1.4946345987200402,Engineering,2023
+Budget,Budget Analysis,1500.0,Engineering,2024
+Actual Spending,Budget Analysis,-31.06167972365688,Engineering,2024
+Variance,Budget Analysis,-31.06167972365688,Engineering,2024
+Budget,Budget Analysis,800.0,Operations,2023
+Actual Spending,Budget Analysis,-34.629554917129894,Operations,2023
+Variance,Budget Analysis,-34.629554917129894,Operations,2023
+Budget,Budget Analysis,800.0,Operations,2024
+Actual Spending,Budget Analysis,81.32813290069794,Operations,2024
+Variance,Budget Analysis,81.32813290069794,Operations,2024
 
 </script><script type="text/plain" id="simple_data" data-format="csv_embedded" data-src="">
-category,value
-Starting Value,1000
-Increase 1,300
-Increase 2,200
-Decrease 1,-150
-Decrease 2,-100
+item,category,value
+Starting Value,Simple,1000
+Increase 1,Simple,300
+Increase 2,Simple,200
+Decrease 1,Simple,-150
+Decrease 2,Simple,-100
 
 </script><script type="text/plain" id="variance_data" data-format="csv_embedded" data-src="">
-category,value,region
-Base Sales,10000,North
-Price Impact,500,North
-Volume Impact,-300,North
-Mix Impact,200,North
-Actual Sales,10400,North
-Base Sales,8000,South
-Price Impact,-200,South
-Volume Impact,400,South
-Mix Impact,100,South
-Actual Sales,8300,South
-Base Sales,12000,East
-Price Impact,800,East
-Volume Impact,-500,East
-Mix Impact,300,East
-Actual Sales,12600,East
-Base Sales,9000,West
-Price Impact,200,West
-Volume Impact,300,West
-Mix Impact,-100,West
-Actual Sales,9400,West
+item,category,value,region
+Base Sales,Variance,10000,North
+Price Impact,Variance,500,North
+Volume Impact,Variance,-300,North
+Mix Impact,Variance,200,North
+Actual Sales,Variance,10400,North
+Base Sales,Variance,8000,South
+Price Impact,Variance,-200,South
+Volume Impact,Variance,400,South
+Mix Impact,Variance,100,South
+Actual Sales,Variance,8300,South
+Base Sales,Variance,12000,East
+Price Impact,Variance,800,East
+Volume Impact,Variance,-500,East
+Mix Impact,Variance,300,East
+Actual Sales,Variance,12600,East
+Base Sales,Variance,9000,West
+Price Impact,Variance,200,West
+Volume Impact,Variance,300,West
+Mix Impact,Variance,-100,West
+Actual Sales,Variance,9400,West
 
 </script><script type="text/plain" id="multi_color_data" data-format="csv_embedded" data-src="">
-financial_category,department,value
-Revenue,Sales,5000
-Direct Costs,Operations,-2000
-Overhead,Admin,-800
-Marketing,Marketing,-600
-Net Income,All Depts,1600
+item,financial_category,department,value
+Revenue,Income,Sales,5000
+Direct Costs,Expense,Operations,-2000
+Overhead,Expense,Admin,-800
+Marketing,Expense,Marketing,-600
+Net Income,Net,All Depts,1600
 
 </script>
 
@@ -2277,8 +2508,8 @@ Net Income,All Depts,1600
     <li><strong>Side-by-side calculation table:</strong> See exact values and running totals</li>
     <li><strong>Click-to-remove interaction:</strong> Click on bars or table rows to temporarily exclude from calculation</li>
     <li><strong>Reset functionality:</strong> Restore all removed segments with one click</li>
-    <li><strong>Color coding:</strong> Green for positive values, red for negative, blue for totals</li>
-    <li><strong>Filtering:</strong> Switch between different datasets</li>
+    <li><strong>Color coding:</strong> Green for positive values, red for negative, black for totals. Or switch to category-based coloring</li>
+    <li><strong>Filtering:</strong> Switch between different datasets using single-select dropdowns</li>
 </ul>
 
     </div>
@@ -2304,7 +2535,36 @@ Net Income,All Depts,1600
 <h2>Profit & Loss Statement</h2>
 <p>Click on bars or table rows to exclude items from the calculation. Use Reset to restore.</p>
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0;">Filters</h4>
+            <div style="margin: 10px;">
+            <label for="currency_select_pnl">currency: </label>
+            <select id="currency_select_pnl" onchange="updateChart_pnl()">
+                <option value="EUR" selected>EUR</option>
+                <option value="USD">USD</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="accounting_select_pnl">accounting: </label>
+            <select id="accounting_select_pnl" onchange="updateChart_pnl()">
+                <option value="Non-GAAP" selected>Non-GAAP</option>
+                <option value="GAAP">GAAP</option>
+            </select>
+        </div>
+        
+</div>
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_pnl">Color By: </label>
+            <select id="color_mode_pnl" onchange="updateChart_pnl()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -2397,18 +2657,10 @@ Net Income,All Depts,1600
     </div>
     <div class="waterfall-table-section-pnl">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-pnl" id="waterfall_table_pnl">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_pnl">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_pnl">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-pnl" onclick="resetWaterfall_pnl()">🔄 Reset All</button>
             </div>
 </div>
@@ -2433,6 +2685,17 @@ Net Income,All Depts,1600
 <p>Waterfall showing cash flow changes. Total bar shows ending cash position.</p>
 
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_cashflow">Color By: </label>
+            <select id="color_mode_cashflow" onchange="updateChart_cashflow()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -2525,18 +2788,10 @@ Net Income,All Depts,1600
     </div>
     <div class="waterfall-table-section-cashflow">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-cashflow" id="waterfall_table_cashflow">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_cashflow">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_cashflow">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-cashflow" onclick="resetWaterfall_cashflow()">🔄 Reset All</button>
             </div>
 </div>
@@ -2566,16 +2821,27 @@ Net Income,All Depts,1600
     <h4 style="margin-top: 0;">Filters</h4>
             <div style="margin: 10px;">
             <label for="region_select_variance">region: </label>
-            <select id="region_select_variance" multiple onchange="updateChart_variance()">
-                <option value="East">East</option>
+            <select id="region_select_variance" onchange="updateChart_variance()">
                 <option value="North" selected>North</option>
                 <option value="South">South</option>
+                <option value="East">East</option>
                 <option value="West">West</option>
             </select>
         </div>
         
 </div>
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_variance">Color By: </label>
+            <select id="color_mode_variance" onchange="updateChart_variance()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -2668,18 +2934,10 @@ Net Income,All Depts,1600
     </div>
     <div class="waterfall-table-section-variance">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-variance" id="waterfall_table_variance">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_variance">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_variance">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-variance" onclick="resetWaterfall_variance()">🔄 Reset All</button>
             </div>
 </div>
@@ -2708,23 +2966,34 @@ Net Income,All Depts,1600
     <h4 style="margin-top: 0;">Filters</h4>
             <div style="margin: 10px;">
             <label for="year_select_budget">year: </label>
-            <select id="year_select_budget" multiple onchange="updateChart_budget()">
+            <select id="year_select_budget" onchange="updateChart_budget()">
                 <option value="2023">2023</option>
                 <option value="2024" selected>2024</option>
             </select>
         </div>
                 <div style="margin: 10px;">
             <label for="department_select_budget">department: </label>
-            <select id="department_select_budget" multiple onchange="updateChart_budget()">
-                <option value="Engineering">Engineering</option>
-                <option value="Marketing">Marketing</option>
-                <option value="Operations">Operations</option>
+            <select id="department_select_budget" onchange="updateChart_budget()">
                 <option value="Sales" selected>Sales</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Engineering">Engineering</option>
+                <option value="Operations">Operations</option>
             </select>
         </div>
         
 </div>
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_budget">Color By: </label>
+            <select id="color_mode_budget" onchange="updateChart_budget()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -2817,18 +3086,10 @@ Net Income,All Depts,1600
     </div>
     <div class="waterfall-table-section-budget">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-budget" id="waterfall_table_budget">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_budget">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_budget">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-budget" onclick="resetWaterfall_budget()">🔄 Reset All</button>
             </div>
 </div>
@@ -2848,6 +3109,17 @@ Net Income,All Depts,1600
 <p>This waterfall chart has show_table=false, so only the visualization is displayed.</p>
 
 
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="color_mode_simple">Color By: </label>
+            <select id="color_mode_simple" onchange="updateChart_simple()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+        
+</div>
 
 
 <!-- Chart -->
@@ -2965,8 +3237,15 @@ Net Income,All Depts,1600
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px;">
-            <label for="color_col">Color Column: </label>
-            <select id="color_col" onchange="updateChart_multi_color()">
+            <label for="color_mode_multi_color">Color By: </label>
+            <select id="color_mode_multi_color" onchange="updateChart_multi_color()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="color_col_multi_color">Category Column: </label>
+            <select id="color_col_multi_color" onchange="updateChart_multi_color()">
                 <option value="financial_category" selected>financial_category</option>
                 <option value="department">department</option>
             </select>
@@ -3065,18 +3344,10 @@ Net Income,All Depts,1600
     </div>
     <div class="waterfall-table-section-multi_color">
                 <h4>Calculation Table</h4>
-                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on rows or chart bars to exclude from calculation</p>
-                <table class="waterfall-table-multi_color" id="waterfall_table_multi_color">
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th>Change</th>
-                            <th>Running Total</th>
-                        </tr>
-                    </thead>
-                    <tbody id="waterfall_tbody_multi_color">
-                    </tbody>
-                </table>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_multi_color">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
                 <button class="waterfall-reset-btn-multi_color" onclick="resetWaterfall_multi_color()">🔄 Reset All</button>
             </div>
 </div>
@@ -3088,22 +3359,25 @@ Net Income,All Depts,1600
 <p>The Waterfall chart type provides:</p>
 <ul>
     <li><strong>Automatic calculation:</strong> Just provide categories and values, cumulative sums are calculated automatically</li>
-    <li><strong>Side-by-side table:</strong> Optional calculation table showing each step and running total</li>
+    <li><strong>Side-by-side table:</strong> Optional calculation table showing each step and running total, grouped by category</li>
     <li><strong>Interactive removal:</strong> Click on bars or table rows to temporarily exclude from calculation</li>
+    <li><strong>Category grouping:</strong> Toggle entire categories on/off using category checkboxes in the table</li>
     <li><strong>Reset functionality:</strong> Restore all removed segments with the reset button</li>
     <li><strong>Color coding:</strong>
         <ul>
-            <li>Green: Positive values (increases)</li>
-            <li>Red: Negative values (decreases)</li>
-            <li>Blue: Total bars</li>
+            <li>Value mode: Green for positive values, Red for negative values</li>
+            <li>Category mode: Different color for each category from the color palette</li>
+            <li>Total bar: Always black regardless of color mode</li>
         </ul>
     </li>
-    <li><strong>Filtering:</strong> Standard multi-select filters to switch between datasets</li>
+    <li><strong>Filtering:</strong> Single-select filters to switch between datasets</li>
     <li><strong>Customization:</strong>
         <ul>
+            <li><code>item_col</code>: Column containing item labels for the x-axis</li>
+            <li><code>color_cols</code>: Column(s) for grouping items by category</li>
+            <li><code>value_col</code>: Column containing numeric values</li>
             <li><code>show_table</code>: Toggle calculation table display</li>
-            <li><code>show_totals</code>: Add a total bar at the end</li>
-            <li><code>color_cols</code> and <code>value_col</code>: Specify data columns</li>
+            <li><code>show_totals</code>: Add a total bar at the end (toggleable from table)</li>
         </ul>
     </li>
 </ul>
@@ -3121,10 +3395,12 @@ Net Income,All Depts,1600
 <h3>Tips</h3>
 <ul>
     <li>Click on any bar or table row to see the impact of removing that component</li>
+    <li>Click category checkboxes to toggle entire groups on/off</li>
+    <li>Use the Color By dropdown to switch between value-based and category-based coloring</li>
     <li>Use the Reset button to quickly restore all segments</li>
     <li>Combine with filters to compare waterfalls across different dimensions</li>
-    <li>Set <code>show_totals=false</code> when your last category is already a total</li>
-    <li>The table maintains the same row order as your input DataFrame</li>
+    <li>Set <code>show_totals=false</code> when your last item is already a total</li>
+    <li>The total bar can be toggled on/off by clicking its row in the table</li>
 </ul>
 
     </div>

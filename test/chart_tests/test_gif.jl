@@ -3,6 +3,10 @@ using JSPlots
 using DataFrames
 using Plots
 
+# Explicitly import Plots functions and JSPlots types to avoid conflicts
+import Plots: plot, gif, @animate
+import JSPlots: Gif
+
 @testset "Gif" begin
     mktempdir() do tmpdir
         # Create test GIF files following the pattern: prefix!group1!group2.gif
