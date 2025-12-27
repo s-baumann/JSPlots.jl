@@ -652,6 +652,92 @@ path_chart = Path(:path, df_business_path, :business_path_data;
     notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
 
 # More Exotic Plot Types
+# Corrplot.
+example5_text = TextBlock("""
+<h2>Example 5: Advanced CorrPlot - Stock Market Analysis with Multiple Scenarios</h2>
+<p>This example demonstrates the advanced CorrPlot features with multiple correlation scenarios:</p>
+<ul>
+    <li><strong>Multiple scenarios:</strong> Switch between different correlation analyses (Short-term, Long-term, Volatility)</li>
+    <li><strong>Variable selection:</strong> Multi-select box to choose which stocks to display</li>
+    <li><strong>Manual ordering:</strong> Toggle between dendrogram ordering and drag-drop manual ordering</li>
+    <li>Interactive exploration of different time horizons and metrics</li>
+</ul>
+<p><strong>Try this:</strong></p>
+<ol>
+    <li>Switch scenarios using the dropdown to compare short-term vs long-term correlations</li>
+    <li>Select specific stocks to focus on particular sectors</li>
+    <li>Uncheck "Order by Dendrogram" and drag stocks to create your own ordering</li>
+</ol>
+""")
+
+# Generate stock market data for different time horizons
+n_days = 250  # Trading days
+stock_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "JPM", "BAC", "GS", "JNJ", "PFE"]
+n_stocks = length(stock_symbols)
+
+# Generate returns for each stock (correlated within sectors)
+# Tech: AAPL, MSFT, GOOGL, AMZN, TSLA
+# Finance: JPM, BAC, GS
+# Healthcare: JNJ, PFE
+
+stock_returns = zeros(n_days, n_stocks)
+for day in 1:n_days
+    # Tech sector common factor
+    tech_factor = randn(rng) * 0.02
+    # Finance sector common factor
+    finance_factor = randn(rng) * 0.015
+    # Healthcare sector common factor
+    health_factor = randn(rng) * 0.01
+
+    stock_returns[day, 1:5] .= tech_factor .+ randn(rng, 5) .* 0.015  # Tech stocks
+    stock_returns[day, 6:8] .= finance_factor .+ randn(rng, 3) .* 0.012  # Finance
+    stock_returns[day, 9:10] .= health_factor .+ randn(rng, 2) .* 0.008  # Healthcare
+end
+
+# Create DataFrame
+df_stocks = DataFrame(stock_returns, stock_symbols)
+
+# Scenario 1: Short-term returns (daily)
+short_vars = Symbol.(stock_symbols)
+cors_short = compute_correlations(df_stocks, short_vars)
+hc_short = cluster_from_correlation(cors_short.pearson, linkage=:ward)
+scenario_short = CorrelationScenario("Short-term Returns (Daily)",
+    cors_short.pearson, cors_short.spearman, hc_short, stock_symbols)
+
+# Scenario 2: Long-term returns (20-day rolling)
+df_longterm = DataFrame()
+for sym in stock_symbols
+    df_longterm[!, Symbol(sym)] = [sum(df_stocks[max(1, i-19):i, Symbol(sym)])
+                                    for i in 20:n_days]
+end
+long_vars = Symbol.(stock_symbols)
+cors_long = compute_correlations(df_longterm, long_vars)
+hc_long = cluster_from_correlation(cors_long.pearson, linkage=:ward)
+scenario_long = CorrelationScenario("Long-term Returns (20-day)",
+    cors_long.pearson, cors_long.spearman, hc_long, stock_symbols)
+
+# Scenario 3: Volatility correlations (rolling std deviation)
+df_volatility = DataFrame()
+for sym in stock_symbols
+    volatilities = [std(df_stocks[max(1, i-19):i, Symbol(sym)])
+                   for i in 20:n_days]
+    df_volatility[!, Symbol(sym)] = volatilities
+end
+vol_vars = Symbol.(stock_symbols)
+cors_vol = compute_correlations(df_volatility, vol_vars)
+hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
+scenario_vol = CorrelationScenario("Volatility Correlations",
+    cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
+
+# Create advanced CorrPlot with multiple scenarios
+corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol];
+    title = "Stock Market Correlation Analysis - Multiple Scenarios",
+    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
+    default_scenario = "Short-term Returns (Daily)",
+    default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
+    allow_manual_order = true
+)
+
 # Waterfall
 # Create waterfall data showing profit breakdown
 waterfall_data = DataFrame(
@@ -771,98 +857,6 @@ sankey_chart = SanKey(:ribbon, sankey_df, :sankey_data;
     value_cols = [:portfolio_value],
     title = "Trader Portfolio Evolution (2015-2023)",
     notes="A SanKey diagram showing how 50 traders' portfolios evolved from 2015 to 2023. Use the 'Affiliation' dropdown to switch between crypto holdings and stock holdings. The ribbon width represents portfolio value. In 2015, all traders held Bitcoin; by 2023, holdings diversified into various cryptocurrencies and stock categories. Notice migration patterns: early Bitcoin holders moving to Ethereum/Solana, and tech stock investors shifting to growth/crypto stocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html\" style=\"color: blue; font-weight: bold;\">See here for SanKey examples</a>")
-
-
-
-# =============================================================================
-# Example 5: Advanced CorrPlot with Multiple Scenarios and Variable Selection
-# =============================================================================
-
-example5_text = TextBlock("""
-<h2>Example 5: Advanced CorrPlot - Stock Market Analysis with Multiple Scenarios</h2>
-<p>This example demonstrates the advanced CorrPlot features with multiple correlation scenarios:</p>
-<ul>
-    <li><strong>Multiple scenarios:</strong> Switch between different correlation analyses (Short-term, Long-term, Volatility)</li>
-    <li><strong>Variable selection:</strong> Multi-select box to choose which stocks to display</li>
-    <li><strong>Manual ordering:</strong> Toggle between dendrogram ordering and drag-drop manual ordering</li>
-    <li>Interactive exploration of different time horizons and metrics</li>
-</ul>
-<p><strong>Try this:</strong></p>
-<ol>
-    <li>Switch scenarios using the dropdown to compare short-term vs long-term correlations</li>
-    <li>Select specific stocks to focus on particular sectors</li>
-    <li>Uncheck "Order by Dendrogram" and drag stocks to create your own ordering</li>
-</ol>
-""")
-
-# Generate stock market data for different time horizons
-n_days = 250  # Trading days
-stock_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "JPM", "BAC", "GS", "JNJ", "PFE"]
-n_stocks = length(stock_symbols)
-
-# Generate returns for each stock (correlated within sectors)
-# Tech: AAPL, MSFT, GOOGL, AMZN, TSLA
-# Finance: JPM, BAC, GS
-# Healthcare: JNJ, PFE
-
-stock_returns = zeros(n_days, n_stocks)
-for day in 1:n_days
-    # Tech sector common factor
-    tech_factor = randn(rng) * 0.02
-    # Finance sector common factor
-    finance_factor = randn(rng) * 0.015
-    # Healthcare sector common factor
-    health_factor = randn(rng) * 0.01
-
-    stock_returns[day, 1:5] .= tech_factor .+ randn(rng, 5) .* 0.015  # Tech stocks
-    stock_returns[day, 6:8] .= finance_factor .+ randn(rng, 3) .* 0.012  # Finance
-    stock_returns[day, 9:10] .= health_factor .+ randn(rng, 2) .* 0.008  # Healthcare
-end
-
-# Create DataFrame
-df_stocks = DataFrame(stock_returns, stock_symbols)
-
-# Scenario 1: Short-term returns (daily)
-short_vars = Symbol.(stock_symbols)
-cors_short = compute_correlations(df_stocks, short_vars)
-hc_short = cluster_from_correlation(cors_short.pearson, linkage=:ward)
-scenario_short = CorrelationScenario("Short-term Returns (Daily)",
-    cors_short.pearson, cors_short.spearman, hc_short, stock_symbols)
-
-# Scenario 2: Long-term returns (20-day rolling)
-df_longterm = DataFrame()
-for sym in stock_symbols
-    df_longterm[!, Symbol(sym)] = [sum(df_stocks[max(1, i-19):i, Symbol(sym)])
-                                    for i in 20:n_days]
-end
-long_vars = Symbol.(stock_symbols)
-cors_long = compute_correlations(df_longterm, long_vars)
-hc_long = cluster_from_correlation(cors_long.pearson, linkage=:ward)
-scenario_long = CorrelationScenario("Long-term Returns (20-day)",
-    cors_long.pearson, cors_long.spearman, hc_long, stock_symbols)
-
-# Scenario 3: Volatility correlations (rolling std deviation)
-df_volatility = DataFrame()
-for sym in stock_symbols
-    volatilities = [std(df_stocks[max(1, i-19):i, Symbol(sym)])
-                   for i in 20:n_days]
-    df_volatility[!, Symbol(sym)] = volatilities
-end
-vol_vars = Symbol.(stock_symbols)
-cors_vol = compute_correlations(df_volatility, vol_vars)
-hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
-scenario_vol = CorrelationScenario("Volatility Correlations",
-    cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
-
-# Create advanced CorrPlot with multiple scenarios
-corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol];
-    title = "Stock Market Correlation Analysis - Multiple Scenarios",
-    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
-    default_scenario = "Short-term Returns (Daily)",
-    default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
-    allow_manual_order = true
-)
-
 
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
@@ -1152,7 +1146,7 @@ images_page =  JSPlotPage(
 
 situational_plot_page =  JSPlotPage(
     all_data,
-    [waterfall_chart, sankey_chart, corrplot5],
+    [corrplot5, waterfall_chart, sankey_chart],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
     notes = "This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
