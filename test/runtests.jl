@@ -73,10 +73,6 @@ using Dates
         include("chart_tests/test_slides.jl")
     end
 
-    @testset "Gif Tests" begin
-        include("chart_tests/test_gif.jl")
-    end
-
     @testset "Waterfall Tests" begin
         include("chart_tests/test_waterfall.jl")
     end

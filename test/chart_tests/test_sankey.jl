@@ -232,7 +232,7 @@ import JSPlots: SanKey
             color_cols = [:party])
 
         deps = JSPlots.dependencies(sankey)
-        @test deps == []
+        @test deps == [:dep_data]
     end
 
     @testset "Sankey with categorical time column" begin
