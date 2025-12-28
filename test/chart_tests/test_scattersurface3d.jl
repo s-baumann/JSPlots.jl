@@ -2,6 +2,7 @@ using Test
 using JSPlots
 using DataFrames
 using Statistics
+using Random
 
 @testset "ScatterSurface3D" begin
     # Generate test data
@@ -632,5 +633,279 @@ using Statistics
         # But the changeScheme function is present internally
         @test occursin("allSchemes_backwards_compat", chart.functional_html)
         @test occursin("\"default\"", chart.functional_html)
+    end
+
+    @testset "weighted_median helper function" begin
+        # Test basic weighted median calculation
+        values = [1.0, 2.0, 3.0, 4.0, 5.0]
+        weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+        result = JSPlots.weighted_median(values, weights)
+        @test result == 3.0  # Middle value with equal weights
+
+        # Test with unequal weights
+        values2 = [1.0, 2.0, 3.0, 4.0, 5.0]
+        weights2 = [0.1, 0.1, 10.0, 0.1, 0.1]  # Weight heavily toward 3.0
+        result2 = JSPlots.weighted_median(values2, weights2)
+        @test result2 == 3.0
+
+        # Test with weights biased toward higher values
+        values3 = [1.0, 2.0, 3.0, 4.0, 5.0]
+        weights3 = [0.1, 0.1, 0.1, 5.0, 5.0]
+        result3 = JSPlots.weighted_median(values3, weights3)
+        @test result3 >= 4.0  # Should be in the heavier-weighted region
+
+        # Test with unsorted values
+        values4 = [5.0, 1.0, 3.0, 2.0, 4.0]
+        weights4 = [1.0, 1.0, 1.0, 1.0, 1.0]
+        result4 = JSPlots.weighted_median(values4, weights4)
+        @test result4 == 3.0
+
+        # Test empty array handling
+        empty_vals = Float64[]
+        empty_weights = Float64[]
+        result_empty = JSPlots.weighted_median(empty_vals, empty_weights)
+        @test result_empty == 0.0
+
+        # Test single value
+        single_val = [42.0]
+        single_weight = [1.0]
+        result_single = JSPlots.weighted_median(single_val, single_weight)
+        @test result_single == 42.0
+
+        # Test two values
+        two_vals = [10.0, 20.0]
+        two_weights = [1.0, 3.0]  # More weight on 20.0
+        result_two = JSPlots.weighted_median(two_vals, two_weights)
+        @test result_two == 20.0
+
+        # Test with very small weights
+        values5 = [1.0, 2.0, 3.0]
+        weights5 = [1e-10, 1e-10, 1.0]
+        result5 = JSPlots.weighted_median(values5, weights5)
+        @test result5 == 3.0
+    end
+
+    @testset "generate_colors helper function" begin
+        # Test color generation for different numbers of groups
+        colors_1 = JSPlots.generate_colors(1)
+        @test length(colors_1) == 1
+        @test startswith(colors_1[1], "hsl(")
+        @test endswith(colors_1[1], ")")
+
+        colors_3 = JSPlots.generate_colors(3)
+        @test length(colors_3) == 3
+        @test all(startswith(c, "hsl(") for c in colors_3)
+        @test all(occursin("70%", c) for c in colors_3)  # Saturation
+        @test all(occursin("50%", c) for c in colors_3)  # Lightness
+
+        # Colors should be different from each other
+        @test colors_3[1] != colors_3[2]
+        @test colors_3[2] != colors_3[3]
+        @test colors_3[1] != colors_3[3]
+
+        # Test with larger number
+        colors_10 = JSPlots.generate_colors(10)
+        @test length(colors_10) == 10
+        # All should be unique
+        @test length(unique(colors_10)) == 10
+
+        # Test hue distribution
+        colors_4 = JSPlots.generate_colors(4)
+        @test length(colors_4) == 4
+        # First color should have hue 0, second 90, third 180, fourth 270
+        @test occursin("hsl(0", colors_4[1]) || occursin("hsl(0.0", colors_4[1])
+    end
+
+    @testset "surface_smoother with L1 minimization" begin
+        # Test surface_smoother with L2_metric=false (uses weighted_median)
+        x = [1.0, 2.0, 3.0, 1.5, 2.5]
+        y = [1.0, 2.0, 3.0, 1.5, 2.5]
+        z = [2.0, 8.0, 18.0, 4.5, 12.5]
+
+        smoothing = 1.0
+        x_grid_l1, y_grid_l1, z_grid_l1 = JSPlots.surface_smoother(x, y, z, smoothing; L2_metric=false)
+
+        @test length(x_grid_l1) == 20
+        @test length(y_grid_l1) == 20
+        @test size(z_grid_l1) == (20, 20)
+
+        # All values should be finite
+        @test all(isfinite, z_grid_l1)
+
+        # Compare L1 and L2 results - they should be different
+        x_grid_l2, y_grid_l2, z_grid_l2 = JSPlots.surface_smoother(x, y, z, smoothing; L2_metric=true)
+
+        # Grids should be the same
+        @test x_grid_l1 == x_grid_l2
+        @test y_grid_l1 == y_grid_l2
+
+        # But z values should differ (L1 uses median, L2 uses mean)
+        @test z_grid_l1 != z_grid_l2
+
+        # Test with outlier data to show L1 robustness
+        x_outlier = [1.0, 2.0, 3.0, 4.0, 5.0]
+        y_outlier = [1.0, 1.0, 1.0, 1.0, 1.0]
+        z_outlier = [1.0, 2.0, 3.0, 4.0, 100.0]  # Outlier at end
+
+        x_grid_out_l1, y_grid_out_l1, z_grid_out_l1 = JSPlots.surface_smoother(
+            x_outlier, y_outlier, z_outlier, 0.5; L2_metric=false)
+        x_grid_out_l2, y_grid_out_l2, z_grid_out_l2 = JSPlots.surface_smoother(
+            x_outlier, y_outlier, z_outlier, 0.5; L2_metric=true)
+
+        # L1 should be more robust to outliers
+        @test all(isfinite, z_grid_out_l1)
+        @test all(isfinite, z_grid_out_l2)
+    end
+
+    @testset "surface_smoother with different smoothing parameters" begin
+        x = rand(20) .* 10
+        y = rand(20) .* 10
+        z = @. sin(x) * cos(y) + randn() * 0.1
+
+        # Test with very small smoothing (should be more local)
+        x_grid_small, y_grid_small, z_grid_small = JSPlots.surface_smoother(x, y, z, 0.1)
+        @test all(isfinite, z_grid_small)
+
+        # Test with large smoothing (should be smoother)
+        x_grid_large, y_grid_large, z_grid_large = JSPlots.surface_smoother(x, y, z, 10.0)
+        @test all(isfinite, z_grid_large)
+
+        # Larger smoothing should produce less variation
+        var_small = var(z_grid_small)
+        var_large = var(z_grid_large)
+        @test var_large <= var_small  # May be equal in some cases due to randomness
+    end
+
+    @testset "compute_surfaces with edge cases" begin
+        # Test with groups that have too few points
+        df_small = DataFrame(
+            x = [1.0, 2.0],
+            y = [1.0, 2.0],
+            z = [1.0, 2.0],
+            group = ["A", "A"]  # Only 2 points in group A
+        )
+
+        # Should skip groups with < 3 points
+        surfaces = JSPlots.compute_surfaces(
+            df_small, :x, :y, :z, [:group], ["A"], true, [1.0], 20)
+
+        # Group A should be skipped or have empty surface data
+        @test haskey(surfaces, "A")
+        @test isempty(surfaces["A"])  # Should have no surfaces computed
+
+        # Test with exactly 3 points (minimum)
+        df_min = DataFrame(
+            x = [1.0, 2.0, 3.0],
+            y = [1.0, 2.0, 3.0],
+            z = [1.0, 4.0, 9.0],
+            group = ["B", "B", "B"]
+        )
+
+        surfaces_min = JSPlots.compute_surfaces(
+            df_min, :x, :y, :z, [:group], ["B"], true, [1.0], 20)
+
+        @test haskey(surfaces_min, "B")
+        @test haskey(surfaces_min["B"], 1.0)  # Should have computed surface
+
+        # Test with "all" group
+        df_all = DataFrame(
+            x = randn(20),
+            y = randn(20),
+            z = randn(20)
+        )
+
+        surfaces_all = JSPlots.compute_surfaces(
+            df_all, :x, :y, :z, Symbol[], ["all"], true, [0.5, 1.0], 20)
+
+        @test haskey(surfaces_all, "all")
+        @test haskey(surfaces_all["all"], 0.5)
+        @test haskey(surfaces_all["all"], 1.0)
+
+        # Verify surface structure
+        x_grid, y_grid, z_grid = surfaces_all["all"][0.5]
+        @test length(x_grid) == 20
+        @test length(y_grid) == 20
+        @test size(z_grid) == (20, 20)
+        @test all(isfinite, z_grid)
+    end
+
+    @testset "compute_surfaces with L1 vs L2" begin
+        # Use deterministic data with outliers to ensure L1 and L2 differ
+        rng = Random.MersenneTwister(12345)
+
+        x_data = randn(rng, 30)
+        y_data = randn(rng, 30)
+        z_data = randn(rng, 30)
+
+        # Add outliers to ensure L1 and L2 differ
+        z_data[1] += 10.0  # Large outlier
+        z_data[16] += 10.0  # Another outlier for group Y
+
+        df = DataFrame(
+            x = x_data,
+            y = y_data,
+            z = z_data,
+            group = repeat(["X", "Y"], 15)
+        )
+
+        # Compute with L2
+        surfaces_l2 = JSPlots.compute_surfaces(
+            df, :x, :y, :z, [:group], ["X", "Y"], true, [1.0], 20)
+
+        # Compute with L1
+        surfaces_l1 = JSPlots.compute_surfaces(
+            df, :x, :y, :z, [:group], ["X", "Y"], false, [1.0], 20)
+
+        # Both should have same structure
+        @test haskey(surfaces_l2, "X")
+        @test haskey(surfaces_l2, "Y")
+        @test haskey(surfaces_l1, "X")
+        @test haskey(surfaces_l1, "Y")
+
+        # Verify surfaces were computed
+        @test haskey(surfaces_l2["X"], 1.0)
+        @test haskey(surfaces_l1["X"], 1.0)
+
+        # Verify both produce finite results
+        _, _, z_grid_l2_x = surfaces_l2["X"][1.0]
+        _, _, z_grid_l1_x = surfaces_l1["X"][1.0]
+        @test all(isfinite, z_grid_l2_x)
+        @test all(isfinite, z_grid_l1_x)
+    end
+
+    @testset "compute_surfaces with multi-part group names" begin
+        df = DataFrame(
+            x = randn(40),
+            y = randn(40),
+            z = randn(40),
+            category = repeat(["Alpha", "Beta"], 20),
+            region = repeat(["North", "South"], 20)
+        )
+
+        # Multi-column grouping creates names like "Alpha_North"
+        group_levels = ["Alpha_North", "Alpha_South", "Beta_North", "Beta_South"]
+
+        surfaces = JSPlots.compute_surfaces(
+            df, :x, :y, :z, [:category, :region], group_levels, true, [1.0], 20)
+
+        # Check all groups were computed
+        @test haskey(surfaces, "Alpha_North")
+        @test haskey(surfaces, "Alpha_South")
+        @test haskey(surfaces, "Beta_North")
+        @test haskey(surfaces, "Beta_South")
+
+        # Each should have a surface for smoothing=1.0
+        @test haskey(surfaces["Alpha_North"], 1.0)
+        @test haskey(surfaces["Beta_South"], 1.0)
+    end
+
+    @testset "dependencies function" begin
+        df = generate_test_data(20)
+        chart = ScatterSurface3D(:dep_test, df, :my_data,
+            x_col=:x, y_col=:y, z_col=:z)
+
+        deps = JSPlots.dependencies(chart)
+        @test deps == [:my_data]
+        @test length(deps) == 1
     end
 end

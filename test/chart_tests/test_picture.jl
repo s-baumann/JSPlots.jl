@@ -1,5 +1,6 @@
 using Test
 using JSPlots
+using DataFrames
 
 # Define test structs at top level
 struct FakeChart end
@@ -530,6 +531,104 @@ struct UnknownChart end
             @test pic.is_temp == false
             @test pic.appearance_html == ""
             @test pic.functional_html == ""
+        end
+
+        @testset "GIF image support" begin
+            # Create a minimal valid GIF (1x1 pixel)
+            test_gif = joinpath(tmpdir, "test.gif")
+            gif_data = UInt8[
+                0x47, 0x49, 0x46, 0x38, 0x39, 0x61,  # GIF89a header
+                0x01, 0x00, 0x01, 0x00,  # 1x1 dimensions
+                0x80, 0x00, 0x00,  # Global color table
+                0xff, 0xff, 0xff,  # White
+                0x00, 0x00, 0x00,  # Black
+                0x2c, 0x00, 0x00, 0x00, 0x00,  # Image descriptor
+                0x01, 0x00, 0x01, 0x00, 0x00,  # 1x1 image
+                0x02, 0x02, 0x44, 0x01, 0x00,  # Image data
+                0x3b  # GIF terminator
+            ]
+            write(test_gif, gif_data)
+
+            # Test GIF with embedded format
+            pic = Picture(:test_gif, test_gif)
+            page = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [pic];
+                dataformat=:csv_embedded
+            )
+            outfile = tempname() * ".html"
+            create_html(page, outfile)
+            @test isfile(outfile)
+            html_content = read(outfile, String)
+            @test occursin("data:image/gif;base64,", html_content)
+
+            # Test GIF with external format
+            mktempdir() do tmpdir2
+                pic2 = Picture(:test_gif_ext, test_gif)
+                page2 = JSPlotPage(
+                    Dict{Symbol,DataFrame}(),
+                    [pic2];
+                    dataformat=:csv_external
+                )
+                outfile2 = joinpath(tmpdir2, "gif_test.html")
+                create_html(page2, outfile2)
+                expected_path = joinpath(tmpdir2, "gif_test", "gif_test.html")
+                @test isfile(expected_path)
+                html_content2 = read(expected_path, String)
+                @test occursin("pictures/test_gif_ext.gif", html_content2)
+            end
+        end
+
+        @testset "Filtered Picture mode with directory" begin
+            # Create a directory with multiple images
+            pics_dir = joinpath(tmpdir, "filtered_pics")
+            mkpath(pics_dir)
+
+            # Create test images for different categories
+            # Filtered mode expects format: prefix!group1!group2.ext
+            for region in ["North", "South"], quarter in ["Q1", "Q2"]
+                img_name = "img_!$(region)!$(quarter).png"
+                img_path = joinpath(pics_dir, img_name)
+                write(img_path, png_data)
+            end
+
+            # Test filtered Picture with directory
+            pic = Picture(:filtered_pic, pics_dir, "img_";
+                title="Filtered Images",
+                notes="Test filtered mode")
+
+            @test pic.chart_title == :filtered_pic
+            @test !isempty(pic.image_files)
+            @test length(pic.image_files) == 4
+            @test haskey(pic.file_mapping, ("North", "Q1"))
+            @test haskey(pic.file_mapping, ("South", "Q2"))
+
+            # Test HTML generation with embedded format
+            page = JSPlotPage(
+                Dict{Symbol,DataFrame}(),
+                [pic];
+                dataformat=:csv_embedded
+            )
+            outfile = tempname() * ".html"
+            create_html(page, outfile)
+            @test isfile(outfile)
+            html_content = read(outfile, String)
+            @test occursin("data:image/png;base64,", html_content)
+            # Should contain image IDs for filtered pictures
+            @test occursin("picture_", html_content)
+
+            # Test with external format
+            mktempdir() do tmpdir3
+                page2 = JSPlotPage(
+                    Dict{Symbol,DataFrame}(),
+                    [pic];
+                    dataformat=:csv_external
+                )
+                outfile2 = joinpath(tmpdir3, "filtered_test.html")
+                create_html(page2, outfile2)
+                expected_path = joinpath(tmpdir3, "filtered_test", "filtered_test.html")
+                @test isfile(expected_path)
+            end
         end
 
         @testset "Internal constructor" begin

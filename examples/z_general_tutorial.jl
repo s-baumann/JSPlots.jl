@@ -670,6 +670,10 @@ example5_text = TextBlock("""
 </ol>
 """)
 
+# Initialize random number generator for reproducibility
+using Random
+rng = Random.MersenneTwister(12345)
+
 # Generate stock market data for different time horizons
 n_days = 250  # Trading days
 stock_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "JPM", "BAC", "GS", "JNJ", "PFE"]
@@ -776,8 +780,6 @@ stock_holdings_by_year = Dict(
 )
 
 # Create 50 traders with realistic portfolio evolution
-using Random
-rng = Random.MersenneTwister(12345)
 trader_count = 50
 for trader_id in 1:trader_count
     # 2015: Everyone holding Bitcoin

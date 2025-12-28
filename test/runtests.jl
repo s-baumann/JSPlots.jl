@@ -2,6 +2,7 @@ using Test
 using JSPlots
 using DataFrames
 using Dates
+using Random
 
 @testset "JSPlots.jl" begin
     # Run each test file in order
