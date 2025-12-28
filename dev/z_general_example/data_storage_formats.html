@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Data Storage Formats</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    
+
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                resolve(results.data);
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                resolve(data);
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        resolve(results.data);
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>Understanding Data Storage Formats</h1>
+<p>This shows the options for including data with the HTML</p>
+
+    <div class="textblock-content">
+        <h2>Data Storage Formats in JSPlots.jl</h2>
+
+<h3>Overview</h3>
+<p>JSPlots.jl supports multiple data storage formats for embedding data in HTML pages.
+The format affects file size, loading speed, and browser compatibility.</p>
+
+<h3>Available Formats</h3>
+
+<h4>1. :parquet (Recommended)</h4>
+<p><strong>Best for:</strong> Large datasets, multi-page reports, production use</p>
+<ul>
+    <li><strong>Compressed binary format</strong> - smallest file sizes (typically 5-10x smaller than CSV)</li>
+    <li><strong>Fast loading</strong> - efficient decompression in browser</li>
+    <li><strong>Modern browsers</strong> - requires JavaScript support</li>
+    <li><strong>Column-oriented</strong> - excellent compression for tabular data</li>
+</ul>
+<pre><code>page = JSPlotPage(data_dict, charts, dataformat = :parquet)</code></pre>
+
+<h4>2. :csv_embedded</h4>
+<p><strong>Best for:</strong> Small datasets, maximum compatibility, debugging</p>
+<ul>
+    <li><strong>Text-based CSV format</strong> - human-readable in HTML source</li>
+    <li><strong>Single file</strong> - data embedded directly in HTML</li>
+    <li><strong>Compact format</strong> - smaller than JSON for tabular data</li>
+    <li><strong>Universal compatibility</strong> - works everywhere</li>
+    <li><strong>Easy debugging</strong> - can inspect data in HTML source</li>
+    <li><strong>No deduplication</strong> - data embedded separately in each page</li>
+</ul>
+<pre><code>page = JSPlotPage(data_dict, charts, dataformat = :csv_embedded)</code></pre>
+
+<h4>3. :csv_external</h4>
+<p><strong>Best for:</strong> Sharing data files, version control, spreadsheet analysis</p>
+<ul>
+    <li><strong>Separate CSV files</strong> - one file per dataset in data/ subdirectory</li>
+    <li><strong>Multiple files</strong> - HTML + CSV files</li>
+    <li><strong>Enables deduplication</strong> - shared datasets only stored once</li>
+    <li><strong>Data reusability</strong> - CSV files can be opened in Excel/spreadsheets</li>
+    <li><strong>Better for git</strong> - separate data from HTML</li>
+</ul>
+<pre><code>page = JSPlotPage(data_dict, charts, dataformat = :csv_external)</code></pre>
+
+<h4>4. :json_embedded</h4>
+<p><strong>Best for:</strong> Small datasets, web developers, API-like structure</p>
+<ul>
+    <li><strong>JSON format</strong> - familiar to web developers</li>
+    <li><strong>Single file</strong> - data embedded directly in HTML</li>
+    <li><strong>Structured data</strong> - preserves data types (numbers, strings, booleans)</li>
+    <li><strong>Larger than CSV</strong> - JSON is ~25% larger due to key names in each row</li>
+    <li><strong>Fast browser parsing</strong> - native JSON.parse() is highly optimized</li>
+    <li><strong>No deduplication</strong> - data embedded separately in each page</li>
+</ul>
+<pre><code>page = JSPlotPage(data_dict, charts, dataformat = :json_embedded)</code></pre>
+
+<h4>5. :json_external</h4>
+<p><strong>Best for:</strong> API consumption, web applications, data interchange</p>
+<ul>
+    <li><strong>Separate JSON files</strong> - one file per dataset in data/ subdirectory</li>
+    <li><strong>Multiple files</strong> - HTML + JSON files</li>
+    <li><strong>Enables deduplication</strong> - shared datasets only stored once</li>
+    <li><strong>API-ready format</strong> - can be consumed by other web applications</li>
+    <li><strong>Type preservation</strong> - maintains data types better than CSV</li>
+    <li><strong>Web-friendly</strong> - easy to load from external servers</li>
+</ul>
+<pre><code>page = JSPlotPage(data_dict, charts, dataformat = :json_external)</code></pre>
+
+<h3>Data Deduplication</h3>
+<p><strong>Key Efficiency Feature:</strong> JSPlots.jl automatically detects when the same dataset
+is used multiple times and only includes it once.</p>
+<p>Note that thisData deduplication only works with external formats
+Data deduplication only works with external formats - (<code>:parquet</code>, <code>:csv_external</code>, <code>:json_external</code>).
+With embedded formats (<code>:csv_embedded</code>, <code>:json_embedded</code>),
+data is embedded separately in each HTML page, so there's no deduplication benefit.</p>
+
+<h4>How It Works</h4>
+<p>When you create a multi-page report with <code>Pages</code>, datasets are identified by their
+<code>Symbol</code> key in the data dictionary. <strong>The <code>Pages</code>-level dataformat setting
+overrides any individual <code>JSPlotPage</code> dataformat settings.</strong></p>
+
+<pre><code># Both pages use :sales_data
+page1 = JSPlotPage(
+    Dict(:sales_data => df),
+    [chart1, chart2],
+    dataformat = :csv_embedded  # This is ignored!
+)
+
+page2 = JSPlotPage(
+    Dict(:sales_data => df),  # Same Symbol = reuses data!
+    [chart3, chart4],
+    dataformat = :json_embedded  # This is also ignored!
+)
+
+# Pages-level dataformat is what actually gets used
+report = Pages(
+    [intro],
+    [page1, page2],
+    dataformat = :parquet  # ← This overrides page-level settings!
+)
+# Result: One parquet file in data/sales_data.parquet shared by both pages</code></pre>
+
+<h4>Benefits of Deduplication (External Formats Only)</h4>
+<ul>
+    <li><strong>Reduced File Size:</strong> Large datasets only stored once, not duplicated per page</li>
+    <li><strong>Faster Loading:</strong> Less data to download and parse</li>
+    <li><strong>Memory Efficiency:</strong> Browser loads dataset into memory once</li>
+    <li><strong>Consistency:</strong> All pages use the exact same data</li>
+</ul>
+
+<h3>Format Comparison Table</h3>
+<table border="1" cellpadding="8" style="border-collapse: collapse; margin: 20px 0; width: 100%;">
+    <tr style="background-color: #f0f0f0;">
+        <th>Feature</th>
+        <th>:parquet</th>
+        <th>:csv_embedded</th>
+        <th>:csv_external</th>
+        <th>:json_embedded</th>
+        <th>:json_external</th>
+    </tr>
+    <tr>
+        <td><strong>File Size</strong></td>
+        <td style="color: green;">Smallest (5-10x smaller)</td>
+        <td style="color: orange;">Medium</td>
+        <td style="color: orange;">Medium</td>
+        <td style="color: red;">Large (~25% bigger than CSV)</td>
+        <td style="color: red;">Large (~25% bigger than CSV)</td>
+    </tr>
+    <tr>
+        <td><strong>Loading Speed</strong></td>
+        <td style="color: green;">Fast</td>
+        <td style="color: orange;">Moderate</td>
+        <td style="color: orange;">Moderate</td>
+        <td style="color: green;">Fast (native JSON.parse)</td>
+        <td style="color: green;">Fast (native JSON.parse)</td>
+    </tr>
+    <tr>
+        <td><strong>Compatibility</strong></td>
+        <td style="color: orange;">Modern browsers</td>
+        <td style="color: green;">Universal</td>
+        <td style="color: green;">Universal</td>
+        <td style="color: green;">Universal</td>
+        <td style="color: green;">Universal</td>
+    </tr>
+    <tr>
+        <td><strong>Deduplication</strong></td>
+        <td style="color: green;">Yes (in Pages)</td>
+        <td style="color: red;">No (embedded)</td>
+        <td style="color: green;">Yes (in Pages)</td>
+        <td style="color: red;">No (embedded)</td>
+        <td style="color: green;">Yes (in Pages)</td>
+    </tr>
+    <tr>
+        <td><strong>Type Preservation</strong></td>
+        <td style="color: green;">Excellent</td>
+        <td style="color: orange;">Limited (strings)</td>
+        <td style="color: orange;">Limited (strings)</td>
+        <td style="color: green;">Good</td>
+        <td style="color: green;">Good</td>
+    </tr>
+    <tr>
+        <td><strong>Human Readable</strong></td>
+        <td>No (binary)</td>
+        <td>Yes (in HTML)</td>
+        <td>Yes (separate files)</td>
+        <td>Yes (in HTML)</td>
+        <td>Yes (separate files)</td>
+    </tr>
+    <tr>
+        <td><strong>File Structure</strong></td>
+        <td>Single HTML + data/</td>
+        <td>Single HTML</td>
+        <td>HTML + data/ folder</td>
+        <td>Single HTML</td>
+        <td>HTML + data/ folder</td>
+    </tr>
+    <tr>
+        <td><strong>Best For</strong></td>
+        <td>Production, large data</td>
+        <td>Small data, debugging</td>
+        <td>Spreadsheet analysis</td>
+        <td>Web developers</td>
+        <td>API/web apps</td>
+    </tr>
+</table>
+
+<h3>Setting Format Globally vs Per-Page</h3>
+<pre><code># Set format for entire report (RECOMMENDED)
+report = Pages(
+    [intro],
+    [page1, page2],
+    dataformat = :parquet  # Overrides any page-level settings
+)
+
+# Individual pages (only for single-page JSPlotPage, not Pages)
+page1 = JSPlotPage(data_dict, charts, dataformat = :parquet)
+create_html(page1, "standalone_page.html")</code></pre>
+
+<p><strong>Note:</strong> When using <code>Pages</code>, the Pages-level <code>dataformat</code>
+overrides any <code>dataformat</code> settings in individual <code>JSPlotPage</code> objects.</p>
+
+<h3>Launcher Scripts for External Formats</h3>
+<p>When using external formats (<code>:parquet</code>, <code>:csv_external</code>, <code>:json_external</code>),
+JSPlots.jl automatically generates launcher scripts to help with browser security restrictions:</p>
+
+<ul>
+    <li><strong>open.sh</strong> - Shell script for Linux/Mac that launches a local web server</li>
+    <li><strong>open.bat</strong> - Batch script for Windows that opens with appropriate permissions</li>
+    <li><strong>README.md</strong> - Instructions for opening the HTML files</li>
+</ul>
+
+<p><strong>Why launcher scripts?</strong> Modern browsers block loading external files (data/, pictures/, etc.)
+from <code>file://</code> URLs for security reasons. The launcher scripts either:</p>
+<ul>
+    <li>Start a local web server (on Linux/Mac via Python's http.server)</li>
+    <li>Launch the browser with flags to allow local file access (on Windows)</li>
+</ul>
+
+<p>For embedded formats (<code>:csv_embedded</code>, <code>:json_embedded</code>), you can open
+the HTML file directly in a browser since all data is embedded - no launcher scripts needed!</p>
+
+    </div>
+
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+</body>
+</html>
