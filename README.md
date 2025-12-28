@@ -23,8 +23,8 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[PivotTable](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html)** - Interactive drag-and-drop pivot tables (via PivotTable.js)
 - **[Table](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html)** - Interactive data tables with CSV download capability
 - **[TextBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html)** - Rich text and HTML content for annotations
-- **[CodeBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html)** - Display code in multiple languages (Julia, Python, R, C++, C, Java, JavaScript, Rust, SQL, PostgreSQL) with syntax highlighting; only Julia code can be executed
-- **[LinkList](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples/auto_grouped.html)** - Styled lists of hyperlinks for multi-page navigation with optional subheadings
+- **[CodeBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html)** - Display code in a nice format. There is proper syntax highlighting for several languages (Julia, Python, R, C++, C, Java, JavaScript, Rust, SQL, PostgreSQL) without others in black.
+- **[LinkList](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html)** - Styled lists of hyperlinks for multi-page navigation with optional subheadings
 
 #### Multimedia
 - **[Picture](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html)** - Display static images or plots from VegaLite.jl, Plots.jl or Makie.jl

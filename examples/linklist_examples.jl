@@ -111,60 +111,75 @@ grouped_explanation = TextBlock("""
 <p>The OrderedDict preserves insertion order, ensuring sections appear in the sequence you define.</p>
 """)
 
+od = OrderedCollections.OrderedDict{String, Vector{Tuple{String,String,String}}}()
+od["OverView"] = [("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code"),
+    ("Documentation", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html", "General tutorial and overview"),
+    ("Pages", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html", "Multi-page reports with navigation")]
+od["Tabular Data and Text"] = [("PivotTable", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
+    ("Table", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
+    ("TextBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
+    ("CodeBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks"),
+    ("LinkList", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html", "Navigation and link lists")]
+od["Multimedia"] = [
+    ("Picture", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display images, GIFs, and filtered charts from VegaLite, Plots.jl, or Makie"),
+    ("Slides", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations")]
+od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
+    ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
+    ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
+od["Distributional Plots"] = [
+    ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
+    ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+od["3D Plots"] = [
+    ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
+    ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
+    ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
+od["Situational Charts"] = [
+    ("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations."),
+    ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
+    ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
+
 grouped_linklist = LinkList(
-    OrderedCollections.OrderedDict(
-        "Tabular Data and Text" => [
-            ("PivotTable", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
-            ("Table", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
-            ("TextBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
-            ("CodeBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks")
-        ],
-        "2D Plotting" => [
-            ("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
-            ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
-            ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
-            ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")
-        ],
-        "Distributional Plots" => [
-            ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
-            ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
-            ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")
-        ],
-        "Three-Dimensional Plots" => [
-            ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
-            ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
-            ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")
-        ],
-        "External Libraries" => [
-            ("Picture", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display plots from VegaLite, Plots.jl, or Makie"),
-            ("Slides", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations")
-        ]
-    ),
+    od,
     chart_title = :grouped_example,
     notes = "Links are organized by category. This structure is ideal for documentation or multi-section reports."
 )
 
 grouped_code = CodeBlock("""
-using OrderedCollections
+od = OrderedCollections.OrderedDict{String, Vector{Tuple{String,String,String}}}()
+od["OverView"] = [("GitHub Repository", "https://github.com/s-baumann/JSPlots.jl", "Source code"),
+    ("Documentation", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html", "General tutorial and overview"),
+    ("Pages", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html", "Multi-page reports with navigation")]
+od["Tabular Data and Text"] = [("PivotTable", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html", "Interactive drag-and-drop pivot tables"),
+    ("Table", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html", "Sortable data tables with CSV download"),
+    ("TextBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html", "Rich text and HTML content"),
+    ("CodeBlock", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html", "Syntax-highlighted code blocks"),
+    ("LinkList", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html", "Navigation and link lists")]
+od["Multimedia"] = [
+    ("Picture", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html", "Display images, GIFs, and filtered charts from VegaLite, Plots.jl, or Makie"),
+    ("Slides", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html", "Slideshows and animations")]
+od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
+    ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
+    ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
+od["Distributional Plots"] = [
+    ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
+    ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+od["3D Plots"] = [
+    ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
+    ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
+    ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
+od["Situational Charts"] = [
+    ("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations."),
+    ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
+    ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
 
-# Create a grouped LinkList with subheadings
-grouped_links = LinkList(
-    OrderedCollections.OrderedDict(
-        "Tabular Data and Text" => [
-            ("PivotTable", "pivottable_examples.html", "Interactive pivot tables"),
-            ("Table", "table_examples.html", "Sortable data tables")
-        ],
-        "2D Plotting" => [
-            ("LineChart", "linechart_examples.html", "Time series visualization"),
-            ("AreaChart", "areachart_examples.html", "Stacked area charts")
-        ],
-        "3D Plotting" => [
-            ("Scatter3D", "scatter3d_examples.html", "3D scatter plots"),
-            ("Surface3D", "surface3d_examples.html", "3D surface plots")
-        ]
-    ),
+grouped_linklist = LinkList(
+    od,
     chart_title = :grouped_example,
-    notes = "Links organized by category"
+    notes = "Links are organized by category. This structure is ideal for documentation or multi-section reports."
 )
 """, Val(:code); language="julia")
 

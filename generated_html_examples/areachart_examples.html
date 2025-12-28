@@ -5514,6 +5514,475 @@ $(function(){
         console.error('Error loading data for chart normalized_mode:', error);
     });
 })();
+(function() {
+    // Configuration
+    const FILTER_COLS = [];
+    const X_COLS = ['Quarter', 'Month', 'Week'];
+    const Y_COLS = ['Revenue', 'Units'];
+    const COLOR_COLS = ['Region'];
+    const COLOR_MAPS = {'Region': {'East': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}};
+    const GROUP_ORDER = {'Region': ['North', 'South', 'East']};
+    const DEFAULT_X_COL = 'Quarter';
+    const DEFAULT_Y_COL = 'Revenue';
+    const DEFAULT_COLOR_COL = 'Region';
+    const FILL_OPACITY = 0.6;
+
+    let allData = [];
+
+    // Detect if x values are discrete or continuous
+    function isDiscrete(values) {
+        // Consider discrete if we have strings, or if numeric with small number of unique values
+        const sample = values[0];
+        if (typeof sample === 'string') return true;
+
+        const uniqueVals = [...new Set(values)];
+        // If less than 20 unique values and they look like categories, treat as discrete
+        return uniqueVals.length < 20 && uniqueVals.every(v => Number.isInteger(v) || typeof v === 'string');
+    }
+
+    // Make it global so inline onchange can see it
+    window.updatePlot_dynamic_x_axis = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_dynamic_x_axis');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_dynamic_x_axis');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get current group column
+        const groupColSelect = document.getElementById('group_col_select_dynamic_x_axis');
+        const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current stack mode
+        const stackModeSelect = document.getElementById('stack_mode_select_dynamic_x_axis');
+        const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_dynamic_x_axis');
+        const facet2Select = document.getElementById('facet2_select_dynamic_x_axis');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map and group order for current selection
+        const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
+        const GROUP_ORDER_ARRAY = GROUP_ORDER[GROUP_COL] || [];
+
+        // Filter data (support multiple selections per filter)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                const selectedValues = filters[col];
+                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - create area chart
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                if (!groupedData[groupVal]) {
+                    groupedData[groupVal] = [];
+                }
+                groupedData[groupVal].push(row);
+            });
+
+            // Get groups in order of appearance
+            const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                Object.keys(groupedData);
+
+            const traces = [];
+            const discrete = isDiscrete(filteredData.map(row => row[X_COL]));
+
+            for (let groupKey of orderedGroups) {
+                const groupData = groupedData[groupKey];
+                groupData.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                    return aVal - bVal;
+                });
+
+                const xValues = groupData.map(row => row[X_COL]);
+                const yValues = groupData.map(row => row[Y_COL]);
+
+                const color = COLOR_MAP[groupKey] || '#636efa';
+                const trace = {
+                    x: xValues,
+                    y: yValues,
+                    name: groupKey,
+                    type: discrete ? 'bar' : 'scatter'
+                };
+
+                if (discrete) {
+                    // Bar chart style
+                    trace.marker = {color: color};
+                } else {
+                    // Area chart style
+                    trace.mode = 'lines';
+                    trace.line = {color: color, width: 0};
+                }
+
+                // Apply stacking mode
+                if (STACK_MODE === 'unstack') {
+                    if (!discrete) {
+                        trace.fill = 'tozeroy';
+                        // Convert hex to rgba
+                        if (color.startsWith('#')) {
+                            const r = parseInt(color.substr(1,2), 16);
+                            const g = parseInt(color.substr(3,2), 16);
+                            const b = parseInt(color.substr(5,2), 16);
+                            trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                        }
+                    } else {
+                        trace.opacity = FILL_OPACITY;
+                    }
+                } else if (STACK_MODE === 'stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                    }
+                } else if (STACK_MODE === 'normalised_stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                        trace.groupnorm = 'percent';
+                    }
+                }
+
+                traces.push(trace);
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                },
+                hovermode: 'closest',
+                showlegend: true,
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            Plotly.newPlot('dynamic_x_axis', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by group column within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                    if (!groupedData[groupVal]) {
+                        groupedData[groupVal] = [];
+                    }
+                    groupedData[groupVal].push(row);
+                });
+
+                const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                    GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                    Object.keys(groupedData);
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                for (let groupKey of orderedGroups) {
+                    const groupData = groupedData[groupKey];
+                    groupData.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+                        if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                        return aVal - bVal;
+                    });
+
+                    const xValues = groupData.map(row => row[X_COL]);
+                    const yValues = groupData.map(row => row[Y_COL]);
+
+                    const color = COLOR_MAP[groupKey] || '#636efa';
+                    const legendGroup = groupKey;
+
+                    const trace = {
+                        x: xValues,
+                        y: yValues,
+                        name: groupKey,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        type: discrete ? 'bar' : 'scatter'
+                    };
+
+                    if (discrete) {
+                        trace.marker = {color: color};
+                    } else {
+                        trace.mode = 'lines';
+                        trace.line = {color: color, width: 0};
+                    }
+
+                    // Apply stacking mode
+                    if (STACK_MODE === 'unstack') {
+                        if (!discrete) {
+                            trace.fill = 'tozeroy';
+                            if (color.startsWith('#')) {
+                                const r = parseInt(color.substr(1,2), 16);
+                                const g = parseInt(color.substr(3,2), 16);
+                                const b = parseInt(color.substr(5,2), 16);
+                                trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                            }
+                        } else {
+                            trace.opacity = FILL_OPACITY;
+                        }
+                    } else if (STACK_MODE === 'stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                        }
+                    } else if (STACK_MODE === 'normalised_stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                            trace.groupnorm = 'percent';
+                        }
+                    }
+
+                    traces.push(trace);
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('dynamic_x_axis', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by group column within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                        if (!groupedData[groupVal]) {
+                            groupedData[groupVal] = [];
+                        }
+                        groupedData[groupVal].push(row);
+                    });
+
+                    const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                        GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                        Object.keys(groupedData);
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                    for (let groupKey of orderedGroups) {
+                        const groupData = groupedData[groupKey];
+                        groupData.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                            return aVal - bVal;
+                        });
+
+                        const xValues = groupData.map(row => row[X_COL]);
+                        const yValues = groupData.map(row => row[Y_COL]);
+
+                        const color = COLOR_MAP[groupKey] || '#636efa';
+                        const legendGroup = groupKey;
+
+                        const trace = {
+                            x: xValues,
+                            y: yValues,
+                            name: groupKey,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            type: discrete ? 'bar' : 'scatter'
+                        };
+
+                        if (discrete) {
+                            trace.marker = {color: color};
+                        } else {
+                            trace.mode = 'lines';
+                            trace.line = {color: color, width: 0};
+                        }
+
+                        // Apply stacking mode
+                        if (STACK_MODE === 'unstack') {
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                                }
+                            } else {
+                                trace.opacity = FILL_OPACITY;
+                            }
+                        } else if (STACK_MODE === 'stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                            }
+                        } else if (STACK_MODE === 'normalised_stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                                trace.groupnorm = 'percent';
+                            }
+                        }
+
+                        traces.push(trace);
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('dynamic_x_axis', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('sales_data_x').then(function(data) {
+        allData = data;
+        window.updatePlot_dynamic_x_axis();
+    }).catch(function(error) {
+        console.error('Error loading data for chart dynamic_x_axis:', error);
+    });
+})();
 
 
 });
@@ -7545,6 +8014,117 @@ Time,Value,Product
 19.5,60.679333416071536,Product C
 20.0,56.41554881364987,Product C
 
+</script><script type="text/plain" id="sales_data_x" data-format="csv_embedded" data-src="">
+Quarter,Month,Week,Revenue,Units,Region,Product
+1,1,1,53780.22065916621,503.5001771235509,North,Widget
+2,4,14,62545.75113168249,553.9065693242377,North,Widget
+3,7,27,62920.83278533169,568.1924963065392,North,Widget
+4,10,40,42806.74685202544,556.8799170944376,North,Widget
+5,13,53,68296.49415379147,654.2984565701167,North,Widget
+6,16,66,65600.4893297276,416.5942030616737,North,Widget
+7,19,79,47733.46119535667,543.6861449930152,North,Widget
+8,22,92,42584.92679743078,698.1797042532337,North,Widget
+9,25,105,61228.94686214841,729.40746429313,North,Widget
+10,28,118,71810.6464930205,744.8218361086663,North,Widget
+11,31,131,93035.86963717421,675.1795596439335,North,Widget
+12,34,144,72196.32956760396,958.5110604842549,North,Widget
+1,1,1,42867.67456893784,602.7157091802203,North,Gadget
+2,4,14,68648.04078773322,538.8971241320644,North,Gadget
+3,7,27,59869.352724648874,578.6394233449853,North,Gadget
+4,10,40,61142.43413645271,767.2256694934933,North,Gadget
+5,13,53,67990.09388396726,728.3231308575248,North,Gadget
+6,16,66,57687.27801924371,701.3692017676273,North,Gadget
+7,19,79,75721.64462756323,636.297861397587,North,Gadget
+8,22,92,74862.33498990082,610.7370859810131,North,Gadget
+9,25,105,64658.99596031314,609.4556214125132,North,Gadget
+10,28,118,65880.04091555942,861.4279399670902,North,Gadget
+11,31,131,59426.70910588714,747.3609582187042,North,Gadget
+12,34,144,55907.125510401005,766.3988608862156,North,Gadget
+1,1,1,41498.58582502938,573.1622290053333,North,Gizmo
+2,4,14,52936.98836130123,561.6785823543105,North,Gizmo
+3,7,27,65527.45898428102,450.3466202707059,North,Gizmo
+4,10,40,38975.52943046135,556.257870551409,North,Gizmo
+5,13,53,69537.21548463317,533.1835517225647,North,Gizmo
+6,16,66,55777.392284244954,709.8826737813872,North,Gizmo
+7,19,79,69843.54031042832,777.5672431977864,North,Gizmo
+8,22,92,77707.84744227107,476.0655526050599,North,Gizmo
+9,25,105,73970.09839814856,711.4299381099122,North,Gizmo
+10,28,118,66102.72471311304,726.1571745634042,North,Gizmo
+11,31,131,67782.63296398426,545.7711281951466,North,Gizmo
+12,34,144,84360.97550240152,664.8482585118531,North,Gizmo
+1,1,1,42055.70364499961,381.41916544193657,South,Widget
+2,4,14,44733.994569359566,461.4548992875408,South,Widget
+3,7,27,73701.17124805402,654.2729246648138,South,Widget
+4,10,40,41170.86858522492,583.4829292801171,South,Widget
+5,13,53,47581.22037371849,688.67681022991,South,Widget
+6,16,66,53423.00206799022,607.8854161240497,South,Widget
+7,19,79,62737.81172689135,684.575813199169,South,Widget
+8,22,92,41842.23381593566,723.6084205475071,South,Widget
+9,25,105,80122.154695906,915.1745636005721,South,Widget
+10,28,118,81616.08732111008,637.9696168268025,South,Widget
+11,31,131,69810.65417785922,862.7321138777927,South,Widget
+12,34,144,54220.05026827793,660.9852990940024,South,Widget
+1,1,1,41149.25169660361,452.50756957104295,South,Gadget
+2,4,14,58402.95257148908,557.667980031782,South,Gadget
+3,7,27,57704.20443575039,480.7886545879073,South,Gadget
+4,10,40,65831.04452725156,667.1058024352556,South,Gadget
+5,13,53,45743.32427240752,643.1017033240946,South,Gadget
+6,16,66,58082.20190782519,596.538725110762,South,Gadget
+7,19,79,71993.25791614508,663.9104259127614,South,Gadget
+8,22,92,52478.43176164954,665.0721408023855,South,Gadget
+9,25,105,44036.87780367778,763.3717559700112,South,Gadget
+10,28,118,70161.49792685508,639.5914641119148,South,Gadget
+11,31,131,75577.48296045214,708.3763455712543,South,Gadget
+12,34,144,73056.06450777702,713.8433069838782,South,Gadget
+1,1,1,46670.47286264012,530.3324356310729,South,Gizmo
+2,4,14,53271.89689715052,256.9665008291182,South,Gizmo
+3,7,27,74671.93715055558,552.790545620702,South,Gizmo
+4,10,40,58896.6202025588,628.6844826831842,South,Gizmo
+5,13,53,48539.17451716538,581.9726486182608,South,Gizmo
+6,16,66,52243.22058225581,583.6650161413388,South,Gizmo
+7,19,79,49015.4060344366,581.1205625800711,South,Gizmo
+8,22,92,61272.58498044833,734.2165103983659,South,Gizmo
+9,25,105,66019.2697382322,844.440290964437,South,Gizmo
+10,28,118,69757.47395633467,853.4053740831853,South,Gizmo
+11,31,131,74309.59078017238,733.1193274424667,South,Gizmo
+12,34,144,70064.21097810192,762.2893968213322,South,Gizmo
+1,1,1,25389.549673506895,687.4217914360426,East,Widget
+2,4,14,65542.52202334891,590.105946876365,East,Widget
+3,7,27,46002.444134378384,719.0335569846065,East,Widget
+4,10,40,49907.20837425432,707.2931515418188,East,Widget
+5,13,53,57317.74536131916,605.3501433423655,East,Widget
+6,16,66,66448.03332767492,616.0614020199347,East,Widget
+7,19,79,71326.68663944837,605.9220378344253,East,Widget
+8,22,92,70792.6623753673,710.0659974121629,East,Widget
+9,25,105,74190.85634930982,716.8718014114896,East,Widget
+10,28,118,71191.99415242046,693.4748056111018,East,Widget
+11,31,131,71807.6878999976,685.0505349048758,East,Widget
+12,34,144,80384.74180987944,823.3747886619116,East,Widget
+1,1,1,38934.52066337524,443.8723092775084,East,Gadget
+2,4,14,50302.78556370103,692.7276086892812,East,Gadget
+3,7,27,58165.645525937805,656.8607441536528,East,Gadget
+4,10,40,56766.85990236078,349.3687579013931,East,Gadget
+5,13,53,52875.750130489236,390.5190229398829,East,Gadget
+6,16,66,59569.124664445924,602.0036571180658,East,Gadget
+7,19,79,77618.79041057471,495.7925824230305,East,Gadget
+8,22,92,56997.866220592594,666.969675503794,East,Gadget
+9,25,105,53511.889464694075,693.9775807926172,East,Gadget
+10,28,118,67456.62267655996,558.1792597586484,East,Gadget
+11,31,131,67165.69788850701,625.544427994462,East,Gadget
+12,34,144,56683.207621958485,882.4601750056598,East,Gadget
+1,1,1,69909.42819525731,495.24826140031894,East,Gizmo
+2,4,14,60652.67332415289,480.27688467507375,East,Gizmo
+3,7,27,44472.60430540252,521.100211015936,East,Gizmo
+4,10,40,73137.63830733486,616.5267061976378,East,Gizmo
+5,13,53,65412.28339885027,683.753708758151,East,Gizmo
+6,16,66,63855.131746296836,616.7044237765003,East,Gizmo
+7,19,79,73142.45827223817,877.1482925143871,East,Gizmo
+8,22,92,53923.90974783261,818.2333432225778,East,Gizmo
+9,25,105,56878.38870776203,606.7995204045171,East,Gizmo
+10,28,118,66221.83404640997,684.6929801309622,East,Gizmo
+11,31,131,77881.88276135846,696.0783299692671,East,Gizmo
+12,34,144,67251.8420301661,655.805643899863,East,Gizmo
+
 </script><script type="text/plain" id="grid_sales" data-format="csv_embedded" data-src="">
 Month,Sales,Product,Region,Segment
 1,36046.976772548085,Product X,East,Segment 1
@@ -7721,7 +8301,7 @@ Quarter,Revenue,Profit,Growth,Industry,CompanySize
     <li><strong>Stack modes:</strong> Unstack (overlapping), stack (cumulative), and normalized stack (percentage)</li>
     <li><strong>Grouping:</strong> Multiple series with automatic color assignment and legend</li>
     <li><strong>Interactive filters:</strong> Dropdown menus to filter data dynamically</li>
-    <li><strong>Dynamic controls:</strong> Change grouping, stacking, and faceting on the fly</li>
+    <li><strong>Dynamic controls:</strong> Change X-axis, grouping, stacking, and faceting on the fly</li>
     <li><strong>Faceting:</strong> Facet wrap (1 variable) and facet grid (2 variables)</li>
 </ul>
 
@@ -8076,6 +8656,53 @@ Quarter,Revenue,Profit,Growth,Industry,CompanySize
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Dynamic X-Axis Selection</h2>
+<p>This example demonstrates how to dynamically change the X-axis dimension from within the HTML page.</p>
+<p>Try switching between Quarter, Month, and Week views using the dropdown control!</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Example 10: Sales with Dynamic X-Axis Selection</h2>
+<p>Use the X-Axis dropdown to switch between different time granularities (Quarter/Month/Week). Also switch between Revenue and Units on Y-axis.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px;">
+            <label for="x_col_select_dynamic_x_axis">X dimension: </label>
+            <select id="x_col_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
+                <option value="Quarter" selected>Quarter</option>
+                <option value="Month">Month</option>
+                <option value="Week">Week</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="y_col_select_dynamic_x_axis">Y dimension: </label>
+            <select id="y_col_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
+                <option value="Revenue" selected>Revenue</option>
+                <option value="Units">Units</option>
+            </select>
+        </div>
+                <div style="margin: 10px;">
+            <label for="stack_mode_select_dynamic_x_axis">Stack mode: </label>
+            <select id="stack_mode_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
+                <option value="unstack">unstack</option>
+                <option value="stack" selected>stack</option>
+                <option value="normalised_stack">normalised_stack</option>
+            </select>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="dynamic_x_axis"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data_x</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Automatic discrete/continuous detection:</strong> Continuous x values (dates, numeric) create smooth areas; discrete x values (categories) create stacked bars</li>
@@ -8086,6 +8713,7 @@ Quarter,Revenue,Profit,Growth,Industry,CompanySize
             <li><em>Normalized stack:</em> Percentage areas - best for showing proportions</li>
         </ul>
     </li>
+    <li><strong>Dynamic X-axis selection:</strong> Switch between different X-axis dimensions (e.g., Quarter/Month/Week) from dropdown</li>
     <li><strong>Dynamic grouping:</strong> Choose which variable to group/color by from dropdown</li>
     <li><strong>Interactive filters:</strong> Filter data dynamically with dropdown menus</li>
     <li><strong>Faceting:</strong> Create small multiples with 1 or 2 faceting variables</li>

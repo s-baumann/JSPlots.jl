@@ -7,8 +7,9 @@ println("Creating CodeBlock examples...")
 header = TextBlock("""
 <a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/codeblock_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
 <h1>CodeBlock Examples</h1>
-<p>This page demonstrates how to use CodeBlock elements in JSPlots to display Julia code with syntax highlighting and execute it to generate visualizations.</p>
+<p>This page demonstrates how to use CodeBlock elements in JSPlots to display code with syntax highlighting and execute Julia code to generate visualizations.</p>
 <p>CodeBlocks are perfect for creating literate programming documents where you show both the code and its output.</p>
+<p><strong>Supported languages:</strong> Julia (executable), Python, R, C++, C, Java, JavaScript, SQL, PostgreSQL (PL/pgSQL), Rust, and more (display only).</p>
 """)
 
 # Example 1: CodeBlock from a function
@@ -150,7 +151,423 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
     title = "January Weather Patterns"
 )
 
-# Example 5: Best Practices summary
+# =============================================================================
+# Multi-Language Examples
+# =============================================================================
+
+multilang_header = TextBlock("""
+<hr style="border: 2px solid #0066cc; margin: 40px 0;">
+<h1 style="color: #0066cc;">Multi-Language Code Display</h1>
+<p>CodeBlock supports displaying code in multiple programming languages with proper syntax highlighting.</p>
+<p>Note: Only Julia code can be executed. Code in other languages is for display purposes only.</p>
+""")
+
+# Python Example
+python_section = TextBlock("""
+<h2>5. Python Code (Display Only)</h2>
+<p>Python code is displayed with proper syntax highlighting but cannot be executed.</p>
+""")
+
+python_code = """
+def merge_sort(arr):
+    if len(arr) <= 1:
+        return arr
+
+    mid = len(arr) // 2
+    left = merge_sort(arr[:mid])
+    right = merge_sort(arr[mid:])
+
+    return merge(left, right)
+
+def merge(left, right):
+    result = []
+    i = j = 0
+
+    while i < len(left) and j < len(right):
+        if left[i] < right[j]:
+            result.append(left[i])
+            i += 1
+        else:
+            result.append(right[j])
+            j += 1
+
+    result.extend(left[i:])
+    result.extend(right[j:])
+    return result
+
+# Example usage
+numbers = [64, 34, 25, 12, 22, 11, 90]
+sorted_numbers = merge_sort(numbers)
+print(f"Sorted array: {sorted_numbers}")
+"""
+
+python_cb = CodeBlock(python_code, Val(:code), language="python",
+    notes="Python merge sort implementation")
+
+# R Example
+r_section = TextBlock("""
+<h2>6. R Code (Display Only)</h2>
+<p>R statistical code with proper syntax highlighting.</p>
+""")
+
+r_code = """
+# Multiple linear regression in R
+# Load the mtcars dataset
+data(mtcars)
+
+# Fit a linear model
+model <- lm(mpg ~ cyl + hp + wt, data = mtcars)
+
+# Display the summary
+summary(model)
+
+# Create a plot
+plot(model\$fitted.values, model\$residuals,
+     main = "Residual Plot",
+     xlab = "Fitted Values",
+     ylab = "Residuals")
+abline(h = 0, col = "red", lty = 2)
+
+# Calculate predictions
+new_data <- data.frame(cyl = c(4, 6, 8), hp = c(110, 150, 200), wt = c(2.5, 3.0, 3.5))
+predictions <- predict(model, newdata = new_data)
+print(predictions)
+"""
+
+r_cb = CodeBlock(r_code, Val(:code), language="r",
+    notes="R linear regression analysis on mtcars dataset")
+
+# SQL Example
+sql_section = TextBlock("""
+<h2>7. SQL Code (Display Only)</h2>
+<p>SQL queries with proper syntax highlighting.</p>
+""")
+
+sql_code = """
+-- Complex customer analytics query
+WITH customer_metrics AS (
+    SELECT
+        c.customer_id,
+        c.name,
+        COUNT(DISTINCT o.order_id) as total_orders,
+        SUM(o.total_amount) as lifetime_value,
+        AVG(o.total_amount) as avg_order_value,
+        MAX(o.order_date) as last_order_date
+    FROM customers c
+    LEFT JOIN orders o ON c.customer_id = o.customer_id
+    WHERE o.order_date >= DATE_SUB(CURRENT_DATE, INTERVAL 1 YEAR)
+    GROUP BY c.customer_id, c.name
+),
+customer_segments AS (
+    SELECT
+        *,
+        CASE
+            WHEN lifetime_value > 10000 THEN 'VIP'
+            WHEN lifetime_value > 5000 THEN 'Premium'
+            WHEN lifetime_value > 1000 THEN 'Standard'
+            ELSE 'Basic'
+        END as segment
+    FROM customer_metrics
+)
+SELECT
+    segment,
+    COUNT(*) as customer_count,
+    AVG(total_orders) as avg_orders_per_customer,
+    SUM(lifetime_value) as segment_revenue
+FROM customer_segments
+GROUP BY segment
+ORDER BY segment_revenue DESC;
+"""
+
+sql_cb = CodeBlock(sql_code, Val(:code), language="sql",
+    notes="SQL customer segmentation and analytics query")
+
+# C++ Example
+cpp_section = TextBlock("""
+<h2>8. C++ Code (Display Only)</h2>
+<p>C++ code with proper syntax highlighting.</p>
+""")
+
+cpp_code = """
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <numeric>
+
+// Template class for a simple generic stack
+template<typename T>
+class Stack {
+private:
+    std::vector<T> elements;
+
+public:
+    void push(const T& element) {
+        elements.push_back(element);
+    }
+
+    T pop() {
+        if (elements.empty()) {
+            throw std::out_of_range("Stack is empty");
+        }
+        T top = elements.back();
+        elements.pop_back();
+        return top;
+    }
+
+    bool empty() const {
+        return elements.empty();
+    }
+
+    size_t size() const {
+        return elements.size();
+    }
+};
+
+int main() {
+    // Example usage
+    Stack<int> numbers;
+
+    // Push numbers
+    for (int i = 1; i <= 5; ++i) {
+        numbers.push(i * 10);
+    }
+
+    // Pop and print
+    while (!numbers.empty()) {
+        std::cout << numbers.pop() << " ";
+    }
+    std::cout << std::endl;
+
+    return 0;
+}
+"""
+
+cpp_cb = CodeBlock(cpp_code, Val(:code), language="c++",
+    notes="C++ template stack implementation")
+
+# JavaScript Example
+javascript_section = TextBlock("""
+<h2>9. JavaScript Code (Display Only)</h2>
+<p>Modern JavaScript (ES6+) code with proper syntax highlighting.</p>
+""")
+
+javascript_code = """
+// Asynchronous data fetching and processing
+class DataProcessor {
+    constructor(apiUrl) {
+        this.apiUrl = apiUrl;
+        this.cache = new Map();
+    }
+
+    // Fetch data with caching
+    async fetchData(endpoint) {
+        const cacheKey = `\${this.apiUrl}/\${endpoint}`;
+
+        if (this.cache.has(cacheKey)) {
+            console.log('Returning cached data');
+            return this.cache.get(cacheKey);
+        }
+
+        try {
+            const response = await fetch(cacheKey);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: \${response.status}`);
+            }
+            const data = await response.json();
+            this.cache.set(cacheKey, data);
+            return data;
+        } catch (error) {
+            console.error('Failed to fetch data:', error);
+            throw error;
+        }
+    }
+
+    // Process data with array methods
+    processUsers(users) {
+        return users
+            .filter(user => user.active)
+            .map(user => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                joinDate: new Date(user.created_at)
+            }))
+            .sort((a, b) => b.joinDate - a.joinDate)
+            .slice(0, 10);
+    }
+}
+
+// Usage example
+const processor = new DataProcessor('https://api.example.com');
+
+async function displayTopUsers() {
+    try {
+        const users = await processor.fetchData('users');
+        const topUsers = processor.processUsers(users);
+
+        topUsers.forEach(user => {
+            console.log(`\${user.name} - \${user.email}`);
+        });
+    } catch (error) {
+        console.error('Error displaying users:', error);
+    }
+}
+
+displayTopUsers();
+"""
+
+javascript_cb = CodeBlock(javascript_code, Val(:code), language="javascript",
+    notes="Modern JavaScript with async/await and array methods")
+
+# Rust Example
+rust_section = TextBlock("""
+<h2>10. Rust Code (Display Only)</h2>
+<p>Rust provides memory safety without garbage collection through its ownership system.</p>
+""")
+
+rust_code = """
+#[derive(Debug)]
+enum ParseError {
+    InvalidFormat,
+    OutOfRange,
+}
+
+struct DataPoint {
+    timestamp: i64,
+    value: f64,
+}
+
+impl DataPoint {
+    fn new(timestamp: i64, value: f64) -> Result<Self, ParseError> {
+        if value < 0.0 || value > 100.0 {
+            return Err(ParseError::OutOfRange);
+        }
+        Ok(DataPoint { timestamp, value })
+    }
+}
+
+fn parse_data(input: &str) -> Result<Vec<DataPoint>, ParseError> {
+    input
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() != 2 {
+                return Err(ParseError::InvalidFormat);
+            }
+
+            let timestamp = parts[0]
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| ParseError::InvalidFormat)?;
+
+            let value = parts[1]
+                .trim()
+                .parse::<f64>()
+                .map_err(|_| ParseError::InvalidFormat)?;
+
+            DataPoint::new(timestamp, value)
+        })
+        .collect()
+}
+
+fn calculate_statistics(data: &[DataPoint]) -> (f64, f64) {
+    let sum: f64 = data.iter().map(|dp| dp.value).sum();
+    let mean = sum / data.len() as f64;
+
+    let variance: f64 = data
+        .iter()
+        .map(|dp| (dp.value - mean).powi(2))
+        .sum::<f64>() / data.len() as f64;
+
+    (mean, variance.sqrt())
+}
+
+fn main() {
+    let input = "1609459200,45.5\\n1609545600,52.3\\n1609632000,48.9";
+
+    match parse_data(input) {
+        Ok(data) => {
+            let (mean, std_dev) = calculate_statistics(&data);
+            println!("Mean: {:.2}, Std Dev: {:.2}", mean, std_dev);
+        }
+        Err(e) => eprintln!("Error parsing data: {:?}", e),
+    }
+}
+"""
+
+rust_cb = CodeBlock(rust_code, Val(:code), language="rust",
+    notes="Demonstrates Rust's ownership, pattern matching, and functional iterators")
+
+# Language Comparison Section
+comparison_section = TextBlock("""
+<h2>11. Language Comparison - Binary Search</h2>
+<p>The same algorithm implemented in different languages:</p>
+""")
+
+julia_binsearch = """
+function binary_search(arr::Vector, target)
+    left, right = 1, length(arr)
+
+    while left <= right
+        mid = div(left + right, 2)
+
+        if arr[mid] == target
+            return mid
+        elseif arr[mid] < target
+            left = mid + 1
+        else
+            right = mid - 1
+        end
+    end
+
+    return nothing  # Not found
+end
+"""
+
+python_binsearch = """
+def binary_search(arr, target):
+    left, right = 0, len(arr) - 1
+
+    while left <= right:
+        mid = (left + right) // 2
+
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+
+    return None  # Not found
+"""
+
+cpp_binsearch = """
+int binary_search(const std::vector<int>& arr, int target) {
+    int left = 0;
+    int right = arr.size() - 1;
+
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+
+        if (arr[mid] == target) {
+            return mid;
+        } else if (arr[mid] < target) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    return -1;  // Not found
+}
+"""
+
+julia_bs_cb = CodeBlock(julia_binsearch, Val(:code), language="julia", notes="Binary search in Julia")
+python_bs_cb = CodeBlock(python_binsearch, Val(:code), language="python", notes="Binary search in Python")
+cpp_bs_cb = CodeBlock(cpp_binsearch, Val(:code), language="c++", notes="Binary search in C++")
+
+# Example 12: Best Practices summary
 best_practices = TextBlock("""
 <h2>Best Practices for Using CodeBlock</h2>
 <div style="background-color: #f0f7ff; padding: 20px; border-left: 4px solid #0066cc; margin: 20px 0;">
@@ -219,10 +636,19 @@ summary = TextBlock("""
 <p>This page demonstrated CodeBlock features:</p>
 <ul>
     <li><strong>Function-based CodeBlocks:</strong> Extract and display function source code</li>
-    <li><strong>Executable code:</strong> Run code and use the results in visualizations</li>
+    <li><strong>Executable code:</strong> Run Julia code and use the results in visualizations</li>
     <li><strong>Display-only blocks:</strong> Show tutorial or example code</li>
     <li><strong>Multi-step workflows:</strong> Document complete analysis processes</li>
     <li><strong>Integration with charts:</strong> Show code alongside its output</li>
+    <li><strong>Multi-language support:</strong> Display code in Python, R, SQL, C++, JavaScript, Rust, and more</li>
+    <li><strong>Language comparison:</strong> Show the same algorithm in different languages</li>
+</ul>
+<p><strong>Key Points:</strong></p>
+<ul>
+    <li>Only Julia code can be executed - all other languages are display-only</li>
+    <li>Automatic syntax highlighting for all supported languages</li>
+    <li>Only loads Prism.js components for languages actually used in the page</li>
+    <li>Perfect for documentation, tutorials, and reproducible research</li>
 </ul>
 <p><strong>CodeBlocks make your analyses reproducible and educational by showing the code that generated every visualization!</strong></p>
 """)
@@ -243,6 +669,14 @@ page = JSPlotPage(
         example2_text, code2, chart2,
         example3_text, code3,
         example4_text, step1_text, step1_code, step2_text, step2_code, weather_chart,
+        multilang_header,
+        python_section, python_cb,
+        r_section, r_cb,
+        sql_section, sql_cb,
+        cpp_section, cpp_cb,
+        javascript_section, javascript_cb,
+        rust_section, rust_cb,
+        comparison_section, julia_bs_cb, python_bs_cb, cpp_bs_cb,
         best_practices,
         summary
     ],
@@ -256,10 +690,18 @@ println("CodeBlock examples created successfully!")
 println("="^60)
 println("\nFile created: generated_html_examples/codeblock_examples.html")
 println("\nThis page includes:")
-println("  • CodeBlock from a function (executable)")
-println("  • CodeBlock showing chart creation code and the resulting chart")
+println("  • CodeBlock from a function (executable Julia)")
+println("  • CodeBlock showing chart creation code and resulting chart")
 println("  • CodeBlock from a code string (display-only)")
 println("  • Multi-step workflow with multiple code blocks")
+println("  • Multi-language examples:")
+println("    - Python (merge sort)")
+println("    - R (linear regression)")
+println("    - SQL (customer analytics)")
+println("    - C++ (template stack)")
+println("    - JavaScript (async data processing)")
+println("    - Rust (ownership and error handling)")
+println("  • Language comparison (binary search in Julia, Python, C++)")
 println("  • Best practices and usage guide")
-println("  • Syntax highlighting for all code blocks")
-println("\nTip: Execute code blocks with codeblock() syntax to get results!")
+println("  • Syntax highlighting for all languages")
+println("\nTip: Only Julia code can be executed with codeblock() syntax!")

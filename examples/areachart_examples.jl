@@ -16,7 +16,7 @@ header = TextBlock("""
     <li><strong>Stack modes:</strong> Unstack (overlapping), stack (cumulative), and normalized stack (percentage)</li>
     <li><strong>Grouping:</strong> Multiple series with automatic color assignment and legend</li>
     <li><strong>Interactive filters:</strong> Dropdown menus to filter data dynamically</li>
-    <li><strong>Dynamic controls:</strong> Change grouping, stacking, and faceting on the fly</li>
+    <li><strong>Dynamic controls:</strong> Change X-axis, grouping, stacking, and faceting on the fly</li>
     <li><strong>Faceting:</strong> Facet wrap (1 variable) and facet grid (2 variables)</li>
 </ul>
 """)
@@ -290,6 +290,40 @@ chart9c = AreaChart(:normalized_mode, df9, :compare_data;
     notes = "Areas are stacked and normalized to 100% - shows relative proportions over time"
 )
 
+# Example 10: Dynamic X-Axis Selection
+df10 = DataFrame()
+quarters10 = 1:12
+for region in ["North", "South", "East"]
+    for product in ["Widget", "Gadget", "Gizmo"]
+        for quarter in quarters10
+            push!(df10, (
+                Quarter = quarter,
+                Month = (quarter - 1) * 3 + 1,  # Map quarters to months
+                Week = (quarter - 1) * 13 + 1,   # Map quarters to weeks
+                Revenue = abs(50000 + randn(rng) * 10000 + quarter * 2000),
+                Units = abs(500 + randn(rng) * 100 + quarter * 20),
+                Region = region,
+                Product = product
+            ))
+        end
+    end
+end
+
+dynamic_x_header = TextBlock("""
+<h2>Dynamic X-Axis Selection</h2>
+<p>This example demonstrates how to dynamically change the X-axis dimension from within the HTML page.</p>
+<p>Try switching between Quarter, Month, and Week views using the dropdown control!</p>
+""")
+
+chart10 = AreaChart(:dynamic_x_axis, df10, :sales_data_x;
+    x_cols = [:Quarter, :Month, :Week],
+    y_cols = [:Revenue, :Units],
+    color_cols = [:Region],
+    stack_mode = "stack",
+    title = "Example 10: Sales with Dynamic X-Axis Selection",
+    notes = "Use the X-Axis dropdown to switch between different time granularities (Quarter/Month/Week). Also switch between Revenue and Units on Y-axis."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -301,6 +335,7 @@ conclusion = TextBlock("""
             <li><em>Normalized stack:</em> Percentage areas - best for showing proportions</li>
         </ul>
     </li>
+    <li><strong>Dynamic X-axis selection:</strong> Switch between different X-axis dimensions (e.g., Quarter/Month/Week) from dropdown</li>
     <li><strong>Dynamic grouping:</strong> Choose which variable to group/color by from dropdown</li>
     <li><strong>Interactive filters:</strong> Filter data dynamically with dropdown menus</li>
     <li><strong>Faceting:</strong> Create small multiples with 1 or 2 faceting variables</li>
@@ -321,10 +356,13 @@ page = JSPlotPage(
         :metrics_data => df6,
         :grid_sales => df7,
         :business_metrics => df8,
-        :compare_data => df9
+        :compare_data => df9,
+        :sales_data_x => df10
     ),
     [header, chart1, chart2, chart3, chart4, chart5, chart6, chart7, chart8,
-     comparison_header, chart9a, chart9b, chart9c, conclusion],
+     comparison_header, chart9a, chart9b, chart9c,
+     dynamic_x_header, chart10,
+     conclusion],
     tab_title = "AreaChart Examples"
 )
 
@@ -344,3 +382,4 @@ println("  • Facet wrap (1 variable)")
 println("  • Facet grid (2 variables)")
 println("  • Dynamic controls (grouping, stacking, faceting)")
 println("  • Side-by-side stack mode comparison")
+println("  • Dynamic X-axis selection (switch between Quarter/Month/Week)")

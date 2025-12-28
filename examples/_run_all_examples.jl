@@ -1,7 +1,6 @@
 
 include("areachart_examples.jl")
 include("codeblock_examples.jl")
-include("codeblock_multilang_examples.jl")
 include("distplot_examples.jl")
 include("external_formats_example.jl")
 include("kerneldensity_examples.jl")
