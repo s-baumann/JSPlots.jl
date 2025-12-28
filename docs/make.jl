@@ -18,17 +18,21 @@ makedocs(;
     warnonly = true,
 )
 
-# Copy generated HTML examples to docs/build after makedocs
+# Copy generated HTML examples to docs/build/examples_html after makedocs
 examples_src = joinpath(@__DIR__, "..", "generated_html_examples")
 build_dir = joinpath(@__DIR__, "build")
+examples_dest = joinpath(build_dir, "examples_html")
 if isdir(examples_src)
-    # Copy each subdirectory/file from generated_html_examples to build
+    # Create examples_html directory if it doesn't exist
+    mkpath(examples_dest)
+
+    # Copy each subdirectory/file from generated_html_examples to build/examples_html
     for item in readdir(examples_src)
         src_path = joinpath(examples_src, item)
-        dest_path = joinpath(build_dir, item)
+        dest_path = joinpath(examples_dest, item)
         cp(src_path, dest_path, force=true)
     end
-    println("Copied HTML examples to docs/build/")
+    println("Copied HTML examples to docs/build/examples_html/")
 else
     @warn "Generated HTML examples directory not found at: $examples_src"
 end
