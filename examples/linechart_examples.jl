@@ -39,7 +39,7 @@ chart1 = LineChart(:revenue_trend, df1, :revenue_data;
 
 # Example 2: Multiple Series Line Chart
 df2 = DataFrame(
-    Month = repeat(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 3),
+    Month = repeat(collect(1:12), 3),
     Sales = vcat(
         [120, 135, 150, 145, 160, 175, 190, 185, 200, 210, 230, 250],  # 2022
         [130, 145, 165, 160, 180, 195, 210, 205, 220, 235, 255, 280],  # 2023

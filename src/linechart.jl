@@ -183,8 +183,10 @@ struct LineChart <: JSPlotsType
                     // Sort keys appropriately
                     const sortedKeys = Object.keys(xGroups).sort((a, b) => {
                         if (isDate) {
-                            // For dates, compare as ISO strings
-                            return String(a).localeCompare(String(b));
+                            // For dates, compare the actual Date objects
+                            const dateA = xOriginalValues[a];
+                            const dateB = xOriginalValues[b];
+                            return dateA - dateB;  // Date subtraction gives milliseconds difference
                         }
                         const aNum = parseFloat(a);
                         const bNum = parseFloat(b);
@@ -302,14 +304,14 @@ struct LineChart <: JSPlotsType
                         group.data.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
                             const aStr = String(aVal);
                             const bStr = String(bVal);
-
-                            // Check if values look like dates (ISO format: YYYY-MM-DD)
-                            const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
-                            if (datePattern.test(aStr) && datePattern.test(bStr)) {
-                                return aStr.localeCompare(bStr);
-                            }
 
                             // Try numeric comparison
                             const aNum = parseFloat(aVal);
@@ -394,14 +396,14 @@ struct LineChart <: JSPlotsType
                             group.data.sort((a, b) => {
                                 const aVal = a[X_COL];
                                 const bVal = b[X_COL];
+
+                                // Check if values are Date objects
+                                if (aVal instanceof Date && bVal instanceof Date) {
+                                    return aVal - bVal;
+                                }
+
                                 const aStr = String(aVal);
                                 const bStr = String(bVal);
-
-                                // Check if values look like dates (ISO format: YYYY-MM-DD)
-                                const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
-                                if (datePattern.test(aStr) && datePattern.test(bStr)) {
-                                    return aStr.localeCompare(bStr);
-                                }
 
                                 // Try numeric comparison
                                 const aNum = parseFloat(aVal);
@@ -511,14 +513,14 @@ struct LineChart <: JSPlotsType
                                 group.data.sort((a, b) => {
                                     const aVal = a[X_COL];
                                     const bVal = b[X_COL];
+
+                                    // Check if values are Date objects
+                                    if (aVal instanceof Date && bVal instanceof Date) {
+                                        return aVal - bVal;
+                                    }
+
                                     const aStr = String(aVal);
                                     const bStr = String(bVal);
-
-                                    // Check if values look like dates (ISO format: YYYY-MM-DD)
-                                    const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
-                                    if (datePattern.test(aStr) && datePattern.test(bStr)) {
-                                        return aStr.localeCompare(bStr);
-                                    }
 
                                     // Try numeric comparison
                                     const aNum = parseFloat(aVal);
