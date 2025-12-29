@@ -204,6 +204,50 @@ function waitForParquet() {
 }
 
 // Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
+    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+
+    // Check first row to identify date columns
+    var firstRow = data[0];
+    var dateColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date columns found, return data unchanged
+    if (dateColumns.length === 0) return data;
+
+    // Convert date strings to Date objects in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -228,7 +272,8 @@ function loadDataset(dataLabel) {
                     return response.json();
                 })
                 .then(function(data) {
-                    resolve(data);
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external JSON:', error);
@@ -314,7 +359,8 @@ function loadDataset(dataLabel) {
                                 console.error('CSV parsing errors:', fatalErrors);
                                 reject(fatalErrors);
                             } else if (results.data && results.data.length > 0) {
-                                resolve(results.data);
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
                             } else {
                                 reject(new Error('No data parsed from CSV'));
                             }
@@ -339,7 +385,8 @@ function loadDataset(dataLabel) {
             // Parse JSON data
             try {
                 var data = JSON.parse(dataText);
-                resolve(data);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
             } catch (error) {
                 console.error('JSON parsing error:', error);
                 reject(error);
@@ -363,7 +410,8 @@ function loadDataset(dataLabel) {
                         console.error('CSV parsing errors:', fatalErrors);
                         reject(fatalErrors);
                     } else if (results.data && results.data.length > 0) {
-                        resolve(results.data);
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
                     } else {
                         reject(new Error('No data parsed from CSV'));
                     }

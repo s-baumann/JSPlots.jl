@@ -184,6 +184,50 @@ function waitForParquet() {
 }
 
 // Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
+    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+
+    // Check first row to identify date columns
+    var firstRow = data[0];
+    var dateColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date columns found, return data unchanged
+    if (dateColumns.length === 0) return data;
+
+    // Convert date strings to Date objects in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -208,7 +252,8 @@ function loadDataset(dataLabel) {
                     return response.json();
                 })
                 .then(function(data) {
-                    resolve(data);
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external JSON:', error);
@@ -294,7 +339,8 @@ function loadDataset(dataLabel) {
                                 console.error('CSV parsing errors:', fatalErrors);
                                 reject(fatalErrors);
                             } else if (results.data && results.data.length > 0) {
-                                resolve(results.data);
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
                             } else {
                                 reject(new Error('No data parsed from CSV'));
                             }
@@ -319,7 +365,8 @@ function loadDataset(dataLabel) {
             // Parse JSON data
             try {
                 var data = JSON.parse(dataText);
-                resolve(data);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
             } catch (error) {
                 console.error('JSON parsing error:', error);
                 reject(error);
@@ -343,7 +390,8 @@ function loadDataset(dataLabel) {
                         console.error('CSV parsing errors:', fatalErrors);
                         reject(fatalErrors);
                     } else if (results.data && results.data.length > 0) {
-                        resolve(results.data);
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
                     } else {
                         reject(new Error('No data parsed from CSV'));
                     }
@@ -379,12 +427,7 @@ $(function(){
     // Aggregation functions
     function aggregate(values, method) {
         if (values.length === 0) return null;
-        if (method === 'none') {
-            // When no aggregation is specified, use mean to avoid duplicate x values
-            // This prevents the zigzag line problem when multiple y values exist for same x
-            const sum = values.reduce((a, b) => a + b, 0);
-            return [sum / values.length];
-        }
+        if (method === 'none') return values;  // Return all values when no aggregation
         if (method === 'count') return [values.length];
         if (method === 'sum') {
             const sum = values.reduce((a, b) => a + b, 0);
@@ -404,6 +447,70 @@ $(function(){
         if (method === 'min') return [Math.min(...values)];
         if (method === 'max') return [Math.max(...values)];
         return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare as ISO strings
+                    return String(a).localeCompare(String(b));
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
     }
 
     // Make it global so inline onchange can see it
@@ -521,59 +628,10 @@ $(function(){
                     return aStr.localeCompare(bStr);
                 });
 
-                // ALWAYS group by x value, even when aggregator is 'none'
-                // This prevents duplicate x values from creating zigzag lines
-                const xGroups = {};
-                group.data.forEach(row => {
-                    const xVal = row[X_COL];
-                    // Convert to string for consistent grouping
-                    const xKey = String(xVal);
-                    if (!xGroups[xKey]) xGroups[xKey] = [];
-                    xGroups[xKey].push(row[Y_COL]);
-                });
-
-                let xValues = [];
-                let yValues = [];
-
-                    // Helper function to check if a string looks like a date
-                    function looksLikeDate(str) {
-                        // Check for common date formats: YYYY-MM-DD, ISO datetime, etc.
-                        return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                               /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                               /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                    }
-
-                    // Check if first key looks like a date to determine handling
-                    const firstKey = Object.keys(xGroups)[0];
-                    const isDateData = firstKey && looksLikeDate(firstKey);
-
-                    // Sort keys - try numeric sort first, fall back to string sort
-                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                        if (isDateData) {
-                            // For dates, use string comparison (ISO format sorts correctly)
-                            return String(a).localeCompare(String(b));
-                        }
-                        const aNum = parseFloat(a);
-                        const bNum = parseFloat(b);
-                        if (!isNaN(aNum) && !isNaN(bNum)) {
-                            return aNum - bNum;
-                        }
-                        return String(a).localeCompare(String(b));
-                    });
-
-                    sortedKeys.forEach(xKey => {
-                        const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                        if (aggregated && aggregated.length > 0) {
-                            // For dates, keep as string; for numbers, parse
-                            if (isDateData) {
-                                xValues.push(xKey);
-                            } else {
-                                const numVal = parseFloat(xKey);
-                                xValues.push(isNaN(numVal) ? xKey : numVal);
-                            }
-                            yValues.push(aggregated[0]);
-                        }
-                    });
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                const xValues = result.xValues;
+                const yValues = result.yValues;
 
                 traces.push({
                     x: xValues,
@@ -662,54 +720,10 @@ $(function(){
                         return aStr.localeCompare(bStr);
                     });
 
-                    // ALWAYS group by x value, even when aggregator is 'none'
-                    // This prevents duplicate x values from creating zigzag lines
-                    const xGroups = {};
-                    group.data.forEach(row => {
-                        const xVal = row[X_COL];
-                        const xKey = String(xVal);
-                        if (!xGroups[xKey]) xGroups[xKey] = [];
-                        xGroups[xKey].push(row[Y_COL]);
-                    });
-
-                    let xValues = [];
-                    let yValues = [];
-
-                        // Helper function to check if a string looks like a date
-                        function looksLikeDate(str) {
-                            return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                                   /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                                   /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                        }
-
-                        const firstKey = Object.keys(xGroups)[0];
-                        const isDateData = firstKey && looksLikeDate(firstKey);
-
-                        // Sort keys
-                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                            if (isDateData) {
-                                return String(a).localeCompare(String(b));
-                            }
-                            const aNum = parseFloat(a);
-                            const bNum = parseFloat(b);
-                            if (!isNaN(aNum) && !isNaN(bNum)) {
-                                return aNum - bNum;
-                            }
-                            return String(a).localeCompare(String(b));
-                        });
-
-                        sortedKeys.forEach(xKey => {
-                            const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                            if (aggregated && aggregated.length > 0) {
-                                if (isDateData) {
-                                    xValues.push(xKey);
-                                } else {
-                                    const numVal = parseFloat(xKey);
-                                    xValues.push(isNaN(numVal) ? xKey : numVal);
-                                }
-                                yValues.push(aggregated[0]);
-                            }
-                        });
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    const xValues = result.xValues;
+                    const yValues = result.yValues;
 
                     const legendGroup = group.color;
 
@@ -823,53 +837,10 @@ $(function(){
                             return aStr.localeCompare(bStr);
                         });
 
-                        // ALWAYS group by x value, even when aggregator is 'none'
-                        // This prevents duplicate x values from creating zigzag lines
-                        const xGroups = {};
-                        group.data.forEach(row => {
-                            const xVal = row[X_COL];
-                            const xKey = String(xVal);
-                            if (!xGroups[xKey]) xGroups[xKey] = [];
-                            xGroups[xKey].push(row[Y_COL]);
-                        });
-
-                        let xValues = [];
-                        let yValues = [];
-
-                            // Helper function to check if a string looks like a date
-                            function looksLikeDate(str) {
-                                return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                                       /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                                       /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                            }
-
-                            const firstKey = Object.keys(xGroups)[0];
-                            const isDateData = firstKey && looksLikeDate(firstKey);
-
-                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                                if (isDateData) {
-                                    return String(a).localeCompare(String(b));
-                                }
-                                const aNum = parseFloat(a);
-                                const bNum = parseFloat(b);
-                                if (!isNaN(aNum) && !isNaN(bNum)) {
-                                    return aNum - bNum;
-                                }
-                                return String(a).localeCompare(String(b));
-                            });
-
-                            sortedKeys.forEach(xKey => {
-                                const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                                if (aggregated && aggregated.length > 0) {
-                                    if (isDateData) {
-                                        xValues.push(xKey);
-                                    } else {
-                                        const numVal = parseFloat(xKey);
-                                        xValues.push(isNaN(numVal) ? xKey : numVal);
-                                    }
-                                    yValues.push(aggregated[0]);
-                                }
-                            });
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        const xValues = result.xValues;
+                        const yValues = result.yValues;
 
                         const legendGroup = group.color;
 
@@ -1219,12 +1190,7 @@ $(function(){
     // Aggregation functions
     function aggregate(values, method) {
         if (values.length === 0) return null;
-        if (method === 'none') {
-            // When no aggregation is specified, use mean to avoid duplicate x values
-            // This prevents the zigzag line problem when multiple y values exist for same x
-            const sum = values.reduce((a, b) => a + b, 0);
-            return [sum / values.length];
-        }
+        if (method === 'none') return values;  // Return all values when no aggregation
         if (method === 'count') return [values.length];
         if (method === 'sum') {
             const sum = values.reduce((a, b) => a + b, 0);
@@ -1244,6 +1210,70 @@ $(function(){
         if (method === 'min') return [Math.min(...values)];
         if (method === 'max') return [Math.max(...values)];
         return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare as ISO strings
+                    return String(a).localeCompare(String(b));
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
     }
 
     // Make it global so inline onchange can see it
@@ -1361,59 +1391,10 @@ $(function(){
                     return aStr.localeCompare(bStr);
                 });
 
-                // ALWAYS group by x value, even when aggregator is 'none'
-                // This prevents duplicate x values from creating zigzag lines
-                const xGroups = {};
-                group.data.forEach(row => {
-                    const xVal = row[X_COL];
-                    // Convert to string for consistent grouping
-                    const xKey = String(xVal);
-                    if (!xGroups[xKey]) xGroups[xKey] = [];
-                    xGroups[xKey].push(row[Y_COL]);
-                });
-
-                let xValues = [];
-                let yValues = [];
-
-                    // Helper function to check if a string looks like a date
-                    function looksLikeDate(str) {
-                        // Check for common date formats: YYYY-MM-DD, ISO datetime, etc.
-                        return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                               /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                               /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                    }
-
-                    // Check if first key looks like a date to determine handling
-                    const firstKey = Object.keys(xGroups)[0];
-                    const isDateData = firstKey && looksLikeDate(firstKey);
-
-                    // Sort keys - try numeric sort first, fall back to string sort
-                    const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                        if (isDateData) {
-                            // For dates, use string comparison (ISO format sorts correctly)
-                            return String(a).localeCompare(String(b));
-                        }
-                        const aNum = parseFloat(a);
-                        const bNum = parseFloat(b);
-                        if (!isNaN(aNum) && !isNaN(bNum)) {
-                            return aNum - bNum;
-                        }
-                        return String(a).localeCompare(String(b));
-                    });
-
-                    sortedKeys.forEach(xKey => {
-                        const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                        if (aggregated && aggregated.length > 0) {
-                            // For dates, keep as string; for numbers, parse
-                            if (isDateData) {
-                                xValues.push(xKey);
-                            } else {
-                                const numVal = parseFloat(xKey);
-                                xValues.push(isNaN(numVal) ? xKey : numVal);
-                            }
-                            yValues.push(aggregated[0]);
-                        }
-                    });
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                const xValues = result.xValues;
+                const yValues = result.yValues;
 
                 traces.push({
                     x: xValues,
@@ -1502,54 +1483,10 @@ $(function(){
                         return aStr.localeCompare(bStr);
                     });
 
-                    // ALWAYS group by x value, even when aggregator is 'none'
-                    // This prevents duplicate x values from creating zigzag lines
-                    const xGroups = {};
-                    group.data.forEach(row => {
-                        const xVal = row[X_COL];
-                        const xKey = String(xVal);
-                        if (!xGroups[xKey]) xGroups[xKey] = [];
-                        xGroups[xKey].push(row[Y_COL]);
-                    });
-
-                    let xValues = [];
-                    let yValues = [];
-
-                        // Helper function to check if a string looks like a date
-                        function looksLikeDate(str) {
-                            return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                                   /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                                   /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                        }
-
-                        const firstKey = Object.keys(xGroups)[0];
-                        const isDateData = firstKey && looksLikeDate(firstKey);
-
-                        // Sort keys
-                        const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                            if (isDateData) {
-                                return String(a).localeCompare(String(b));
-                            }
-                            const aNum = parseFloat(a);
-                            const bNum = parseFloat(b);
-                            if (!isNaN(aNum) && !isNaN(bNum)) {
-                                return aNum - bNum;
-                            }
-                            return String(a).localeCompare(String(b));
-                        });
-
-                        sortedKeys.forEach(xKey => {
-                            const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                            if (aggregated && aggregated.length > 0) {
-                                if (isDateData) {
-                                    xValues.push(xKey);
-                                } else {
-                                    const numVal = parseFloat(xKey);
-                                    xValues.push(isNaN(numVal) ? xKey : numVal);
-                                }
-                                yValues.push(aggregated[0]);
-                            }
-                        });
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    const xValues = result.xValues;
+                    const yValues = result.yValues;
 
                     const legendGroup = group.color;
 
@@ -1663,53 +1600,10 @@ $(function(){
                             return aStr.localeCompare(bStr);
                         });
 
-                        // ALWAYS group by x value, even when aggregator is 'none'
-                        // This prevents duplicate x values from creating zigzag lines
-                        const xGroups = {};
-                        group.data.forEach(row => {
-                            const xVal = row[X_COL];
-                            const xKey = String(xVal);
-                            if (!xGroups[xKey]) xGroups[xKey] = [];
-                            xGroups[xKey].push(row[Y_COL]);
-                        });
-
-                        let xValues = [];
-                        let yValues = [];
-
-                            // Helper function to check if a string looks like a date
-                            function looksLikeDate(str) {
-                                return /^\d{4}-\d{2}-\d{2}/.test(str) ||
-                                       /^\d{4}-\d{2}-\d{2}T/.test(str) ||
-                                       /^\d{2}\/\d{2}\/\d{4}/.test(str);
-                            }
-
-                            const firstKey = Object.keys(xGroups)[0];
-                            const isDateData = firstKey && looksLikeDate(firstKey);
-
-                            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
-                                if (isDateData) {
-                                    return String(a).localeCompare(String(b));
-                                }
-                                const aNum = parseFloat(a);
-                                const bNum = parseFloat(b);
-                                if (!isNaN(aNum) && !isNaN(bNum)) {
-                                    return aNum - bNum;
-                                }
-                                return String(a).localeCompare(String(b));
-                            });
-
-                            sortedKeys.forEach(xKey => {
-                                const aggregated = aggregate(xGroups[xKey], AGGREGATOR);
-                                if (aggregated && aggregated.length > 0) {
-                                    if (isDateData) {
-                                        xValues.push(xKey);
-                                    } else {
-                                        const numVal = parseFloat(xKey);
-                                        xValues.push(isNaN(numVal) ? xKey : numVal);
-                                    }
-                                    yValues.push(aggregated[0]);
-                                }
-                            });
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        const xValues = result.xValues;
+                        const yValues = result.yValues;
 
                         const legendGroup = group.color;
 
