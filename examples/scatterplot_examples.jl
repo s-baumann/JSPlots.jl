@@ -135,7 +135,7 @@ df6 = DataFrame(
 
 scatter6 = ScatterPlot(:timeseries, df6, :df6, [:value1, :value2];
     color_cols = [:portfolio],
-    filters = Dict{Symbol, Any}(:date => [Date(2024, 7, 1)], :quarter => [3]),
+    filters = Dict{Symbol, Any}(:quarter => [3]),
     title = "Time Series Scatter with Filters",
     notes = "Use date and quarter filters to focus on specific time periods. " *
            "Points are colored by portfolio to show different investment trajectories."

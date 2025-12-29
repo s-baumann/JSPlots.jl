@@ -115,43 +115,70 @@ end
 """
     generate_range_slider_html(slider::RangeSliderControl)
 
-Generate HTML for a range slider control (dual-handle slider for numeric ranges).
+Generate HTML for a range slider control (dual-handle jQuery UI slider for numeric ranges).
+
+Uses jQuery UI's range slider with two handles for intuitive min/max selection.
 
 # Arguments
 - `slider::RangeSliderControl`: The range slider specification
 
 # Returns
-- `String`: HTML string for the range slider
+- `String`: HTML string for the jQuery UI range slider
 """
 function generate_range_slider_html(slider::RangeSliderControl)::String
+    # Format numbers for display (remove unnecessary decimals)
+    format_num(x) = x == floor(x) ? string(Int(floor(x))) : string(round(x, digits=2))
+
     return """
-            <div style="margin: 10px;">
-                <label>$(slider.label): </label>
-                <span id="$(slider.id)_display">$(slider.default_min) - $(slider.default_max)</span>
-                <div style="margin-top: 5px;">
-                    <input type="range" id="$(slider.id)_min" min="$(slider.min_value)" max="$(slider.max_value)"
-                           value="$(slider.default_min)" step="any" style="width: 45%;"
-                           oninput="updateRangeDisplay_$(slider.id)(); $(slider.onchange)">
-                    <input type="range" id="$(slider.id)_max" min="$(slider.min_value)" max="$(slider.max_value)"
-                           value="$(slider.default_max)" step="any" style="width: 45%;"
-                           oninput="updateRangeDisplay_$(slider.id)(); $(slider.onchange)">
-                </div>
+            <div style="margin: 15px 10px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: bold;">$(slider.label): </label>
+                <span id="$(slider.id)_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">$(format_num(slider.default_min)) - $(format_num(slider.default_max))</span>
+                <div id="$(slider.id)_slider" style="margin: 10px 5px; width: 90%;"></div>
                 <script>
-                    function updateRangeDisplay_$(slider.id)() {
-                        const minVal = parseFloat(document.getElementById('$(slider.id)_min').value);
-                        const maxVal = parseFloat(document.getElementById('$(slider.id)_max').value);
-                        // Ensure min <= max
-                        if (minVal > maxVal) {
-                            document.getElementById('$(slider.id)_min').value = maxVal;
-                            document.getElementById('$(slider.id)_max').value = minVal;
-                        }
-                        const displayMin = parseFloat(document.getElementById('$(slider.id)_min').value);
-                        const displayMax = parseFloat(document.getElementById('$(slider.id)_max').value);
-                        document.getElementById('$(slider.id)_display').textContent =
-                            displayMin.toFixed(2) + ' - ' + displayMax.toFixed(2);
+                    \$(function() {
+                        // Initialize jQuery UI range slider
+                        \$("#$(slider.id)_slider").slider({
+                            range: true,
+                            min: $(slider.min_value),
+                            max: $(slider.max_value),
+                            step: $(slider.max_value - slider.min_value) / 1000,  // Smooth sliding
+                            values: [$(slider.default_min), $(slider.default_max)],
+                            slide: function(event, ui) {
+                                // Update display during sliding
+                                const minVal = ui.values[0];
+                                const maxVal = ui.values[1];
+                                const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+                                \$("#$(slider.id)_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                            },
+                            change: function(event, ui) {
+                                // Update display and trigger chart update
+                                const minVal = ui.values[0];
+                                const maxVal = ui.values[1];
+                                const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+                                \$("#$(slider.id)_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+
+                                // Store values for easy access
+                                \$("#$(slider.id)_slider").data('minValue', minVal);
+                                \$("#$(slider.id)_slider").data('maxValue', maxVal);
+
+                                // Call the update function
+                                $(slider.onchange)
+                            }
+                        });
+
+                        // Store initial values
+                        \$("#$(slider.id)_slider").data('minValue', $(slider.default_min));
+                        \$("#$(slider.id)_slider").data('maxValue', $(slider.default_max));
+                    });
+
+                    // Helper functions to get slider values
+                    function get$(slider.id)Min() {
+                        return \$("#$(slider.id)_slider").slider("values", 0);
                     }
-                    // Initialize display
-                    updateRangeDisplay_$(slider.id)();
+
+                    function get$(slider.id)Max() {
+                        return \$("#$(slider.id)_slider").slider("values", 1);
+                    }
                 </script>
             </div>
             """

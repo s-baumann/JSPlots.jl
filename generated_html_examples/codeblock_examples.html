@@ -364,6 +364,8 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['day'];
     const Y_COLS = ['stock_a', 'stock_b'];
     const COLOR_COLS = [];
@@ -377,7 +379,12 @@ $(function(){
     // Aggregation functions
     function aggregate(values, method) {
         if (values.length === 0) return null;
-        if (method === 'none') return values;
+        if (method === 'none') {
+            // When no aggregation is specified, use mean to avoid duplicate x values
+            // This prevents the zigzag line problem when multiple y values exist for same x
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
         if (method === 'count') return [values.length];
         if (method === 'sum') {
             const sum = values.reduce((a, b) => a + b, 0);
@@ -408,12 +415,26 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_stock_chart');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get current filter values
         const filters = {};
-        FILTER_COLS.forEach(col => {
-            const select = document.getElementById(col + '_select');
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_stock_chart');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_stock_chart' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -439,11 +460,20 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (support both categorical and continuous filters)
         const filteredData = allData.filter(row => {
+            // Check categorical filters (dropdowns)
             for (let col in filters) {
                 const selectedValues = filters[col];
                 if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            // Check continuous filters (range sliders)
+            for (let col in rangeFilters) {
+                const value = parseFloat(row[col]);
+                const range = rangeFilters[col];
+                if (value < range.min || value > range.max) {
                     return false;
                 }
             }
@@ -467,25 +497,43 @@ $(function(){
             const traces = [];
             for (let groupKey in groupedData) {
                 const group = groupedData[groupKey];
-                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
 
-                let xValues, yValues;
-                if (AGGREGATOR === 'none') {
-                    xValues = group.data.map(row => row[X_COL]);
-                    yValues = group.data.map(row => row[Y_COL]);
-                } else {
-                    // Group by x value and aggregate
-                    const xGroups = {};
-                    group.data.forEach(row => {
-                        const xVal = row[X_COL];
-                        // Convert to string for consistent grouping
-                        const xKey = String(xVal);
-                        if (!xGroups[xKey]) xGroups[xKey] = [];
-                        xGroups[xKey].push(row[Y_COL]);
-                    });
+                    // Check if values look like dates (ISO format: YYYY-MM-DD)
+                    const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                    if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                        return aStr.localeCompare(bStr);
+                    }
 
-                    xValues = [];
-                    yValues = [];
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // ALWAYS group by x value, even when aggregator is 'none'
+                // This prevents duplicate x values from creating zigzag lines
+                const xGroups = {};
+                group.data.forEach(row => {
+                    const xVal = row[X_COL];
+                    // Convert to string for consistent grouping
+                    const xKey = String(xVal);
+                    if (!xGroups[xKey]) xGroups[xKey] = [];
+                    xGroups[xKey].push(row[Y_COL]);
+                });
+
+                let xValues = [];
+                let yValues = [];
 
                     // Helper function to check if a string looks like a date
                     function looksLikeDate(str) {
@@ -526,7 +574,6 @@ $(function(){
                             yValues.push(aggregated[0]);
                         }
                     });
-                }
 
                 traces.push({
                     x: xValues,
@@ -591,24 +638,42 @@ $(function(){
 
                 for (let groupKey in groupedData) {
                     const group = groupedData[groupKey];
-                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
 
-                    let xValues, yValues;
-                    if (AGGREGATOR === 'none') {
-                        xValues = group.data.map(row => row[X_COL]);
-                        yValues = group.data.map(row => row[Y_COL]);
-                    } else {
-                        // Group by x value and aggregate
-                        const xGroups = {};
-                        group.data.forEach(row => {
-                            const xVal = row[X_COL];
-                            const xKey = String(xVal);
-                            if (!xGroups[xKey]) xGroups[xKey] = [];
-                            xGroups[xKey].push(row[Y_COL]);
-                        });
+                        // Check if values look like dates (ISO format: YYYY-MM-DD)
+                        const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                        if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                            return aStr.localeCompare(bStr);
+                        }
 
-                        xValues = [];
-                        yValues = [];
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // ALWAYS group by x value, even when aggregator is 'none'
+                    // This prevents duplicate x values from creating zigzag lines
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        const xKey = String(xVal);
+                        if (!xGroups[xKey]) xGroups[xKey] = [];
+                        xGroups[xKey].push(row[Y_COL]);
+                    });
+
+                    let xValues = [];
+                    let yValues = [];
 
                         // Helper function to check if a string looks like a date
                         function looksLikeDate(str) {
@@ -645,7 +710,6 @@ $(function(){
                                 yValues.push(aggregated[0]);
                             }
                         });
-                    }
 
                     const legendGroup = group.color;
 
@@ -735,24 +799,42 @@ $(function(){
 
                     for (let groupKey in groupedData) {
                         const group = groupedData[groupKey];
-                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
 
-                        let xValues, yValues;
-                        if (AGGREGATOR === 'none') {
-                            xValues = group.data.map(row => row[X_COL]);
-                            yValues = group.data.map(row => row[Y_COL]);
-                        } else {
-                            // Group by x value and aggregate
-                            const xGroups = {};
-                            group.data.forEach(row => {
-                                const xVal = row[X_COL];
-                                const xKey = String(xVal);
-                                if (!xGroups[xKey]) xGroups[xKey] = [];
-                                xGroups[xKey].push(row[Y_COL]);
-                            });
+                            // Check if values look like dates (ISO format: YYYY-MM-DD)
+                            const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                            if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                                return aStr.localeCompare(bStr);
+                            }
 
-                            xValues = [];
-                            yValues = [];
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // ALWAYS group by x value, even when aggregator is 'none'
+                        // This prevents duplicate x values from creating zigzag lines
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            const xKey = String(xVal);
+                            if (!xGroups[xKey]) xGroups[xKey] = [];
+                            xGroups[xKey].push(row[Y_COL]);
+                        });
+
+                        let xValues = [];
+                        let yValues = [];
 
                             // Helper function to check if a string looks like a date
                             function looksLikeDate(str) {
@@ -788,7 +870,6 @@ $(function(){
                                     yValues.push(aggregated[0]);
                                 }
                             });
-                        }
 
                         const legendGroup = group.color;
 
@@ -1123,6 +1204,8 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['date'];
     const Y_COLS = ['temperature', 'humidity'];
     const COLOR_COLS = [];
@@ -1136,7 +1219,12 @@ $(function(){
     // Aggregation functions
     function aggregate(values, method) {
         if (values.length === 0) return null;
-        if (method === 'none') return values;
+        if (method === 'none') {
+            // When no aggregation is specified, use mean to avoid duplicate x values
+            // This prevents the zigzag line problem when multiple y values exist for same x
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
         if (method === 'count') return [values.length];
         if (method === 'sum') {
             const sum = values.reduce((a, b) => a + b, 0);
@@ -1167,12 +1255,26 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_weather');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get current filter values
         const filters = {};
-        FILTER_COLS.forEach(col => {
-            const select = document.getElementById(col + '_select');
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_weather');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_weather' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -1198,11 +1300,20 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
+        // Filter data (support both categorical and continuous filters)
         const filteredData = allData.filter(row => {
+            // Check categorical filters (dropdowns)
             for (let col in filters) {
                 const selectedValues = filters[col];
                 if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                    return false;
+                }
+            }
+            // Check continuous filters (range sliders)
+            for (let col in rangeFilters) {
+                const value = parseFloat(row[col]);
+                const range = rangeFilters[col];
+                if (value < range.min || value > range.max) {
                     return false;
                 }
             }
@@ -1226,25 +1337,43 @@ $(function(){
             const traces = [];
             for (let groupKey in groupedData) {
                 const group = groupedData[groupKey];
-                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
 
-                let xValues, yValues;
-                if (AGGREGATOR === 'none') {
-                    xValues = group.data.map(row => row[X_COL]);
-                    yValues = group.data.map(row => row[Y_COL]);
-                } else {
-                    // Group by x value and aggregate
-                    const xGroups = {};
-                    group.data.forEach(row => {
-                        const xVal = row[X_COL];
-                        // Convert to string for consistent grouping
-                        const xKey = String(xVal);
-                        if (!xGroups[xKey]) xGroups[xKey] = [];
-                        xGroups[xKey].push(row[Y_COL]);
-                    });
+                    // Check if values look like dates (ISO format: YYYY-MM-DD)
+                    const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                    if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                        return aStr.localeCompare(bStr);
+                    }
 
-                    xValues = [];
-                    yValues = [];
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // ALWAYS group by x value, even when aggregator is 'none'
+                // This prevents duplicate x values from creating zigzag lines
+                const xGroups = {};
+                group.data.forEach(row => {
+                    const xVal = row[X_COL];
+                    // Convert to string for consistent grouping
+                    const xKey = String(xVal);
+                    if (!xGroups[xKey]) xGroups[xKey] = [];
+                    xGroups[xKey].push(row[Y_COL]);
+                });
+
+                let xValues = [];
+                let yValues = [];
 
                     // Helper function to check if a string looks like a date
                     function looksLikeDate(str) {
@@ -1285,7 +1414,6 @@ $(function(){
                             yValues.push(aggregated[0]);
                         }
                     });
-                }
 
                 traces.push({
                     x: xValues,
@@ -1350,24 +1478,42 @@ $(function(){
 
                 for (let groupKey in groupedData) {
                     const group = groupedData[groupKey];
-                    group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
 
-                    let xValues, yValues;
-                    if (AGGREGATOR === 'none') {
-                        xValues = group.data.map(row => row[X_COL]);
-                        yValues = group.data.map(row => row[Y_COL]);
-                    } else {
-                        // Group by x value and aggregate
-                        const xGroups = {};
-                        group.data.forEach(row => {
-                            const xVal = row[X_COL];
-                            const xKey = String(xVal);
-                            if (!xGroups[xKey]) xGroups[xKey] = [];
-                            xGroups[xKey].push(row[Y_COL]);
-                        });
+                        // Check if values look like dates (ISO format: YYYY-MM-DD)
+                        const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                        if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                            return aStr.localeCompare(bStr);
+                        }
 
-                        xValues = [];
-                        yValues = [];
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // ALWAYS group by x value, even when aggregator is 'none'
+                    // This prevents duplicate x values from creating zigzag lines
+                    const xGroups = {};
+                    group.data.forEach(row => {
+                        const xVal = row[X_COL];
+                        const xKey = String(xVal);
+                        if (!xGroups[xKey]) xGroups[xKey] = [];
+                        xGroups[xKey].push(row[Y_COL]);
+                    });
+
+                    let xValues = [];
+                    let yValues = [];
 
                         // Helper function to check if a string looks like a date
                         function looksLikeDate(str) {
@@ -1404,7 +1550,6 @@ $(function(){
                                 yValues.push(aggregated[0]);
                             }
                         });
-                    }
 
                     const legendGroup = group.color;
 
@@ -1494,24 +1639,42 @@ $(function(){
 
                     for (let groupKey in groupedData) {
                         const group = groupedData[groupKey];
-                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
 
-                        let xValues, yValues;
-                        if (AGGREGATOR === 'none') {
-                            xValues = group.data.map(row => row[X_COL]);
-                            yValues = group.data.map(row => row[Y_COL]);
-                        } else {
-                            // Group by x value and aggregate
-                            const xGroups = {};
-                            group.data.forEach(row => {
-                                const xVal = row[X_COL];
-                                const xKey = String(xVal);
-                                if (!xGroups[xKey]) xGroups[xKey] = [];
-                                xGroups[xKey].push(row[Y_COL]);
-                            });
+                            // Check if values look like dates (ISO format: YYYY-MM-DD)
+                            const datePattern = /^\d{4}-\d{2}-\d{2}/;
+                            if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                                return aStr.localeCompare(bStr);
+                            }
 
-                            xValues = [];
-                            yValues = [];
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // ALWAYS group by x value, even when aggregator is 'none'
+                        // This prevents duplicate x values from creating zigzag lines
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            const xKey = String(xVal);
+                            if (!xGroups[xKey]) xGroups[xKey] = [];
+                            xGroups[xKey].push(row[Y_COL]);
+                        });
+
+                        let xValues = [];
+                        let yValues = [];
 
                             // Helper function to check if a string looks like a date
                             function looksLikeDate(str) {
@@ -1547,7 +1710,6 @@ $(function(){
                                     yValues.push(aggregated[0]);
                                 }
                             });
-                        }
 
                         const legendGroup = group.color;
 
@@ -2021,7 +2183,7 @@ scatter = ScatterPlot(:my_scatter, df, :my_data;
 # Step 3: Export to HTML
 create_html(scatter, &quot;output.html&quot;)
 </code></pre>
-    <div class="codeblock-notes">This code is for display only - not executed in this example</div>
+    
 </div>
 <br>
 <hr>
@@ -2217,8 +2379,8 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>5. Python Code (Display Only)</h2>
-<p>Python code is displayed with proper syntax highlighting but cannot be executed.</p>
+        <h2>5. Python Code</h2>
+<p>Python code is displayed with proper syntax highlighting.</p>
 
     </div>
 <br>
@@ -2310,7 +2472,7 @@ print(f&quot;Sorted array: {sorted_numbers}&quot;)
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>6. R Code (Display Only)</h2>
+        <h2>6. R Code</h2>
 <p>R statistical code with proper syntax highlighting.</p>
 
     </div>
@@ -2394,7 +2556,7 @@ print(predictions)
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>7. SQL Code (Display Only)</h2>
+        <h2>7. SQL Code</h2>
 <p>SQL queries with proper syntax highlighting.</p>
 
     </div>
@@ -2490,7 +2652,7 @@ ORDER BY segment_revenue DESC;
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>8. C++ Code (Display Only)</h2>
+        <h2>8. C++ Code</h2>
 <p>C++ code with proper syntax highlighting.</p>
 
     </div>
@@ -2604,7 +2766,7 @@ int main() {
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>9. JavaScript Code (Display Only)</h2>
+        <h2>9. JavaScript Code</h2>
 <p>Modern JavaScript (ES6+) code with proper syntax highlighting.</p>
 
     </div>
@@ -2729,7 +2891,7 @@ displayTopUsers();
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>10. Rust Code (Display Only)</h2>
+        <h2>10. Rust Code</h2>
 <p>Rust provides memory safety without garbage collection through its ownership system.</p>
 
     </div>

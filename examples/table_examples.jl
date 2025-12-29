@@ -141,21 +141,6 @@ select!(monthly_summary, :Month, :Days, :Total_Revenue, :Avg_Daily_Revenue)
 monthly_summary[!, :Total_Revenue] = round.(monthly_summary.Total_Revenue, digits=0)
 monthly_summary[!, :Avg_Daily_Revenue] = round.(monthly_summary.Avg_Daily_Revenue, digits=2)
 
-# Create visualizations
-table_monthly = Table(:monthly_sales, monthly_summary;
-                      notes="Monthly sales summary (download for detailed analysis)")
-
-chart_trend = LineChart(:revenue_trend, detailed_sales, :detailed_sales;
-    x_cols = [:Date],
-    y_cols = [:Revenue],
-    color_cols = [:Category],
-    title = "Daily Revenue by Category",
-)
-
-# Add an image to the dashboard
-dashboard_pic = Picture(:dashboard_image, example_image_path;
-                       notes="Example image included in the dashboard")
-
 # Example 7: Large table example
 # Create a larger dataset
 large_df = DataFrame(
@@ -196,27 +181,12 @@ feature_text = TextBlock("""
 <p>Use <strong>PivotTable</strong> when you need interactive data exploration with drag-and-drop capabilities.</p>
 """)
 
-conclusion = TextBlock("""
-<h2>Summary</h2>
-<p>This page demonstrated all key Table features:</p>
-<ul>
-    <li>Basic product inventory table</li>
-    <li>Financial data with calculated columns</li>
-    <li>Statistical summaries</li>
-    <li>HTML escaping and missing value handling</li>
-    <li>Top performers and department summaries</li>
-    <li>Integration with charts and images</li>
-    <li>Large table with 100 rows</li>
-    <li>Feature comparison</li>
-</ul>
-<p><strong>Tip:</strong> Every table includes a 'Download as CSV' button for easy data export!</p>
-""")
 
 # Create single combined page with all tables
 page = JSPlotPage(
     Dict{Symbol,DataFrame}(:detailed_sales => detailed_sales),
     [header, table1, table2, table3, table4, table_top, table_dept,
-     table_monthly, chart_trend, dashboard_pic, table_large, feature_text, table_comparison, conclusion],
+     table_large, feature_text, table_comparison],
     tab_title = "Table Examples"
 )
 

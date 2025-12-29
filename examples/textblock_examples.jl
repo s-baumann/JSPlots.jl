@@ -108,36 +108,6 @@ simple_image = TextBlock("""
 </div>
 """, Dict("mascot" => joinpath(dirname(@__FILE__),"pictures", "images.jpeg")))
 
-# Example 7: Combining text blocks with actual plots
-df = DataFrame(
-    x = 1:10,
-    y = rand(rng, 10) .* 100,
-    color = repeat(["A", "B"], inner=5)
-)
-
-line_plot = LineChart(:example_chart, df, :df;
-    x_cols = [:x],
-    y_cols = [:y],
-    color_cols = [:color],
-    title = "Sample Data",
-)
-
-intro_text = TextBlock("""
-<h2>Example: Analysis Report</h2>
-<p>This section shows how to create a complete analysis report with text blocks and interactive charts.</p>
-""")
-
-conclusion_text = TextBlock("""
-<h2>Conclusions</h2>
-<p>Based on the analysis above, we can conclude that:</p>
-<ol>
-    <li>The data shows moderate variability</li>
-    <li>No significant outliers are present</li>
-    <li>Further investigation is recommended</li>
-</ol>
-<h3>Next Steps</h3>
-<p>For more information, contact the data science team.</p>
-""")
 
 summary = TextBlock("""
 <h2>Summary</h2>
@@ -156,8 +126,7 @@ summary = TextBlock("""
 # Create a single page combining all text block examples
 page = JSPlotPage(
     Dict{Symbol,DataFrame}(:df => df),
-    [header, text1, text2, text3, company_header, multi_image_content, simple_image,
-     intro_text, line_plot, conclusion_text, summary],
+    [header, text1, text2, text3, company_header, multi_image_content, simple_image, summary],
     tab_title = "TextBlock Examples"
 )
 

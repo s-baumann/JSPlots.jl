@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Dates, StableRNGs
+using JSPlots, DataFrames, Dates, StableRNGs, Distributions
 
 println("Creating LineChart examples...")
 
@@ -71,8 +71,15 @@ for dept in departments
                 Department = dept,
                 Quarter = quarter,
                 Month = month_name,
-                Productivity = 70 + rand(rng) * 30,
+                Value = 70 + rand(rng) * 30,
                 Metric = "Productivity"
+            ))
+            push!(metrics_df, (
+                Department = dept,
+                Quarter = quarter,
+                Month = month_name,
+                Value = rand(rng, Poisson(month)),
+                Metric = "Sick_Days"
             ))
         end
     end
@@ -80,8 +87,8 @@ end
 
 chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
     x_cols = [:Month],
-    y_cols = [:Productivity],
-    color_cols = [:Metric],
+    y_cols = [:Value],
+    color_cols = [:Department, :Metric],
     filters = Dict{Symbol,Any}(:Department => "Engineering", :Quarter => "Q1"),
     title = "Department Productivity by Month",
     notes = "Interactive filters allow you to select different departments and quarters"
@@ -186,7 +193,7 @@ chart7 = LineChart(:dynamic_controls, dynamic_df, :dynamic_data;
     color_cols = [:Stock, :Strategy, :Region],
     facet_cols = [:Stock, :Strategy, :Region],
     default_facet_cols = nothing,
-    aggregator = "none",
+    aggregator = "mean",
     title = "Dynamic Controls Demo - Stock Returns",
     notes = "Use the dropdown menus to dynamically change: (1) Color by, (2) Line type by, (3) Aggregator, (4) Facet 1, (5) Facet 2."
 )
@@ -238,6 +245,43 @@ chart9 = LineChart(:multi_dimensions, df_multi, :multi_data;
            "This demonstrates how you can provide multiple options for both axes and let users explore different views of the same dataset."
 )
 
+# Example 10: Continuous Range Filters with jQuery UI Slider
+# Create data with continuous numeric variables suitable for range filtering
+continuous_filter_df = DataFrame()
+products_cf = ["Widget", "Gadget", "Doohickey"]
+regions_cf = ["North", "South", "East", "West"]
+
+for product in products_cf
+    for region in regions_cf
+        for month in 1:12
+            push!(continuous_filter_df, (
+                Month = month,
+                Sales = 50000 + rand(rng) * 100000,
+                Profit_Margin = 5 + rand(rng) * 45,  # 5% to 50%
+                Units = 100 + rand(rng) * 900,  # 100 to 1000 units
+                Product = product,
+                Region = region
+            ))
+        end
+    end
+end
+
+chart10 = LineChart(:continuous_filters, continuous_filter_df, :continuous_filter_data;
+    x_cols = [:Month],
+    y_cols = [:Sales],
+    color_cols = [:Product],
+    filters = Dict(
+        :Product => ["Widget", "Gadget", "Doohickey"],  # Categorical filter (dropdown)
+        :Profit_Margin => [5.0, 50.0],  # Continuous filter (range slider)
+        :Units => [100.0, 1000.0]  # Another continuous filter (range slider)
+    ),
+    aggregator = "mean",
+    title = "Sales with Continuous Range Filters",
+    notes = "This example demonstrates jQuery UI range sliders for continuous variables. " *
+           "Use the Product dropdown for categorical filtering, and the Profit Margin and Units sliders " *
+           "to filter by numeric ranges. Each slider has two handles for min/max values."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -245,7 +289,8 @@ conclusion = TextBlock("""
     <li><strong>Time series support:</strong> Automatic date formatting and axis scaling</li>
     <li><strong>Dynamic color grouping:</strong> Choose which variable to color by from dropdown</li>
     <li><strong>Aggregation:</strong> Handle multiple observations per x value with mean, median, count, min, max, or none</li>
-    <li><strong>Interactive filters:</strong> Dropdown menus for dynamic data filtering</li>
+    <li><strong>Interactive filters:</strong> Dropdown menus for categorical filtering and jQuery UI range sliders for continuous numeric filtering</li>
+    <li><strong>Continuous range sliders:</strong> Single slider bar with two draggable handles for min/max values (powered by jQuery UI)</li>
     <li><strong>Dynamic faceting:</strong> Choose 0, 1, or 2 variables for faceting on the fly</li>
     <li><strong>Customization:</strong> Control titles, labels, line width, and markers</li>
     <li><strong>Integration:</strong> Combine with other plot types, images, and text</li>
@@ -263,9 +308,10 @@ page = JSPlotPage(
         :facet_grid_data => facet_grid_df,
         :dynamic_data => dynamic_df,
         :agg_data => agg_df,
-        :multi_data => df_multi
+        :multi_data => df_multi,
+        :continuous_filter_data => continuous_filter_df
     ),
-    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, conclusion],
+    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, chart10, conclusion],
     tab_title = "LineChart Examples"
 )
 
@@ -284,4 +330,5 @@ println("  • Facet grid (2 variables)")
 println("  • Dynamic controls (color, faceting)")
 println("  • Aggregation demo (mean, median, count, min, max)")
 println("  • Dynamic X and Y dimension selection")
+println("  • Continuous range filters with jQuery UI sliders")
 println("  • Integration with images and text")

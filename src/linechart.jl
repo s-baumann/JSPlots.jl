@@ -80,7 +80,13 @@ struct LineChart <: JSPlotsType
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
         # Create JavaScript arrays for columns
+        # Separate categorical and continuous filters
+        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
+        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        categorical_filters_js = build_js_array(categorical_filter_cols)
+        continuous_filters_js = build_js_array(continuous_filter_cols)
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
@@ -100,6 +106,8 @@ struct LineChart <: JSPlotsType
         (function() {
             // Configuration
             const FILTER_COLS = $filter_cols_js;
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
@@ -113,7 +121,12 @@ struct LineChart <: JSPlotsType
             // Aggregation functions
             function aggregate(values, method) {
                 if (values.length === 0) return null;
-                if (method === 'none') return values;
+                if (method === 'none') {
+                    // When no aggregation is specified, use mean to avoid duplicate x values
+                    // This prevents the zigzag line problem when multiple y values exist for same x
+                    const sum = values.reduce((a, b) => a + b, 0);
+                    return [sum / values.length];
+                }
                 if (method === 'count') return [values.length];
                 if (method === 'sum') {
                     const sum = values.reduce((a, b) => a + b, 0);
@@ -144,12 +157,26 @@ struct LineChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-                // Get current filter values (multiple selections)
+                // Get current filter values
                 const filters = {};
-                FILTER_COLS.forEach(col => {
-                    const select = document.getElementById(col + '_select');
+                const rangeFilters = {};
+
+                // Read categorical filters (dropdowns)
+                CATEGORICAL_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$chart_title');
                     if (select) {
                         filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Read continuous filters (range sliders)
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
                     }
                 });
 
@@ -175,11 +202,20 @@ struct LineChart <: JSPlotsType
                 // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-                // Filter data (support multiple selections per filter)
+                // Filter data (support both categorical and continuous filters)
                 const filteredData = allData.filter(row => {
+                    // Check categorical filters (dropdowns)
                     for (let col in filters) {
                         const selectedValues = filters[col];
                         if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
+                            return false;
+                        }
+                    }
+                    // Check continuous filters (range sliders)
+                    for (let col in rangeFilters) {
+                        const value = parseFloat(row[col]);
+                        const range = rangeFilters[col];
+                        if (value < range.min || value > range.max) {
                             return false;
                         }
                     }
@@ -203,25 +239,43 @@ struct LineChart <: JSPlotsType
                     const traces = [];
                     for (let groupKey in groupedData) {
                         const group = groupedData[groupKey];
-                        group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
 
-                        let xValues, yValues;
-                        if (AGGREGATOR === 'none') {
-                            xValues = group.data.map(row => row[X_COL]);
-                            yValues = group.data.map(row => row[Y_COL]);
-                        } else {
-                            // Group by x value and aggregate
-                            const xGroups = {};
-                            group.data.forEach(row => {
-                                const xVal = row[X_COL];
-                                // Convert to string for consistent grouping
-                                const xKey = String(xVal);
-                                if (!xGroups[xKey]) xGroups[xKey] = [];
-                                xGroups[xKey].push(row[Y_COL]);
-                            });
+                            // Check if values look like dates (ISO format: YYYY-MM-DD)
+                            const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
+                            if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                                return aStr.localeCompare(bStr);
+                            }
 
-                            xValues = [];
-                            yValues = [];
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // ALWAYS group by x value, even when aggregator is 'none'
+                        // This prevents duplicate x values from creating zigzag lines
+                        const xGroups = {};
+                        group.data.forEach(row => {
+                            const xVal = row[X_COL];
+                            // Convert to string for consistent grouping
+                            const xKey = String(xVal);
+                            if (!xGroups[xKey]) xGroups[xKey] = [];
+                            xGroups[xKey].push(row[Y_COL]);
+                        });
+
+                        let xValues = [];
+                        let yValues = [];
 
                             // Helper function to check if a string looks like a date
                             function looksLikeDate(str) {
@@ -262,7 +316,6 @@ struct LineChart <: JSPlotsType
                                     yValues.push(aggregated[0]);
                                 }
                             });
-                        }
 
                         traces.push({
                             x: xValues,
@@ -327,24 +380,42 @@ struct LineChart <: JSPlotsType
 
                         for (let groupKey in groupedData) {
                             const group = groupedData[groupKey];
-                            group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                            // Robust sort that handles dates, numbers, and strings
+                            group.data.sort((a, b) => {
+                                const aVal = a[X_COL];
+                                const bVal = b[X_COL];
+                                const aStr = String(aVal);
+                                const bStr = String(bVal);
 
-                            let xValues, yValues;
-                            if (AGGREGATOR === 'none') {
-                                xValues = group.data.map(row => row[X_COL]);
-                                yValues = group.data.map(row => row[Y_COL]);
-                            } else {
-                                // Group by x value and aggregate
-                                const xGroups = {};
-                                group.data.forEach(row => {
-                                    const xVal = row[X_COL];
-                                    const xKey = String(xVal);
-                                    if (!xGroups[xKey]) xGroups[xKey] = [];
-                                    xGroups[xKey].push(row[Y_COL]);
-                                });
+                                // Check if values look like dates (ISO format: YYYY-MM-DD)
+                                const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
+                                if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                                    return aStr.localeCompare(bStr);
+                                }
 
-                                xValues = [];
-                                yValues = [];
+                                // Try numeric comparison
+                                const aNum = parseFloat(aVal);
+                                const bNum = parseFloat(bVal);
+                                if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                    return aNum - bNum;
+                                }
+
+                                // Fall back to string comparison
+                                return aStr.localeCompare(bStr);
+                            });
+
+                            // ALWAYS group by x value, even when aggregator is 'none'
+                            // This prevents duplicate x values from creating zigzag lines
+                            const xGroups = {};
+                            group.data.forEach(row => {
+                                const xVal = row[X_COL];
+                                const xKey = String(xVal);
+                                if (!xGroups[xKey]) xGroups[xKey] = [];
+                                xGroups[xKey].push(row[Y_COL]);
+                            });
+
+                            let xValues = [];
+                            let yValues = [];
 
                                 // Helper function to check if a string looks like a date
                                 function looksLikeDate(str) {
@@ -381,7 +452,6 @@ struct LineChart <: JSPlotsType
                                         yValues.push(aggregated[0]);
                                     }
                                 });
-                            }
 
                             const legendGroup = group.color;
 
@@ -471,24 +541,42 @@ struct LineChart <: JSPlotsType
 
                             for (let groupKey in groupedData) {
                                 const group = groupedData[groupKey];
-                                group.data.sort((a, b) => a[X_COL] - b[X_COL]);
+                                // Robust sort that handles dates, numbers, and strings
+                                group.data.sort((a, b) => {
+                                    const aVal = a[X_COL];
+                                    const bVal = b[X_COL];
+                                    const aStr = String(aVal);
+                                    const bStr = String(bVal);
 
-                                let xValues, yValues;
-                                if (AGGREGATOR === 'none') {
-                                    xValues = group.data.map(row => row[X_COL]);
-                                    yValues = group.data.map(row => row[Y_COL]);
-                                } else {
-                                    // Group by x value and aggregate
-                                    const xGroups = {};
-                                    group.data.forEach(row => {
-                                        const xVal = row[X_COL];
-                                        const xKey = String(xVal);
-                                        if (!xGroups[xKey]) xGroups[xKey] = [];
-                                        xGroups[xKey].push(row[Y_COL]);
-                                    });
+                                    // Check if values look like dates (ISO format: YYYY-MM-DD)
+                                    const datePattern = /^\\d{4}-\\d{2}-\\d{2}/;
+                                    if (datePattern.test(aStr) && datePattern.test(bStr)) {
+                                        return aStr.localeCompare(bStr);
+                                    }
 
-                                    xValues = [];
-                                    yValues = [];
+                                    // Try numeric comparison
+                                    const aNum = parseFloat(aVal);
+                                    const bNum = parseFloat(bVal);
+                                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                        return aNum - bNum;
+                                    }
+
+                                    // Fall back to string comparison
+                                    return aStr.localeCompare(bStr);
+                                });
+
+                                // ALWAYS group by x value, even when aggregator is 'none'
+                                // This prevents duplicate x values from creating zigzag lines
+                                const xGroups = {};
+                                group.data.forEach(row => {
+                                    const xVal = row[X_COL];
+                                    const xKey = String(xVal);
+                                    if (!xGroups[xKey]) xGroups[xKey] = [];
+                                    xGroups[xKey].push(row[Y_COL]);
+                                });
+
+                                let xValues = [];
+                                let yValues = [];
 
                                     // Helper function to check if a string looks like a date
                                     function looksLikeDate(str) {
@@ -524,7 +612,6 @@ struct LineChart <: JSPlotsType
                                             yValues.push(aggregated[0]);
                                         }
                                     });
-                                }
 
                                 const legendGroup = group.color;
 

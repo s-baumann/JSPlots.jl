@@ -103,7 +103,7 @@ create_html(scatter, "output.html")
 """
 
 code3 = CodeBlock(tutorial_code, Val(:code),
-    notes="This code is for display only - not executed in this example")
+    notes="")
 
 # Example 4: Multiple related code blocks showing a workflow
 example4_text = TextBlock("""
@@ -164,8 +164,8 @@ multilang_header = TextBlock("""
 
 # Python Example
 python_section = TextBlock("""
-<h2>5. Python Code (Display Only)</h2>
-<p>Python code is displayed with proper syntax highlighting but cannot be executed.</p>
+<h2>5. Python Code</h2>
+<p>Python code is displayed with proper syntax highlighting.</p>
 """)
 
 python_code = """
@@ -206,7 +206,7 @@ python_cb = CodeBlock(python_code, Val(:code), language="python",
 
 # R Example
 r_section = TextBlock("""
-<h2>6. R Code (Display Only)</h2>
+<h2>6. R Code</h2>
 <p>R statistical code with proper syntax highlighting.</p>
 """)
 
@@ -239,7 +239,7 @@ r_cb = CodeBlock(r_code, Val(:code), language="r",
 
 # SQL Example
 sql_section = TextBlock("""
-<h2>7. SQL Code (Display Only)</h2>
+<h2>7. SQL Code</h2>
 <p>SQL queries with proper syntax highlighting.</p>
 """)
 
@@ -284,7 +284,7 @@ sql_cb = CodeBlock(sql_code, Val(:code), language="sql",
 
 # C++ Example
 cpp_section = TextBlock("""
-<h2>8. C++ Code (Display Only)</h2>
+<h2>8. C++ Code</h2>
 <p>C++ code with proper syntax highlighting.</p>
 """)
 
@@ -347,7 +347,7 @@ cpp_cb = CodeBlock(cpp_code, Val(:code), language="c++",
 
 # JavaScript Example
 javascript_section = TextBlock("""
-<h2>9. JavaScript Code (Display Only)</h2>
+<h2>9. JavaScript Code</h2>
 <p>Modern JavaScript (ES6+) code with proper syntax highlighting.</p>
 """)
 
@@ -421,7 +421,7 @@ javascript_cb = CodeBlock(javascript_code, Val(:code), language="javascript",
 
 # Rust Example
 rust_section = TextBlock("""
-<h2>10. Rust Code (Display Only)</h2>
+<h2>10. Rust Code</h2>
 <p>Rust provides memory safety without garbage collection through its ownership system.</p>
 """)
 

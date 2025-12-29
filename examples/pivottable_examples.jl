@@ -167,54 +167,6 @@ pivot8 = PivotTable(:Correlation_Matrix, :correlations;
     notes = "Correlation matrix with custom red-white-blue color scale"
 )
 
-# Example 8: Combined with LineChart
-df_line = DataFrame(
-    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
-    x = 1:10,
-    y = rand(rng, 10),
-    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
-)
-df_line[!, :categ] .=  [ :B, :B, :B, :B, :B, :A, :A, :A, :A, :C]
-df_line[!, :categ22] .= "Category_A"
-
-df_line2 = DataFrame(
-    date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
-    x = 1:10,
-    y = rand(rng, 10),
-    color = [:A, :B, :A, :B, :A, :B, :A, :B, :A, :B]
-)
-df_line2[!, :categ] .= [:A, :A, :A, :A, :A, :B, :B, :B, :B, :C]
-df_line2[!, :categ22] .= "Category_B"
-df_combined = vcat(df_line, df_line2)
-
-linechart = LineChart(:pchart, df_combined, :df_combined;
-            x_cols=[:x],
-            y_cols=[:y],
-            color_cols=[:color],
-            filters=Dict(:categ => :A, :categ22 => "Category_A"),
-            title="Line Chart with Filters",
-            notes="Interactive line chart with dropdown filters - combine with PivotTables!")
-
-# Example 9: Combined with 3D Surface
-subframe = allcombinations(DataFrame, x = collect(1:6), y = collect(1:6)); subframe[!, :group] .= "A";
-sf2 = deepcopy(subframe); sf2[!, :group] .= "B"
-sf3 = deepcopy(subframe); sf3[!, :group] .= "C"
-sf4 = deepcopy(subframe); sf4[!, :group] .= "D"
-subframe[!, :z] = cos.(sqrt.(subframe.x .^ 2 .+  subframe.y .^ 2))
-sf2[!, :z] = cos.(sqrt.(sf2.x .^ 2 .+  sf2.y .^ 1)) .- 1.0
-sf3[!, :z] = cos.(sqrt.(sf3.x .^ 2 .+  sf3.y .^ 0.5)) .+ 1.0
-sf4[!, :z] = sqrt.(sf4.x) .- sqrt.(sf4.y)
-subframe = reduce(vcat, [subframe, sf2, sf3, sf4])
-
-surface3d = Surface3D(:threeD, subframe, :subframe;
-        x_col = :x,
-        y_col = :y,
-        z_col = :z,
-        group_col = :group,
-        title = "3D Surface Chart",
-        notes = "3D surface visualization grouped by mathematical functions"
-    )
-
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -239,11 +191,9 @@ page = JSPlotPage(
         :survey_data => survey_df,
         :transaction_data => transactions_df,
         :stockReturns => stockReturns,
-        :correlations => correlations,
-        :df_combined => df_combined,
-        :subframe => subframe
+        :correlations => correlations
     ),
-    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, linechart, surface3d, conclusion],
+    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, conclusion],
     tab_title = "PivotTable Examples",
     dataformat = :csv_embedded
 )

@@ -11,6 +11,18 @@ println("Creating Picture examples...")
 # Set up consistent RNG for reproducible examples
 rng = StableRNG(123)
 
+# Prepare header
+header = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/picture_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>Picture Examples</h1>
+<p>This page demonstrates the Picture chart type in JSPlots.</p>
+<ul>
+    <li><strong>Put images from the internet (png, jpeg, gif, whatever) into your html page</li>
+    <li><strong>Have a filtering so you can choose between multiple charts in a particular point.</li>
+</ul>
+""")
+
+
 # ========================================
 # Example 1: Simple Picture from file path
 # ========================================
@@ -201,7 +213,7 @@ println("Creating HTML page...")
 # Create page with all picture examples
 page = JSPlotPage(
     Dict{Symbol,DataFrame}(),
-    [pic1, gif_pic, filtered_pic, simple_filtered_pic],
+    [header, pic1, gif_pic, filtered_pic, simple_filtered_pic],
     dataformat=:csv_embedded
 )
 

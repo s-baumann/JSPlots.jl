@@ -277,7 +277,7 @@ function compute_surfaces(df, x_col, y_col, z_col, group_cols, group_levels,
         # Fit surface at each smoothing level
         for smoothing in smoothing_params
             try
-                x_grid, y_grid, z_grid = surface_smoother(x_data, y_data, z_data, smoothing; L2_metric=true)
+                x_grid, y_grid, z_grid = surface_smoother(x_data, y_data, z_data, smoothing; L2_metric=L2_metric)
                 surfaces[group_name][smoothing] = (x_grid, y_grid, z_grid)
             catch e
                 @warn "Failed to fit surface for group $group_name with smoothing $smoothing: $e"
