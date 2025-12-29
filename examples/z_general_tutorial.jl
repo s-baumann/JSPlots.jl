@@ -317,7 +317,7 @@ pages_theory = TextBlock("""
 then combine them into a multi-page report using <code>Pages</code>.</p>
 
 We have two examples that demonstrate the use of pages.
-<a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/easy_report/easy_report.html\" style=\"color: blue; font-weight: bold;\">See here </a> and <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report/annual_report.html\" style=\"color: blue; font-weight: bold;\"> see here/a>
+<a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/easy_report/easy_report.html\" style=\"color: blue; font-weight: bold;\">See here </a> and <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report/annual_report.html\" style=\"color: blue; font-weight: bold;\"> see here </a>
 with <a href=\"https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl\" style=\"color: blue; font-weight: bold;\">this script</a> generating both of them.
 
 <h3>Creating Individual Pages with JSPlotPage</h3>
@@ -740,7 +740,7 @@ scenario_vol = CorrelationScenario("Volatility Correlations",
 # Create advanced CorrPlot with multiple scenarios
 corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol];
     title = "Stock Market Correlation Analysis - Multiple Scenarios",
-    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
+    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. Note that it will only appear if i) you select order by dendrogram and ii) you select all of the variables. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
     default_scenario = "Short-term Returns (Daily)",
     default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
     allow_manual_order = true
