@@ -19,20 +19,25 @@ struct CorrelationScenario
     hc::Clustering.Hclust
     var_labels::Vector{String}
 
-    function CorrelationScenario(name::String, pearson::Matrix{Float64},
-                                spearman::Matrix{Float64}, hc::Clustering.Hclust,
-                                var_labels::Vector{String})
-        n = length(var_labels)
-        if size(pearson) != (n, n)
+    function CorrelationScenario(name::String, pearson::AbstractMatrix{<:Real},
+                                spearman::AbstractMatrix{<:Real}, hc::Clustering.Hclust,
+                                var_labels::Union{Vector{String}, Vector{Symbol}})
+        # Convert to standard types
+        pearson_mat = Matrix{Float64}(pearson)
+        spearman_mat = Matrix{Float64}(spearman)
+        labels = string.(var_labels)
+
+        n = length(labels)
+        if size(pearson_mat) != (n, n)
             error("Pearson matrix must be $(n)x$(n) to match $(n) variable labels")
         end
-        if size(spearman) != (n, n)
+        if size(spearman_mat) != (n, n)
             error("Spearman matrix must be $(n)x$(n) to match $(n) variable labels")
         end
         if length(hc.order) != n
             error("Dendrogram order must have $(n) elements to match $(n) variables")
         end
-        new(name, pearson, spearman, hc, var_labels)
+        new(name, pearson_mat, spearman_mat, hc, labels)
     end
 end
 
@@ -108,17 +113,17 @@ function cluster_from_correlation(corr_matrix::Matrix{Float64}; linkage::Symbol=
 end
 
 """
-    CorrPlot(chart_title::Symbol, pearson::Matrix{Float64}, spearman::Matrix{Float64},
-             hc::Clustering.Hclust, var_labels::Vector{String}; kwargs...)
+    CorrPlot(chart_title::Symbol, pearson::AbstractMatrix, spearman::AbstractMatrix,
+             hc::Clustering.Hclust, var_labels::Union{Vector{String}, Vector{Symbol}}; kwargs...)
 
 Create an interactive correlation plot with hierarchical clustering dendrogram.
 
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this chart
-- `pearson::Matrix{Float64}`: Pearson correlation matrix
-- `spearman::Matrix{Float64}`: Spearman correlation matrix
+- `pearson::AbstractMatrix{<:Real}`: Pearson correlation matrix (accepts Matrix, Hermitian, etc.)
+- `spearman::AbstractMatrix{<:Real}`: Spearman correlation matrix (accepts Matrix, Hermitian, etc.)
 - `hc::Clustering.Hclust`: Hierarchical clustering result from `cluster_from_correlation`
-- `var_labels::Vector{String}`: Variable names for labeling
+- `var_labels::Union{Vector{String}, Vector{Symbol}}`: Variable names for labeling
 
 # Keyword Arguments
 - `title::String`: Chart title (default: `"Correlation Plot with Dendrogram"`)
@@ -151,20 +156,25 @@ struct CorrPlot <: JSPlotsType
     appearance_html::String
 
     function CorrPlot(chart_title::Symbol,
-                      pearson::Matrix{Float64},
-                      spearman::Matrix{Float64},
+                      pearson::AbstractMatrix{<:Real},
+                      spearman::AbstractMatrix{<:Real},
                       hc::Clustering.Hclust,
-                      var_labels::Vector{String};
+                      var_labels::Union{Vector{String}, Vector{Symbol}};
                       title::String = "Correlation Plot with Dendrogram",
                       notes::String = "")
 
-        n = length(var_labels)
+        # Convert to standard types
+        pearson_mat = Matrix{Float64}(pearson)
+        spearman_mat = Matrix{Float64}(spearman)
+        labels = string.(var_labels)
+
+        n = length(labels)
 
         # Validate inputs
-        if size(pearson) != (n, n)
+        if size(pearson_mat) != (n, n)
             error("Pearson matrix must be $(n)x$(n) to match $(n) variable labels")
         end
-        if size(spearman) != (n, n)
+        if size(spearman_mat) != (n, n)
             error("Spearman matrix must be $(n)x$(n) to match $(n) variable labels")
         end
         if length(hc.order) != n
@@ -173,11 +183,11 @@ struct CorrPlot <: JSPlotsType
 
         # Reorder variables according to dendrogram
         ordered_indices = hc.order
-        ordered_labels = var_labels[ordered_indices]
+        ordered_labels = labels[ordered_indices]
 
         # Reorder correlation matrices
-        pearson_ordered = pearson[ordered_indices, ordered_indices]
-        spearman_ordered = spearman[ordered_indices, ordered_indices]
+        pearson_ordered = pearson_mat[ordered_indices, ordered_indices]
+        spearman_ordered = spearman_mat[ordered_indices, ordered_indices]
 
         # Build JSON data for correlations (asymmetric matrix)
         corr_data = []
