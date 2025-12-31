@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -405,7 +458,8 @@ $(function(){
 
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'returns'];
     const Y_COLS = ['Sharpe', 'returns', 'max_drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -444,6 +498,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_strategy_evolution_arrows = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('strategy_evolution_arrows' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_strategy_evolution_arrows');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -451,12 +513,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_strategy_evolution_arrows');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_strategy_evolution_arrows');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_strategy_evolution_arrows' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -478,16 +552,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_strategy_evolution_arrows_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_strategy_evolution_arrows_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -1035,7 +1142,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'returns'];
     const Y_COLS = ['Sharpe', 'returns', 'max_drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -1074,6 +1182,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_strategy_evolution_alpha = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('strategy_evolution_alpha' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_strategy_evolution_alpha');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -1081,12 +1197,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_strategy_evolution_alpha');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_strategy_evolution_alpha');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_strategy_evolution_alpha' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -1108,16 +1236,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_strategy_evolution_alpha_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_strategy_evolution_alpha_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -1665,7 +1826,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['region'];
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'winrate'];
     const Y_COLS = ['Sharpe', 'drawdown', 'winrate'];
     const COLOR_COLS = ['strategy', 'region'];
@@ -1704,6 +1866,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_regional_paths = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('regional_paths' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_regional_paths');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -1711,12 +1881,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_regional_paths');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_regional_paths');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_regional_paths' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -1738,16 +1920,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_regional_paths_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_regional_paths_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -2295,7 +2510,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe'];
     const Y_COLS = ['returns', 'Sharpe'];
     const COLOR_COLS = ['asset_class'];
@@ -2334,6 +2550,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_asset_performance = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('asset_performance' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_asset_performance');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -2341,12 +2565,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_asset_performance');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_asset_performance');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_asset_performance' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -2368,16 +2604,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_asset_performance_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_asset_performance_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -2925,7 +3194,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe'];
     const Y_COLS = ['Sharpe', 'drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -2964,6 +3234,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_facet_by_region = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('facet_by_region' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_facet_by_region');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -2971,12 +3249,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_facet_by_region');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_facet_by_region');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_facet_by_region' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -2998,16 +3288,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_facet_by_region_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_facet_by_region_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -3555,7 +3878,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['development_cost', 'features_completed', 'bug_count'];
     const Y_COLS = ['user_satisfaction', 'features_completed', 'development_cost'];
     const COLOR_COLS = ['product'];
@@ -3594,6 +3918,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_product_development = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('product_development' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_product_development');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -3601,12 +3933,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_product_development');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_product_development');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_product_development' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -3628,16 +3972,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_product_development_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_product_development_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -4185,7 +4562,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['portfolio_risk', 'diversification', 'transaction_cost'];
     const Y_COLS = ['portfolio_return', 'portfolio_risk', 'diversification'];
     const COLOR_COLS = ['stage'];
@@ -4224,6 +4602,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_optimization_path = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('optimization_path' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_optimization_path');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -4231,12 +4617,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_optimization_path');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_optimization_path');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_optimization_path' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -4258,16 +4656,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_optimization_path_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_optimization_path_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -4815,7 +5246,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['customer_acquisition_cost', 'churn_rate', 'monthly_revenue'];
     const Y_COLS = ['customer_lifetime_value', 'monthly_revenue', 'customer_acquisition_cost'];
     const COLOR_COLS = ['company'];
@@ -4854,6 +5286,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_business_metrics = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('business_metrics' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_business_metrics');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -4861,12 +5301,24 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_business_metrics');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_business_metrics');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_business_metrics' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
         });
 
@@ -4888,16 +5340,49 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            return true;
+
+            const countElement = document.getElementById(col + '_select_business_metrics_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_business_metrics_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -5735,21 +6220,31 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_strategy_evolution_arrows">X dimension: </label>
-            <select id="x_col_select_strategy_evolution_arrows" onchange="updateChart_strategy_evolution_arrows()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_strategy_evolution_arrows">X dimension: </label>
+                <select id="x_col_select_strategy_evolution_arrows" onchange="updateChart_strategy_evolution_arrows()">
                 <option value="volatility" selected>volatility</option>
                 <option value="Sharpe">Sharpe</option>
                 <option value="returns">returns</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_strategy_evolution_arrows_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_strategy_evolution_arrows">Y dimension: </label>
-            <select id="y_col_select_strategy_evolution_arrows" onchange="updateChart_strategy_evolution_arrows()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_strategy_evolution_arrows">Y dimension: </label>
+                <select id="y_col_select_strategy_evolution_arrows" onchange="updateChart_strategy_evolution_arrows()">
                 <option value="Sharpe" selected>Sharpe</option>
                 <option value="returns">returns</option>
                 <option value="max_drawdown">max_drawdown</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_strategy_evolution_arrows_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5766,21 +6261,31 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_strategy_evolution_alpha">X dimension: </label>
-            <select id="x_col_select_strategy_evolution_alpha" onchange="updateChart_strategy_evolution_alpha()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_strategy_evolution_alpha">X dimension: </label>
+                <select id="x_col_select_strategy_evolution_alpha" onchange="updateChart_strategy_evolution_alpha()">
                 <option value="volatility" selected>volatility</option>
                 <option value="Sharpe">Sharpe</option>
                 <option value="returns">returns</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_strategy_evolution_alpha_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_strategy_evolution_alpha">Y dimension: </label>
-            <select id="y_col_select_strategy_evolution_alpha" onchange="updateChart_strategy_evolution_alpha()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_strategy_evolution_alpha">Y dimension: </label>
+                <select id="y_col_select_strategy_evolution_alpha" onchange="updateChart_strategy_evolution_alpha()">
                 <option value="Sharpe" selected>Sharpe</option>
                 <option value="returns">returns</option>
                 <option value="max_drawdown">max_drawdown</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_strategy_evolution_alpha_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5795,42 +6300,65 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 <p>Default shows 3 strategies in US region. Use filters to explore other regions. Alpha gradient shows time progression.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="region_select_regional_paths">region: </label>
-            <select id="region_select_regional_paths" multiple onchange="updateChart_regional_paths()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_regional_paths">region: </label>
+                <select id="region_select_regional_paths" multiple onchange="updateChart_regional_paths()">
                 <option value="Asia">Asia</option>
                 <option value="Europe">Europe</option>
                 <option value="US" selected>US</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_regional_paths_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_regional_paths">X dimension: </label>
-            <select id="x_col_select_regional_paths" onchange="updateChart_regional_paths()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_regional_paths">X dimension: </label>
+                <select id="x_col_select_regional_paths" onchange="updateChart_regional_paths()">
                 <option value="volatility" selected>volatility</option>
                 <option value="Sharpe">Sharpe</option>
                 <option value="winrate">winrate</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_regional_paths_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_regional_paths">Y dimension: </label>
-            <select id="y_col_select_regional_paths" onchange="updateChart_regional_paths()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_regional_paths">Y dimension: </label>
+                <select id="y_col_select_regional_paths" onchange="updateChart_regional_paths()">
                 <option value="Sharpe" selected>Sharpe</option>
                 <option value="drawdown">drawdown</option>
                 <option value="winrate">winrate</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_regional_paths_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="color_col_select_regional_paths">Path grouping: </label>
-            <select id="color_col_select_regional_paths" onchange="updateChart_regional_paths()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_regional_paths">Path grouping: </label>
+                <select id="color_col_select_regional_paths" onchange="updateChart_regional_paths()">
                 <option value="strategy" selected>strategy</option>
                 <option value="region">region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_regional_paths_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5847,19 +6375,29 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_asset_performance">X dimension: </label>
-            <select id="x_col_select_asset_performance" onchange="updateChart_asset_performance()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_asset_performance">X dimension: </label>
+                <select id="x_col_select_asset_performance" onchange="updateChart_asset_performance()">
                 <option value="volatility" selected>volatility</option>
                 <option value="Sharpe">Sharpe</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_asset_performance_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_asset_performance">Y dimension: </label>
-            <select id="y_col_select_asset_performance" onchange="updateChart_asset_performance()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_asset_performance">Y dimension: </label>
+                <select id="y_col_select_asset_performance" onchange="updateChart_asset_performance()">
                 <option value="returns" selected>returns</option>
                 <option value="Sharpe">Sharpe</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_asset_performance_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5876,40 +6414,60 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_facet_by_region">X dimension: </label>
-            <select id="x_col_select_facet_by_region" onchange="updateChart_facet_by_region()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_facet_by_region">X dimension: </label>
+                <select id="x_col_select_facet_by_region" onchange="updateChart_facet_by_region()">
                 <option value="volatility" selected>volatility</option>
                 <option value="Sharpe">Sharpe</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_facet_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_facet_by_region">Y dimension: </label>
-            <select id="y_col_select_facet_by_region" onchange="updateChart_facet_by_region()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_facet_by_region">Y dimension: </label>
+                <select id="y_col_select_facet_by_region" onchange="updateChart_facet_by_region()">
                 <option value="Sharpe" selected>Sharpe</option>
                 <option value="drawdown">drawdown</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_facet_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_facet_by_region">Facet 1: </label>
-            <select id="facet1_select_facet_by_region" onchange="updateChart_facet_by_region()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_facet_by_region">Facet 1: </label>
+                <select id="facet1_select_facet_by_region" onchange="updateChart_facet_by_region()">
                 <option value="None">None</option>
                 <option value="region" selected>region</option>
                 <option value="strategy">strategy</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_facet_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_facet_by_region">Facet 2: </label>
-            <select id="facet2_select_facet_by_region" onchange="updateChart_facet_by_region()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_facet_by_region">Facet 2: </label>
+                <select id="facet2_select_facet_by_region" onchange="updateChart_facet_by_region()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="strategy">strategy</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_facet_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5925,21 +6483,31 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_product_development">X dimension: </label>
-            <select id="x_col_select_product_development" onchange="updateChart_product_development()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_product_development">X dimension: </label>
+                <select id="x_col_select_product_development" onchange="updateChart_product_development()">
                 <option value="development_cost" selected>development_cost</option>
                 <option value="features_completed">features_completed</option>
                 <option value="bug_count">bug_count</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_product_development_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_product_development">Y dimension: </label>
-            <select id="y_col_select_product_development" onchange="updateChart_product_development()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_product_development">Y dimension: </label>
+                <select id="y_col_select_product_development" onchange="updateChart_product_development()">
                 <option value="user_satisfaction" selected>user_satisfaction</option>
                 <option value="features_completed">features_completed</option>
                 <option value="development_cost">development_cost</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_product_development_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5956,21 +6524,31 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_optimization_path">X dimension: </label>
-            <select id="x_col_select_optimization_path" onchange="updateChart_optimization_path()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_optimization_path">X dimension: </label>
+                <select id="x_col_select_optimization_path" onchange="updateChart_optimization_path()">
                 <option value="portfolio_risk" selected>portfolio_risk</option>
                 <option value="diversification">diversification</option>
                 <option value="transaction_cost">transaction_cost</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_optimization_path_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_optimization_path">Y dimension: </label>
-            <select id="y_col_select_optimization_path" onchange="updateChart_optimization_path()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_optimization_path">Y dimension: </label>
+                <select id="y_col_select_optimization_path" onchange="updateChart_optimization_path()">
                 <option value="portfolio_return" selected>portfolio_return</option>
                 <option value="portfolio_risk">portfolio_risk</option>
                 <option value="diversification">diversification</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_optimization_path_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -5987,21 +6565,31 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_business_metrics">X dimension: </label>
-            <select id="x_col_select_business_metrics" onchange="updateChart_business_metrics()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_business_metrics">X dimension: </label>
+                <select id="x_col_select_business_metrics" onchange="updateChart_business_metrics()">
                 <option value="customer_acquisition_cost" selected>customer_acquisition_cost</option>
                 <option value="churn_rate">churn_rate</option>
                 <option value="monthly_revenue">monthly_revenue</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_business_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_business_metrics">Y dimension: </label>
-            <select id="y_col_select_business_metrics" onchange="updateChart_business_metrics()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_business_metrics">Y dimension: </label>
+                <select id="y_col_select_business_metrics" onchange="updateChart_business_metrics()">
                 <option value="customer_lifetime_value" selected>customer_lifetime_value</option>
                 <option value="monthly_revenue">monthly_revenue</option>
                 <option value="customer_acquisition_cost">customer_acquisition_cost</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_business_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6011,6 +6599,6 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 <div id="business_metrics"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_data</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

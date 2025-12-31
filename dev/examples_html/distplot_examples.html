@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -403,6 +456,11 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     // Plotly default colors
     var plotlyColors = [
         'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -410,7 +468,7 @@ $(function(){
         'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
         'rgb(23, 190, 207)'
     ];
-    
+
     // Initialize toggle states
     window.showHistogram_simple_dist = true;
     window.showBox_simple_dist = true;
@@ -665,31 +723,88 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_simple_dist = function() {
-        const FILTER_COLS = [];
+        const totalObs = window.allData_simple_dist.length;
 
-        // Get filter values (multiple selections)
+        // Update total observation count
+        const totalObsElement = document.getElementById('simple_dist_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_simple_dist');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_simple_dist.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_simple_dist' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_simple_dist;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_simple_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_simple_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Render with filtered data
-        updatePlot_simple_dist(filteredData);
+        updatePlot_simple_dist(currentData);
     };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     // Plotly default colors
     var plotlyColors = [
         'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -697,7 +812,7 @@ if (currentGroupCol) {
         'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
         'rgb(23, 190, 207)'
     ];
-    
+
     // Initialize toggle states
     window.showHistogram_multi_group_dist = true;
     window.showBox_multi_group_dist = true;
@@ -932,31 +1047,88 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_group_dist = function() {
-        const FILTER_COLS = [];
+        const totalObs = window.allData_multi_group_dist.length;
 
-        // Get filter values (multiple selections)
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_group_dist_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_multi_group_dist');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_multi_group_dist.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_multi_group_dist' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_multi_group_dist;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_group_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_group_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Render with filtered data
-        updatePlot_multi_group_dist(filteredData);
+        updatePlot_multi_group_dist(currentData);
     };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = ['department'];
+    const CONTINUOUS_FILTERS = ['age'];
+
     // Plotly default colors
     var plotlyColors = [
         'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -964,7 +1136,7 @@ if (currentGroupCol) {
         'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
         'rgb(23, 190, 207)'
     ];
-    
+
     // Initialize toggle states
     window.showHistogram_filtered_dist = true;
     window.showBox_filtered_dist = true;
@@ -1199,31 +1371,88 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_filtered_dist = function() {
-        const FILTER_COLS = ['age', 'department'];
+        const totalObs = window.allData_filtered_dist.length;
 
-        // Get filter values (multiple selections)
+        // Update total observation count
+        const totalObsElement = document.getElementById('filtered_dist_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_filtered_dist');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_filtered_dist.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_filtered_dist' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_filtered_dist;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_filtered_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_filtered_dist_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Render with filtered data
-        updatePlot_filtered_dist(filteredData);
+        updatePlot_filtered_dist(currentData);
     };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     // Plotly default colors
     var plotlyColors = [
         'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -1231,7 +1460,7 @@ if (currentGroupCol) {
         'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
         'rgb(23, 190, 207)'
     ];
-    
+
     // Initialize toggle states
     window.showHistogram_multi_dropdown = true;
     window.showBox_multi_dropdown = true;
@@ -1492,31 +1721,88 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_dropdown = function() {
-        const FILTER_COLS = [];
+        const totalObs = window.allData_multi_dropdown.length;
 
-        // Get filter values (multiple selections)
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_dropdown_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_multi_dropdown');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_multi_dropdown.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_multi_dropdown' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_multi_dropdown;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_dropdown_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_dropdown_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Render with filtered data
-        updatePlot_multi_dropdown(filteredData);
+        updatePlot_multi_dropdown(currentData);
     };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     // Plotly default colors
     var plotlyColors = [
         'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -1524,7 +1810,7 @@ if (currentGroupCol) {
         'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
         'rgb(23, 190, 207)'
     ];
-    
+
     // Initialize toggle states
     window.showHistogram_custom_appearance = true;
     window.showBox_custom_appearance = true;
@@ -1759,31 +2045,771 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_custom_appearance = function() {
-        const FILTER_COLS = [];
+        const totalObs = window.allData_custom_appearance.length;
 
-        // Get filter values (multiple selections)
+        // Update total observation count
+        const totalObsElement = document.getElementById('custom_appearance_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_custom_appearance');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_custom_appearance.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_custom_appearance' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_custom_appearance;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_custom_appearance_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_custom_appearance_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Render with filtered data
-        updatePlot_custom_appearance(filteredData);
+        updatePlot_custom_appearance(currentData);
     };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = ['time_col', 'datetime_col', 'date_col', 'zoneddatetime_col'];
+
+    // Plotly default colors
+    var plotlyColors = [
+        'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
+        'rgb(214, 39, 40)', 'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+        'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
+        'rgb(23, 190, 207)'
+    ];
+
+    // Initialize toggle states
+    window.showHistogram_datetime_filters = true;
+    window.showBox_datetime_filters = true;
+    window.showRug_datetime_filters = true;
+    
+    // Load and parse CSV data using centralized parser
+    loadDataset('df6').then(function(data) {
+        window.allData_datetime_filters = data;
+
+        // Initialize buttons and sliders after data is loaded
+        $(function() {
+                // Histogram toggle button
+document.getElementById('datetime_filters_histogram_toggle').addEventListener('click', function() {
+    window.showHistogram_datetime_filters = !window.showHistogram_datetime_filters;
+    this.textContent = window.showHistogram_datetime_filters ? 'Hide Histogram' : 'Show Histogram';
+    updatePlotWithFilters_datetime_filters();
+});
+
+// Box plot toggle button
+document.getElementById('datetime_filters_box_toggle').addEventListener('click', function() {
+    window.showBox_datetime_filters = !window.showBox_datetime_filters;
+    this.textContent = window.showBox_datetime_filters ? 'Hide Box Plot' : 'Show Box Plot';
+    updatePlotWithFilters_datetime_filters();
+});
+
+// Rug plot toggle button
+document.getElementById('datetime_filters_rug_toggle').addEventListener('click', function() {
+    window.showRug_datetime_filters = !window.showRug_datetime_filters;
+    this.textContent = window.showRug_datetime_filters ? 'Hide Rug Plot' : 'Show Rug Plot';
+    updatePlotWithFilters_datetime_filters();
+});
+
+
+                
+
+                
+
+                    document.getElementById('datetime_filters_bins_slider').addEventListener('input', function() {
+        var bins = parseInt(this.value);
+        document.getElementById('datetime_filters_bins_label').textContent = bins;
+        updatePlotWithFilters_datetime_filters();
+    });
+
+
+            // Initial plot
+            updatePlotWithFilters_datetime_filters();
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart datetime_filters:', error);
+    });
+
+    function updatePlot_datetime_filters(data) {
+        var traces = [];
+
+        // Get current selections from dropdowns
+var currentValueCol = 'value';
+var currentGroupCol = 'category';
+
+// Handle "None" option for group selector
+if (currentGroupCol === '_none_') {
+    currentGroupCol = null;
+}
+
+// Get current bins from slider
+var binsSlider = document.getElementById('datetime_filters_bins_slider');
+var currentBins = binsSlider ? parseInt(binsSlider.value) : 30;
+
+if (currentGroupCol) {
+    // Group data by group column
+    var groups = {};
+    data.forEach(function(row) {
+        var key = row[currentGroupCol];
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(row);
+    });
+
+    var groupKeys = Object.keys(groups);
+    var numGroups = groupKeys.length;
+
+    // Create traces for each group
+    groupKeys.forEach(function(key, idx) {
+        var groupData = groups[key];
+        var values = groupData.map(d => d[currentValueCol]);
+
+        // Box plot (top portion)
+        if (window.showBox_datetime_filters) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'box',
+                xaxis: 'x2',
+                yaxis: 'y2',
+                orientation: 'h',
+                marker: {
+                    color: plotlyColors[idx % plotlyColors.length]
+                },
+                boxmean: 'sd',
+                opacity: 0.7,
+                showlegend: false
+            });
+        }
+
+        // Histogram (bottom portion)
+        if (window.showHistogram_datetime_filters) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'histogram',
+                xaxis: 'x',
+                yaxis: 'y',
+                marker: {
+                    color: plotlyColors[idx % plotlyColors.length]
+                },
+                opacity: 0.7,
+                nbinsx: currentBins
+            });
+        }
+
+        // Rug plot (tick marks at bottom)
+        if (window.showRug_datetime_filters) {
+            traces.push({
+                x: values,
+                name: key + ' rug',
+                type: 'scatter',
+                mode: 'markers',
+                xaxis: 'x',
+                yaxis: 'y3',
+                marker: {
+                    symbol: 'line-ns-open',
+                    color: plotlyColors[idx % plotlyColors.length],
+                    size: 8,
+                    line: {
+                        width: 1
+                    }
+                },
+                showlegend: false,
+                hoverinfo: 'x'
+            });
+        }
+    });
+} else {
+    // No grouping
+    var values = data.map(d => d[currentValueCol]);
+
+    // Box plot (top portion)
+    if (window.showBox_datetime_filters) {
+        traces.push({
+            x: values,
+            name: 'distribution',
+            type: 'box',
+            xaxis: 'x2',
+            yaxis: 'y2',
+            orientation: 'h',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            boxmean: 'sd',
+            opacity: 0.7,
+            showlegend: false
+        });
+    }
+
+    // Histogram (bottom portion)
+    if (window.showHistogram_datetime_filters) {
+        traces.push({
+            x: values,
+            name: 'frequency',
+            type: 'histogram',
+            xaxis: 'x',
+            yaxis: 'y',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            opacity: 0.7,
+            nbinsx: currentBins,
+            showlegend: false
+        });
+    }
+
+    // Rug plot (tick marks at bottom)
+    if (window.showRug_datetime_filters) {
+        traces.push({
+            x: values,
+            name: 'rug',
+            type: 'scatter',
+            mode: 'markers',
+            xaxis: 'x',
+            yaxis: 'y3',
+            marker: {
+                symbol: 'line-ns-open',
+                color: 'rgb(31, 119, 180)',
+                size: 8,
+                line: {
+                    width: 1
+                }
+            },
+            showlegend: false,
+            hoverinfo: 'x'
+        });
+    }
+}
+
+
+            var layout = {
+        title: 'Date/Time Filtering Test',
+        showlegend: currentGroupCol !== null,
+        autosize: true,
+        grid: {
+            rows: 3,
+            columns: 1,
+            pattern: 'independent',
+            roworder: 'top to bottom'
+        },
+        xaxis: {
+            title: currentValueCol,
+            domain: [0, 1],
+            showgrid: true,
+            zeroline: true
+        },
+        yaxis: {
+            title: 'Frequency',
+            domain: [0.07, 0.69],
+            showgrid: true,
+            zeroline: true
+        },
+        xaxis2: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis2: {
+            domain: [0.7, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        xaxis3: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis3: {
+            domain: [0, 0.05],
+            showgrid: false,
+            showticklabels: false
+        },
+        margin: {t: 100, r: 50, b: 100, l: 80}
+    };
+
+
+        Plotly.newPlot('datetime_filters', traces, layout, {responsive: true});
+    }
+
+    // Filter and update function
+    window.updatePlotWithFilters_datetime_filters = function() {
+        const totalObs = window.allData_datetime_filters.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('datetime_filters_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_datetime_filters');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_datetime_filters' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_datetime_filters;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_datetime_filters_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_datetime_filters_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Render with filtered data
+        updatePlot_datetime_filters(currentData);
+    };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = ['datetime_cat', 'zoneddatetime_cat', 'date_cat', 'time_cat'];
+
+    // Plotly default colors
+    var plotlyColors = [
+        'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
+        'rgb(214, 39, 40)', 'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+        'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
+        'rgb(23, 190, 207)'
+    ];
+
+    // Initialize toggle states
+    window.showHistogram_datetime_sliders = true;
+    window.showBox_datetime_sliders = true;
+    window.showRug_datetime_sliders = true;
+    
+    // Load and parse CSV data using centralized parser
+    loadDataset('df7').then(function(data) {
+        window.allData_datetime_sliders = data;
+
+        // Initialize buttons and sliders after data is loaded
+        $(function() {
+                // Histogram toggle button
+document.getElementById('datetime_sliders_histogram_toggle').addEventListener('click', function() {
+    window.showHistogram_datetime_sliders = !window.showHistogram_datetime_sliders;
+    this.textContent = window.showHistogram_datetime_sliders ? 'Hide Histogram' : 'Show Histogram';
+    updatePlotWithFilters_datetime_sliders();
+});
+
+// Box plot toggle button
+document.getElementById('datetime_sliders_box_toggle').addEventListener('click', function() {
+    window.showBox_datetime_sliders = !window.showBox_datetime_sliders;
+    this.textContent = window.showBox_datetime_sliders ? 'Hide Box Plot' : 'Show Box Plot';
+    updatePlotWithFilters_datetime_sliders();
+});
+
+// Rug plot toggle button
+document.getElementById('datetime_sliders_rug_toggle').addEventListener('click', function() {
+    window.showRug_datetime_sliders = !window.showRug_datetime_sliders;
+    this.textContent = window.showRug_datetime_sliders ? 'Hide Rug Plot' : 'Show Rug Plot';
+    updatePlotWithFilters_datetime_sliders();
+});
+
+
+                
+
+                
+
+                    document.getElementById('datetime_sliders_bins_slider').addEventListener('input', function() {
+        var bins = parseInt(this.value);
+        document.getElementById('datetime_sliders_bins_label').textContent = bins;
+        updatePlotWithFilters_datetime_sliders();
+    });
+
+
+            // Initial plot
+            updatePlotWithFilters_datetime_sliders();
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart datetime_sliders:', error);
+    });
+
+    function updatePlot_datetime_sliders(data) {
+        var traces = [];
+
+        // Get current selections from dropdowns
+var currentValueCol = 'value';
+var currentGroupCol = 'region';
+
+// Handle "None" option for group selector
+if (currentGroupCol === '_none_') {
+    currentGroupCol = null;
+}
+
+// Get current bins from slider
+var binsSlider = document.getElementById('datetime_sliders_bins_slider');
+var currentBins = binsSlider ? parseInt(binsSlider.value) : 30;
+
+if (currentGroupCol) {
+    // Group data by group column
+    var groups = {};
+    data.forEach(function(row) {
+        var key = row[currentGroupCol];
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(row);
+    });
+
+    var groupKeys = Object.keys(groups);
+    var numGroups = groupKeys.length;
+
+    // Create traces for each group
+    groupKeys.forEach(function(key, idx) {
+        var groupData = groups[key];
+        var values = groupData.map(d => d[currentValueCol]);
+
+        // Box plot (top portion)
+        if (window.showBox_datetime_sliders) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'box',
+                xaxis: 'x2',
+                yaxis: 'y2',
+                orientation: 'h',
+                marker: {
+                    color: plotlyColors[idx % plotlyColors.length]
+                },
+                boxmean: 'sd',
+                opacity: 0.7,
+                showlegend: false
+            });
+        }
+
+        // Histogram (bottom portion)
+        if (window.showHistogram_datetime_sliders) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'histogram',
+                xaxis: 'x',
+                yaxis: 'y',
+                marker: {
+                    color: plotlyColors[idx % plotlyColors.length]
+                },
+                opacity: 0.7,
+                nbinsx: currentBins
+            });
+        }
+
+        // Rug plot (tick marks at bottom)
+        if (window.showRug_datetime_sliders) {
+            traces.push({
+                x: values,
+                name: key + ' rug',
+                type: 'scatter',
+                mode: 'markers',
+                xaxis: 'x',
+                yaxis: 'y3',
+                marker: {
+                    symbol: 'line-ns-open',
+                    color: plotlyColors[idx % plotlyColors.length],
+                    size: 8,
+                    line: {
+                        width: 1
+                    }
+                },
+                showlegend: false,
+                hoverinfo: 'x'
+            });
+        }
+    });
+} else {
+    // No grouping
+    var values = data.map(d => d[currentValueCol]);
+
+    // Box plot (top portion)
+    if (window.showBox_datetime_sliders) {
+        traces.push({
+            x: values,
+            name: 'distribution',
+            type: 'box',
+            xaxis: 'x2',
+            yaxis: 'y2',
+            orientation: 'h',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            boxmean: 'sd',
+            opacity: 0.7,
+            showlegend: false
+        });
+    }
+
+    // Histogram (bottom portion)
+    if (window.showHistogram_datetime_sliders) {
+        traces.push({
+            x: values,
+            name: 'frequency',
+            type: 'histogram',
+            xaxis: 'x',
+            yaxis: 'y',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            opacity: 0.7,
+            nbinsx: currentBins,
+            showlegend: false
+        });
+    }
+
+    // Rug plot (tick marks at bottom)
+    if (window.showRug_datetime_sliders) {
+        traces.push({
+            x: values,
+            name: 'rug',
+            type: 'scatter',
+            mode: 'markers',
+            xaxis: 'x',
+            yaxis: 'y3',
+            marker: {
+                symbol: 'line-ns-open',
+                color: 'rgb(31, 119, 180)',
+                size: 8,
+                line: {
+                    width: 1
+                }
+            },
+            showlegend: false,
+            hoverinfo: 'x'
+        });
+    }
+}
+
+
+            var layout = {
+        title: 'Date/Time Range Slider Filters Test',
+        showlegend: currentGroupCol !== null,
+        autosize: true,
+        grid: {
+            rows: 3,
+            columns: 1,
+            pattern: 'independent',
+            roworder: 'top to bottom'
+        },
+        xaxis: {
+            title: currentValueCol,
+            domain: [0, 1],
+            showgrid: true,
+            zeroline: true
+        },
+        yaxis: {
+            title: 'Frequency',
+            domain: [0.07, 0.69],
+            showgrid: true,
+            zeroline: true
+        },
+        xaxis2: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis2: {
+            domain: [0.7, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        xaxis3: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis3: {
+            domain: [0, 0.05],
+            showgrid: false,
+            showticklabels: false
+        },
+        margin: {t: 100, r: 50, b: 100, l: 80}
+    };
+
+
+        Plotly.newPlot('datetime_sliders', traces, layout, {responsive: true});
+    }
+
+    // Filter and update function
+    window.updatePlotWithFilters_datetime_sliders = function() {
+        const totalObs = window.allData_datetime_sliders.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('datetime_sliders_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_datetime_sliders');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_datetime_sliders' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_datetime_sliders;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_datetime_sliders_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_datetime_sliders_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Render with filtered data
+        updatePlot_datetime_sliders(currentData);
+    };
+})();
 
 
 });
@@ -1791,7 +2817,150 @@ if (currentGroupCol) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="df2" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="df7" data-format="csv_embedded" data-src="">
+value,date_cat,datetime_cat,zoneddatetime_cat,time_cat,region
+81.026882793962,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,South
+86.98787874367623,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,East
+67.5316986061707,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,North
+104.46064112110882,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,South
+88.70342257097208,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,North
+80.86083202937965,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,West
+84.5355367716578,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,West
+75.93980456743802,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,North
+64.17786582907144,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,West
+113.12448654295565,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,East
+102.0303292563604,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,West
+72.2860910940174,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,West
+89.63881180265545,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,North
+108.19771938728985,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,01:00:00.0,South
+90.78907082910794,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,West
+90.53147638438992,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,North
+100.76291600830342,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,North
+87.2727180812273,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,South
+99.89826730551773,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,South
+77.77177697894615,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,East
+75.87839535467363,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,West
+116.33620377591416,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,North
+130.88753413806188,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,West
+105.67527984168925,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,North
+97.3530060803434,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,West
+72.78444031319098,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,South
+66.41999193429217,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,South
+73.60087316275316,2024-01-03,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,02:00:00.0,East
+123.09699014053629,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,West
+72.0143695254873,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,East
+80.78188504585225,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,West
+47.59427319887641,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,East
+100.27549285811791,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,East
+108.58649319639909,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,East
+67.45127981530733,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,West
+87.6204440170312,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,North
+97.79750606265156,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,West
+83.30755021391468,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,North
+63.410252891475224,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,East
+80.0538509911288,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,West
+102.93750695158602,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,South
+89.94287305688408,2024-01-04,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,03:00:00.0,South
+93.12614645379055,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+75.31512461662207,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,West
+79.72666456236063,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+84.21294792609025,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+97.47234774066594,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,East
+84.68398789213998,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+54.563865453158925,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+101.28929272875095,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+79.7340621597758,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,East
+85.57223653323274,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,East
+109.45293282639345,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,West
+75.13905646609618,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,North
+84.70904682796893,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,South
+100.53310914725964,2024-01-05,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,04:00:00.0,East
+96.47678343277589,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,East
+96.32689461870274,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,South
+102.80249151707241,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+73.00113154658227,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+74.34370991128574,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+102.73202268510569,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,East
+81.37075476409397,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,East
+85.33033833463251,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+100.02398910105069,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,South
+118.36464590135562,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+83.97560320810862,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,North
+60.341458472942165,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,West
+68.14601369052195,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,South
+86.86630511416764,2024-01-06,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,05:00:00.0,South
+65.79962926093962,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,West
+62.4169602671549,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,North
+82.46286643015456,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,East
+80.27522106592056,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,South
+94.17559455082822,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,West
+107.49665022203699,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,West
+76.36160425663356,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,East
+74.65670139414635,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,South
+57.23730114638979,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,South
+100.58044280285492,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,South
+83.64548962145146,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,East
+83.74046832571484,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,North
+55.17965384986353,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,West
+69.55789290072833,2024-01-07,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,06:00:00.0,South
+93.02185270794926,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,North
+98.173213286655,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,East
+90.33316687861458,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,South
+113.48807800037224,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,South
+63.03372915365345,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,West
+76.54931095363496,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,West
+69.34450950394611,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,West
+84.83364343527397,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,North
+70.10292582649643,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,West
+95.75976119018992,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,West
+97.48708132107562,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,East
+92.88050388820014,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,East
+82.00819830802482,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,South
+83.77880589561829,2024-01-08,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,07:00:00.0,South
+95.95418889394111,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,West
+106.12505175751897,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,East
+106.63086653666136,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,North
+84.53482050989409,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,South
+86.53457927301197,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,South
+81.48310557609423,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,North
+68.76331081365905,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,West
+95.8224110460145,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,East
+74.31644457875665,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,East
+92.89996970698019,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,North
+106.05572708246578,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,South
+77.7429678515681,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,North
+77.15300631229132,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,East
+85.17626920463736,2024-01-09,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,08:00:00.0,East
+94.24218644323952,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,West
+94.16181052118654,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,West
+86.54488624172906,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,North
+108.61199268100346,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,West
+74.70094565405478,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,East
+89.22404528089018,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,South
+81.03606176901528,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,North
+83.06835762522968,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,East
+103.4603787982853,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,North
+116.92812386301772,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,South
+96.64788328902704,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,West
+81.91190043762536,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,West
+60.814255077099475,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,South
+86.19323090990241,2024-01-10,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,09:00:00.0,North
+83.92860089067952,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,North
+103.85411260210462,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,West
+81.31370943391352,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,North
+86.37561709870394,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,East
+84.8449540057626,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,North
+109.55346242301005,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,North
+100.70055229047972,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,West
+82.6248318388221,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,South
+90.96079722690922,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,South
+85.76321072988827,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,East
+96.26908117252476,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,South
+91.75788586563216,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,West
+97.24533472086947,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,South
+85.67586955579887,2024-01-11,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,10:00:00.0,South
+
+</script><script type="text/plain" id="df2" data-format="csv_embedded" data-src="">
 value,group
 101.89928371916528,Control
 100.26368096101072,Control
@@ -3293,6 +4462,109 @@ value,group
 90.0609240137677,Treatment B
 95.64631092127154,Treatment B
 106.89514266778573,Treatment B
+
+</script><script type="text/plain" id="df6" data-format="csv_embedded" data-src="">
+value,date_col,datetime_col,zoneddatetime_col,time_col,category
+91.18371743570785,2024-01-02,2024-01-01T01:00:00.0,2024-01-01T01:00:00.000+00:00,00:10:00.0,A
+79.01918640609561,2024-01-03,2024-01-01T02:00:00.0,2024-01-01T02:00:00.000+00:00,00:20:00.0,B
+88.06836236079272,2024-01-04,2024-01-01T03:00:00.0,2024-01-01T03:00:00.000+00:00,00:30:00.0,A
+129.99260513700386,2024-01-05,2024-01-01T04:00:00.0,2024-01-01T04:00:00.000+00:00,00:40:00.0,B
+126.73181272460701,2024-01-06,2024-01-01T05:00:00.0,2024-01-01T05:00:00.000+00:00,00:50:00.0,A
+128.97464581392157,2024-01-07,2024-01-01T06:00:00.0,2024-01-01T06:00:00.000+00:00,01:00:00.0,C
+109.98876181853788,2024-01-08,2024-01-01T07:00:00.0,2024-01-01T07:00:00.000+00:00,01:10:00.0,A
+106.90391137550228,2024-01-09,2024-01-01T08:00:00.0,2024-01-01T08:00:00.000+00:00,01:20:00.0,B
+68.62765235321413,2024-01-10,2024-01-01T09:00:00.0,2024-01-01T09:00:00.000+00:00,01:30:00.0,B
+120.4542489749308,2024-01-11,2024-01-01T10:00:00.0,2024-01-01T10:00:00.000+00:00,01:40:00.0,B
+67.76805798819424,2024-01-12,2024-01-01T11:00:00.0,2024-01-01T11:00:00.000+00:00,01:50:00.0,C
+100.32186683046109,2024-01-13,2024-01-01T12:00:00.0,2024-01-01T12:00:00.000+00:00,02:00:00.0,B
+97.85182681764039,2024-01-14,2024-01-01T13:00:00.0,2024-01-01T13:00:00.000+00:00,02:10:00.0,B
+103.91404551670044,2024-01-15,2024-01-01T14:00:00.0,2024-01-01T14:00:00.000+00:00,02:20:00.0,A
+103.42870898942644,2024-01-16,2024-01-01T15:00:00.0,2024-01-01T15:00:00.000+00:00,02:30:00.0,C
+91.6799964095186,2024-01-17,2024-01-01T16:00:00.0,2024-01-01T16:00:00.000+00:00,02:40:00.0,B
+87.6388634167009,2024-01-18,2024-01-01T17:00:00.0,2024-01-01T17:00:00.000+00:00,02:50:00.0,A
+153.18419657170216,2024-01-19,2024-01-01T18:00:00.0,2024-01-01T18:00:00.000+00:00,03:00:00.0,B
+112.65471868620808,2024-01-20,2024-01-01T19:00:00.0,2024-01-01T19:00:00.000+00:00,03:10:00.0,C
+92.39703512242134,2024-01-21,2024-01-01T20:00:00.0,2024-01-01T20:00:00.000+00:00,03:20:00.0,C
+117.96929335822412,2024-01-22,2024-01-01T21:00:00.0,2024-01-01T21:00:00.000+00:00,03:30:00.0,C
+79.5315556064815,2024-01-23,2024-01-01T22:00:00.0,2024-01-01T22:00:00.000+00:00,03:40:00.0,B
+99.67347117640062,2024-01-24,2024-01-01T23:00:00.0,2024-01-01T23:00:00.000+00:00,03:50:00.0,C
+129.6844067001431,2024-01-25,2024-01-02T00:00:00.0,2024-01-02T00:00:00.000+00:00,04:00:00.0,B
+67.19110850421178,2024-01-26,2024-01-02T01:00:00.0,2024-01-02T01:00:00.000+00:00,04:10:00.0,B
+95.45819928694681,2024-01-27,2024-01-02T02:00:00.0,2024-01-02T02:00:00.000+00:00,04:20:00.0,B
+89.32609993341634,2024-01-28,2024-01-02T03:00:00.0,2024-01-02T03:00:00.000+00:00,04:30:00.0,B
+125.57178973158108,2024-01-29,2024-01-02T04:00:00.0,2024-01-02T04:00:00.000+00:00,04:40:00.0,B
+124.91789857111955,2024-01-30,2024-01-02T05:00:00.0,2024-01-02T05:00:00.000+00:00,04:50:00.0,B
+110.10330674769028,2024-01-31,2024-01-02T06:00:00.0,2024-01-02T06:00:00.000+00:00,05:00:00.0,B
+75.69469721589387,2024-02-01,2024-01-02T07:00:00.0,2024-01-02T07:00:00.000+00:00,05:10:00.0,A
+79.49095666104517,2024-02-02,2024-01-02T08:00:00.0,2024-01-02T08:00:00.000+00:00,05:20:00.0,C
+112.19087720545437,2024-02-03,2024-01-02T09:00:00.0,2024-01-02T09:00:00.000+00:00,05:30:00.0,B
+66.0470421319397,2024-02-04,2024-01-02T10:00:00.0,2024-01-02T10:00:00.000+00:00,05:40:00.0,C
+92.67495152328469,2024-02-05,2024-01-02T11:00:00.0,2024-01-02T11:00:00.000+00:00,05:50:00.0,A
+103.64256904454446,2024-02-06,2024-01-02T12:00:00.0,2024-01-02T12:00:00.000+00:00,06:00:00.0,A
+100.28977508927147,2024-02-07,2024-01-02T13:00:00.0,2024-01-02T13:00:00.000+00:00,06:10:00.0,B
+77.672773799738,2024-02-08,2024-01-02T14:00:00.0,2024-01-02T14:00:00.000+00:00,06:20:00.0,A
+117.35340507642395,2024-02-09,2024-01-02T15:00:00.0,2024-01-02T15:00:00.000+00:00,06:30:00.0,B
+119.8364025690941,2024-02-10,2024-01-02T16:00:00.0,2024-01-02T16:00:00.000+00:00,06:40:00.0,A
+98.51260737833427,2024-02-11,2024-01-02T17:00:00.0,2024-01-02T17:00:00.000+00:00,06:50:00.0,B
+93.57991443850412,2024-02-12,2024-01-02T18:00:00.0,2024-01-02T18:00:00.000+00:00,07:00:00.0,C
+122.28024675504997,2024-02-13,2024-01-02T19:00:00.0,2024-01-02T19:00:00.000+00:00,07:10:00.0,B
+92.61982732047545,2024-02-14,2024-01-02T20:00:00.0,2024-01-02T20:00:00.000+00:00,07:20:00.0,A
+98.60346545046383,2024-02-15,2024-01-02T21:00:00.0,2024-01-02T21:00:00.000+00:00,07:30:00.0,C
+105.47586377775544,2024-02-16,2024-01-02T22:00:00.0,2024-01-02T22:00:00.000+00:00,07:40:00.0,A
+85.42094288483864,2024-02-17,2024-01-02T23:00:00.0,2024-01-02T23:00:00.000+00:00,07:50:00.0,B
+145.95072843407985,2024-02-18,2024-01-03T00:00:00.0,2024-01-03T00:00:00.000+00:00,08:00:00.0,B
+114.78270990107958,2024-02-19,2024-01-03T01:00:00.0,2024-01-03T01:00:00.000+00:00,08:10:00.0,B
+79.47392198240712,2024-02-20,2024-01-03T02:00:00.0,2024-01-03T02:00:00.000+00:00,08:20:00.0,A
+93.66069210854687,2024-02-21,2024-01-03T03:00:00.0,2024-01-03T03:00:00.000+00:00,08:30:00.0,A
+78.29327502616695,2024-02-22,2024-01-03T04:00:00.0,2024-01-03T04:00:00.000+00:00,08:40:00.0,A
+150.91792559682887,2024-02-23,2024-01-03T05:00:00.0,2024-01-03T05:00:00.000+00:00,08:50:00.0,A
+103.28258636267563,2024-02-24,2024-01-03T06:00:00.0,2024-01-03T06:00:00.000+00:00,09:00:00.0,A
+78.32303814693185,2024-02-25,2024-01-03T07:00:00.0,2024-01-03T07:00:00.000+00:00,09:10:00.0,C
+88.34341213919978,2024-02-26,2024-01-03T08:00:00.0,2024-01-03T08:00:00.000+00:00,09:20:00.0,A
+96.95547868745614,2024-02-27,2024-01-03T09:00:00.0,2024-01-03T09:00:00.000+00:00,09:30:00.0,A
+124.99617031328185,2024-02-28,2024-01-03T10:00:00.0,2024-01-03T10:00:00.000+00:00,09:40:00.0,C
+104.41579002327988,2024-02-29,2024-01-03T11:00:00.0,2024-01-03T11:00:00.000+00:00,09:50:00.0,A
+70.99946364987055,2024-03-01,2024-01-03T12:00:00.0,2024-01-03T12:00:00.000+00:00,10:00:00.0,C
+113.58328250619971,2024-03-02,2024-01-03T13:00:00.0,2024-01-03T13:00:00.000+00:00,10:10:00.0,C
+84.54658587941978,2024-03-03,2024-01-03T14:00:00.0,2024-01-03T14:00:00.000+00:00,10:20:00.0,C
+106.32570616619196,2024-03-04,2024-01-03T15:00:00.0,2024-01-03T15:00:00.000+00:00,10:30:00.0,B
+115.58911670000643,2024-03-05,2024-01-03T16:00:00.0,2024-01-03T16:00:00.000+00:00,10:40:00.0,C
+101.94492306206128,2024-03-06,2024-01-03T17:00:00.0,2024-01-03T17:00:00.000+00:00,10:50:00.0,B
+64.9590090644879,2024-03-07,2024-01-03T18:00:00.0,2024-01-03T18:00:00.000+00:00,11:00:00.0,A
+86.36109780172336,2024-03-08,2024-01-03T19:00:00.0,2024-01-03T19:00:00.000+00:00,11:10:00.0,C
+61.45916397539323,2024-03-09,2024-01-03T20:00:00.0,2024-01-03T20:00:00.000+00:00,11:20:00.0,A
+76.49166218359021,2024-03-10,2024-01-03T21:00:00.0,2024-01-03T21:00:00.000+00:00,11:30:00.0,B
+143.6495809425028,2024-03-11,2024-01-03T22:00:00.0,2024-01-03T22:00:00.000+00:00,11:40:00.0,B
+70.95979729755837,2024-03-12,2024-01-03T23:00:00.0,2024-01-03T23:00:00.000+00:00,11:50:00.0,B
+75.66845051307844,2024-03-13,2024-01-04T00:00:00.0,2024-01-04T00:00:00.000+00:00,12:00:00.0,A
+115.79512386667426,2024-03-14,2024-01-04T01:00:00.0,2024-01-04T01:00:00.000+00:00,12:10:00.0,B
+83.99854443814276,2024-03-15,2024-01-04T02:00:00.0,2024-01-04T02:00:00.000+00:00,12:20:00.0,C
+103.07388256549935,2024-03-16,2024-01-04T03:00:00.0,2024-01-04T03:00:00.000+00:00,12:30:00.0,B
+90.07897493130206,2024-03-17,2024-01-04T04:00:00.0,2024-01-04T04:00:00.000+00:00,12:40:00.0,B
+98.08362755515314,2024-03-18,2024-01-04T05:00:00.0,2024-01-04T05:00:00.000+00:00,12:50:00.0,A
+120.94426232670293,2024-03-19,2024-01-04T06:00:00.0,2024-01-04T06:00:00.000+00:00,13:00:00.0,A
+106.09222379337652,2024-03-20,2024-01-04T07:00:00.0,2024-01-04T07:00:00.000+00:00,13:10:00.0,C
+120.88346854988372,2024-03-21,2024-01-04T08:00:00.0,2024-01-04T08:00:00.000+00:00,13:20:00.0,B
+113.40379335162108,2024-03-22,2024-01-04T09:00:00.0,2024-01-04T09:00:00.000+00:00,13:30:00.0,B
+84.1318933723562,2024-03-23,2024-01-04T10:00:00.0,2024-01-04T10:00:00.000+00:00,13:40:00.0,B
+123.5698263696597,2024-03-24,2024-01-04T11:00:00.0,2024-01-04T11:00:00.000+00:00,13:50:00.0,A
+101.05455182065698,2024-03-25,2024-01-04T12:00:00.0,2024-01-04T12:00:00.000+00:00,14:00:00.0,A
+78.62592706173848,2024-03-26,2024-01-04T13:00:00.0,2024-01-04T13:00:00.000+00:00,14:10:00.0,B
+64.95694310507658,2024-03-27,2024-01-04T14:00:00.0,2024-01-04T14:00:00.000+00:00,14:20:00.0,B
+112.08840764553321,2024-03-28,2024-01-04T15:00:00.0,2024-01-04T15:00:00.000+00:00,14:30:00.0,C
+101.62093155397639,2024-03-29,2024-01-04T16:00:00.0,2024-01-04T16:00:00.000+00:00,14:40:00.0,C
+99.30158946129228,2024-03-30,2024-01-04T17:00:00.0,2024-01-04T17:00:00.000+00:00,14:50:00.0,A
+121.46812433412288,2024-03-31,2024-01-04T18:00:00.0,2024-01-04T18:00:00.000+00:00,15:00:00.0,C
+101.56631767148231,2024-04-01,2024-01-04T19:00:00.0,2024-01-04T19:00:00.000+00:00,15:10:00.0,B
+102.76042129619866,2024-04-02,2024-01-04T20:00:00.0,2024-01-04T20:00:00.000+00:00,15:20:00.0,A
+94.17613560208,2024-04-03,2024-01-04T21:00:00.0,2024-01-04T21:00:00.000+00:00,15:30:00.0,C
+98.44434371094437,2024-04-04,2024-01-04T22:00:00.0,2024-01-04T22:00:00.000+00:00,15:40:00.0,B
+95.81940745192692,2024-04-05,2024-01-04T23:00:00.0,2024-01-04T23:00:00.000+00:00,15:50:00.0,C
+101.05236232815172,2024-04-06,2024-01-05T00:00:00.0,2024-01-05T00:00:00.000+00:00,16:00:00.0,C
+60.70460195526912,2024-04-07,2024-01-05T01:00:00.0,2024-01-05T01:00:00.000+00:00,16:10:00.0,C
+81.02761134332341,2024-04-08,2024-01-05T02:00:00.0,2024-01-05T02:00:00.000+00:00,16:20:00.0,A
+103.19114478116369,2024-04-09,2024-01-05T03:00:00.0,2024-01-05T03:00:00.000+00:00,16:30:00.0,A
+115.61477506423728,2024-04-10,2024-01-05T04:00:00.0,2024-01-05T04:00:00.000+00:00,16:40:00.0,A
 
 </script><script type="text/plain" id="df3" data-format="csv_embedded" data-src="">
 score,age,department
@@ -7003,22 +8275,40 @@ measurement,time_point
 
 <!-- Filters (for data filtering) -->
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="department_select_filtered_dist">department: </label>
-            <select id="department_select_filtered_dist" multiple onchange="updatePlotWithFilters_filtered_dist()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="filtered_dist_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="department_select_filtered_dist">department: </label>
+                <select id="department_select_filtered_dist" multiple onchange="updatePlotWithFilters_filtered_dist()">
                 <option value="Engineering" selected>Engineering</option>
                 <option value="HR" selected>HR</option>
                 <option value="Marketing" selected>Marketing</option>
                 <option value="Sales" selected>Sales</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="department_select_filtered_dist_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-        <div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">age: </label>
-    <span id="age_range_filtered_dist_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">18 - 80</span>
-    <div id="age_range_filtered_dist_slider" style="margin: 10px 5px; width: 90%;"></div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">age: </label>
+        <span id="age_range_filtered_dist_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">18 - 80</span>
+        <div id="age_range_filtered_dist_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="age_range_filtered_dist_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_age_range_filtered_dist(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#age_range_filtered_dist_slider").slider({
                 range: true,
@@ -7030,15 +8320,13 @@ measurement,time_point
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#age_range_filtered_dist_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#age_range_filtered_dist_display").text(formatValue_age_range_filtered_dist(minVal) + " - " + formatValue_age_range_filtered_dist(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#age_range_filtered_dist_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#age_range_filtered_dist_display").text(formatValue_age_range_filtered_dist(minVal) + " - " + formatValue_age_range_filtered_dist(maxVal));
 
                     // Store values for easy access
                     $("#age_range_filtered_dist_slider").data('minValue', minVal);
@@ -7175,6 +8463,626 @@ measurement,time_point
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df5</p><br>
 <hr>
 <br>
+<h2>Date/Time Filtering Test</h2>
+<p>This example tests continuous range filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders for intuitive filtering. Try adjusting the range sliders to filter the data!</p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="datetime_filters_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+    <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">time_col: </label>
+        <span id="time_col_range_datetime_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">00:10:00 - 16:40:00</span>
+        <div id="time_col_range_datetime_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="time_col_range_datetime_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_time_col_range_datetime_filters(x) {
+    // x is milliseconds since midnight
+    const totalSeconds = Math.floor(x / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return String(hours).padStart(2, '0') + ':' +
+           String(minutes).padStart(2, '0') + ':' +
+           String(seconds).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#time_col_range_datetime_filters_slider").slider({
+                range: true,
+                min: 600000.0,
+                max: 6.0e7,
+                step: 5.94e7 / 1000,  // Smooth sliding
+                values: [600000.0, 6.0e7],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#time_col_range_datetime_filters_display").text(formatValue_time_col_range_datetime_filters(minVal) + " - " + formatValue_time_col_range_datetime_filters(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#time_col_range_datetime_filters_display").text(formatValue_time_col_range_datetime_filters(minVal) + " - " + formatValue_time_col_range_datetime_filters(maxVal));
+
+                    // Store values for easy access
+                    $("#time_col_range_datetime_filters_slider").data('minValue', minVal);
+                    $("#time_col_range_datetime_filters_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_filters()
+                }
+            });
+
+            // Store initial values
+            $("#time_col_range_datetime_filters_slider").data('minValue', 600000.0);
+            $("#time_col_range_datetime_filters_slider").data('maxValue', 6.0e7);
+        });
+
+        // Helper functions to get slider values
+        function gettime_col_range_datetime_filtersMin() {
+            return $("#time_col_range_datetime_filters_slider").slider("values", 0);
+        }
+
+        function gettime_col_range_datetime_filtersMax() {
+            return $("#time_col_range_datetime_filters_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">datetime_col: </label>
+        <span id="datetime_col_range_datetime_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-01T01:00:00 - 2024-01-05T04:00:00</span>
+        <div id="datetime_col_range_datetime_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="datetime_col_range_datetime_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_datetime_col_range_datetime_filters(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0') + 'T' +
+           String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#datetime_col_range_datetime_filters_slider").slider({
+                range: true,
+                min: 1.7040708e12,
+                max: 1.7044272e12,
+                step: 3.564e8 / 1000,  // Smooth sliding
+                values: [1.7040708e12, 1.7044272e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#datetime_col_range_datetime_filters_display").text(formatValue_datetime_col_range_datetime_filters(minVal) + " - " + formatValue_datetime_col_range_datetime_filters(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#datetime_col_range_datetime_filters_display").text(formatValue_datetime_col_range_datetime_filters(minVal) + " - " + formatValue_datetime_col_range_datetime_filters(maxVal));
+
+                    // Store values for easy access
+                    $("#datetime_col_range_datetime_filters_slider").data('minValue', minVal);
+                    $("#datetime_col_range_datetime_filters_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_filters()
+                }
+            });
+
+            // Store initial values
+            $("#datetime_col_range_datetime_filters_slider").data('minValue', 1.7040708e12);
+            $("#datetime_col_range_datetime_filters_slider").data('maxValue', 1.7044272e12);
+        });
+
+        // Helper functions to get slider values
+        function getdatetime_col_range_datetime_filtersMin() {
+            return $("#datetime_col_range_datetime_filters_slider").slider("values", 0);
+        }
+
+        function getdatetime_col_range_datetime_filtersMax() {
+            return $("#datetime_col_range_datetime_filters_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">date_col: </label>
+        <span id="date_col_range_datetime_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-02 - 2024-04-10</span>
+        <div id="date_col_range_datetime_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="date_col_range_datetime_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_date_col_range_datetime_filters(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#date_col_range_datetime_filters_slider").slider({
+                range: true,
+                min: 1.7041536e12,
+                max: 1.7127072e12,
+                step: 8.5536e9 / 1000,  // Smooth sliding
+                values: [1.7041536e12, 1.7127072e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#date_col_range_datetime_filters_display").text(formatValue_date_col_range_datetime_filters(minVal) + " - " + formatValue_date_col_range_datetime_filters(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#date_col_range_datetime_filters_display").text(formatValue_date_col_range_datetime_filters(minVal) + " - " + formatValue_date_col_range_datetime_filters(maxVal));
+
+                    // Store values for easy access
+                    $("#date_col_range_datetime_filters_slider").data('minValue', minVal);
+                    $("#date_col_range_datetime_filters_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_filters()
+                }
+            });
+
+            // Store initial values
+            $("#date_col_range_datetime_filters_slider").data('minValue', 1.7041536e12);
+            $("#date_col_range_datetime_filters_slider").data('maxValue', 1.7127072e12);
+        });
+
+        // Helper functions to get slider values
+        function getdate_col_range_datetime_filtersMin() {
+            return $("#date_col_range_datetime_filters_slider").slider("values", 0);
+        }
+
+        function getdate_col_range_datetime_filtersMax() {
+            return $("#date_col_range_datetime_filters_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">zoneddatetime_col: </label>
+        <span id="zoneddatetime_col_range_datetime_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-01T01:00:00 - 2024-01-05T04:00:00</span>
+        <div id="zoneddatetime_col_range_datetime_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="zoneddatetime_col_range_datetime_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_zoneddatetime_col_range_datetime_filters(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0') + 'T' +
+           String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#zoneddatetime_col_range_datetime_filters_slider").slider({
+                range: true,
+                min: 1.7040708e12,
+                max: 1.7044272e12,
+                step: 3.564e8 / 1000,  // Smooth sliding
+                values: [1.7040708e12, 1.7044272e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#zoneddatetime_col_range_datetime_filters_display").text(formatValue_zoneddatetime_col_range_datetime_filters(minVal) + " - " + formatValue_zoneddatetime_col_range_datetime_filters(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#zoneddatetime_col_range_datetime_filters_display").text(formatValue_zoneddatetime_col_range_datetime_filters(minVal) + " - " + formatValue_zoneddatetime_col_range_datetime_filters(maxVal));
+
+                    // Store values for easy access
+                    $("#zoneddatetime_col_range_datetime_filters_slider").data('minValue', minVal);
+                    $("#zoneddatetime_col_range_datetime_filters_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_filters()
+                }
+            });
+
+            // Store initial values
+            $("#zoneddatetime_col_range_datetime_filters_slider").data('minValue', 1.7040708e12);
+            $("#zoneddatetime_col_range_datetime_filters_slider").data('maxValue', 1.7044272e12);
+        });
+
+        // Helper functions to get slider values
+        function getzoneddatetime_col_range_datetime_filtersMin() {
+            return $("#zoneddatetime_col_range_datetime_filters_slider").slider("values", 0);
+        }
+
+        function getzoneddatetime_col_range_datetime_filtersMax() {
+            return $("#zoneddatetime_col_range_datetime_filters_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <div style="margin: 20px 0;">
+    <button id="datetime_filters_histogram_toggle" style="padding: 5px 15px; cursor: pointer; margin-right: 10px;">
+        Hide Histogram
+    </button>
+    <button id="datetime_filters_box_toggle" style="padding: 5px 15px; cursor: pointer; margin-right: 10px;">
+        Hide Box Plot
+    </button>
+    <button id="datetime_filters_rug_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Rug Plot
+    </button>
+</div>
+
+</div>
+
+<!-- Faceting -->
+
+<!-- Chart -->
+<div id="datetime_filters"></div>
+
+        <!-- Bins slider below chart -->
+        <div style="margin: 20px 0;">
+    <label for="datetime_filters_bins_slider">Number of bins: </label>
+    <span id="datetime_filters_bins_label">30</span>
+    <input type="range" id="datetime_filters_bins_slider"
+           min="5"
+           max="100"
+           step="1"
+           value="30"
+           style="width: 300px; margin-left: 10px;">
+</div>
+
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6</p><br>
+<hr>
+<br>
+<h2>Date/Time Range Slider Filters Test</h2>
+<p>This example tests range slider filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders regardless of the number of unique values, providing a consistent filtering experience.</p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="datetime_sliders_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+    <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">datetime_cat: </label>
+        <span id="datetime_cat_range_datetime_sliders_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-01T02:00:00 - 2024-01-01T20:00:00</span>
+        <div id="datetime_cat_range_datetime_sliders_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="datetime_cat_range_datetime_sliders_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_datetime_cat_range_datetime_sliders(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0') + 'T' +
+           String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#datetime_cat_range_datetime_sliders_slider").slider({
+                range: true,
+                min: 1.7040744e12,
+                max: 1.7041392e12,
+                step: 6.48e7 / 1000,  // Smooth sliding
+                values: [1.7040744e12, 1.7041392e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#datetime_cat_range_datetime_sliders_display").text(formatValue_datetime_cat_range_datetime_sliders(minVal) + " - " + formatValue_datetime_cat_range_datetime_sliders(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#datetime_cat_range_datetime_sliders_display").text(formatValue_datetime_cat_range_datetime_sliders(minVal) + " - " + formatValue_datetime_cat_range_datetime_sliders(maxVal));
+
+                    // Store values for easy access
+                    $("#datetime_cat_range_datetime_sliders_slider").data('minValue', minVal);
+                    $("#datetime_cat_range_datetime_sliders_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_sliders()
+                }
+            });
+
+            // Store initial values
+            $("#datetime_cat_range_datetime_sliders_slider").data('minValue', 1.7040744e12);
+            $("#datetime_cat_range_datetime_sliders_slider").data('maxValue', 1.7041392e12);
+        });
+
+        // Helper functions to get slider values
+        function getdatetime_cat_range_datetime_slidersMin() {
+            return $("#datetime_cat_range_datetime_sliders_slider").slider("values", 0);
+        }
+
+        function getdatetime_cat_range_datetime_slidersMax() {
+            return $("#datetime_cat_range_datetime_sliders_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">zoneddatetime_cat: </label>
+        <span id="zoneddatetime_cat_range_datetime_sliders_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-01T02:00:00 - 2024-01-01T20:00:00</span>
+        <div id="zoneddatetime_cat_range_datetime_sliders_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="zoneddatetime_cat_range_datetime_sliders_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_zoneddatetime_cat_range_datetime_sliders(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0') + 'T' +
+           String(d.getHours()).padStart(2, '0') + ':' +
+           String(d.getMinutes()).padStart(2, '0') + ':' +
+           String(d.getSeconds()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#zoneddatetime_cat_range_datetime_sliders_slider").slider({
+                range: true,
+                min: 1.7040744e12,
+                max: 1.7041392e12,
+                step: 6.48e7 / 1000,  // Smooth sliding
+                values: [1.7040744e12, 1.7041392e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#zoneddatetime_cat_range_datetime_sliders_display").text(formatValue_zoneddatetime_cat_range_datetime_sliders(minVal) + " - " + formatValue_zoneddatetime_cat_range_datetime_sliders(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#zoneddatetime_cat_range_datetime_sliders_display").text(formatValue_zoneddatetime_cat_range_datetime_sliders(minVal) + " - " + formatValue_zoneddatetime_cat_range_datetime_sliders(maxVal));
+
+                    // Store values for easy access
+                    $("#zoneddatetime_cat_range_datetime_sliders_slider").data('minValue', minVal);
+                    $("#zoneddatetime_cat_range_datetime_sliders_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_sliders()
+                }
+            });
+
+            // Store initial values
+            $("#zoneddatetime_cat_range_datetime_sliders_slider").data('minValue', 1.7040744e12);
+            $("#zoneddatetime_cat_range_datetime_sliders_slider").data('maxValue', 1.7041392e12);
+        });
+
+        // Helper functions to get slider values
+        function getzoneddatetime_cat_range_datetime_slidersMin() {
+            return $("#zoneddatetime_cat_range_datetime_sliders_slider").slider("values", 0);
+        }
+
+        function getzoneddatetime_cat_range_datetime_slidersMax() {
+            return $("#zoneddatetime_cat_range_datetime_sliders_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">date_cat: </label>
+        <span id="date_cat_range_datetime_sliders_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2024-01-02 - 2024-01-11</span>
+        <div id="date_cat_range_datetime_sliders_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="date_cat_range_datetime_sliders_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_date_cat_range_datetime_sliders(x) {
+    const d = new Date(x);
+    return d.getFullYear() + '-' +
+           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+           String(d.getDate()).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#date_cat_range_datetime_sliders_slider").slider({
+                range: true,
+                min: 1.7041536e12,
+                max: 1.7049312e12,
+                step: 7.776e8 / 1000,  // Smooth sliding
+                values: [1.7041536e12, 1.7049312e12],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#date_cat_range_datetime_sliders_display").text(formatValue_date_cat_range_datetime_sliders(minVal) + " - " + formatValue_date_cat_range_datetime_sliders(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#date_cat_range_datetime_sliders_display").text(formatValue_date_cat_range_datetime_sliders(minVal) + " - " + formatValue_date_cat_range_datetime_sliders(maxVal));
+
+                    // Store values for easy access
+                    $("#date_cat_range_datetime_sliders_slider").data('minValue', minVal);
+                    $("#date_cat_range_datetime_sliders_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_sliders()
+                }
+            });
+
+            // Store initial values
+            $("#date_cat_range_datetime_sliders_slider").data('minValue', 1.7041536e12);
+            $("#date_cat_range_datetime_sliders_slider").data('maxValue', 1.7049312e12);
+        });
+
+        // Helper functions to get slider values
+        function getdate_cat_range_datetime_slidersMin() {
+            return $("#date_cat_range_datetime_sliders_slider").slider("values", 0);
+        }
+
+        function getdate_cat_range_datetime_slidersMax() {
+            return $("#date_cat_range_datetime_sliders_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">time_cat: </label>
+        <span id="time_cat_range_datetime_sliders_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">01:00:00 - 10:00:00</span>
+        <div id="time_cat_range_datetime_sliders_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="time_cat_range_datetime_sliders_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_time_cat_range_datetime_sliders(x) {
+    // x is milliseconds since midnight
+    const totalSeconds = Math.floor(x / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return String(hours).padStart(2, '0') + ':' +
+           String(minutes).padStart(2, '0') + ':' +
+           String(seconds).padStart(2, '0');
+}
+
+            // Initialize jQuery UI range slider
+            $("#time_cat_range_datetime_sliders_slider").slider({
+                range: true,
+                min: 3.6e6,
+                max: 3.6e7,
+                step: 3.24e7 / 1000,  // Smooth sliding
+                values: [3.6e6, 3.6e7],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#time_cat_range_datetime_sliders_display").text(formatValue_time_cat_range_datetime_sliders(minVal) + " - " + formatValue_time_cat_range_datetime_sliders(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#time_cat_range_datetime_sliders_display").text(formatValue_time_cat_range_datetime_sliders(minVal) + " - " + formatValue_time_cat_range_datetime_sliders(maxVal));
+
+                    // Store values for easy access
+                    $("#time_cat_range_datetime_sliders_slider").data('minValue', minVal);
+                    $("#time_cat_range_datetime_sliders_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_datetime_sliders()
+                }
+            });
+
+            // Store initial values
+            $("#time_cat_range_datetime_sliders_slider").data('minValue', 3.6e6);
+            $("#time_cat_range_datetime_sliders_slider").data('maxValue', 3.6e7);
+        });
+
+        // Helper functions to get slider values
+        function gettime_cat_range_datetime_slidersMin() {
+            return $("#time_cat_range_datetime_sliders_slider").slider("values", 0);
+        }
+
+        function gettime_cat_range_datetime_slidersMax() {
+            return $("#time_cat_range_datetime_sliders_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <div style="margin: 20px 0;">
+    <button id="datetime_sliders_histogram_toggle" style="padding: 5px 15px; cursor: pointer; margin-right: 10px;">
+        Hide Histogram
+    </button>
+    <button id="datetime_sliders_box_toggle" style="padding: 5px 15px; cursor: pointer; margin-right: 10px;">
+        Hide Box Plot
+    </button>
+    <button id="datetime_sliders_rug_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Rug Plot
+    </button>
+</div>
+
+</div>
+
+<!-- Faceting -->
+
+<!-- Chart -->
+<div id="datetime_sliders"></div>
+
+        <!-- Bins slider below chart -->
+        <div style="margin: 20px 0;">
+    <label for="datetime_sliders_bins_slider">Number of bins: </label>
+    <span id="datetime_sliders_bins_label">30</span>
+    <input type="range" id="datetime_sliders_bins_slider"
+           min="5"
+           max="100"
+           step="1"
+           value="30"
+           style="width: 300px; margin-left: 10px;">
+</div>
+
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df7</p><br>
+<hr>
+<br>
     <div class="textblock-content">
         <h2>Key Features Summary</h2>
 <ul>
@@ -7189,6 +9097,6 @@ measurement,time_point
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

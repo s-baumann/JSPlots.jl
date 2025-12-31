@@ -211,12 +211,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -224,21 +226,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -246,6 +257,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -537,6 +590,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_revenue_trend = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('revenue_trend' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_revenue_trend');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -589,25 +650,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_revenue_trend' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_revenue_trend' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -1050,6 +1137,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_multi_series = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_series' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_multi_series');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -1102,25 +1197,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_series' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_series' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -1563,6 +1684,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_filtered_metrics = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('filtered_metrics' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_filtered_metrics');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -1615,25 +1744,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_filtered_metrics' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_filtered_metrics' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -2076,6 +2231,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_facet_wrap_example = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('facet_wrap_example' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_facet_wrap_example');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -2128,25 +2291,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_facet_wrap_example' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_facet_wrap_example' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -2589,6 +2778,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_facet_grid_example = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('facet_grid_example' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_facet_grid_example');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -2641,25 +2838,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_facet_grid_example' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_facet_grid_example' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -3102,6 +3325,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_dynamic_controls = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('dynamic_controls' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_dynamic_controls');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -3154,25 +3385,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_dynamic_controls' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_dynamic_controls' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -3615,6 +3872,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_aggregation_demo = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('aggregation_demo' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_aggregation_demo');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -3667,25 +3932,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_aggregation_demo' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_aggregation_demo' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -4128,6 +4419,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_multi_dimensions = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_dimensions' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_multi_dimensions');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -4180,25 +4479,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_dimensions' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_dimensions' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -4641,6 +4966,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_continuous_filters = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('continuous_filters' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_continuous_filters');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -4693,25 +5026,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_continuous_filters' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_continuous_filters' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -6325,9 +6684,10 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_revenue_trend">Aggregator: </label>
-            <select id="aggregator_select_revenue_trend" onchange="updateChart_revenue_trend()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_revenue_trend">Aggregator: </label>
+                <select id="aggregator_select_revenue_trend" onchange="updateChart_revenue_trend()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6336,6 +6696,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_revenue_trend_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6352,9 +6716,10 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_multi_series">Aggregator: </label>
-            <select id="aggregator_select_multi_series" onchange="updateChart_multi_series()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_multi_series">Aggregator: </label>
+                <select id="aggregator_select_multi_series" onchange="updateChart_multi_series()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6363,6 +6728,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_multi_series_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6377,40 +6746,59 @@ Month,Sales,Product,Region,Year,color
 <p>Interactive filters allow you to select different departments and quarters</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="Department_select_filtered_metrics">Department: </label>
-            <select id="Department_select_filtered_metrics" multiple onchange="updateChart_filtered_metrics()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="Department_select_filtered_metrics">Department: </label>
+                <select id="Department_select_filtered_metrics" multiple onchange="updateChart_filtered_metrics()">
                 <option value="Engineering" selected>Engineering</option>
                 <option value="Marketing">Marketing</option>
                 <option value="Operations">Operations</option>
                 <option value="Sales">Sales</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="Department_select_filtered_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="Quarter_select_filtered_metrics">Quarter: </label>
-            <select id="Quarter_select_filtered_metrics" multiple onchange="updateChart_filtered_metrics()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="Quarter_select_filtered_metrics">Quarter: </label>
+                <select id="Quarter_select_filtered_metrics" multiple onchange="updateChart_filtered_metrics()">
                 <option value="Q1" selected>Q1</option>
                 <option value="Q2">Q2</option>
                 <option value="Q3">Q3</option>
                 <option value="Q4">Q4</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="Quarter_select_filtered_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="color_col_select_filtered_metrics">Color by: </label>
-            <select id="color_col_select_filtered_metrics" onchange="updateChart_filtered_metrics()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_filtered_metrics">Color by: </label>
+                <select id="color_col_select_filtered_metrics" onchange="updateChart_filtered_metrics()">
                 <option value="Department" selected>Department</option>
                 <option value="Metric">Metric</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_filtered_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="aggregator_select_filtered_metrics">Aggregator: </label>
-            <select id="aggregator_select_filtered_metrics" onchange="updateChart_filtered_metrics()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_filtered_metrics">Aggregator: </label>
+                <select id="aggregator_select_filtered_metrics" onchange="updateChart_filtered_metrics()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6419,6 +6807,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_filtered_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6443,16 +6835,22 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="color_col_select_facet_wrap_example">Color by: </label>
-            <select id="color_col_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_facet_wrap_example">Color by: </label>
+                <select id="color_col_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
                 <option value="color" selected>color</option>
                 <option value="Product">Product</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_facet_wrap_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="aggregator_select_facet_wrap_example">Aggregator: </label>
-            <select id="aggregator_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_facet_wrap_example">Aggregator: </label>
+                <select id="aggregator_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6461,18 +6859,27 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_facet_wrap_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_facet_wrap_example">Facet by: </label>
-            <select id="facet1_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_facet_wrap_example">Facet by: </label>
+                <select id="facet1_select_facet_wrap_example" onchange="updateChart_facet_wrap_example()">
                 <option value="None">None</option>
                 <option value="Product" selected>Product</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_facet_wrap_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6488,9 +6895,10 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_facet_grid_example">Aggregator: </label>
-            <select id="aggregator_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_facet_grid_example">Aggregator: </label>
+                <select id="aggregator_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6499,27 +6907,41 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_facet_grid_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_facet_grid_example">Facet 1: </label>
-            <select id="facet1_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_facet_grid_example">Facet 1: </label>
+                <select id="facet1_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
                 <option value="None">None</option>
                 <option value="Product" selected>Product</option>
                 <option value="Region">Region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_facet_grid_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_facet_grid_example">Facet 2: </label>
-            <select id="facet2_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_facet_grid_example">Facet 2: </label>
+                <select id="facet2_select_facet_grid_example" onchange="updateChart_facet_grid_example()">
                 <option value="None">None</option>
                 <option value="Product">Product</option>
                 <option value="Region" selected>Region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_facet_grid_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6535,17 +6957,23 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="color_col_select_dynamic_controls">Color by: </label>
-            <select id="color_col_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_dynamic_controls">Color by: </label>
+                <select id="color_col_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
                 <option value="Stock" selected>Stock</option>
                 <option value="Strategy">Strategy</option>
                 <option value="Region">Region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_dynamic_controls_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="aggregator_select_dynamic_controls">Aggregator: </label>
-            <select id="aggregator_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_dynamic_controls">Aggregator: </label>
+                <select id="aggregator_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
                 <option value="none">none</option>
                 <option value="mean" selected>mean</option>
                 <option value="median">median</option>
@@ -6554,29 +6982,43 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_dynamic_controls_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_dynamic_controls">Facet 1: </label>
-            <select id="facet1_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_dynamic_controls">Facet 1: </label>
+                <select id="facet1_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
                 <option value="None" selected>None</option>
                 <option value="Stock">Stock</option>
                 <option value="Strategy">Strategy</option>
                 <option value="Region">Region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_dynamic_controls_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_dynamic_controls">Facet 2: </label>
-            <select id="facet2_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_dynamic_controls">Facet 2: </label>
+                <select id="facet2_select_dynamic_controls" onchange="updateChart_dynamic_controls()">
                 <option value="None" selected>None</option>
                 <option value="Stock">Stock</option>
                 <option value="Strategy">Strategy</option>
                 <option value="Region">Region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_dynamic_controls_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6592,9 +7034,10 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_aggregation_demo">Aggregator: </label>
-            <select id="aggregator_select_aggregation_demo" onchange="updateChart_aggregation_demo()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_aggregation_demo">Aggregator: </label>
+                <select id="aggregator_select_aggregation_demo" onchange="updateChart_aggregation_demo()">
                 <option value="none">none</option>
                 <option value="mean" selected>mean</option>
                 <option value="median">median</option>
@@ -6603,6 +7046,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_aggregation_demo_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6619,25 +7066,36 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="x_col_select_multi_dimensions">X dimension: </label>
-            <select id="x_col_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_multi_dimensions">X dimension: </label>
+                <select id="x_col_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
                 <option value="time_hours" selected>time_hours</option>
                 <option value="time_halfhours">time_halfhours</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_multi_dimensions_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="y_col_select_multi_dimensions">Y dimension: </label>
-            <select id="y_col_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_col_select_multi_dimensions">Y dimension: </label>
+                <select id="y_col_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
                 <option value="temperature_celsius" selected>temperature_celsius</option>
                 <option value="temperature_fahrenheit">temperature_fahrenheit</option>
                 <option value="humidity_percent">humidity_percent</option>
                 <option value="pressure_hpa">pressure_hpa</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_col_select_multi_dimensions_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="aggregator_select_multi_dimensions">Aggregator: </label>
-            <select id="aggregator_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_multi_dimensions">Aggregator: </label>
+                <select id="aggregator_select_multi_dimensions" onchange="updateChart_multi_dimensions()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -6646,6 +7104,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_multi_dimensions_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6660,21 +7122,39 @@ Month,Sales,Product,Region,Year,color
 <p>This example demonstrates jQuery UI range sliders for continuous variables. Use the Product dropdown for categorical filtering, and the Profit Margin and Units sliders to filter by numeric ranges. Each slider has two handles for min/max values.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="Product_select_continuous_filters">Product: </label>
-            <select id="Product_select_continuous_filters" multiple onchange="updateChart_continuous_filters()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="Product_select_continuous_filters">Product: </label>
+                <select id="Product_select_continuous_filters" multiple onchange="updateChart_continuous_filters()">
                 <option value="Doohickey" selected>Doohickey</option>
                 <option value="Gadget" selected>Gadget</option>
                 <option value="Widget" selected>Widget</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="Product_select_continuous_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-        <div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Units: </label>
-    <span id="Units_range_continuous_filters_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">122.16 - 999.08</span>
-    <div id="Units_range_continuous_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Units: </label>
+        <span id="Units_range_continuous_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">122.16 - 999.08</span>
+        <div id="Units_range_continuous_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="Units_range_continuous_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_Units_range_continuous_filters(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#Units_range_continuous_filters_slider").slider({
                 range: true,
@@ -6686,15 +7166,13 @@ Month,Sales,Product,Region,Year,color
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#Units_range_continuous_filters_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#Units_range_continuous_filters_display").text(formatValue_Units_range_continuous_filters(minVal) + " - " + formatValue_Units_range_continuous_filters(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#Units_range_continuous_filters_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#Units_range_continuous_filters_display").text(formatValue_Units_range_continuous_filters(minVal) + " - " + formatValue_Units_range_continuous_filters(maxVal));
 
                     // Store values for easy access
                     $("#Units_range_continuous_filters_slider").data('minValue', minVal);
@@ -6720,12 +7198,22 @@ Month,Sales,Product,Region,Year,color
         }
     </script>
 </div>
-<div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">Profit_Margin: </label>
-    <span id="Profit_Margin_range_continuous_filters_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">5.28 - 49.48</span>
-    <div id="Profit_Margin_range_continuous_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Profit_Margin: </label>
+        <span id="Profit_Margin_range_continuous_filters_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">5.28 - 49.48</span>
+        <div id="Profit_Margin_range_continuous_filters_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="Profit_Margin_range_continuous_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_Profit_Margin_range_continuous_filters(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#Profit_Margin_range_continuous_filters_slider").slider({
                 range: true,
@@ -6737,15 +7225,13 @@ Month,Sales,Product,Region,Year,color
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#Profit_Margin_range_continuous_filters_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#Profit_Margin_range_continuous_filters_display").text(formatValue_Profit_Margin_range_continuous_filters(minVal) + " - " + formatValue_Profit_Margin_range_continuous_filters(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#Profit_Margin_range_continuous_filters_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#Profit_Margin_range_continuous_filters_display").text(formatValue_Profit_Margin_range_continuous_filters(minVal) + " - " + formatValue_Profit_Margin_range_continuous_filters(maxVal));
 
                     // Store values for easy access
                     $("#Profit_Margin_range_continuous_filters_slider").data('minValue', minVal);
@@ -6776,9 +7262,10 @@ Month,Sales,Product,Region,Year,color
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_continuous_filters">Aggregator: </label>
-            <select id="aggregator_select_continuous_filters" onchange="updateChart_continuous_filters()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_continuous_filters">Aggregator: </label>
+                <select id="aggregator_select_continuous_filters" onchange="updateChart_continuous_filters()">
                 <option value="none">none</option>
                 <option value="mean" selected>mean</option>
                 <option value="median">median</option>
@@ -6787,6 +7274,10 @@ Month,Sales,Product,Region,Year,color
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_continuous_filters_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -6815,6 +7306,6 @@ Month,Sales,Product,Region,Year,color
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>
