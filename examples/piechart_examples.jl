@@ -52,7 +52,7 @@ pie2 = PieChart(:budget_donut, budget_df, :budget_data;
 sales_df = DataFrame()
 regions = ["North", "South", "East", "West"]
 products = ["Product A", "Product B", "Product C"]
-years = ["2022", "2023", "2024"]
+years = [2022, 2023, 2024]
 
 for region in regions
     for product in products
@@ -70,7 +70,7 @@ end
 pie3 = PieChart(:sales_filtered, sales_df, :sales_data;
     value_cols = [:sales],
     color_cols = [:product],
-    filters = Dict{Symbol,Any}(:region => "North", :year => "2024"),
+    filters = Symbol[:region, :year],
     title = "Example 3: Product Sales with Filters",
     notes = "Interactive filters allow you to select different regions and years. Try selecting multiple options!"
 )
@@ -81,7 +81,7 @@ pie4 = PieChart(:sales_by_region, sales_df, :sales_data;
     color_cols = [:product],
     facet_cols = [:region],
     default_facet_cols = :region,
-    filters = Dict{Symbol,Any}(:year => "2024"),
+    filters = Symbol[:year],
     title = "Example 4: Product Sales Faceted by Region",
     notes = "Facet wrap creates a grid of pie charts, one for each region. Note single facet dropdown!"
 )

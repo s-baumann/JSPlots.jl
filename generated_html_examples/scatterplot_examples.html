@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -404,7 +457,10 @@ function loadDataset(dataLabel) {
 $(function(){
 
     (function() {
-    const FILTER_COLS = [];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     window.showDensity_multi_dim = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'mass';
@@ -585,28 +641,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_multi_dim = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_multi_dim.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_dim_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_multi_dim');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_multi_dim.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_multi_dim' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_multi_dim;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_dim_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_dim_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_multi_dim(filteredData);
+        updatePlot_multi_dim(currentData);
     };
 
     loadDataset('df1').then(data => {
@@ -625,7 +734,10 @@ $(function(){
     }).catch(error => console.error('Error loading data for chart multi_dim:', error));
     })();
     (function() {
-    const FILTER_COLS = [];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     window.showDensity_multi_style = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'x';
@@ -806,28 +918,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_multi_style = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_multi_style.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('multi_style_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_multi_style');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_multi_style.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_multi_style' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_multi_style;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_multi_style_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_multi_style_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_multi_style(filteredData);
+        updatePlot_multi_style(currentData);
     };
 
     loadDataset('df2').then(data => {
@@ -846,7 +1011,10 @@ $(function(){
     }).catch(error => console.error('Error loading data for chart multi_style:', error));
     })();
     (function() {
-    const FILTER_COLS = [];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     window.showDensity_facet_single = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'temperature';
@@ -1027,28 +1195,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_facet_single = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_facet_single.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('facet_single_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_facet_single');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_facet_single.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_facet_single' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_facet_single;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_facet_single_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_facet_single_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_facet_single(filteredData);
+        updatePlot_facet_single(currentData);
     };
 
     loadDataset('df3').then(data => {
@@ -1067,7 +1288,10 @@ $(function(){
     }).catch(error => console.error('Error loading data for chart facet_single:', error));
     })();
     (function() {
-    const FILTER_COLS = [];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     window.showDensity_facet_grid = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'score1';
@@ -1248,28 +1472,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_facet_grid = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_facet_grid.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('facet_grid_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_facet_grid');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_facet_grid.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_facet_grid' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_facet_grid;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_facet_grid_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_facet_grid_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_facet_grid(filteredData);
+        updatePlot_facet_grid(currentData);
     };
 
     loadDataset('df4').then(data => {
@@ -1288,7 +1565,10 @@ $(function(){
     }).catch(error => console.error('Error loading data for chart facet_grid:', error));
     })();
     (function() {
-    const FILTER_COLS = [];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
     window.showDensity_complex = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'var1';
@@ -1469,28 +1749,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_complex = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_complex.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('complex_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_complex');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_complex.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_complex' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_complex;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_complex_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_complex_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_complex(filteredData);
+        updatePlot_complex(currentData);
     };
 
     loadDataset('df5').then(data => {
@@ -1509,7 +1842,10 @@ $(function(){
     }).catch(error => console.error('Error loading data for chart complex:', error));
     })();
     (function() {
-    const FILTER_COLS = ['quarter'];
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = ['quarter'];
+
     window.showDensity_timeseries = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
     const DEFAULT_X_COL = 'value1';
@@ -1690,28 +2026,81 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_timeseries = function() {
-        // Get filter values (multiple selections)
+        const totalObs = window.allData_timeseries.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('timeseries_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_timeseries');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_timeseries.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_timeseries' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
+        });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = window.allData_timeseries;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_timeseries_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_timeseries_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
         });
 
         // Update plot with filtered data
-        updatePlot_timeseries(filteredData);
+        updatePlot_timeseries(currentData);
     };
 
     loadDataset('df6').then(data => {
@@ -5194,15 +5583,70 @@ var1,var2,var3,var4,group_A,group_B,group_C,intensity
 
 <!-- Filters (for data filtering) -->
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="quarter_select_timeseries">quarter: </label>
-            <select id="quarter_select_timeseries" multiple onchange="updatePlotWithFilters_timeseries()">
-                <option value="1" selected>1</option>
-                <option value="2" selected>2</option>
-            </select>
-        </div>
-        
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="timeseries_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+    <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">quarter: </label>
+        <span id="quarter_range_timeseries_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">1 - 2</span>
+        <div id="quarter_range_timeseries_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="quarter_range_timeseries_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_quarter_range_timeseries(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
+            // Initialize jQuery UI range slider
+            $("#quarter_range_timeseries_slider").slider({
+                range: true,
+                min: 1.0,
+                max: 2.0,
+                step: 1.0 / 1000,  // Smooth sliding
+                values: [1.0, 2.0],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#quarter_range_timeseries_display").text(formatValue_quarter_range_timeseries(minVal) + " - " + formatValue_quarter_range_timeseries(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#quarter_range_timeseries_display").text(formatValue_quarter_range_timeseries(minVal) + " - " + formatValue_quarter_range_timeseries(maxVal));
+
+                    // Store values for easy access
+                    $("#quarter_range_timeseries_slider").data('minValue', minVal);
+                    $("#quarter_range_timeseries_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_timeseries()
+                }
+            });
+
+            // Store initial values
+            $("#quarter_range_timeseries_slider").data('minValue', 1.0);
+            $("#quarter_range_timeseries_slider").data('maxValue', 2.0);
+        });
+
+        // Helper functions to get slider values
+        function getquarter_range_timeseriesMin() {
+            return $("#quarter_range_timeseries_slider").slider("values", 0);
+        }
+
+        function getquarter_range_timeseriesMax() {
+            return $("#quarter_range_timeseries_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
 </div>
 
 <!-- Plot Attributes -->
@@ -5236,6 +5680,6 @@ var1,var2,var3,var4,group_A,group_B,group_C,intensity
 <div id="timeseries"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

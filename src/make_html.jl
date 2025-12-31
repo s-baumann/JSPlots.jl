@@ -104,12 +104,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -117,21 +119,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -139,6 +150,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -338,7 +391,7 @@ ___DATASETS___
 
 ___PIVOT_TABLES___
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v___VERSION___.</small></p>
 </body>
 </html>
 """
@@ -745,6 +798,13 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             end
         end
 
+        # Get package version
+        version_str = try
+            string(pkgversion(JSPlots))
+        catch
+            "unknown"
+        end
+
         full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
         full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
         full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
@@ -753,6 +813,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+        full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         # Save HTML file
         open(actual_html_path, "w") do outfile
@@ -833,6 +894,13 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
             end
         end
 
+        # Get package version
+        version_str = try
+            string(pkgversion(JSPlots))
+        catch
+            "unknown"
+        end
+
         full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
         full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
         full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
@@ -841,6 +909,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+        full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         open(outfile_path, "w") do outfile
             write(outfile, full_page_html)
@@ -974,6 +1043,13 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     end
 
     # Build full page HTML
+    # Get package version
+    version_str = try
+        string(pkgversion(@__MODULE__))
+    catch
+        "unknown"
+    end
+
     full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
     full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
     full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
@@ -982,6 +1058,7 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
     full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
     full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+    full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
     return full_page_html
 end

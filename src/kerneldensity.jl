@@ -80,7 +80,14 @@ struct KernelDensity <: JSPlotsType
         filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") *
                        join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
+
+        # Separate categorical and continuous filters for JavaScript
+        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
+        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        categorical_filters_js = build_js_array(categorical_filter_cols)
+        continuous_filters_js = build_js_array(continuous_filter_cols)
 
         # Generate facet dropdowns using html_controls abstraction
         facet_dropdowns_html = generate_facet_dropdowns_html(
@@ -175,6 +182,10 @@ struct KernelDensity <: JSPlotsType
         # Generate kernel density calculation JavaScript
         functional_html = """
             (function() {
+            // Filter configuration
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
+
             // Plotly default colors
             const plotlyColors = [
                 'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
@@ -458,30 +469,81 @@ struct KernelDensity <: JSPlotsType
 
             // Filter and update function
             window.updatePlotWithFilters_$(chart_title) = function() {
-                const FILTER_COLS = $filter_cols_js;
+                const totalObs = window.allData_$(chart_title).length;
 
-                // Get filter values (multiple selections)
+                // Update total observation count
+                const totalObsElement = document.getElementById('$(chart_title)_total_obs');
+                if (totalObsElement) {
+                    totalObsElement.textContent = '(' + totalObs + ' observations)';
+                }
+
+                // Get categorical filter values (multiple selections)
                 const filters = {};
-                FILTER_COLS.forEach(col => {
+                CATEGORICAL_FILTERS.forEach(col => {
                     const select = document.getElementById(col + '_select_$(chart_title)');
                     if (select) {
                         filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
                     }
                 });
 
-                // Filter data (support multiple selections per filter)
-                const filteredData = window.allData_$(chart_title).filter(row => {
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
+                // Get continuous filter values (range sliders)
+                const rangeFilters = {};
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$(chart_title)' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
                     }
-                    return true;
+                });
+
+                // Apply filters incrementally to track observation counts
+                let currentData = window.allData_$(chart_title);
+
+                // Apply categorical filters and update counts
+                CATEGORICAL_FILTERS.forEach(col => {
+                    if (filters[col] && filters[col].length > 0) {
+                        currentData = currentData.filter(row => {
+                            const rowValueStr = temporalValueToString(row[col]);
+                            return filters[col].includes(rowValueStr);
+                        });
+                    }
+
+                    // Update observation count for this filter
+                    const countElement = document.getElementById(col + '_select_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
+                });
+
+                // Apply continuous filters and update counts
+                CONTINUOUS_FILTERS.forEach(col => {
+                    if (rangeFilters[col]) {
+                        const range = rangeFilters[col];
+                        currentData = currentData.filter(row => {
+                            const rawValue = row[col];
+                            let value;
+                            if (rawValue instanceof Date) {
+                                value = rawValue.getTime();
+                            } else {
+                                value = parseFloat(rawValue);
+                            }
+                            return value >= range.min && value <= range.max;
+                        });
+                    }
+
+                    // Update observation count for this filter
+                    const countElement = document.getElementById(col + '_range_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
                 });
 
                 // Render with filtered data
-                updatePlot_$(chart_title)(filteredData);
+                updatePlot_$(chart_title)(currentData);
             };
 
             // Load and parse CSV data using centralized parser

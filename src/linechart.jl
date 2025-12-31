@@ -211,6 +211,14 @@ struct LineChart <: JSPlotsType
 
             // Make it global so inline onchange can see it
             window.updateChart_$chart_title = function() {
+                const totalObs = allData.length;
+
+                // Update total observation count
+                const totalObsElement = document.getElementById('$chart_title' + '_total_obs');
+                if (totalObsElement) {
+                    totalObsElement.textContent = '(' + totalObs + ' observations)';
+                }
+
                 // Get current X and Y columns
                 const xColSelect = document.getElementById('x_col_select_$chart_title');
                 const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -263,25 +271,51 @@ struct LineChart <: JSPlotsType
                 // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-                // Filter data (support both categorical and continuous filters)
-                const filteredData = allData.filter(row => {
-                    // Check categorical filters (dropdowns)
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
+                // Apply filters incrementally to track observation counts
+                let currentData = allData;
+
+                // Apply categorical filters and update counts
+                CATEGORICAL_FILTERS.forEach(col => {
+                    if (filters[col] && filters[col].length > 0) {
+                        currentData = currentData.filter(row => {
+                            const rowValueStr = temporalValueToString(row[col]);
+                            return filters[col].includes(rowValueStr);
+                        });
                     }
-                    // Check continuous filters (range sliders)
-                    for (let col in rangeFilters) {
-                        const value = parseFloat(row[col]);
-                        const range = rangeFilters[col];
-                        if (value < range.min || value > range.max) {
-                            return false;
-                        }
+
+                    // Update observation count for this filter
+                    const countElement = document.getElementById(col + '_select_$(chart_title)' + '_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
                     }
-                    return true;
                 });
+
+                // Apply continuous filters and update counts
+                CONTINUOUS_FILTERS.forEach(col => {
+                    if (rangeFilters[col]) {
+                        const range = rangeFilters[col];
+                        currentData = currentData.filter(row => {
+                            const rawValue = row[col];
+                            let value;
+                            if (rawValue instanceof Date) {
+                                value = rawValue.getTime();
+                            } else {
+                                value = parseFloat(rawValue);
+                            }
+                            return value >= range.min && value <= range.max;
+                        });
+                    }
+
+                    // Update observation count for this filter
+                    const countElement = document.getElementById(col + '_range_$(chart_title)' + '_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
+                });
+
+                const filteredData = currentData;
 
                 if (FACET_COLS.length === 0) {
                     // No faceting - group by color

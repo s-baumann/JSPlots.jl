@@ -252,41 +252,43 @@ module JSPlots
     end
 
     """
-        is_continuous_column(df::DataFrame, col::Symbol; threshold::Int=20)
+        is_continuous_column(df::DataFrame, col::Symbol)
 
-    Determine if a column should be treated as continuous (numeric with many unique values).
+    Determine if a column should be treated as continuous (numeric or date/time type).
+
+    All numeric types (Int, Float, etc.) and date/time types are treated as continuous
+    and will use range sliders in the UI. This avoids type conversion issues between
+    numeric values and string-based categorical filters.
 
     # Arguments
     - `df::DataFrame`: DataFrame containing the column
     - `col::Symbol`: Column to check
-    - `threshold::Int`: Minimum number of unique values to be considered continuous (default: 20)
 
     # Returns
-    - `Bool`: true if column is numeric and has >= threshold unique values
+    - `Bool`: true if column is numeric or date/time type, false otherwise
 
     # Examples
     ```julia
-    is_continuous_column(df, :age)        # true if numeric with many values
-    is_continuous_column(df, :category)   # false if string or few unique values
+    is_continuous_column(df, :age)        # true if numeric
+    is_continuous_column(df, :year)       # true if numeric (even with few unique values)
+    is_continuous_column(df, :date)       # true if date/time type
+    is_continuous_column(df, :category)   # false if string
     ```
     """
-    function is_continuous_column(df::DataFrame, col::Symbol; threshold::Int=20)
+    function is_continuous_column(df::DataFrame, col::Symbol)
         col_str = string(col)
         if !(col_str in names(df))
             return false
         end
 
         col_type = eltype(df[!, col])
-        # Check if numeric type
+        # Check if numeric or date type
         is_numeric = col_type <: Number || col_type <: Union{Missing, <:Number}
+        is_date = col_type <: Dates.TimeType || col_type <: Union{Missing, <:Dates.TimeType}
 
-        if !is_numeric
-            return false
-        end
-
-        # Check number of unique values
-        unique_vals = unique(skipmissing(df[!, col]))
-        return length(unique_vals) >= threshold
+        # All numeric and date/time types are treated as continuous
+        # This avoids type conversion issues with categorical filters
+        return is_numeric || is_date
     end
 
     """

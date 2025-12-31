@@ -33,11 +33,12 @@ Specification for a range slider control (for continuous numeric filters).
 # Fields
 - `id::String`: HTML element ID (without _min/_max suffix)
 - `label::String`: Display label for the slider
-- `min_value::Float64`: Minimum value of the range
-- `max_value::Float64`: Maximum value of the range
-- `default_min::Float64`: Default minimum selection
-- `default_max::Float64`: Default maximum selection
+- `min_value::Float64`: Minimum value of the range (in milliseconds for dates)
+- `max_value::Float64`: Maximum value of the range (in milliseconds for dates)
+- `default_min::Float64`: Default minimum selection (in milliseconds for dates)
+- `default_max::Float64`: Default maximum selection (in milliseconds for dates)
 - `onchange::String`: JavaScript function to call on change
+- `value_type::Symbol`: Type of values (:numeric, :date, :datetime, :zoneddatetime, :time)
 """
 struct RangeSliderControl
     id::String
@@ -47,6 +48,7 @@ struct RangeSliderControl
     default_min::Float64
     default_max::Float64
     onchange::String
+    value_type::Symbol
 end
 
 """
@@ -104,10 +106,15 @@ function generate_dropdown_html(dropdown::DropdownControl; multiselect::Bool=fal
     multiple_attr = multiselect ? " multiple" : ""
 
     return """
-            <div style="margin: 10px;">
-                <label for="$(dropdown.id)">$(dropdown.label): </label>
-                <select id="$(dropdown.id)"$multiple_attr onchange="$(dropdown.onchange)">
+            <div style="margin: 10px; display: flex; align-items: center;">
+                <div style="flex: 0 0 70%;">
+                    <label for="$(dropdown.id)">$(dropdown.label): </label>
+                    <select id="$(dropdown.id)"$multiple_attr onchange="$(dropdown.onchange)">
     $options_html            </select>
+                </div>
+                <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                    <span id="$(dropdown.id)_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                </div>
             </div>
             """
 end
@@ -126,16 +133,82 @@ Uses jQuery UI's range slider with two handles for intuitive min/max selection.
 - `String`: HTML string for the jQuery UI range slider
 """
 function generate_range_slider_html(slider::RangeSliderControl)::String
-    # Format numbers for display (remove unnecessary decimals)
-    format_num(x) = x == floor(x) ? string(Int(floor(x))) : string(round(x, digits=2))
+    # Format numbers or dates for display based on value_type
+    function format_value(x::Float64)::String
+        if slider.value_type == :date
+            # Convert milliseconds to Date and format as YYYY-MM-DD
+            dt = Dates.unix2datetime(x / 1000)
+            return Dates.format(Date(dt), "yyyy-mm-dd")
+        elseif slider.value_type == :datetime || slider.value_type == :zoneddatetime
+            # Convert milliseconds to DateTime and format as YYYY-MM-DDTHH:MM:SS
+            dt = Dates.unix2datetime(x / 1000)
+            return Dates.format(dt, "yyyy-mm-ddTHH:MM:SS")
+        elseif slider.value_type == :time
+            # Convert milliseconds to Time and format as HH:MM:SS
+            ns = Int64(x * 1_000_000)  # Convert back to nanoseconds
+            t = Time(Dates.Nanosecond(ns))
+            return Dates.format(t, "HH:MM:SS")
+        else
+            # Numeric: format with appropriate precision
+            return x == floor(x) ? string(Int(floor(x))) : string(round(x, digits=2))
+        end
+    end
+
+    # Create JavaScript formatter function based on value_type
+    local js_formatter::String
+    if slider.value_type == :date
+        js_formatter = """
+                        function formatValue_$(slider.id)(x) {
+                            const d = new Date(x);
+                            return d.getFullYear() + '-' +
+                                   String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                                   String(d.getDate()).padStart(2, '0');
+                        }"""
+    elseif slider.value_type == :datetime || slider.value_type == :zoneddatetime
+        js_formatter = """
+                        function formatValue_$(slider.id)(x) {
+                            const d = new Date(x);
+                            return d.getFullYear() + '-' +
+                                   String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                                   String(d.getDate()).padStart(2, '0') + 'T' +
+                                   String(d.getHours()).padStart(2, '0') + ':' +
+                                   String(d.getMinutes()).padStart(2, '0') + ':' +
+                                   String(d.getSeconds()).padStart(2, '0');
+                        }"""
+    elseif slider.value_type == :time
+        js_formatter = """
+                        function formatValue_$(slider.id)(x) {
+                            // x is milliseconds since midnight
+                            const totalSeconds = Math.floor(x / 1000);
+                            const hours = Math.floor(totalSeconds / 3600);
+                            const minutes = Math.floor((totalSeconds % 3600) / 60);
+                            const seconds = totalSeconds % 60;
+                            return String(hours).padStart(2, '0') + ':' +
+                                   String(minutes).padStart(2, '0') + ':' +
+                                   String(seconds).padStart(2, '0');
+                        }"""
+    else
+        js_formatter = """
+                        function formatValue_$(slider.id)(x) {
+                            return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+                        }"""
+    end
 
     return """
-            <div style="margin: 15px 10px;">
-                <label style="display: block; margin-bottom: 5px; font-weight: bold;">$(slider.label): </label>
-                <span id="$(slider.id)_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">$(format_num(slider.default_min)) - $(format_num(slider.default_max))</span>
-                <div id="$(slider.id)_slider" style="margin: 10px 5px; width: 90%;"></div>
+            <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+                <div style="flex: 0 0 70%;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: bold;">$(slider.label): </label>
+                    <span id="$(slider.id)_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">$(format_value(slider.default_min)) - $(format_value(slider.default_max))</span>
+                    <div id="$(slider.id)_slider" style="margin: 10px 5px; width: 90%;"></div>
+                </div>
+                <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+                    <span id="$(slider.id)_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                </div>
                 <script>
                     \$(function() {
+                        // Value formatter function
+                        $js_formatter
+
                         // Initialize jQuery UI range slider
                         \$("#$(slider.id)_slider").slider({
                             range: true,
@@ -147,15 +220,13 @@ function generate_range_slider_html(slider::RangeSliderControl)::String
                                 // Update display during sliding
                                 const minVal = ui.values[0];
                                 const maxVal = ui.values[1];
-                                const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                                \$("#$(slider.id)_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                                \$("#$(slider.id)_display").text(formatValue_$(slider.id)(minVal) + " - " + formatValue_$(slider.id)(maxVal));
                             },
                             change: function(event, ui) {
                                 // Update display and trigger chart update
                                 const minVal = ui.values[0];
                                 const maxVal = ui.values[1];
-                                const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                                \$("#$(slider.id)_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                                \$("#$(slider.id)_display").text(formatValue_$(slider.id)(minVal) + " - " + formatValue_$(slider.id)(maxVal));
 
                                 // Store values for easy access
                                 \$("#$(slider.id)_slider").data('minValue', minVal);
@@ -205,7 +276,8 @@ The generated HTML includes three optional sections:
 Each section is only included if it has controls to display.
 """
 function generate_appearance_html(controls::ChartHtmlControls;
-                                  multiselect_filters::Bool=true)::String
+                                  multiselect_filters::Bool=true,
+                                  chart_title::Symbol=:chart)::String
 
     # Build filters section
     filters_html = ""
@@ -224,7 +296,10 @@ function generate_appearance_html(controls::ChartHtmlControls;
 
         filters_html = """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-            <h4 style="margin-top: 0;">Filters</h4>
+            <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+                <span>Filters</span>
+                <span id="$(chart_title)_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+            </h4>
             $filter_controls_html
         </div>
         """
@@ -373,8 +448,40 @@ function build_filter_dropdowns(chart_title_safe::String,
             if is_continuous_column(df, col)
                 # Create range slider for continuous variables
                 col_data = collect(skipmissing(df[!, col]))
-                min_val = Float64(minimum(col_data))
-                max_val = Float64(maximum(col_data))
+
+                # Convert date/time types to numeric values for slider
+                # The JavaScript will compare the original Date objects, but the slider needs numbers
+                min_data = minimum(col_data)
+                max_data = maximum(col_data)
+
+                # Determine value type and convert to numeric
+                local value_type::Symbol
+                if min_data isa Date
+                    # Convert to milliseconds since Unix epoch
+                    min_val = Float64(Dates.datetime2unix(DateTime(min_data)) * 1000)
+                    max_val = Float64(Dates.datetime2unix(DateTime(max_data)) * 1000)
+                    value_type = :date
+                elseif min_data isa DateTime
+                    # Convert to milliseconds since Unix epoch
+                    min_val = Float64(Dates.datetime2unix(min_data) * 1000)
+                    max_val = Float64(Dates.datetime2unix(max_data) * 1000)
+                    value_type = :datetime
+                elseif min_data isa ZonedDateTime
+                    # Convert to milliseconds since Unix epoch
+                    min_val = Float64(Dates.datetime2unix(DateTime(min_data)) * 1000)
+                    max_val = Float64(Dates.datetime2unix(DateTime(max_data)) * 1000)
+                    value_type = :zoneddatetime
+                elseif min_data isa Time
+                    # Convert to nanoseconds since midnight, then to milliseconds
+                    min_val = Float64(Dates.value(min_data)) / 1_000_000
+                    max_val = Float64(Dates.value(max_data)) / 1_000_000
+                    value_type = :time
+                else
+                    # Numeric type - convert directly
+                    min_val = Float64(min_data)
+                    max_val = Float64(max_data)
+                    value_type = :numeric
+                end
 
                 # Default to full range if default_vals is empty or contains all values
                 default_min = min_val
@@ -387,7 +494,8 @@ function build_filter_dropdowns(chart_title_safe::String,
                     max_val,
                     default_min,
                     default_max,
-                    update_function
+                    update_function,
+                    value_type
                 ))
             else
                 # Create dropdown for categorical variables
@@ -626,7 +734,10 @@ function generate_appearance_html_from_sections(filters_html::String,
     # Build filters section
     filters_section = filters_html != "" ? """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-            <h4 style="margin-top: 0;">Filters</h4>
+            <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+                <span>Filters</span>
+                <span id="$(chart_div_id)_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+            </h4>
             $filters_html
         </div>
         """ : ""

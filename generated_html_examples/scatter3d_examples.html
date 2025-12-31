@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -6462,22 +6515,40 @@ the principal components of the filtered data!</p>
 
 <!-- Filters (for data filtering) -->
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="region_select_filtered_scatter">region: </label>
-            <select id="region_select_filtered_scatter" multiple onchange="updatePlotWithFilters_filtered_scatter()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="filtered_scatter_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_filtered_scatter">region: </label>
+                <select id="region_select_filtered_scatter" multiple onchange="updatePlotWithFilters_filtered_scatter()">
                 <option value="East">East</option>
                 <option value="North" selected>North</option>
                 <option value="South">South</option>
                 <option value="West">West</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_filtered_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-        <div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">temperature: </label>
-    <span id="temperature_range_filtered_scatter_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">15 - 35</span>
-    <div id="temperature_range_filtered_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">temperature: </label>
+        <span id="temperature_range_filtered_scatter_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">15 - 35</span>
+        <div id="temperature_range_filtered_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="temperature_range_filtered_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_temperature_range_filtered_scatter(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#temperature_range_filtered_scatter_slider").slider({
                 range: true,
@@ -6489,15 +6560,13 @@ the principal components of the filtered data!</p>
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#temperature_range_filtered_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#temperature_range_filtered_scatter_display").text(formatValue_temperature_range_filtered_scatter(minVal) + " - " + formatValue_temperature_range_filtered_scatter(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#temperature_range_filtered_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#temperature_range_filtered_scatter_display").text(formatValue_temperature_range_filtered_scatter(minVal) + " - " + formatValue_temperature_range_filtered_scatter(maxVal));
 
                     // Store values for easy access
                     $("#temperature_range_filtered_scatter_slider").data('minValue', minVal);
@@ -6624,13 +6693,26 @@ This is useful for understanding how multivariate time series evolve in 3D space
 
 <!-- Filters (for data filtering) -->
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-    <div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">time: </label>
-    <span id="time_range_timeseries_scatter_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">0 - 31.42</span>
-    <div id="time_range_timeseries_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="timeseries_scatter_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+    <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">time: </label>
+        <span id="time_range_timeseries_scatter_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">0 - 31.42</span>
+        <div id="time_range_timeseries_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="time_range_timeseries_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_time_range_timeseries_scatter(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#time_range_timeseries_scatter_slider").slider({
                 range: true,
@@ -6642,15 +6724,13 @@ This is useful for understanding how multivariate time series evolve in 3D space
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#time_range_timeseries_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#time_range_timeseries_scatter_display").text(formatValue_time_range_timeseries_scatter(minVal) + " - " + formatValue_time_range_timeseries_scatter(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#time_range_timeseries_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#time_range_timeseries_scatter_display").text(formatValue_time_range_timeseries_scatter(minVal) + " - " + formatValue_time_range_timeseries_scatter(maxVal));
 
                     // Store values for easy access
                     $("#time_range_timeseries_scatter_slider").data('minValue', minVal);
@@ -6753,22 +6833,40 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
 
 <!-- Filters (for data filtering) -->
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="location_select_comprehensive_scatter">location: </label>
-            <select id="location_select_comprehensive_scatter" multiple onchange="updatePlotWithFilters_comprehensive_scatter()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="comprehensive_scatter_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="location_select_comprehensive_scatter">location: </label>
+                <select id="location_select_comprehensive_scatter" multiple onchange="updatePlotWithFilters_comprehensive_scatter()">
                 <option value="Site A" selected>Site A</option>
                 <option value="Site B">Site B</option>
                 <option value="Site C">Site C</option>
                 <option value="Site D">Site D</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="location_select_comprehensive_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-        <div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">temperature: </label>
-    <span id="temperature_range_comprehensive_scatter_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">15 - 35</span>
-    <div id="temperature_range_comprehensive_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">temperature: </label>
+        <span id="temperature_range_comprehensive_scatter_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">15 - 35</span>
+        <div id="temperature_range_comprehensive_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="temperature_range_comprehensive_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_temperature_range_comprehensive_scatter(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#temperature_range_comprehensive_scatter_slider").slider({
                 range: true,
@@ -6780,15 +6878,13 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#temperature_range_comprehensive_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#temperature_range_comprehensive_scatter_display").text(formatValue_temperature_range_comprehensive_scatter(minVal) + " - " + formatValue_temperature_range_comprehensive_scatter(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#temperature_range_comprehensive_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#temperature_range_comprehensive_scatter_display").text(formatValue_temperature_range_comprehensive_scatter(minVal) + " - " + formatValue_temperature_range_comprehensive_scatter(maxVal));
 
                     // Store values for easy access
                     $("#temperature_range_comprehensive_scatter_slider").data('minValue', minVal);
@@ -6815,12 +6911,22 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
     </script>
 </div>
 
-<div style="margin: 15px 10px;">
-    <label style="display: block; margin-bottom: 5px; font-weight: bold;">pressure: </label>
-    <span id="pressure_range_comprehensive_scatter_display" style="display: inline-block; min-width: 100px; font-size: 0.9em; color: #666;">980 - 1029.5</span>
-    <div id="pressure_range_comprehensive_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+<div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">pressure: </label>
+        <span id="pressure_range_comprehensive_scatter_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">980 - 1029.5</span>
+        <div id="pressure_range_comprehensive_scatter_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="pressure_range_comprehensive_scatter_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
     <script>
         $(function() {
+            // Value formatter function
+            function formatValue_pressure_range_comprehensive_scatter(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
             // Initialize jQuery UI range slider
             $("#pressure_range_comprehensive_scatter_slider").slider({
                 range: true,
@@ -6832,15 +6938,13 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
                     // Update display during sliding
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#pressure_range_comprehensive_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#pressure_range_comprehensive_scatter_display").text(formatValue_pressure_range_comprehensive_scatter(minVal) + " - " + formatValue_pressure_range_comprehensive_scatter(maxVal));
                 },
                 change: function(event, ui) {
                     // Update display and trigger chart update
                     const minVal = ui.values[0];
                     const maxVal = ui.values[1];
-                    const formatNum = (x) => x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
-                    $("#pressure_range_comprehensive_scatter_display").text(formatNum(minVal) + " - " + formatNum(maxVal));
+                    $("#pressure_range_comprehensive_scatter_display").text(formatValue_pressure_range_comprehensive_scatter(minVal) + " - " + formatValue_pressure_range_comprehensive_scatter(maxVal));
 
                     // Store values for easy access
                     $("#pressure_range_comprehensive_scatter_slider").data('minValue', minVal);
@@ -6968,6 +7072,6 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

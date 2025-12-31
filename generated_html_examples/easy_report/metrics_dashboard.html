@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -511,6 +564,14 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_metrics_h1 = function() {
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('metrics_h1' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_metrics_h1');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -563,25 +624,51 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Filter data (support both categorical and continuous filters)
-        const filteredData = allData.filter(row => {
-            // Check categorical filters (dropdowns)
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
             }
-            // Check continuous filters (range sliders)
-            for (let col in rangeFilters) {
-                const value = parseFloat(row[col]);
-                const range = rangeFilters[col];
-                if (value < range.min || value > range.max) {
-                    return false;
-                }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_select_metrics_h1' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
             }
-            return true;
         });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            // Update observation count for this filter
+            const countElement = document.getElementById(col + '_range_metrics_h1' + '_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -944,9 +1031,10 @@ $(function(){
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="aggregator_select_metrics_h1">Aggregator: </label>
-            <select id="aggregator_select_metrics_h1" onchange="updateChart_metrics_h1()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_metrics_h1">Aggregator: </label>
+                <select id="aggregator_select_metrics_h1" onchange="updateChart_metrics_h1()">
                 <option value="none" selected>none</option>
                 <option value="mean">mean</option>
                 <option value="median">median</option>
@@ -955,6 +1043,10 @@ $(function(){
                 <option value="max">max</option>
                 <option value="sum">sum</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_metrics_h1_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -964,6 +1056,6 @@ $(function(){
 <div id="metrics_h1"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: metrics_data2.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

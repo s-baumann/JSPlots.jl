@@ -103,6 +103,12 @@ struct SanKey <: JSPlotsType
         update_function = "updateChart_$chart_title()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df_work, update_function)
 
+        # Separate categorical and continuous filters for JavaScript
+        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
+        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        categorical_filters_js = build_js_array(categorical_filter_cols)
+        continuous_filters_js = build_js_array(continuous_filter_cols)
+
         # Build color column dropdown if multiple provided
         color_col_dropdown = if length(color_cols) > 1
             [DropdownControl(
@@ -168,7 +174,8 @@ struct SanKey <: JSPlotsType
         # Build functional HTML (JavaScript)
         functional_html = """
         (function() {
-            const FILTER_COLS = $filter_cols_js;
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
             const COLOR_COLS = $color_cols_js;
             const VALUE_COLS = $value_cols_js;
             const ID_COL = '$(string(id_col))';
@@ -310,25 +317,78 @@ struct SanKey <: JSPlotsType
                     return;
                 }
 
-                // Get current filter values
+                const totalObs = allData.length;
+
+                // Update total observation count
+                const totalObsElement = document.getElementById('$chart_title' + '_total_obs');
+                if (totalObsElement) {
+                    totalObsElement.textContent = '(' + totalObs + ' observations)';
+                }
+
+                // Get categorical filter values
                 const filters = {};
-                FILTER_COLS.forEach(col => {
+                CATEGORICAL_FILTERS.forEach(col => {
                     const select = document.getElementById(col + '_select_$chart_title');
                     if (select) {
                         filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
                     }
                 });
 
-                // Filter data
-                const filteredData = allData.filter(row => {
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
+                // Get continuous filter values (range sliders)
+                const rangeFilters = {};
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
                     }
-                    return true;
                 });
+
+                // Apply filters incrementally to track observation counts
+                let currentData = allData;
+
+                // Apply categorical filters and update counts
+                CATEGORICAL_FILTERS.forEach(col => {
+                    if (filters[col] && filters[col].length > 0) {
+                        currentData = currentData.filter(row => {
+                            const rowValueStr = temporalValueToString(row[col]);
+                            return filters[col].includes(rowValueStr);
+                        });
+                    }
+
+                    const countElement = document.getElementById(col + '_select_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
+                });
+
+                // Apply continuous filters and update counts
+                CONTINUOUS_FILTERS.forEach(col => {
+                    if (rangeFilters[col]) {
+                        const range = rangeFilters[col];
+                        currentData = currentData.filter(row => {
+                            const rawValue = row[col];
+                            let value;
+                            if (rawValue instanceof Date) {
+                                value = rawValue.getTime();
+                            } else {
+                                value = parseFloat(rawValue);
+                            }
+                            return value >= range.min && value <= range.max;
+                        });
+                    }
+
+                    const countElement = document.getElementById(col + '_range_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
+                });
+
+                const filteredData = currentData;
 
                 if (filteredData.length === 0) {
                     console.warn('No data after filtering');

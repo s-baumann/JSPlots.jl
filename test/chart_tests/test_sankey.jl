@@ -97,7 +97,7 @@ import JSPlots: SanKey
 
         @test occursin("region_select", sankey.appearance_html)
         @test occursin("North", sankey.appearance_html)
-        @test occursin("FILTER_COLS", sankey.functional_html)
+        @test occursin("CATEGORICAL_FILTERS", sankey.functional_html) || occursin("CONTINUOUS_FILTERS", sankey.functional_html)
     end
 
     @testset "Sankey with equal weighting (no value column)" begin

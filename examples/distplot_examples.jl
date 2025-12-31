@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Dates, Distributions, StableRNGs
+using JSPlots, DataFrames, Dates, Distributions, StableRNGs, TimeZones
 
 println("Creating DistPlot examples...")
 
@@ -110,6 +110,65 @@ distplot5 = DistPlot(:custom_appearance, df5, :df5;
     notes = "Demonstrates customization options: rug plot hidden, increased box opacity, custom bin count"
 )
 
+# Example 6: Date/Time Filtering (Testing continuous filters for temporal types)
+n = 100  # Need >20 unique values for each time column to trigger range sliders
+base_date = Date(2024, 1, 1)
+base_datetime = DateTime(2024, 1, 1, 0, 0, 0)
+base_time = Time(0, 0, 0)
+
+df6 = DataFrame(
+    value = randn(rng, n) .* 20 .+ 100,
+    date_col = [base_date + Day(i) for i in 1:n],  # 100 unique dates
+    datetime_col = [base_datetime + Hour(i) for i in 1:n],  # 100 unique datetimes
+    zoneddatetime_col = [ZonedDateTime(base_datetime + Hour(i), tz"UTC") for i in 1:n],  # 100 unique zoned datetimes
+    time_col = [base_time + Minute(i*10) for i in 1:n],  # 100 unique times
+    category = rand(rng, ["A", "B", "C"], n)
+)
+
+distplot6 = DistPlot(:datetime_filters, df6, :df6;
+    value_cols = [:value],
+    color_cols = [:category],
+    filters = Dict(
+        :date_col => df6.date_col[1:50],  # Default to first half of date range
+        :datetime_col => df6.datetime_col,  # All datetimes selected by default
+        :zoneddatetime_col => df6.zoneddatetime_col,  # All zoned datetimes
+        :time_col => df6.time_col[26:75]  # Middle portion of time range
+    ),
+    show_controls = true,
+    title = "Date/Time Filtering Test",
+    notes = "This example tests continuous range filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders for intuitive filtering. Try adjusting the range sliders to filter the data!"
+)
+
+# Example 7: Date/Time Range Sliders (Testing that all temporal types use sliders)
+n = 140  # 140 rows but only 10 unique values per time column
+base_date_cat = Date(2024, 1, 1)
+base_datetime_cat = DateTime(2024, 1, 1, 0, 0, 0)
+base_time_cat = Time(0, 0, 0)
+
+# Create 10 unique values for each temporal type, repeated to make 140 rows
+unique_dates = [base_date_cat + Day(i) for i in 1:10]
+unique_datetimes = [base_datetime_cat + Hour(i*2) for i in 1:10]
+unique_zoneddatetimes = [ZonedDateTime(base_datetime_cat + Hour(i*2), tz"UTC") for i in 1:10]
+unique_times = [base_time_cat + Hour(i) for i in 1:10]
+
+df7 = DataFrame(
+    value = randn(rng, n) .* 15 .+ 90,
+    date_cat = repeat(unique_dates, inner=14),  # 10 unique dates
+    datetime_cat = repeat(unique_datetimes, inner=14),  # 10 unique datetimes
+    zoneddatetime_cat = repeat(unique_zoneddatetimes, inner=14),  # 10 unique zoned datetimes
+    time_cat = repeat(unique_times, inner=14),  # 10 unique times
+    region = rand(rng, ["North", "South", "East", "West"], n)
+)
+
+distplot7 = DistPlot(:datetime_sliders, df7, :df7;
+    value_cols = [:value],
+    color_cols = [:region],
+    filters = [:date_cat, :datetime_cat, :zoneddatetime_cat, :time_cat],  # All temporal types use sliders
+    show_controls = true,
+    title = "Date/Time Range Slider Filters Test",
+    notes = "This example tests range slider filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders regardless of the number of unique values, providing a consistent filtering experience."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -129,9 +188,11 @@ page = JSPlotPage(
         :df2 => df2,
         :df3 => df3,
         :df4 => df4,
-        :df5 => df5
+        :df5 => df5,
+        :df6 => df6,
+        :df7 => df7
     ),
-    [header, distplot1, distplot2, distplot3, distplot4, distplot5, conclusion],
+    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6, distplot7, conclusion],
     tab_title = "DistPlot Examples"
 )
 
@@ -147,3 +208,5 @@ println("  • Multiple groups comparison")
 println("  • Interactive filters (numeric and categorical)")
 println("  • Multiple value and group columns with dropdowns")
 println("  • Customized appearance options")
+println("  • Date/Time filtering with range sliders (>20 unique values)")
+println("  • Date/Time filtering with dropdown lists (<20 unique values)")

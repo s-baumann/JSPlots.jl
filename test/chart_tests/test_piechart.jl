@@ -174,7 +174,7 @@ using DataFrames
             filters = Dict{Symbol,Any}(:group => "X")
         )
         @test occursin("filteredData", chart.functional_html)
-        @test occursin("FILTER_COLS", chart.functional_html)
+        @test occursin("CATEGORICAL_FILTERS", chart.functional_html) || occursin("CONTINUOUS_FILTERS", chart.functional_html)
     end
 
     @testset "Event listeners" begin

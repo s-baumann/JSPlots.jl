@@ -185,12 +185,14 @@ function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
     // Regex patterns for ISO date formats
-    var datePattern = /^\\d{4}-\\d{2}-\\d{2}\$/;  // YYYY-MM-DD
-    var datetimePattern = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date columns
+    // Check first row to identify date and time columns
     var firstRow = data[0];
     var dateColumns = [];
+    var timeColumns = [];
 
     for (var key in firstRow) {
         if (firstRow.hasOwnProperty(key)) {
@@ -198,21 +200,30 @@ function parseDatesInData(data) {
             if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
                     dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
                 }
             }
         }
     }
 
-    // If no date columns found, return data unchanged
-    if (dateColumns.length === 0) return data;
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
 
-    // Convert date strings to Date objects in all rows
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
                 if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
                     newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
                 } else {
                     newRow[key] = row[key];
                 }
@@ -220,6 +231,48 @@ function parseDatesInData(data) {
         }
         return newRow;
     });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
 }
 
 // This function parses data from embedded or external sources and returns a Promise
@@ -405,7 +458,8 @@ $(function(){
 
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['revenue', 'units'];
     const COLOR_COLS = ['company'];
     const COLOR_MAPS = {'company': {'Company E': '#FFA15A', 'Company D': '#ab63fa', 'Company C': '#00cc96', 'Company B': '#EF553B', 'Company A': '#636efa'}};
@@ -439,6 +493,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('market_share' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_market_share');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -449,25 +511,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_market_share');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_market_share' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_market_share_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_market_share_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_market_share');
@@ -657,7 +764,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['amount'];
     const COLOR_COLS = ['category'];
     const COLOR_MAPS = {'category': {'Salaries': '#636efa', 'R&D': '#00cc96', 'Operations': '#ab63fa', 'Other': '#19d3f3', 'Marketing': '#EF553B', 'Infrastructure': '#FFA15A'}};
@@ -691,6 +799,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('budget_donut' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_budget_donut');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -701,25 +817,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_budget_donut');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_budget_donut' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_budget_donut_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_budget_donut_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_budget_donut');
@@ -909,7 +1070,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['year', 'region'];
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = ['year'];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['product'];
     const COLOR_MAPS = {'product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
@@ -943,6 +1105,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('sales_filtered' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_sales_filtered');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -953,25 +1123,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_sales_filtered');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_sales_filtered' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_sales_filtered_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_sales_filtered_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_sales_filtered');
@@ -1161,7 +1376,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['year'];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = ['year'];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['product'];
     const COLOR_MAPS = {'product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
@@ -1195,6 +1411,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('sales_by_region' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_sales_by_region');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1205,25 +1429,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_sales_by_region');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_sales_by_region' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_sales_by_region_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_sales_by_region_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_sales_by_region');
@@ -1413,7 +1682,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['count'];
     const COLOR_COLS = ['preference'];
     const COLOR_MAPS = {'preference': {'Mobile': '#636efa', 'Desktop': '#EF553B', 'Tablet': '#00cc96'}};
@@ -1447,6 +1717,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('demographics_grid' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_demographics_grid');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1457,25 +1735,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_demographics_grid');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_demographics_grid' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_demographics_grid_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_demographics_grid_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_demographics_grid');
@@ -1665,7 +1988,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['quarter'];
+    const CATEGORICAL_FILTERS = ['quarter'];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['amount'];
     const COLOR_COLS = ['expense_type', 'department'];
     const COLOR_MAPS = {'expense_type': {'Salaries': '#636efa', 'Training': '#ab63fa', 'Equipment': '#EF553B', 'Travel': '#00cc96', 'Supplies': '#FFA15A'}, 'department': {'HR': '#FFA15A', 'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
@@ -1699,6 +2023,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('dept_expenses' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_dept_expenses');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1709,25 +2041,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_dept_expenses');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_dept_expenses' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_dept_expenses_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_dept_expenses_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_dept_expenses');
@@ -1917,7 +2294,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['revenue_contribution'];
     const COLOR_COLS = ['segment'];
     const COLOR_MAPS = {'segment': {'Enterprise': '#636efa', 'Individual': '#FFA15A', 'Mid-Market': '#EF553B', 'Small Business': '#00cc96', 'Startup': '#ab63fa'}};
@@ -1951,6 +2329,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('customer_segments' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_customer_segments');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1961,25 +2347,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_customer_segments');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_customer_segments' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_customer_segments_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_customer_segments_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_customer_segments');
@@ -2169,7 +2600,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['category'];
     const COLOR_MAPS = {'category': {'Food': '#ab63fa', 'Home & Garden': '#00cc96', 'Clothing': '#EF553B', 'Electronics': '#636efa', 'Books': '#FFA15A'}};
@@ -2203,6 +2635,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('store_comparison' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_store_comparison');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2213,25 +2653,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_store_comparison');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_store_comparison' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_store_comparison_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_store_comparison_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_store_comparison');
@@ -2421,7 +2906,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['visitors'];
     const COLOR_COLS = ['browser', 'device'];
     const COLOR_MAPS = {'browser': {'Safari': '#00cc96', 'Chrome': '#636efa', 'Edge': '#ab63fa', 'Firefox': '#EF553B'}, 'device': {'Mobile': '#EF553B', 'Desktop': '#636efa', 'Tablet': '#00cc96'}};
@@ -2455,6 +2941,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('traffic_analysis' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_traffic_analysis');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2465,25 +2959,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_traffic_analysis');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_traffic_analysis' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_traffic_analysis_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_traffic_analysis_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_traffic_analysis');
@@ -2673,7 +3212,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['quarter'];
+    const CATEGORICAL_FILTERS = ['quarter'];
+    const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['revenue', 'units_sold', 'profit', 'customer_count'];
     const COLOR_COLS = ['product', 'channel', 'region'];
     const COLOR_MAPS = {'channel': {'Retail': '#EF553B', 'Online': '#636efa', 'Wholesale': '#00cc96'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'North America': '#636efa', 'South America': '#ab63fa'}, 'product': {'Monitor': '#FFA15A', 'Phone': '#EF553B', 'Headphones': '#ab63fa', 'Laptop': '#636efa', 'Tablet': '#00cc96'}};
@@ -2707,6 +3247,14 @@ $(function(){
             return;
         }
 
+        const totalObs = allData.length;
+
+        // Update total observation count
+        const totalObsElement = document.getElementById('comprehensive_sales' + '_total_obs');
+        if (totalObsElement) {
+            totalObsElement.textContent = '(' + totalObs + ' observations)';
+        }
+
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_comprehensive_sales');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2717,25 +3265,70 @@ $(function(){
         // Get color map for current color selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
+        CATEGORICAL_FILTERS.forEach(col => {
             const select = document.getElementById(col + '_select_comprehensive_sales');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_comprehensive_sales' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
             }
-            return true;
         });
+
+        // Apply filters incrementally to track observation counts
+        let currentData = allData;
+
+        // Apply categorical filters and update counts
+        CATEGORICAL_FILTERS.forEach(col => {
+            if (filters[col] && filters[col].length > 0) {
+                currentData = currentData.filter(row => {
+                    const rowValueStr = temporalValueToString(row[col]);
+                    return filters[col].includes(rowValueStr);
+                });
+            }
+
+            const countElement = document.getElementById(col + '_select_comprehensive_sales_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        // Apply continuous filters and update counts
+        CONTINUOUS_FILTERS.forEach(col => {
+            if (rangeFilters[col]) {
+                const range = rangeFilters[col];
+                currentData = currentData.filter(row => {
+                    const rawValue = row[col];
+                    let value;
+                    if (rawValue instanceof Date) {
+                        value = rawValue.getTime();
+                    } else {
+                        value = parseFloat(rawValue);
+                    }
+                    return value >= range.min && value <= range.max;
+                });
+            }
+
+            const countElement = document.getElementById(col + '_range_comprehensive_sales_obs_count');
+            if (countElement) {
+                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+            }
+        });
+
+        const filteredData = currentData;
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_comprehensive_sales');
@@ -3466,12 +4059,17 @@ Store C,Books,11918.705181170277
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="value_col_select_market_share">Slice size: </label>
-            <select id="value_col_select_market_share" onchange="updateChart_market_share()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="value_col_select_market_share">Slice size: </label>
+                <select id="value_col_select_market_share" onchange="updateChart_market_share()">
                 <option value="revenue" selected>revenue</option>
                 <option value="units">units</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="value_col_select_market_share_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3497,25 +4095,84 @@ Store C,Books,11918.705181170277
 <p>Interactive filters allow you to select different regions and years. Try selecting multiple options!</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="year_select_sales_filtered">year: </label>
-            <select id="year_select_sales_filtered" multiple onchange="updateChart_sales_filtered()">
-                <option value="2022">2022</option>
-                <option value="2023">2023</option>
-                <option value="2024" selected>2024</option>
-            </select>
-        </div>
-                <div style="margin: 10px;">
-            <label for="region_select_sales_filtered">region: </label>
-            <select id="region_select_sales_filtered" multiple onchange="updateChart_sales_filtered()">
-                <option value="East">East</option>
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_sales_filtered">region: </label>
+                <select id="region_select_sales_filtered" multiple onchange="updateChart_sales_filtered()">
+                <option value="East" selected>East</option>
                 <option value="North" selected>North</option>
-                <option value="South">South</option>
-                <option value="West">West</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_sales_filtered_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-        
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">year: </label>
+        <span id="year_range_sales_filtered_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2022 - 2024</span>
+        <div id="year_range_sales_filtered_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="year_range_sales_filtered_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_year_range_sales_filtered(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
+            // Initialize jQuery UI range slider
+            $("#year_range_sales_filtered_slider").slider({
+                range: true,
+                min: 2022.0,
+                max: 2024.0,
+                step: 2.0 / 1000,  // Smooth sliding
+                values: [2022.0, 2024.0],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#year_range_sales_filtered_display").text(formatValue_year_range_sales_filtered(minVal) + " - " + formatValue_year_range_sales_filtered(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#year_range_sales_filtered_display").text(formatValue_year_range_sales_filtered(minVal) + " - " + formatValue_year_range_sales_filtered(maxVal));
+
+                    // Store values for easy access
+                    $("#year_range_sales_filtered_slider").data('minValue', minVal);
+                    $("#year_range_sales_filtered_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updateChart_sales_filtered()
+                }
+            });
+
+            // Store initial values
+            $("#year_range_sales_filtered_slider").data('minValue', 2022.0);
+            $("#year_range_sales_filtered_slider").data('maxValue', 2024.0);
+        });
+
+        // Helper functions to get slider values
+        function getyear_range_sales_filteredMin() {
+            return $("#year_range_sales_filtered_slider").slider("values", 0);
+        }
+
+        function getyear_range_sales_filteredMax() {
+            return $("#year_range_sales_filtered_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
 </div>
 
 
@@ -3529,27 +4186,86 @@ Store C,Books,11918.705181170277
 <p>Facet wrap creates a grid of pie charts, one for each region. Note single facet dropdown!</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="year_select_sales_by_region">year: </label>
-            <select id="year_select_sales_by_region" multiple onchange="updateChart_sales_by_region()">
-                <option value="2022">2022</option>
-                <option value="2023">2023</option>
-                <option value="2024" selected>2024</option>
-            </select>
-        </div>
-        
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+    <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">year: </label>
+        <span id="year_range_sales_by_region_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">2022 - 2024</span>
+        <div id="year_range_sales_by_region_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="year_range_sales_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_year_range_sales_by_region(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
+            // Initialize jQuery UI range slider
+            $("#year_range_sales_by_region_slider").slider({
+                range: true,
+                min: 2022.0,
+                max: 2024.0,
+                step: 2.0 / 1000,  // Smooth sliding
+                values: [2022.0, 2024.0],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#year_range_sales_by_region_display").text(formatValue_year_range_sales_by_region(minVal) + " - " + formatValue_year_range_sales_by_region(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#year_range_sales_by_region_display").text(formatValue_year_range_sales_by_region(minVal) + " - " + formatValue_year_range_sales_by_region(maxVal));
+
+                    // Store values for easy access
+                    $("#year_range_sales_by_region_slider").data('minValue', minVal);
+                    $("#year_range_sales_by_region_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updateChart_sales_by_region()
+                }
+            });
+
+            // Store initial values
+            $("#year_range_sales_by_region_slider").data('minValue', 2022.0);
+            $("#year_range_sales_by_region_slider").data('maxValue', 2024.0);
+        });
+
+        // Helper functions to get slider values
+        function getyear_range_sales_by_regionMin() {
+            return $("#year_range_sales_by_region_slider").slider("values", 0);
+        }
+
+        function getyear_range_sales_by_regionMax() {
+            return $("#year_range_sales_by_region_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
 </div>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_sales_by_region">Facet by: </label>
-            <select id="facet1_select_sales_by_region" onchange="updateChart_sales_by_region()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_sales_by_region">Facet by: </label>
+                <select id="facet1_select_sales_by_region" onchange="updateChart_sales_by_region()">
                 <option value="None">None</option>
                 <option value="region" selected>region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_sales_by_region_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3566,21 +4282,31 @@ Store C,Books,11918.705181170277
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_demographics_grid">Facet 1: </label>
-            <select id="facet1_select_demographics_grid" onchange="updateChart_demographics_grid()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_demographics_grid">Facet 1: </label>
+                <select id="facet1_select_demographics_grid" onchange="updateChart_demographics_grid()">
                 <option value="None">None</option>
                 <option value="age_group" selected>age_group</option>
                 <option value="gender">gender</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_demographics_grid_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_demographics_grid">Facet 2: </label>
-            <select id="facet2_select_demographics_grid" onchange="updateChart_demographics_grid()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_demographics_grid">Facet 2: </label>
+                <select id="facet2_select_demographics_grid" onchange="updateChart_demographics_grid()">
                 <option value="None">None</option>
                 <option value="age_group">age_group</option>
                 <option value="gender" selected>gender</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_demographics_grid_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3594,39 +4320,57 @@ Store C,Books,11918.705181170277
 <p>Expenses broken down by type for each department. Try switching slice grouping to see department distribution!</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="quarter_select_dept_expenses">quarter: </label>
-            <select id="quarter_select_dept_expenses" multiple onchange="updateChart_dept_expenses()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="quarter_select_dept_expenses">quarter: </label>
+                <select id="quarter_select_dept_expenses" multiple onchange="updateChart_dept_expenses()">
                 <option value="Q1" selected>Q1</option>
                 <option value="Q2">Q2</option>
                 <option value="Q3">Q3</option>
                 <option value="Q4">Q4</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="quarter_select_dept_expenses_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="color_col_select_dept_expenses">Slice grouping: </label>
-            <select id="color_col_select_dept_expenses" onchange="updateChart_dept_expenses()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_dept_expenses">Slice grouping: </label>
+                <select id="color_col_select_dept_expenses" onchange="updateChart_dept_expenses()">
                 <option value="expense_type" selected>expense_type</option>
                 <option value="department">department</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_dept_expenses_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_dept_expenses">Facet by: </label>
-            <select id="facet1_select_dept_expenses" onchange="updateChart_dept_expenses()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_dept_expenses">Facet by: </label>
+                <select id="facet1_select_dept_expenses" onchange="updateChart_dept_expenses()">
                 <option value="None">None</option>
                 <option value="department" selected>department</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_dept_expenses_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3654,12 +4398,17 @@ Store C,Books,11918.705181170277
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_store_comparison">Facet by: </label>
-            <select id="facet1_select_store_comparison" onchange="updateChart_store_comparison()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_store_comparison">Facet by: </label>
+                <select id="facet1_select_store_comparison" onchange="updateChart_store_comparison()">
                 <option value="None">None</option>
                 <option value="store" selected>store</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_store_comparison_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3675,33 +4424,48 @@ Store C,Books,11918.705181170277
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="color_col_select_traffic_analysis">Slice grouping: </label>
-            <select id="color_col_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_traffic_analysis">Slice grouping: </label>
+                <select id="color_col_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
                 <option value="browser" selected>browser</option>
                 <option value="device">device</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_traffic_analysis_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_traffic_analysis">Facet 1: </label>
-            <select id="facet1_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_traffic_analysis">Facet 1: </label>
+                <select id="facet1_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
                 <option value="None" selected>None</option>
                 <option value="country">country</option>
                 <option value="device">device</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_traffic_analysis_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_traffic_analysis">Facet 2: </label>
-            <select id="facet2_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_traffic_analysis">Facet 2: </label>
+                <select id="facet2_select_traffic_analysis" onchange="updateChart_traffic_analysis()">
                 <option value="None" selected>None</option>
                 <option value="country">country</option>
                 <option value="device">device</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_traffic_analysis_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3715,60 +4479,88 @@ Store C,Books,11918.705181170277
 <p>This example demonstrates ALL PieChart features: (1) Multiple slice size options (revenue, units, profit, customers), (2) Multiple grouping options (by product, channel, or region), (3) Flexible faceting (choose 0, 1, or 2 facet variables), (4) Interactive filters (select quarters). Try different combinations!</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
-    <h4 style="margin-top: 0;">Filters</h4>
-            <div style="margin: 10px;">
-            <label for="quarter_select_comprehensive_sales">quarter: </label>
-            <select id="quarter_select_comprehensive_sales" multiple onchange="updateChart_comprehensive_sales()">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="quarter_select_comprehensive_sales">quarter: </label>
+                <select id="quarter_select_comprehensive_sales" multiple onchange="updateChart_comprehensive_sales()">
                 <option value="Q1-2024">Q1-2024</option>
                 <option value="Q2-2024">Q2-2024</option>
                 <option value="Q3-2024">Q3-2024</option>
                 <option value="Q4-2024" selected>Q4-2024</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="quarter_select_comprehensive_sales_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-            <div style="margin: 10px;">
-            <label for="value_col_select_comprehensive_sales">Slice size: </label>
-            <select id="value_col_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="value_col_select_comprehensive_sales">Slice size: </label>
+                <select id="value_col_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
                 <option value="revenue" selected>revenue</option>
                 <option value="units_sold">units_sold</option>
                 <option value="profit">profit</option>
                 <option value="customer_count">customer_count</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="value_col_select_comprehensive_sales_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="color_col_select_comprehensive_sales">Slice grouping: </label>
-            <select id="color_col_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_comprehensive_sales">Slice grouping: </label>
+                <select id="color_col_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
                 <option value="product" selected>product</option>
                 <option value="channel">channel</option>
                 <option value="region">region</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_comprehensive_sales_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
     <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px;">
-            <label for="facet1_select_comprehensive_sales">Facet 1: </label>
-            <select id="facet1_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet1_select_comprehensive_sales">Facet 1: </label>
+                <select id="facet1_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="channel">channel</option>
                 <option value="quarter">quarter</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet1_select_comprehensive_sales_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
-                <div style="margin: 10px;">
-            <label for="facet2_select_comprehensive_sales">Facet 2: </label>
-            <select id="facet2_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="facet2_select_comprehensive_sales">Facet 2: </label>
+                <select id="facet2_select_comprehensive_sales" onchange="updateChart_comprehensive_sales()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="channel">channel</option>
                 <option value="quarter">quarter</option>
             </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="facet2_select_comprehensive_sales_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
         </div>
         
 </div>
@@ -3796,6 +4588,6 @@ Store C,Books,11918.705181170277
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a>.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
 </body>
 </html>

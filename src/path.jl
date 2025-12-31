@@ -94,8 +94,14 @@ normalized_filters = normalize_filters(filters, df)
         update_function = "updateChart_$chart_title()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
 
+        # Separate categorical and continuous filters for JavaScript
+        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
+        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        categorical_filters_js = build_js_array(categorical_filter_cols)
+        continuous_filters_js = build_js_array(continuous_filter_cols)
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
@@ -114,7 +120,8 @@ normalized_filters = normalize_filters(filters, df)
         functional_html = """
         (function() {
             // Configuration
-            const FILTER_COLS = $filter_cols_js;
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
@@ -153,6 +160,14 @@ normalized_filters = normalize_filters(filters, df)
 
             // Make it global so inline onchange can see it
             window.updateChart_$chart_title = function() {
+                const totalObs = allData.length;
+
+                // Update total observation count
+                const totalObsElement = document.getElementById('$chart_title' + '_total_obs');
+                if (totalObsElement) {
+                    totalObsElement.textContent = '(' + totalObs + ' observations)';
+                }
+
                 // Get current X and Y columns
                 const xColSelect = document.getElementById('x_col_select_$chart_title');
                 const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -160,12 +175,24 @@ normalized_filters = normalize_filters(filters, df)
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-                // Get current filter values (multiple selections)
+                // Get categorical filter values (multiple selections)
                 const filters = {};
-                FILTER_COLS.forEach(col => {
+                CATEGORICAL_FILTERS.forEach(col => {
                     const select = document.getElementById(col + '_select_$chart_title');
                     if (select) {
                         filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Get continuous filter values (range sliders)
+                const rangeFilters = {};
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
                     }
                 });
 
@@ -187,16 +214,49 @@ normalized_filters = normalize_filters(filters, df)
                 // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-                // Filter data (support multiple selections per filter)
-                const filteredData = allData.filter(row => {
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
+                // Apply filters incrementally to track observation counts
+                let currentData = allData;
+
+                // Apply categorical filters and update counts
+                CATEGORICAL_FILTERS.forEach(col => {
+                    if (filters[col] && filters[col].length > 0) {
+                        currentData = currentData.filter(row => {
+                            const rowValueStr = temporalValueToString(row[col]);
+                            return filters[col].includes(rowValueStr);
+                        });
                     }
-                    return true;
+
+                    const countElement = document.getElementById(col + '_select_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
                 });
+
+                // Apply continuous filters and update counts
+                CONTINUOUS_FILTERS.forEach(col => {
+                    if (rangeFilters[col]) {
+                        const range = rangeFilters[col];
+                        currentData = currentData.filter(row => {
+                            const rawValue = row[col];
+                            let value;
+                            if (rawValue instanceof Date) {
+                                value = rawValue.getTime();
+                            } else {
+                                value = parseFloat(rawValue);
+                            }
+                            return value >= range.min && value <= range.max;
+                        });
+                    }
+
+                    const countElement = document.getElementById(col + '_range_$(chart_title)_obs_count');
+                    if (countElement) {
+                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+                    }
+                });
+
+                const filteredData = currentData;
 
                 if (FACET_COLS.length === 0) {
                     // No faceting - group by color
