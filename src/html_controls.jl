@@ -38,7 +38,7 @@ Specification for a range slider control (for continuous numeric filters).
 - `default_min::Float64`: Default minimum selection (in milliseconds for dates)
 - `default_max::Float64`: Default maximum selection (in milliseconds for dates)
 - `onchange::String`: JavaScript function to call on change
-- `value_type::Symbol`: Type of values (:numeric, :date, :datetime, :zoneddatetime, :time)
+- `value_type::Symbol`: Type of values (:integer, :numeric, :date, :datetime, :zoneddatetime, :time)
 """
 struct RangeSliderControl
     id::String
@@ -148,8 +148,11 @@ function generate_range_slider_html(slider::RangeSliderControl)::String
             ns = Int64(x * 1_000_000)  # Convert back to nanoseconds
             t = Time(Dates.Nanosecond(ns))
             return Dates.format(t, "HH:MM:SS")
+        elseif slider.value_type == :integer
+            # Integer: always format as whole number
+            return string(Int(round(x)))
         else
-            # Numeric: format with appropriate precision
+            # Floating point numeric: format with appropriate precision
             return x == floor(x) ? string(Int(floor(x))) : string(round(x, digits=2))
         end
     end
@@ -187,6 +190,11 @@ function generate_range_slider_html(slider::RangeSliderControl)::String
                                    String(minutes).padStart(2, '0') + ':' +
                                    String(seconds).padStart(2, '0');
                         }"""
+    elseif slider.value_type == :integer
+        js_formatter = """
+                        function formatValue_$(slider.id)(x) {
+                            return Math.round(x).toString();
+                        }"""
     else
         js_formatter = """
                         function formatValue_$(slider.id)(x) {
@@ -214,7 +222,7 @@ function generate_range_slider_html(slider::RangeSliderControl)::String
                             range: true,
                             min: $(slider.min_value),
                             max: $(slider.max_value),
-                            step: $(slider.max_value - slider.min_value) / 1000,  // Smooth sliding
+                            step: $(slider.value_type == :integer ? "1.0" : string((slider.max_value - slider.min_value) / 1000)),  // Integer steps for integers, smooth for others
                             values: [$(slider.default_min), $(slider.default_max)],
                             slide: function(event, ui) {
                                 // Update display during sliding
@@ -480,7 +488,12 @@ function build_filter_dropdowns(chart_title_safe::String,
                     # Numeric type - convert directly
                     min_val = Float64(min_data)
                     max_val = Float64(max_data)
-                    value_type = :numeric
+                    # Distinguish between integer and floating point types
+                    if min_data isa Integer
+                        value_type = :integer
+                    else
+                        value_type = :numeric
+                    end
                 end
 
                 # Default to full range if default_vals is empty or contains all values
