@@ -17,7 +17,7 @@ Area chart visualization with support for stacking modes and interactive control
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
-- `stack_mode::String`: Stacking mode - "unstack", "stack", or "normalised_stack" (default: `"stack"`)
+- `stack_mode::String`: Stacking mode - "unstack", "stack", "normalised_stack", or "dodge" (default: `"stack"`)
 - `title::String`: Chart title (default: `"Area Chart"`)
 - `fill_opacity::Float64`: Opacity of filled areas (0-1) (default: `0.6`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
@@ -26,6 +26,7 @@ Area chart visualization with support for stacking modes and interactive control
 - `unstack`: Areas are overlaid with transparency, allowing all to be visible
 - `stack`: Areas are stacked on top of each other, showing cumulative values
 - `normalised_stack`: Areas are stacked and normalized to 100%, showing proportions
+- `dodge`: Bars are placed side-by-side for each x value (only available for discrete x values)
 
 # Examples
 ```julia
@@ -69,7 +70,7 @@ struct AreaChart <: JSPlotsType
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
         # Validate stack_mode
-        valid_stack_modes = ["unstack", "stack", "normalised_stack"]
+        valid_stack_modes = ["unstack", "stack", "normalised_stack", "dodge"]
         if !(stack_mode in valid_stack_modes)
             error("stack_mode must be one of: $(join(valid_stack_modes, ", "))")
         end
@@ -95,8 +96,12 @@ struct AreaChart <: JSPlotsType
         update_function = "updatePlot_$chart_title_safe()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
 
-        # Create JavaScript arrays for columns
-        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        # Create JavaScript arrays for columns (split categorical and continuous)
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+
+        categorical_filters_js = build_js_array(categorical_filter_cols)
+        continuous_filters_js = build_js_array(continuous_filter_cols)
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
@@ -129,7 +134,8 @@ struct AreaChart <: JSPlotsType
         functional_html = """
         (function() {
             // Configuration
-            const FILTER_COLS = $filter_cols_js;
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
@@ -162,17 +168,29 @@ struct AreaChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title_safe');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-                // Get current filter values (multiple selections)
+                // Get categorical filter values (multiple selections)
                 const filters = {};
-                FILTER_COLS.forEach(col => {
-                    const select = document.getElementById(col + '_select');
+                CATEGORICAL_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$chart_title_safe');
                     if (select) {
                         filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
                     }
                 });
 
+                // Get continuous filter values (range sliders)
+                const rangeFilters = {};
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$chart_title_safe' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
+                    }
+                });
+
                 // Get current group column
-                const groupColSelect = document.getElementById('group_col_select_$chart_title_safe');
+                const groupColSelect = document.getElementById('color_col_select_$chart_title_safe');
                 const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_COLOR_COL;
 
                 // Get current stack mode
@@ -194,16 +212,15 @@ struct AreaChart <: JSPlotsType
                 const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
                 const GROUP_ORDER_ARRAY = GROUP_ORDER[GROUP_COL] || [];
 
-                // Filter data (support multiple selections per filter)
-                const filteredData = allData.filter(row => {
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
-                    }
-                    return true;
-                });
+                // Apply filters with observation counting (centralized function)
+                const filteredData = applyFiltersWithCounting(
+                    allData,
+                    '$chart_title_safe',
+                    CATEGORICAL_FILTERS,
+                    CONTINUOUS_FILTERS,
+                    filters,
+                    rangeFilters
+                );
 
                 if (FACET_COLS.length === 0) {
                     // No faceting - create area chart
@@ -282,6 +299,20 @@ struct AreaChart <: JSPlotsType
                                 trace.stackgroup = 'one';
                                 trace.groupnorm = 'percent';
                             }
+                        } else if (STACK_MODE === 'dodge') {
+                            if (discrete) {
+                                trace.type = 'bar';
+                            }
+                            // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(\${r}, \${g}, \${b}, \${FILL_OPACITY})`;
+                                }
+                            }
                         }
 
                         traces.push(trace);
@@ -294,7 +325,8 @@ struct AreaChart <: JSPlotsType
                         },
                         hovermode: 'closest',
                         showlegend: true,
-                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                                 STACK_MODE === 'dodge' ? 'group' : 'overlay',
                         barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
                     };
 
@@ -315,7 +347,8 @@ struct AreaChart <: JSPlotsType
                         hovermode: 'closest',
                         showlegend: true,
                         grid: {rows: nRows, columns: nCols, pattern: 'independent'},
-                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                                 STACK_MODE === 'dodge' ? 'group' : 'overlay',
                         barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
                     };
 
@@ -400,6 +433,17 @@ struct AreaChart <: JSPlotsType
                                     trace.stackgroup = 'one' + idx;
                                     trace.groupnorm = 'percent';
                                 }
+                            } else if (STACK_MODE === 'dodge') {
+                                // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                                if (!discrete) {
+                                    trace.fill = 'tozeroy';
+                                    if (color.startsWith('#')) {
+                                        const r = parseInt(color.substr(1,2), 16);
+                                        const g = parseInt(color.substr(3,2), 16);
+                                        const b = parseInt(color.substr(5,2), 16);
+                                        trace.fillcolor = `rgba(\${r}, \${g}, \${b}, \${FILL_OPACITY})`;
+                                    }
+                                }
                             }
 
                             traces.push(trace);
@@ -446,7 +490,8 @@ struct AreaChart <: JSPlotsType
                         hovermode: 'closest',
                         showlegend: true,
                         grid: {rows: nRows, columns: nCols, pattern: 'independent'},
-                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                        barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                                 STACK_MODE === 'dodge' ? 'group' : 'overlay',
                         barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
                     };
 
@@ -532,6 +577,17 @@ struct AreaChart <: JSPlotsType
                                         trace.fill = 'tonexty';
                                         trace.stackgroup = 'one' + idx;
                                         trace.groupnorm = 'percent';
+                                    }
+                                } else if (STACK_MODE === 'dodge') {
+                                    // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                                    if (!discrete) {
+                                        trace.fill = 'tozeroy';
+                                        if (color.startsWith('#')) {
+                                            const r = parseInt(color.substr(1,2), 16);
+                                            const g = parseInt(color.substr(3,2), 16);
+                                            const b = parseInt(color.substr(5,2), 16);
+                                            trace.fillcolor = `rgba(\${r}, \${g}, \${b}, \${FILL_OPACITY})`;
+                                        }
                                     }
                                 }
 
@@ -635,8 +691,8 @@ struct AreaChart <: JSPlotsType
         end
 
         # Stack mode dropdown (always shown)
-        stack_mode_display = ["unstack", "stack", "normalized stack"]
-        stack_mode_values = ["unstack", "stack", "normalised_stack"]
+        stack_mode_display = ["unstack", "stack", "normalized stack", "dodge"]
+        stack_mode_values = ["unstack", "stack", "normalised_stack", "dodge"]
         # Map display names to values for the dropdown
         push!(attribute_dropdowns, DropdownControl(
             "stack_mode_select_$chart_title_safe",

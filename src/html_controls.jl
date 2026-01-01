@@ -284,8 +284,7 @@ The generated HTML includes three optional sections:
 Each section is only included if it has controls to display.
 """
 function generate_appearance_html(controls::ChartHtmlControls;
-                                  multiselect_filters::Bool=true,
-                                  chart_title::Symbol=:chart)::String
+                                  multiselect_filters::Bool=true)::String
 
     # Build filters section
     filters_html = ""
@@ -306,7 +305,7 @@ function generate_appearance_html(controls::ChartHtmlControls;
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
             <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
                 <span>Filters</span>
-                <span id="$(chart_title)_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+                <span id="$(controls.chart_div_id)_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
             </h4>
             $filter_controls_html
         </div>

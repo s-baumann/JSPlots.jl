@@ -655,14 +655,6 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
 
         // Filter and update function
         window.updatePlotWithFilters_$(chart_title_safe) = function() {
-            const totalObs = allData.length;
-
-            // Update total observation count
-            const totalObsElement = document.getElementById('$(chart_title_safe)' + '_total_obs');
-            if (totalObsElement) {
-                totalObsElement.textContent = '(' + totalObs + ' observations)';
-            }
-
             // Get categorical filter values (multiple selections)
             const filters = {};
             CATEGORICAL_FILTERS.forEach(col => {
@@ -684,49 +676,15 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
                 }
             });
 
-            // Apply filters incrementally to track observation counts
-            let currentData = allData;
-
-            // Apply categorical filters and update counts
-            CATEGORICAL_FILTERS.forEach(col => {
-                if (filters[col] && filters[col].length > 0) {
-                    currentData = currentData.filter(row => {
-                        const rowValueStr = temporalValueToString(row[col]);
-                        return filters[col].includes(rowValueStr);
-                    });
-                }
-
-                const countElement = document.getElementById(col + '_select_$(chart_title_safe)_obs_count');
-                if (countElement) {
-                    const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                    countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-                }
-            });
-
-            // Apply continuous filters and update counts
-            CONTINUOUS_FILTERS.forEach(col => {
-                if (rangeFilters[col]) {
-                    const range = rangeFilters[col];
-                    currentData = currentData.filter(row => {
-                        const rawValue = row[col];
-                        let value;
-                        if (rawValue instanceof Date) {
-                            value = rawValue.getTime();
-                        } else {
-                            value = parseFloat(rawValue);
-                        }
-                        return value >= range.min && value <= range.max;
-                    });
-                }
-
-                const countElement = document.getElementById(col + '_range_$(chart_title_safe)_obs_count');
-                if (countElement) {
-                    const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                    countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-                }
-            });
-
-            const filteredData = currentData;
+            // Apply filters with observation counting (centralized function)
+            const filteredData = applyFiltersWithCounting(
+                allData,
+                '$(chart_title_safe)',
+                CATEGORICAL_FILTERS,
+                CONTINUOUS_FILTERS,
+                filters,
+                rangeFilters
+            );
 
             // Update plot with filtered data
             updatePlot_$(chart_title_safe)(filteredData);

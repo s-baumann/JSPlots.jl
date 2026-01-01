@@ -421,14 +421,6 @@ struct DistPlot <: JSPlotsType
 
             // Filter and update function
             window.updatePlotWithFilters_$(chart_title) = function() {
-                const totalObs = window.allData_$(chart_title).length;
-
-                // Update total observation count
-                const totalObsElement = document.getElementById('$(chart_title)_total_obs');
-                if (totalObsElement) {
-                    totalObsElement.textContent = '(' + totalObs + ' observations)';
-                }
-
                 // Get categorical filter values (multiple selections)
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -450,52 +442,18 @@ struct DistPlot <: JSPlotsType
                     }
                 });
 
-                // Apply filters incrementally to track observation counts
-                let currentData = window.allData_$(chart_title);
-
-                // Apply categorical filters and update counts
-                CATEGORICAL_FILTERS.forEach(col => {
-                    if (filters[col] && filters[col].length > 0) {
-                        currentData = currentData.filter(row => {
-                            const rowValueStr = temporalValueToString(row[col]);
-                            return filters[col].includes(rowValueStr);
-                        });
-                    }
-
-                    // Update observation count for this filter
-                    const countElement = document.getElementById(col + '_select_$(chart_title)_obs_count');
-                    if (countElement) {
-                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-                    }
-                });
-
-                // Apply continuous filters and update counts
-                CONTINUOUS_FILTERS.forEach(col => {
-                    if (rangeFilters[col]) {
-                        const range = rangeFilters[col];
-                        currentData = currentData.filter(row => {
-                            const rawValue = row[col];
-                            let value;
-                            if (rawValue instanceof Date) {
-                                value = rawValue.getTime();
-                            } else {
-                                value = parseFloat(rawValue);
-                            }
-                            return value >= range.min && value <= range.max;
-                        });
-                    }
-
-                    // Update observation count for this filter
-                    const countElement = document.getElementById(col + '_range_$(chart_title)_obs_count');
-                    if (countElement) {
-                        const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                        countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-                    }
-                });
+                // Apply filters with observation counting (centralized function)
+                const filteredData = applyFiltersWithCounting(
+                    window.allData_$(chart_title),
+                    '$chart_title',
+                    CATEGORICAL_FILTERS,
+                    CONTINUOUS_FILTERS,
+                    filters,
+                    rangeFilters
+                );
 
                 // Render with filtered data
-                updatePlot_$(chart_title)(currentData);
+                updatePlot_$(chart_title)(filteredData);
             };
         })();
         """

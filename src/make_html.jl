@@ -194,6 +194,63 @@ function temporalValueToString(value) {
     }
 }
 
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });

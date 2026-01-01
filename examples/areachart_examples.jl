@@ -13,7 +13,7 @@ header = TextBlock("""
 <ul>
     <li><strong>Continuous areas:</strong> Smooth filled areas for continuous x values (like dates)</li>
     <li><strong>Discrete areas:</strong> Bar-style areas for categorical x values</li>
-    <li><strong>Stack modes:</strong> Unstack (overlapping), stack (cumulative), and normalized stack (percentage)</li>
+    <li><strong>Stack modes:</strong> Unstack (overlapping), stack (cumulative), normalized stack (percentage), and dodge (side-by-side bars)</li>
     <li><strong>Grouping:</strong> Multiple series with automatic color assignment and legend</li>
     <li><strong>Interactive filters:</strong> Dropdown menus to filter data dynamically</li>
     <li><strong>Dynamic controls:</strong> Change X-axis, grouping, stacking, and faceting on the fly</li>
@@ -116,7 +116,7 @@ chart4 = AreaChart(:discrete_area, df4, :headcount_data;
 
 # Example 5: Time Series with Filters
 df5 = DataFrame()
-years = ["2022", "2023", "2024"]
+years = [2022, 2023, 2024]
 channels = ["Online", "Retail", "Wholesale"]
 regions_filter = ["North", "South"]
 dates5 = Date(2024, 1, 1):Week(1):Date(2024, 12, 31)
@@ -141,7 +141,7 @@ chart5 = AreaChart(:filtered_area, df5, :channel_revenue;
     x_cols = [:Date],
     y_cols = [:Revenue],
     color_cols = [:Channel],
-    filters = Dict{Symbol,Any}(:Year => "2024", :Region => "North"),
+    filters = Dict{Symbol,Any}(:Year => 2024, :Region => "North"),
     stack_mode = "stack",
     title = "Example 5: Revenue by Channel with Filters",
     notes = "Continuous date axis with interactive filters. Select different years and regions to update the view."
@@ -324,15 +324,84 @@ chart10 = AreaChart(:dynamic_x_axis, df10, :sales_data_x;
     notes = "Use the X-Axis dropdown to switch between different time granularities (Quarter/Month/Week). Also switch between Revenue and Units on Y-axis."
 )
 
+# Example 11: Dodge Mode (Grouped Bars) with Discrete X
+df11 = DataFrame()
+products_dodge = ["Product A", "Product B", "Product C"]
+stores = ["Store 1", "Store 2", "Store 3", "Store 4", "Store 5"]
+
+for product in products_dodge
+    for store in stores
+        push!(df11, (
+            Store = store,
+            Sales = abs(10000 + randn(rng) * 2000),
+            Product = product
+        ))
+    end
+end
+
+dodge_header = TextBlock("""
+<h2>Dodge Mode (Grouped Bars)</h2>
+<p>Dodge mode places bars side-by-side for each x value, making it easy to compare groups directly.</p>
+<p>This mode only works with discrete (categorical) x values. For continuous x values, it falls back to unstack mode.</p>
+""")
+
+chart11 = AreaChart(:dodge_mode, df11, :sales_by_store;
+    x_cols = [:Store],
+    y_cols = [:Sales],
+    color_cols = [:Product],
+    stack_mode = "dodge",
+    title = "Example 11: Sales by Store (Dodge Mode)",
+    notes = "Dodge mode with discrete x-axis. Bars for each product are placed side-by-side within each store for easy comparison."
+)
+
+# Example 12: Comparing Dodge vs Stack Mode
+df12 = DataFrame()
+categories_comparison = ["Category A", "Category B", "Category C", "Category D"]
+segments_comparison = ["Segment 1", "Segment 2", "Segment 3"]
+
+for category in categories_comparison
+    for segment in segments_comparison
+        push!(df12, (
+            Category = category,
+            Value = abs(50 + randn(rng) * 10),
+            Segment = segment
+        ))
+    end
+end
+
+dodge_comparison_header = TextBlock("""
+<h2>Dodge vs Stack Comparison</h2>
+<p>The following two charts show the same data using dodge and stack modes:</p>
+""")
+
+chart12a = AreaChart(:dodge_comparison, df12, :comparison_data;
+    x_cols = [:Category],
+    y_cols = [:Value],
+    color_cols = [:Segment],
+    stack_mode = "dodge",
+    title = "Dodge Mode - Side-by-Side Comparison",
+    notes = "Bars are placed next to each other, making it easy to compare segments within each category."
+)
+
+chart12b = AreaChart(:stack_comparison, df12, :comparison_data;
+    x_cols = [:Category],
+    y_cols = [:Value],
+    color_cols = [:Segment],
+    stack_mode = "stack",
+    title = "Stack Mode - Cumulative View",
+    notes = "Bars are stacked, showing the total value and how each segment contributes to it."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Automatic discrete/continuous detection:</strong> Continuous x values (dates, numeric) create smooth areas; discrete x values (categories) create stacked bars</li>
-    <li><strong>Three stack modes:</strong>
+    <li><strong>Four stack modes:</strong>
         <ul>
             <li><em>Unstack:</em> Overlapping areas with transparency - best for comparing trends</li>
             <li><em>Stack:</em> Cumulative areas - best for showing total and parts</li>
             <li><em>Normalized stack:</em> Percentage areas - best for showing proportions</li>
+            <li><em>Dodge:</em> Side-by-side bars (discrete x only) - best for direct comparison between groups</li>
         </ul>
     </li>
     <li><strong>Dynamic X-axis selection:</strong> Switch between different X-axis dimensions (e.g., Quarter/Month/Week) from dropdown</li>
@@ -357,11 +426,15 @@ page = JSPlotPage(
         :grid_sales => df7,
         :business_metrics => df8,
         :compare_data => df9,
-        :sales_data_x => df10
+        :sales_data_x => df10,
+        :sales_by_store => df11,
+        :comparison_data => df12
     ),
     [header, chart1, chart2, chart3, chart4, chart5, chart6, chart7, chart8,
      comparison_header, chart9a, chart9b, chart9c,
      dynamic_x_header, chart10,
+     dodge_header, chart11,
+     dodge_comparison_header, chart12a, chart12b,
      conclusion],
     tab_title = "AreaChart Examples"
 )
@@ -383,3 +456,5 @@ println("  • Facet grid (2 variables)")
 println("  • Dynamic controls (grouping, stacking, faceting)")
 println("  • Side-by-side stack mode comparison")
 println("  • Dynamic X-axis selection (switch between Quarter/Month/Week)")
+println("  • Dodge mode (side-by-side grouped bars)")
+println("  • Dodge vs Stack comparison")

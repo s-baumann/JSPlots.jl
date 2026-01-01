@@ -275,6 +275,63 @@ function temporalValueToString(value) {
     }
 }
 
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -641,14 +698,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_multi_dim = function() {
-        const totalObs = window.allData_multi_dim.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('multi_dim_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -670,52 +719,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_multi_dim;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_multi_dim_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_multi_dim_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_multi_dim,
+            'multi_dim',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_multi_dim(currentData);
+        updatePlot_multi_dim(filteredData);
     };
 
     loadDataset('df1').then(data => {
@@ -918,14 +933,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_multi_style = function() {
-        const totalObs = window.allData_multi_style.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('multi_style_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -947,52 +954,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_multi_style;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_multi_style_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_multi_style_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_multi_style,
+            'multi_style',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_multi_style(currentData);
+        updatePlot_multi_style(filteredData);
     };
 
     loadDataset('df2').then(data => {
@@ -1195,14 +1168,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_facet_single = function() {
-        const totalObs = window.allData_facet_single.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('facet_single_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1224,52 +1189,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_facet_single;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_facet_single_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_facet_single_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_facet_single,
+            'facet_single',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_facet_single(currentData);
+        updatePlot_facet_single(filteredData);
     };
 
     loadDataset('df3').then(data => {
@@ -1472,14 +1403,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_facet_grid = function() {
-        const totalObs = window.allData_facet_grid.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('facet_grid_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1501,52 +1424,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_facet_grid;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_facet_grid_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_facet_grid_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_facet_grid,
+            'facet_grid',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_facet_grid(currentData);
+        updatePlot_facet_grid(filteredData);
     };
 
     loadDataset('df4').then(data => {
@@ -1749,14 +1638,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_complex = function() {
-        const totalObs = window.allData_complex.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('complex_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1778,52 +1659,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_complex;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_complex_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_complex_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_complex,
+            'complex',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_complex(currentData);
+        updatePlot_complex(filteredData);
     };
 
     loadDataset('df5').then(data => {
@@ -2026,14 +1873,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_timeseries = function() {
-        const totalObs = window.allData_timeseries.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('timeseries_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2055,52 +1894,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_timeseries;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_timeseries_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_timeseries_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_timeseries,
+            'timeseries',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_timeseries(currentData);
+        updatePlot_timeseries(filteredData);
     };
 
     loadDataset('df6').then(data => {
@@ -5680,6 +5485,6 @@ var1,var2,var3,var4,group_A,group_B,group_C,intensity
 <div id="timeseries"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
 </body>
 </html>

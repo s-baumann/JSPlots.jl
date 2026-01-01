@@ -275,6 +275,63 @@ function temporalValueToString(value) {
     }
 }
 
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -493,14 +550,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('market_share' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_market_share');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -532,49 +581,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_market_share_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_market_share_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'market_share',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_market_share');
@@ -799,14 +814,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('budget_donut' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_budget_donut');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -838,49 +845,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_budget_donut_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_budget_donut_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'budget_donut',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_budget_donut');
@@ -1105,14 +1078,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('sales_filtered' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_sales_filtered');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1144,49 +1109,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_sales_filtered_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_sales_filtered_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'sales_filtered',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_sales_filtered');
@@ -1411,14 +1342,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('sales_by_region' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_sales_by_region');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1450,49 +1373,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_sales_by_region_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_sales_by_region_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'sales_by_region',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_sales_by_region');
@@ -1717,14 +1606,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('demographics_grid' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_demographics_grid');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1756,49 +1637,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_demographics_grid_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_demographics_grid_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'demographics_grid',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_demographics_grid');
@@ -2023,14 +1870,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('dept_expenses' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_dept_expenses');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2062,49 +1901,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_dept_expenses_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_dept_expenses_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'dept_expenses',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_dept_expenses');
@@ -2329,14 +2134,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('customer_segments' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_customer_segments');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2368,49 +2165,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_customer_segments_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_customer_segments_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'customer_segments',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_customer_segments');
@@ -2635,14 +2398,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('store_comparison' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_store_comparison');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2674,49 +2429,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_store_comparison_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_store_comparison_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'store_comparison',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_store_comparison');
@@ -2941,14 +2662,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('traffic_analysis' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_traffic_analysis');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -2980,49 +2693,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_traffic_analysis_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_traffic_analysis_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'traffic_analysis',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_traffic_analysis');
@@ -3247,14 +2926,6 @@ $(function(){
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('comprehensive_sales' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_comprehensive_sales');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -3286,49 +2957,15 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_comprehensive_sales_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_comprehensive_sales_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'comprehensive_sales',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_comprehensive_sales');
@@ -4097,7 +3734,7 @@ Store C,Books,11918.705181170277
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="sales_filtered_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
@@ -4188,7 +3825,7 @@ Store C,Books,11918.705181170277
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="sales_by_region_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
     <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
     <div style="flex: 0 0 70%;">
@@ -4322,7 +3959,7 @@ Store C,Books,11918.705181170277
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="dept_expenses_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
@@ -4481,7 +4118,7 @@ Store C,Books,11918.705181170277
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="comprehensive_sales_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
@@ -4588,6 +4225,6 @@ Store C,Books,11918.705181170277
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
 </body>
 </html>
