@@ -275,6 +275,63 @@ function temporalValueToString(value) {
     }
 }
 
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -709,14 +766,6 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_dist = function() {
-        const totalObs = window.allData_dist.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('dist_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -738,52 +787,18 @@ if (currentGroupCol) {
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_dist;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_dist_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_dist_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_dist,
+            'dist',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Render with filtered data
-        updatePlot_dist(currentData);
+        updatePlot_dist(filteredData);
     };
 })();
     (function() {
@@ -1070,14 +1085,6 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_kde = function() {
-        const totalObs = window.allData_kde.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('kde_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1099,52 +1106,18 @@ if (currentGroupCol) {
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_kde;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_kde_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_kde_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_kde,
+            'kde',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Render with filtered data
-        updatePlot_kde(currentData);
+        updatePlot_kde(filteredData);
     };
 
     // Load and parse CSV data using centralized parser
@@ -1214,14 +1187,6 @@ if (currentGroupCol) {
             return;
         }
 
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('pie' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current value and color columns
         const valueColSelect = document.getElementById('value_col_select_pie');
         const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
@@ -1253,49 +1218,15 @@ if (currentGroupCol) {
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_pie_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_pie_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'pie',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_pie');
@@ -1769,6 +1700,6 @@ if (currentGroupCol) {
 <div id="pie"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
 </body>
 </html>

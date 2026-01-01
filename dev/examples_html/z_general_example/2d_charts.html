@@ -275,6 +275,63 @@ function temporalValueToString(value) {
     }
 }
 
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -564,14 +621,6 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_LineChart = function() {
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('LineChart' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_LineChart');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -624,51 +673,15 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_LineChart' + '_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_LineChart' + '_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'LineChart',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -1005,7 +1018,8 @@ $(function(){
 })();
 (function() {
     // Configuration
-    const FILTER_COLS = ['segment', 'region', 'product'];
+    const CATEGORICAL_FILTERS = ['segment', 'region', 'product'];
+    const CONTINUOUS_FILTERS = [];
     const X_COLS = ['date', 'quarter'];
     const Y_COLS = ['sales', 'quantity', 'cost', 'customers', 'satisfaction'];
     const COLOR_COLS = ['product', 'segment', 'region'];
@@ -1038,17 +1052,29 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_AreaChart');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current filter values (multiple selections)
+        // Get categorical filter values (multiple selections)
         const filters = {};
-        FILTER_COLS.forEach(col => {
-            const select = document.getElementById(col + '_select');
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_AreaChart');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
         });
 
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_AreaChart' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
         // Get current group column
-        const groupColSelect = document.getElementById('group_col_select_AreaChart');
+        const groupColSelect = document.getElementById('color_col_select_AreaChart');
         const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_COLOR_COL;
 
         // Get current stack mode
@@ -1070,16 +1096,15 @@ $(function(){
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
         const GROUP_ORDER_ARRAY = GROUP_ORDER[GROUP_COL] || [];
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = allData.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'AreaChart',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         if (FACET_COLS.length === 0) {
             // No faceting - create area chart
@@ -1158,6 +1183,20 @@ $(function(){
                         trace.stackgroup = 'one';
                         trace.groupnorm = 'percent';
                     }
+                } else if (STACK_MODE === 'dodge') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    }
+                    // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                    if (!discrete) {
+                        trace.fill = 'tozeroy';
+                        if (color.startsWith('#')) {
+                            const r = parseInt(color.substr(1,2), 16);
+                            const g = parseInt(color.substr(3,2), 16);
+                            const b = parseInt(color.substr(5,2), 16);
+                            trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                        }
+                    }
                 }
 
                 traces.push(trace);
@@ -1170,7 +1209,8 @@ $(function(){
                 },
                 hovermode: 'closest',
                 showlegend: true,
-                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
                 barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
             };
 
@@ -1191,7 +1231,8 @@ $(function(){
                 hovermode: 'closest',
                 showlegend: true,
                 grid: {rows: nRows, columns: nCols, pattern: 'independent'},
-                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
                 barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
             };
 
@@ -1276,6 +1317,17 @@ $(function(){
                             trace.stackgroup = 'one' + idx;
                             trace.groupnorm = 'percent';
                         }
+                    } else if (STACK_MODE === 'dodge') {
+                        // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                        if (!discrete) {
+                            trace.fill = 'tozeroy';
+                            if (color.startsWith('#')) {
+                                const r = parseInt(color.substr(1,2), 16);
+                                const g = parseInt(color.substr(3,2), 16);
+                                const b = parseInt(color.substr(5,2), 16);
+                                trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                            }
+                        }
                     }
 
                     traces.push(trace);
@@ -1322,7 +1374,8 @@ $(function(){
                 hovermode: 'closest',
                 showlegend: true,
                 grid: {rows: nRows, columns: nCols, pattern: 'independent'},
-                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' : 'overlay',
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
                 barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
             };
 
@@ -1408,6 +1461,17 @@ $(function(){
                                 trace.fill = 'tonexty';
                                 trace.stackgroup = 'one' + idx;
                                 trace.groupnorm = 'percent';
+                            }
+                        } else if (STACK_MODE === 'dodge') {
+                            // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                                }
                             }
                         }
 
@@ -1657,14 +1721,6 @@ $(function(){
 
     // Filter and update function
     window.updatePlotWithFilters_scatter = function() {
-        const totalObs = window.allData_scatter.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('scatter_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1686,52 +1742,18 @@ $(function(){
             }
         });
 
-        // Apply filters incrementally to track observation counts
-        let currentData = window.allData_scatter;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_select_scatter_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            // Update observation count for this filter
-            const countElement = document.getElementById(col + '_range_scatter_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_scatter,
+            'scatter',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         // Update plot with filtered data
-        updatePlot_scatter(currentData);
+        updatePlot_scatter(filteredData);
     };
 
     loadDataset('sales_data').then(data => {
@@ -1791,14 +1813,6 @@ $(function(){
 
     // Make it global so inline onchange can see it
     window.updateChart_path = function() {
-        const totalObs = allData.length;
-
-        // Update total observation count
-        const totalObsElement = document.getElementById('path' + '_total_obs');
-        if (totalObsElement) {
-            totalObsElement.textContent = '(' + totalObs + ' observations)';
-        }
-
         // Get current X and Y columns
         const xColSelect = document.getElementById('x_col_select_path');
         const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
@@ -1845,49 +1859,15 @@ $(function(){
         // Get color map for current selection
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
-        // Apply filters incrementally to track observation counts
-        let currentData = allData;
-
-        // Apply categorical filters and update counts
-        CATEGORICAL_FILTERS.forEach(col => {
-            if (filters[col] && filters[col].length > 0) {
-                currentData = currentData.filter(row => {
-                    const rowValueStr = temporalValueToString(row[col]);
-                    return filters[col].includes(rowValueStr);
-                });
-            }
-
-            const countElement = document.getElementById(col + '_select_path_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        // Apply continuous filters and update counts
-        CONTINUOUS_FILTERS.forEach(col => {
-            if (rangeFilters[col]) {
-                const range = rangeFilters[col];
-                currentData = currentData.filter(row => {
-                    const rawValue = row[col];
-                    let value;
-                    if (rawValue instanceof Date) {
-                        value = rawValue.getTime();
-                    } else {
-                        value = parseFloat(rawValue);
-                    }
-                    return value >= range.min && value <= range.max;
-                });
-            }
-
-            const countElement = document.getElementById(col + '_range_path_obs_count');
-            if (countElement) {
-                const pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
-                countElement.textContent = pct + '% (' + currentData.length + ') remaining';
-            }
-        });
-
-        const filteredData = currentData;
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'path',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
 
         if (FACET_COLS.length === 0) {
             // No faceting - group by color
@@ -2565,7 +2545,7 @@ $(function(){
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="AreaChart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
@@ -2658,6 +2638,7 @@ $(function(){
                 <option value="unstack">unstack</option>
                 <option value="stack" selected>stack</option>
                 <option value="normalised_stack">normalised_stack</option>
+                <option value="dodge">dodge</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
@@ -2788,7 +2769,7 @@ $(function(){
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="chart_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="path_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
@@ -2882,6 +2863,6 @@ $(function(){
 <div id="path"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_path_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
 </body>
 </html>
