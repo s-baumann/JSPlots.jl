@@ -28,9 +28,9 @@ using DataFrames
             color_cols = [:category],
             show_eigenvectors = true
         )
-        @test occursin("_x_col_select", chart.appearance_html)
-        @test occursin("_y_col_select", chart.appearance_html)
-        @test occursin("_z_col_select", chart.appearance_html)
+        @test occursin("x_col_select", chart.appearance_html)
+        @test occursin("y_col_select", chart.appearance_html)
+        @test occursin("z_col_select", chart.appearance_html)
     end
 
     @testset "With filtering" begin
@@ -301,9 +301,9 @@ using DataFrames
         chart = Scatter3D(:four_dims, df_scatter_3d, :df_scatter_3d, [:x, :y, :z, :w];
             color_cols = [:category]
         )
-        @test occursin("_x_col_select", chart.appearance_html)
-        @test occursin("_y_col_select", chart.appearance_html)
-        @test occursin("_z_col_select", chart.appearance_html)
+        @test occursin("x_col_select", chart.appearance_html)
+        @test occursin("y_col_select", chart.appearance_html)
+        @test occursin("z_col_select", chart.appearance_html)
     end
 
     @testset "All features combined" begin

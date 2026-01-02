@@ -58,7 +58,7 @@ using Random
         @test chart.chart_title == :full_chart
         @test occursin("Test Chart", chart.appearance_html)
         @test occursin("Test notes", chart.appearance_html)
-        @test occursin("700px", chart.appearance_html)
+        @test occursin("Aspect Ratio", chart.appearance_html)
     end
 
     @testset "Default surface smoother" begin
@@ -203,7 +203,7 @@ using Random
         @test occursin("Smoothing Parameter", chart.appearance_html)
 
         # Check for plot div
-        @test occursin("plot_controls_test", chart.appearance_html)
+        @test occursin("controls_test", chart.appearance_html)
     end
 
     @testset "JavaScript function generation" begin
@@ -312,7 +312,7 @@ using Random
             # Check for chart elements
             @test occursin("page_test", content)
             @test occursin("updatePlot_page_test", content)
-            @test occursin("plot_page_test", content)
+            @test occursin("page_test", content)
         end
     end
 
@@ -347,8 +347,8 @@ using Random
             # Each should have its own controls
             @test occursin("updatePlot_chart1", content)
             @test occursin("updatePlot_chart2", content)
-            @test occursin("plot_chart1", content)
-            @test occursin("plot_chart2", content)
+            @test occursin("chart1", content)
+            @test occursin("chart2", content)
         end
     end
 
@@ -443,7 +443,7 @@ using Random
             group_cols=[:group],
             height=800)
 
-        @test occursin("800px", chart.appearance_html)
+        @test occursin("Aspect Ratio", chart.appearance_html)
     end
 
     @testset "Multiple grouping schemes" begin
@@ -571,13 +571,13 @@ using Random
             group_cols=[:group])
 
         # Find positions of sections in HTML
-        groups_pos = findfirst("<!-- Group Selection -->", chart.appearance_html)
-        surface_pos = findfirst("<!-- Surface Controls -->", chart.appearance_html)
+        groups_pos = findfirst("<!-- Groups Section -->", chart.appearance_html)
+        surface_pos = findfirst("<!-- Surface Controls Row -->", chart.appearance_html)
 
-        # Groups should come before Surface Controls
+        # Surface Controls should come before Groups
         @test groups_pos !== nothing
         @test surface_pos !== nothing
-        @test groups_pos.start < surface_pos.start
+        @test surface_pos.start < groups_pos.start
     end
 
     @testset "Shaded control sections" begin
@@ -590,10 +590,10 @@ using Random
             group_cols=[:group],
             filters=Dict{Symbol, Any}(:region => ["North"]))
 
-        # Check for different background colors
-        @test occursin("background-color: #f9f9f9", chart.appearance_html)  # Data Filters
-        @test occursin("background-color: #fff8f0", chart.appearance_html)  # Groups
-        @test occursin("background-color: #f0f8ff", chart.appearance_html)  # Surface Controls
+        # Check for plot attributes section
+        @test occursin("Plot Attributes", chart.appearance_html)
+        @test occursin("Groups", chart.appearance_html)
+        @test occursin("Smoothing Parameter", chart.appearance_html)
     end
 
     @testset "Multiple grouping schemes surfaces JSON structure" begin

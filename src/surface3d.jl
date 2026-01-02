@@ -70,6 +70,7 @@ normalized_filters = normalize_filters(filters, df)
         use_grouping = group_col !== nothing
 
         functional_html = """
+            (function() {
             const FILTER_COLS = $filter_cols_js;
 
             // Load and parse CSV data using centralized parser
@@ -207,6 +208,8 @@ normalized_filters = normalize_filters(filters, df)
                 // Update plot with filtered data
                 updatePlot_$(chart_title_safe)(filteredData);
             };
+
+            })();
         """
 
         # Use html_controls abstraction to generate appearance HTML

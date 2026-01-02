@@ -228,8 +228,9 @@ include("test_data.jl")
         )
 
         # Check for control elements in appearance HTML
-        @test occursin("X dimension", chart.appearance_html)
-        @test occursin("Y dimension", chart.appearance_html)
+        @test occursin("Axes", chart.appearance_html)
+        @test occursin("X: ", chart.appearance_html)
+        @test occursin("Y: ", chart.appearance_html)
         @test occursin("Color by", chart.appearance_html)
         @test occursin("Stack mode", chart.appearance_html)
         @test occursin("controls_test", chart.appearance_html)
