@@ -364,6 +364,9 @@ $options                </select>
                         });
                     }
                     updatePlotWithFilters_$(chart_title)();
+
+                    // Setup aspect ratio control after initial render
+                    setupAspectRatioControl('$chart_title');
                 });
             }).catch(error => console.error('Error loading data for chart $chart_title:', error));
             })();
@@ -416,7 +419,8 @@ $style_html        </div>
             faceting_html,
             title,
             notes,
-            string(chart_title)
+            string(chart_title);
+            aspect_ratio_default=1.0
         )
 
         new(chart_title, data_label, functional_html, appearance_html)

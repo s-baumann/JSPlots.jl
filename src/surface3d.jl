@@ -78,6 +78,9 @@ normalized_filters = normalize_filters(filters, df)
 
                 // Initial plot
                 updatePlotWithFilters_$(chart_title_safe)();
+
+                // Setup aspect ratio control after initial render
+                setupAspectRatioControl('$chart_title_safe');
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
@@ -207,13 +210,16 @@ normalized_filters = normalize_filters(filters, df)
         """
 
         # Use html_controls abstraction to generate appearance HTML
+        # Add minimal plot attributes section to enable aspect ratio slider
+        plot_attributes_html = "<!-- Aspect ratio control below -->"
         appearance_html = generate_appearance_html_from_sections(
             filters_html,
-            "",  # No plot attributes in Surface3D
+            plot_attributes_html,
             "",  # No faceting in Surface3D
             title,
             notes,
-            string(chart_title_safe)
+            string(chart_title_safe);
+            aspect_ratio_default=1.0
         )
 
         new(chart_title, data_label, functional_html, appearance_html)

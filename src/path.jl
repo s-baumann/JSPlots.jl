@@ -775,6 +775,9 @@ normalized_filters = normalize_filters(filters, df)
             loadDataset('$data_label').then(function(data) {
                 allData = data;
                 window.updateChart_$chart_title();
+
+                // Setup aspect ratio control after initial render
+                setupAspectRatioControl('$chart_title');
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
@@ -823,7 +826,7 @@ normalized_filters = normalize_filters(filters, df)
         )
 
         # Generate base appearance HTML
-        base_appearance_html = generate_appearance_html(controls)
+        base_appearance_html = generate_appearance_html(controls; aspect_ratio_default=0.4)
 
         # Add arrow toggle button to Plot Attributes section
         arrow_button_html = """

@@ -526,6 +526,9 @@ struct KernelDensity <: JSPlotsType
 
                     // Initial plot
                     updatePlotWithFilters_$(chart_title)();
+
+                    // Setup aspect ratio control after initial render
+                    setupAspectRatioControl('$chart_title');
                 });
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);

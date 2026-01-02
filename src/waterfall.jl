@@ -156,7 +156,7 @@ struct Waterfall <: JSPlotsType
             title,
             notes
         )
-        appearance_html_base = generate_appearance_html(controls; multiselect_filters=false)
+        appearance_html_base = generate_appearance_html(controls; multiselect_filters=false, aspect_ratio_default=0.4)
 
         # Add waterfall-specific styles and layout
         waterfall_styles = """
@@ -594,6 +594,9 @@ struct Waterfall <: JSPlotsType
             loadDataset('$data_label').then(function(data) {
                 allData = data;
                 window.updateChart_$chart_title();
+
+                // Setup aspect ratio control after initial render
+                setupAspectRatioControl('$chart_title');
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });

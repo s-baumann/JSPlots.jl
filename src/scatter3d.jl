@@ -788,6 +788,9 @@ $style_html        </div>
 
                 // Initial plot
                 updatePlotWithFilters_$(chart_title_safe)();
+
+                // Setup aspect ratio control after initial render
+                setupAspectRatioControl('$chart_title_safe');
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });
@@ -805,7 +808,8 @@ $style_html        </div>
             faceting_html,
             title,
             notes,
-            string(chart_title_safe)
+            string(chart_title_safe);
+            aspect_ratio_default=1.0
         )
 
         new(chart_title, data_label, functional_html, appearance_html)

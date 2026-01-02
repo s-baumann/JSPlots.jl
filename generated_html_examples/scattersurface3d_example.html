@@ -478,6 +478,49 @@ function getAxisLabel(originalLabel, transformType) {
     }
 }
 
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -764,7 +807,6 @@ $(function(){
                 yaxis: {title: 'y'},
                 zaxis: {title: 'z'}
             },
-            height: 600,
             margin: {l: 0, r: 0, b: 0, t: 30}
         };
 
@@ -915,6 +957,12 @@ $(function(){
     loadDataset('data').then(function(data) {
         allData = data;
         updatePlotWithFilters_scatter_surface_basic();
+
+        // Setup aspect ratio control after initial render
+        // Use setTimeout to ensure Plotly has finished rendering
+        setTimeout(function() {
+            setupAspectRatioControl('scatter_surface_basic');
+        }, 100);
     }).catch(function(error) {
         console.error('Error loading data for chart scatter_surface_basic:', error);
     });
@@ -1024,7 +1072,6 @@ $(function(){
                 yaxis: {title: 'y'},
                 zaxis: {title: 'z'}
             },
-            height: 600,
             margin: {l: 0, r: 0, b: 0, t: 30}
         };
 
@@ -1175,6 +1222,12 @@ $(function(){
     loadDataset('data_subset').then(function(data) {
         allData = data;
         updatePlotWithFilters_scatter_surface_custom();
+
+        // Setup aspect ratio control after initial render
+        // Use setTimeout to ensure Plotly has finished rendering
+        setTimeout(function() {
+            setupAspectRatioControl('scatter_surface_custom');
+        }, 100);
     }).catch(function(error) {
         console.error('Error loading data for chart scatter_surface_custom:', error);
     });
@@ -1284,7 +1337,6 @@ $(function(){
                 yaxis: {title: 'trading_activity'},
                 zaxis: {title: 'return_24h'}
             },
-            height: 700,
             margin: {l: 0, r: 0, b: 0, t: 30}
         };
 
@@ -1435,6 +1487,12 @@ $(function(){
     loadDataset('finance_data').then(function(data) {
         allData = data;
         updatePlotWithFilters_finance_multi_group();
+
+        // Setup aspect ratio control after initial render
+        // Use setTimeout to ensure Plotly has finished rendering
+        setTimeout(function() {
+            setupAspectRatioControl('finance_multi_group');
+        }, 100);
     }).catch(function(error) {
         console.error('Error loading data for chart finance_multi_group:', error);
     });
@@ -2042,11 +2100,43 @@ stock_id,industry,country,carry,trading_activity,return_24h
 
     
 
-    <!-- Group Selection -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
-        <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+    <!-- Plot Attributes (Surface Controls and Groups) -->
+    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+        <h4 style="margin-top: 0;">Plot Attributes</h4>
+
+        <!-- Surface Controls Row -->
+        <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;">
+            <div>
+                <label>Smoothing Parameter: </label>
+                <select id="smoothing_select_scatter_surface_basic"
+                        onchange="setSmoothing_scatter_surface_basic(this.value)"
+                        style="padding: 5px;">
+                    <option value="-1">Defaults</option>
+<option value="0">0.2</option>
+<option value="1">0.5</option>
+<option value="2">1.0</option>
+<option value="3">2.0</option>
+<option value="4">4.0</option>
+                </select>
+                <span id="smoothing_label_scatter_surface_basic" style="margin-left: 5px;">Defaults</span>
+            </div>
+            <div style="text-align: right;">
+                <button id="l1l2_toggle_scatter_surface_basic" onclick="toggleL1L2_scatter_surface_basic()"
+style="background-color: #4CAF50; color: white; padding: 5px 10px;
+       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+            </div>
+        </div>
+
+        <!-- Toggle Buttons Row -->
+        <div style="margin: 10px 0;">
+            <button onclick="toggleAllSurfaces_scatter_surface_basic()" style="padding: 5px 10px; margin-right: 10px;">Toggle All Surfaces</button>
+            <button onclick="toggleAllPoints_scatter_surface_basic()" style="padding: 5px 10px;">Toggle All Points</button>
+        </div>
+
+        <!-- Groups Section -->
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Groups (click to toggle visibility)</h4>
         
-        <div id="group_buttons_scatter_surface_basic">
+        <div id="group_buttons_scatter_surface_basic" style="margin: 10px 0;">
                 <button onclick="toggleGroup_scatter_surface_basic('A')"
             style="background-color: hsl(0.0, 70%, 50%); margin: 2px; padding: 5px 10px;
                    border: 1px solid #ccc; cursor: pointer;">
@@ -2066,35 +2156,20 @@ stock_id,industry,country,carry,trading_activity,return_24h
     </button>
 
         </div>
-    </div>
 
-    <!-- Surface Controls -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-        <h4 style="margin-top: 0;">Surface Controls</h4>
-        <div style="margin: 5px 0;">
-            <label>Smoothing Parameter: </label>
-            <select id="smoothing_select_scatter_surface_basic"
-                    onchange="setSmoothing_scatter_surface_basic(this.value)">
-                <option value="-1">Defaults</option>
-<option value="0">0.2</option>
-<option value="1">0.5</option>
-<option value="2">1.0</option>
-<option value="3">2.0</option>
-<option value="4">4.0</option>
-            </select>
-            <span id="smoothing_label_scatter_surface_basic">Defaults</span>
-        </div>
-        <div style="margin: 10px 0;">
-            <button onclick="toggleAllSurfaces_scatter_surface_basic()">Toggle All Surfaces</button>
-            <button onclick="toggleAllPoints_scatter_surface_basic()">Toggle All Points</button>
-            <button id="l1l2_toggle_scatter_surface_basic" onclick="toggleL1L2_scatter_surface_basic()"
-style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 10px;
-       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+        <!-- Aspect Ratio Slider (logarithmic scale for better precision) -->
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="scatter_surface_basic_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="scatter_surface_basic_aspect_ratio_label">1.0</span>
+            <input type="range" id="scatter_surface_basic_aspect_ratio_slider"
+                   min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
         </div>
     </div>
 
     <!-- Chart -->
-    <div id="plot_scatter_surface_basic" style="width: 100%; height: 600px;"></div>
+    <div id="plot_scatter_surface_basic" style="width: 100%;"></div>
 
     <div id="method_explanation_scatter_surface_basic" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
     </div>
@@ -2122,11 +2197,40 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
 
     
 
-    <!-- Group Selection -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
-        <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+    <!-- Plot Attributes (Surface Controls and Groups) -->
+    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+        <h4 style="margin-top: 0;">Plot Attributes</h4>
+
+        <!-- Surface Controls Row -->
+        <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;">
+            <div>
+                <label>Smoothing Parameter: </label>
+                <select id="smoothing_select_scatter_surface_custom"
+                        onchange="setSmoothing_scatter_surface_custom(this.value)"
+                        style="padding: 5px;">
+                    <option value="-1">Defaults</option>
+<option value="0">0.3</option>
+<option value="1">0.7</option>
+<option value="2">1.5</option>
+<option value="3">3.0</option>
+                </select>
+                <span id="smoothing_label_scatter_surface_custom" style="margin-left: 5px;">Defaults</span>
+            </div>
+            <div style="text-align: right;">
+                
+            </div>
+        </div>
+
+        <!-- Toggle Buttons Row -->
+        <div style="margin: 10px 0;">
+            <button onclick="toggleAllSurfaces_scatter_surface_custom()" style="padding: 5px 10px; margin-right: 10px;">Toggle All Surfaces</button>
+            <button onclick="toggleAllPoints_scatter_surface_custom()" style="padding: 5px 10px;">Toggle All Points</button>
+        </div>
+
+        <!-- Groups Section -->
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Groups (click to toggle visibility)</h4>
         
-        <div id="group_buttons_scatter_surface_custom">
+        <div id="group_buttons_scatter_surface_custom" style="margin: 10px 0;">
                 <button onclick="toggleGroup_scatter_surface_custom('A')"
             style="background-color: hsl(0.0, 70%, 50%); margin: 2px; padding: 5px 10px;
                    border: 1px solid #ccc; cursor: pointer;">
@@ -2140,32 +2244,20 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
     </button>
 
         </div>
-    </div>
 
-    <!-- Surface Controls -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-        <h4 style="margin-top: 0;">Surface Controls</h4>
-        <div style="margin: 5px 0;">
-            <label>Smoothing Parameter: </label>
-            <select id="smoothing_select_scatter_surface_custom"
-                    onchange="setSmoothing_scatter_surface_custom(this.value)">
-                <option value="-1">Defaults</option>
-<option value="0">0.3</option>
-<option value="1">0.7</option>
-<option value="2">1.5</option>
-<option value="3">3.0</option>
-            </select>
-            <span id="smoothing_label_scatter_surface_custom">Defaults</span>
-        </div>
-        <div style="margin: 10px 0;">
-            <button onclick="toggleAllSurfaces_scatter_surface_custom()">Toggle All Surfaces</button>
-            <button onclick="toggleAllPoints_scatter_surface_custom()">Toggle All Points</button>
-            
+        <!-- Aspect Ratio Slider (logarithmic scale for better precision) -->
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="scatter_surface_custom_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="scatter_surface_custom_aspect_ratio_label">1.0</span>
+            <input type="range" id="scatter_surface_custom_aspect_ratio_slider"
+                   min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
         </div>
     </div>
 
     <!-- Chart -->
-    <div id="plot_scatter_surface_custom" style="width: 100%; height: 600px;"></div>
+    <div id="plot_scatter_surface_custom" style="width: 100%;"></div>
 
     <div id="method_explanation_scatter_surface_custom" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
     </div>
@@ -2205,9 +2297,47 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
 
     
 
-    <!-- Group Selection -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
-        <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+    <!-- Plot Attributes (Surface Controls and Groups) -->
+    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+        <h4 style="margin-top: 0;">Plot Attributes</h4>
+
+        <!-- Surface Controls Row -->
+        <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;">
+            <div>
+                <label>Smoothing Parameter: </label>
+                <select id="smoothing_select_finance_multi_group"
+                        onchange="setSmoothing_finance_multi_group(this.value)"
+                        style="padding: 5px;">
+                    <option value="-1">Defaults</option>
+<option value="0">0.3</option>
+<option value="1">0.5</option>
+<option value="2">0.7</option>
+<option value="3">1.0</option>
+<option value="4">1.5</option>
+<option value="5">2.0</option>
+<option value="6">3.0</option>
+<option value="7">4.0</option>
+<option value="8">5.0</option>
+<option value="9">7.0</option>
+<option value="10">10.0</option>
+                </select>
+                <span id="smoothing_label_finance_multi_group" style="margin-left: 5px;">Defaults</span>
+            </div>
+            <div style="text-align: right;">
+                <button id="l1l2_toggle_finance_multi_group" onclick="toggleL1L2_finance_multi_group()"
+style="background-color: #4CAF50; color: white; padding: 5px 10px;
+       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+            </div>
+        </div>
+
+        <!-- Toggle Buttons Row -->
+        <div style="margin: 10px 0;">
+            <button onclick="toggleAllSurfaces_finance_multi_group()" style="padding: 5px 10px; margin-right: 10px;">Toggle All Surfaces</button>
+            <button onclick="toggleAllPoints_finance_multi_group()" style="padding: 5px 10px;">Toggle All Points</button>
+        </div>
+
+        <!-- Groups Section -->
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Groups (click to toggle visibility)</h4>
             <div style="margin: 10px 0;">
         <label><strong>Grouping Scheme: </strong></label>
         <select id="scheme_selector_finance_multi_group"
@@ -2218,7 +2348,7 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
         </select>
     </div>
 
-        <div id="group_buttons_finance_multi_group">
+        <div id="group_buttons_finance_multi_group" style="margin: 10px 0;">
                 <button onclick="toggleGroup_finance_multi_group('Energy')"
             style="background-color: hsl(65.45454545454545, 70%, 50%); margin: 2px; padding: 5px 10px;
                    border: 1px solid #ccc; cursor: pointer;">
@@ -2256,41 +2386,20 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
     </button>
 
         </div>
-    </div>
 
-    <!-- Surface Controls -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-        <h4 style="margin-top: 0;">Surface Controls</h4>
-        <div style="margin: 5px 0;">
-            <label>Smoothing Parameter: </label>
-            <select id="smoothing_select_finance_multi_group"
-                    onchange="setSmoothing_finance_multi_group(this.value)">
-                <option value="-1">Defaults</option>
-<option value="0">0.3</option>
-<option value="1">0.5</option>
-<option value="2">0.7</option>
-<option value="3">1.0</option>
-<option value="4">1.5</option>
-<option value="5">2.0</option>
-<option value="6">3.0</option>
-<option value="7">4.0</option>
-<option value="8">5.0</option>
-<option value="9">7.0</option>
-<option value="10">10.0</option>
-            </select>
-            <span id="smoothing_label_finance_multi_group">Defaults</span>
-        </div>
-        <div style="margin: 10px 0;">
-            <button onclick="toggleAllSurfaces_finance_multi_group()">Toggle All Surfaces</button>
-            <button onclick="toggleAllPoints_finance_multi_group()">Toggle All Points</button>
-            <button id="l1l2_toggle_finance_multi_group" onclick="toggleL1L2_finance_multi_group()"
-style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 10px;
-       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+        <!-- Aspect Ratio Slider (logarithmic scale for better precision) -->
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="finance_multi_group_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="finance_multi_group_aspect_ratio_label">1.0</span>
+            <input type="range" id="finance_multi_group_aspect_ratio_slider"
+                   min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
         </div>
     </div>
 
     <!-- Chart -->
-    <div id="plot_finance_multi_group" style="width: 100%; height: 700px;"></div>
+    <div id="plot_finance_multi_group" style="width: 100%;"></div>
 
     <div id="method_explanation_finance_multi_group" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
     </div>
@@ -2333,6 +2442,6 @@ style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.2.</small></p>
 </body>
 </html>

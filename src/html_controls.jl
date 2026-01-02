@@ -285,7 +285,8 @@ The generated HTML includes two optional sections:
 Each section is only included if it has controls to display.
 """
 function generate_appearance_html(controls::ChartHtmlControls;
-                                  multiselect_filters::Bool=true)::String
+                                  multiselect_filters::Bool=true,
+                                  aspect_ratio_default::Float64=0.6)::String
 
     # Build filters section
     filters_html = ""
@@ -375,6 +376,23 @@ function generate_appearance_html(controls::ChartHtmlControls;
             $facet_controls_html
             """
         end
+
+        # Add aspect ratio slider at the bottom of Plot Attributes
+        # Use logarithmic scale for better precision at smaller values
+        log_min = log(0.25)
+        log_max = log(2.5)
+        log_default = log(aspect_ratio_default)
+        aspect_ratio_html = """
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="$(controls.chart_div_id)_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="$(controls.chart_div_id)_aspect_ratio_label">$aspect_ratio_default</span>
+            <input type="range" id="$(controls.chart_div_id)_aspect_ratio_slider"
+                   min="$log_min" max="$log_max" step="0.01" value="$log_default"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+        </div>
+        """
+        attribute_controls_html *= aspect_ratio_html
 
         attributes_html = """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
@@ -781,7 +799,8 @@ function generate_appearance_html_from_sections(filters_html::String,
                                                 faceting_html::String,
                                                 title::String,
                                                 notes::String,
-                                                chart_div_id::String)::String
+                                                chart_div_id::String;
+                                                aspect_ratio_default::Float64=0.6)::String
     # Build filters section
     filters_section = filters_html != "" ? """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
@@ -805,6 +824,22 @@ function generate_appearance_html_from_sections(filters_html::String,
             $faceting_html
             """
         end
+
+        # Add aspect ratio slider at the bottom
+        # Use logarithmic scale for better precision at smaller values
+        log_min = log(0.25)
+        log_max = log(2.5)
+        log_default = log(aspect_ratio_default)
+        combined_content *= """
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="$(chart_div_id)_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="$(chart_div_id)_aspect_ratio_label">$aspect_ratio_default</span>
+            <input type="range" id="$(chart_div_id)_aspect_ratio_slider"
+                   min="$log_min" max="$log_max" step="0.01" value="$log_default"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+        </div>
+        """
 
         """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">

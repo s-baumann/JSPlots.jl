@@ -543,7 +543,6 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
                     yaxis: {title: '$(y_col)'},
                     zaxis: {title: '$(z_col)'}
                 },
-                height: $(height),
                 margin: {l: 0, r: 0, b: 0, t: 30}
             };
 
@@ -694,6 +693,12 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
         loadDataset('$(data_label)').then(function(data) {
             allData = data;
             updatePlotWithFilters_$(chart_title_safe)();
+
+            // Setup aspect ratio control after initial render
+            // Use setTimeout to ensure Plotly has finished rendering
+            setTimeout(function() {
+                setupAspectRatioControl('$(chart_title_safe)');
+            }, 100);
         }).catch(function(error) {
             console.error('Error loading data for chart $(chart_title_safe):', error);
         });
@@ -755,37 +760,54 @@ function generate_appearance_html(chart_title_safe, title, notes,
 
         $(filters_section)
 
-        <!-- Group Selection -->
-        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
-            <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+        <!-- Plot Attributes (Surface Controls and Groups) -->
+        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+            <h4 style="margin-top: 0;">Plot Attributes</h4>
+
+            <!-- Surface Controls Row -->
+            <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;">
+                <div>
+                    <label>Smoothing Parameter: </label>
+                    <select id="smoothing_select_$(chart_title_safe)"
+                            onchange="setSmoothing_$(chart_title_safe)(this.value)"
+                            style="padding: 5px;">
+                        $(smoothing_options)
+                    </select>
+                    <span id="smoothing_label_$(chart_title_safe)" style="margin-left: 5px;">Defaults</span>
+                </div>
+                <div style="text-align: right;">
+                    $(has_l1 ? """<button id="l1l2_toggle_$(chart_title_safe)" onclick="toggleL1L2_$(chart_title_safe)()"
+                                 style="background-color: #4CAF50; color: white; padding: 5px 10px;
+                                        border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>""" : "")
+                </div>
+            </div>
+
+            <!-- Toggle Buttons Row -->
+            <div style="margin: 10px 0;">
+                <button onclick="toggleAllSurfaces_$(chart_title_safe)()" style="padding: 5px 10px; margin-right: 10px;">Toggle All Surfaces</button>
+                <button onclick="toggleAllPoints_$(chart_title_safe)()" style="padding: 5px 10px;">Toggle All Points</button>
+            </div>
+
+            <!-- Groups Section -->
+            <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Groups (click to toggle visibility)</h4>
             $(scheme_selector)
-            <div id="group_buttons_$(chart_title_safe)">
+            <div id="group_buttons_$(chart_title_safe)" style="margin: 10px 0;">
                 $(group_buttons)
             </div>
-        </div>
 
-        <!-- Surface Controls -->
-        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-            <h4 style="margin-top: 0;">Surface Controls</h4>
-            <div style="margin: 5px 0;">
-                <label>Smoothing Parameter: </label>
-                <select id="smoothing_select_$(chart_title_safe)"
-                        onchange="setSmoothing_$(chart_title_safe)(this.value)">
-                    $(smoothing_options)
-                </select>
-                <span id="smoothing_label_$(chart_title_safe)">Defaults</span>
-            </div>
-            <div style="margin: 10px 0;">
-                <button onclick="toggleAllSurfaces_$(chart_title_safe)()">Toggle All Surfaces</button>
-                <button onclick="toggleAllPoints_$(chart_title_safe)()">Toggle All Points</button>
-                $(has_l1 ? """<button id="l1l2_toggle_$(chart_title_safe)" onclick="toggleL1L2_$(chart_title_safe)()"
-                             style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 10px;
-                                    border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>""" : "")
+            <!-- Aspect Ratio Slider (logarithmic scale for better precision) -->
+            <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+                <label for="$(chart_title_safe)_aspect_ratio_slider">Aspect Ratio: </label>
+                <span id="$(chart_title_safe)_aspect_ratio_label">1.0</span>
+                <input type="range" id="$(chart_title_safe)_aspect_ratio_slider"
+                       min="$(log(0.25))" max="$(log(2.5))" step="0.01" value="$(log(1.0))"
+                       style="width: 75%; margin-left: 10px;">
+                <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
             </div>
         </div>
 
         <!-- Chart -->
-        <div id="plot_$(chart_title_safe)" style="width: 100%; height: $(height)px;"></div>
+        <div id="plot_$(chart_title_safe)" style="width: 100%;"></div>
 
         <div id="method_explanation_$(chart_title_safe)" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
         </div>
