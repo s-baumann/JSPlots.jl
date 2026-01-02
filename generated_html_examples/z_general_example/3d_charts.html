@@ -364,6 +364,50 @@ function applyAxisTransform(values, transformType) {
                 return (v - mean) / std;
             });
 
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
         default:
             return values;
     }
@@ -425,6 +469,10 @@ function getAxisLabel(originalLabel, transformType) {
             return 'log(' + originalLabel + ')';
         case 'z_score':
             return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -632,10 +680,30 @@ $(function(){
     });
 
     function computeEigenvectors(data, X_COL, Y_COL, Z_COL) {
-        // Extract numeric data
-        const xs = data.map(row => parseFloat(row[X_COL]));
-        const ys = data.map(row => parseFloat(row[Y_COL]));
-        const zs = data.map(row => parseFloat(row[Z_COL]));
+        // Extract numeric data and filter out invalid values
+        const validIndices = [];
+        const xs = [];
+        const ys = [];
+        const zs = [];
+
+        data.forEach((row, idx) => {
+            const x = parseFloat(row[X_COL]);
+            const y = parseFloat(row[Y_COL]);
+            const z = parseFloat(row[Z_COL]);
+
+            // Only include if all three values are valid numbers
+            if (!isNaN(x) && isFinite(x) && !isNaN(y) && isFinite(y) && !isNaN(z) && isFinite(z)) {
+                xs.push(x);
+                ys.push(y);
+                zs.push(z);
+                validIndices.push(idx);
+            }
+        });
+
+        // Check if we have enough valid points
+        if (xs.length < 3) {
+            return null;  // Not enough valid points for eigenvector computation
+        }
 
         // Compute means
         const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -836,7 +904,9 @@ $(function(){
             }));
 
             const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-            traces.push(...createEigenvectorTraces(eigData, 'scene'));
+            if (eigData !== null) {
+                traces.push(...createEigenvectorTraces(eigData, 'scene'));
+            }
         }
 
         const layout = {
@@ -928,7 +998,9 @@ $(function(){
                 }));
 
                 const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                traces.push(...createEigenvectorTraces(eigData, sceneId));
+                if (eigData !== null) {
+                    traces.push(...createEigenvectorTraces(eigData, sceneId));
+                }
             }
         });
 
@@ -1070,7 +1142,9 @@ $(function(){
                     }));
 
                     const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                    traces.push(...createEigenvectorTraces(eigData, sceneId));
+                    if (eigData !== null) {
+                        traces.push(...createEigenvectorTraces(eigData, sceneId));
+                    }
                 }
             });
         });
@@ -1845,6 +1919,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -1866,6 +1942,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -1887,6 +1965,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>

@@ -868,8 +868,8 @@ function build_axis_controls_html(chart_title_safe::String,
         return ""
     end
 
-    # Transform options (only 3 now)
-    transform_options = ["identity", "log", "z_score"]
+    # Transform options
+    transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf"]
     transform_default = "identity"
 
     axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"

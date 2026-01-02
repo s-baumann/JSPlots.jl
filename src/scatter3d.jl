@@ -167,10 +167,30 @@ $style_html        </div>
             });
 
             function computeEigenvectors(data, X_COL, Y_COL, Z_COL) {
-                // Extract numeric data
-                const xs = data.map(row => parseFloat(row[X_COL]));
-                const ys = data.map(row => parseFloat(row[Y_COL]));
-                const zs = data.map(row => parseFloat(row[Z_COL]));
+                // Extract numeric data and filter out invalid values
+                const validIndices = [];
+                const xs = [];
+                const ys = [];
+                const zs = [];
+
+                data.forEach((row, idx) => {
+                    const x = parseFloat(row[X_COL]);
+                    const y = parseFloat(row[Y_COL]);
+                    const z = parseFloat(row[Z_COL]);
+
+                    // Only include if all three values are valid numbers
+                    if (!isNaN(x) && isFinite(x) && !isNaN(y) && isFinite(y) && !isNaN(z) && isFinite(z)) {
+                        xs.push(x);
+                        ys.push(y);
+                        zs.push(z);
+                        validIndices.push(idx);
+                    }
+                });
+
+                // Check if we have enough valid points
+                if (xs.length < 3) {
+                    return null;  // Not enough valid points for eigenvector computation
+                }
 
                 // Compute means
                 const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -371,7 +391,9 @@ $style_html        </div>
                     }));
 
                     const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                    traces.push(...createEigenvectorTraces(eigData, 'scene'));
+                    if (eigData !== null) {
+                        traces.push(...createEigenvectorTraces(eigData, 'scene'));
+                    }
                 }
 
                 const layout = {
@@ -463,7 +485,9 @@ $style_html        </div>
                         }));
 
                         const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                        traces.push(...createEigenvectorTraces(eigData, sceneId));
+                        if (eigData !== null) {
+                            traces.push(...createEigenvectorTraces(eigData, sceneId));
+                        }
                     }
                 });
 
@@ -605,7 +629,9 @@ $style_html        </div>
                             }));
 
                             const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                            traces.push(...createEigenvectorTraces(eigData, sceneId));
+                            if (eigData !== null) {
+                                traces.push(...createEigenvectorTraces(eigData, sceneId));
+                            }
                         }
                     });
                 });
