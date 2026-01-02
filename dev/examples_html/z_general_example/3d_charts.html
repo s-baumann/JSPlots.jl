@@ -364,6 +364,50 @@ function applyAxisTransform(values, transformType) {
                 return (v - mean) / std;
             });
 
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
         default:
             return values;
     }
@@ -425,8 +469,55 @@ function getAxisLabel(originalLabel, transformType) {
             return 'log(' + originalLabel + ')';
         case 'z_score':
             return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
         default:
             return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
     }
 }
 
@@ -632,10 +723,30 @@ $(function(){
     });
 
     function computeEigenvectors(data, X_COL, Y_COL, Z_COL) {
-        // Extract numeric data
-        const xs = data.map(row => parseFloat(row[X_COL]));
-        const ys = data.map(row => parseFloat(row[Y_COL]));
-        const zs = data.map(row => parseFloat(row[Z_COL]));
+        // Extract numeric data and filter out invalid values
+        const validIndices = [];
+        const xs = [];
+        const ys = [];
+        const zs = [];
+
+        data.forEach((row, idx) => {
+            const x = parseFloat(row[X_COL]);
+            const y = parseFloat(row[Y_COL]);
+            const z = parseFloat(row[Z_COL]);
+
+            // Only include if all three values are valid numbers
+            if (!isNaN(x) && isFinite(x) && !isNaN(y) && isFinite(y) && !isNaN(z) && isFinite(z)) {
+                xs.push(x);
+                ys.push(y);
+                zs.push(z);
+                validIndices.push(idx);
+            }
+        });
+
+        // Check if we have enough valid points
+        if (xs.length < 3) {
+            return null;  // Not enough valid points for eigenvector computation
+        }
 
         // Compute means
         const meanX = xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -836,7 +947,9 @@ $(function(){
             }));
 
             const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-            traces.push(...createEigenvectorTraces(eigData, 'scene'));
+            if (eigData !== null) {
+                traces.push(...createEigenvectorTraces(eigData, 'scene'));
+            }
         }
 
         const layout = {
@@ -928,7 +1041,9 @@ $(function(){
                 }));
 
                 const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                traces.push(...createEigenvectorTraces(eigData, sceneId));
+                if (eigData !== null) {
+                    traces.push(...createEigenvectorTraces(eigData, sceneId));
+                }
             }
         });
 
@@ -1070,7 +1185,9 @@ $(function(){
                     }));
 
                     const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
-                    traces.push(...createEigenvectorTraces(eigData, sceneId));
+                    if (eigData !== null) {
+                        traces.push(...createEigenvectorTraces(eigData, sceneId));
+                    }
                 }
             });
         });
@@ -1227,6 +1344,9 @@ $(function(){
 
         // Initial plot
         updatePlotWithFilters_scatter3d();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('scatter3d');
     }).catch(function(error) {
         console.error('Error loading data for chart scatter3d:', error);
     });
@@ -1240,6 +1360,9 @@ $(function(){
 
         // Initial plot
         updatePlotWithFilters_surface3d();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('surface3d');
     }).catch(function(error) {
         console.error('Error loading data for chart surface3d:', error);
     });
@@ -1458,7 +1581,6 @@ const plotData = uniqueGroups.map((grp, index) => {
                 yaxis: {title: 'latitude'},
                 zaxis: {title: 'sales'}
             },
-            height: 600,
             margin: {l: 0, r: 0, b: 0, t: 30}
         };
 
@@ -1609,6 +1731,12 @@ const plotData = uniqueGroups.map((grp, index) => {
     loadDataset('sales_data').then(function(data) {
         allData = data;
         updatePlotWithFilters_scattersurface();
+
+        // Setup aspect ratio control after initial render
+        // Use setTimeout to ensure Plotly has finished rendering
+        setTimeout(function() {
+            setupAspectRatioControl('scattersurface');
+        }, 100);
     }).catch(function(error) {
         console.error('Error loading data for chart scattersurface:', error);
     });
@@ -1845,6 +1973,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -1866,6 +1996,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -1887,6 +2019,8 @@ const plotData = uniqueGroups.map((grp, index) => {
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -1914,6 +2048,14 @@ const plotData = uniqueGroups.map((grp, index) => {
                 </div>
             </div>
             
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="scatter3d_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="scatter3d_aspect_ratio_label">1.0</span>
+    <input type="range" id="scatter3d_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
 
 </div>
 
@@ -1948,6 +2090,18 @@ const plotData = uniqueGroups.map((grp, index) => {
 </div>
 
 <!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <!-- Aspect ratio control below --><div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="surface3d_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="surface3d_aspect_ratio_label">1.0</span>
+    <input type="range" id="surface3d_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
 
 <!-- Chart -->
 <div id="surface3d"></div>
@@ -1960,11 +2114,53 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     
 
-    <!-- Group Selection -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff8f0;">
-        <h4 style="margin-top: 0;">Groups (click to toggle visibility)</h4>
+    <!-- Plot Attributes (Surface Controls and Groups) -->
+    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+        <h4 style="margin-top: 0;">Plot Attributes</h4>
+
+        <!-- Surface Controls Row -->
+        <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center;">
+            <div>
+                <label>Smoothing Parameter: </label>
+                <select id="smoothing_select_scattersurface"
+                        onchange="setSmoothing_scattersurface(this.value)"
+                        style="padding: 5px;">
+                    <option value="-1">Defaults</option>
+<option value="0">0.1</option>
+<option value="1">0.15</option>
+<option value="2">0.2</option>
+<option value="3">0.3</option>
+<option value="4">0.4</option>
+<option value="5">0.5</option>
+<option value="6">0.7</option>
+<option value="7">1.0</option>
+<option value="8">1.5</option>
+<option value="9">2.0</option>
+<option value="10">3.0</option>
+<option value="11">4.0</option>
+<option value="12">5.0</option>
+<option value="13">7.0</option>
+<option value="14">10.0</option>
+                </select>
+                <span id="smoothing_label_scattersurface" style="margin-left: 5px;">Defaults</span>
+            </div>
+            <div style="text-align: right;">
+                <button id="l1l2_toggle_scattersurface" onclick="toggleL1L2_scattersurface()"
+style="background-color: #4CAF50; color: white; padding: 5px 10px;
+       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+            </div>
+        </div>
+
+        <!-- Toggle Buttons Row -->
+        <div style="margin: 10px 0;">
+            <button onclick="toggleAllSurfaces_scattersurface()" style="padding: 5px 10px; margin-right: 10px;">Toggle All Surfaces</button>
+            <button onclick="toggleAllPoints_scattersurface()" style="padding: 5px 10px;">Toggle All Points</button>
+        </div>
+
+        <!-- Groups Section -->
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Groups (click to toggle visibility)</h4>
         
-        <div id="group_buttons_scattersurface">
+        <div id="group_buttons_scattersurface" style="margin: 10px 0;">
                 <button onclick="toggleGroup_scattersurface('Laptop_SMB')"
             style="background-color: hsl(80.0, 70%, 50%); margin: 2px; padding: 5px 10px;
                    border: 1px solid #ccc; cursor: pointer;">
@@ -2020,51 +2216,26 @@ const plotData = uniqueGroups.map((grp, index) => {
     </button>
 
         </div>
-    </div>
 
-    <!-- Surface Controls -->
-    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-        <h4 style="margin-top: 0;">Surface Controls</h4>
-        <div style="margin: 5px 0;">
-            <label>Smoothing Parameter: </label>
-            <select id="smoothing_select_scattersurface"
-                    onchange="setSmoothing_scattersurface(this.value)">
-                <option value="-1">Defaults</option>
-<option value="0">0.1</option>
-<option value="1">0.15</option>
-<option value="2">0.2</option>
-<option value="3">0.3</option>
-<option value="4">0.4</option>
-<option value="5">0.5</option>
-<option value="6">0.7</option>
-<option value="7">1.0</option>
-<option value="8">1.5</option>
-<option value="9">2.0</option>
-<option value="10">3.0</option>
-<option value="11">4.0</option>
-<option value="12">5.0</option>
-<option value="13">7.0</option>
-<option value="14">10.0</option>
-            </select>
-            <span id="smoothing_label_scattersurface">Defaults</span>
-        </div>
-        <div style="margin: 10px 0;">
-            <button onclick="toggleAllSurfaces_scattersurface()">Toggle All Surfaces</button>
-            <button onclick="toggleAllPoints_scattersurface()">Toggle All Points</button>
-            <button id="l1l2_toggle_scattersurface" onclick="toggleL1L2_scattersurface()"
-style="background-color: #4CAF50; color: white; margin-left: 10px; padding: 5px 10px;
-       border: 1px solid #ccc; cursor: pointer;">Using L2 (Mean)</button>
+        <!-- Aspect Ratio Slider (logarithmic scale for better precision) -->
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+            <label for="scattersurface_aspect_ratio_slider">Aspect Ratio: </label>
+            <span id="scattersurface_aspect_ratio_label">1.0</span>
+            <input type="range" id="scattersurface_aspect_ratio_slider"
+                   min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+                   style="width: 75%; margin-left: 10px;">
+            <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
         </div>
     </div>
 
     <!-- Chart -->
-    <div id="plot_scattersurface" style="width: 100%; height: 600px;"></div>
+    <div id="plot_scattersurface" style="width: 100%;"></div>
 
     <div id="method_explanation_scattersurface" style="margin-top: 10px; font-size: 0.85em; color: #666; line-height: 1.4;">
     </div>
 </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.2.</small></p>
 </body>
 </html>

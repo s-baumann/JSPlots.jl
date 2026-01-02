@@ -364,6 +364,50 @@ function applyAxisTransform(values, transformType) {
                 return (v - mean) / std;
             });
 
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
         default:
             return values;
     }
@@ -425,8 +469,55 @@ function getAxisLabel(originalLabel, transformType) {
             return 'log(' + originalLabel + ')';
         case 'z_score':
             return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
         default:
             return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
     }
 }
 
@@ -1268,6 +1359,9 @@ $(function(){
     loadDataset('strategy_data').then(function(data) {
         allData = data;
         window.updateChart_strategy_evolution_arrows();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('strategy_evolution_arrows');
     }).catch(function(error) {
         console.error('Error loading data for chart strategy_evolution_arrows:', error);
     });
@@ -1929,6 +2023,9 @@ $(function(){
     loadDataset('strategy_data').then(function(data) {
         allData = data;
         window.updateChart_strategy_evolution_alpha();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('strategy_evolution_alpha');
     }).catch(function(error) {
         console.error('Error loading data for chart strategy_evolution_alpha:', error);
     });
@@ -2590,6 +2687,9 @@ $(function(){
     loadDataset('regional_data').then(function(data) {
         allData = data;
         window.updateChart_regional_paths();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('regional_paths');
     }).catch(function(error) {
         console.error('Error loading data for chart regional_paths:', error);
     });
@@ -3251,6 +3351,9 @@ $(function(){
     loadDataset('asset_data').then(function(data) {
         allData = data;
         window.updateChart_asset_performance();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('asset_performance');
     }).catch(function(error) {
         console.error('Error loading data for chart asset_performance:', error);
     });
@@ -3912,6 +4015,9 @@ $(function(){
     loadDataset('regional_data').then(function(data) {
         allData = data;
         window.updateChart_facet_by_region();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('facet_by_region');
     }).catch(function(error) {
         console.error('Error loading data for chart facet_by_region:', error);
     });
@@ -4573,6 +4679,9 @@ $(function(){
     loadDataset('product_data').then(function(data) {
         allData = data;
         window.updateChart_product_development();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('product_development');
     }).catch(function(error) {
         console.error('Error loading data for chart product_development:', error);
     });
@@ -5234,6 +5343,9 @@ $(function(){
     loadDataset('optimization_data').then(function(data) {
         allData = data;
         window.updateChart_optimization_path();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('optimization_path');
     }).catch(function(error) {
         console.error('Error loading data for chart optimization_path:', error);
     });
@@ -5895,6 +6007,9 @@ $(function(){
     loadDataset('business_data').then(function(data) {
         allData = data;
         window.updateChart_business_metrics();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('business_metrics');
     }).catch(function(error) {
         console.error('Error loading data for chart business_metrics:', error);
     });
@@ -6207,6 +6322,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6223,8 +6340,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="strategy_evolution_arrows_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="strategy_evolution_arrows_aspect_ratio_label">0.4</span>
+    <input type="range" id="strategy_evolution_arrows_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6256,6 +6383,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6272,8 +6401,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="strategy_evolution_alpha_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="strategy_evolution_alpha_aspect_ratio_label">0.4</span>
+    <input type="range" id="strategy_evolution_alpha_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6337,6 +6476,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6353,8 +6494,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="regional_paths_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="regional_paths_aspect_ratio_label">0.4</span>
+    <input type="range" id="regional_paths_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6385,6 +6536,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6400,8 +6553,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="asset_performance_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="asset_performance_aspect_ratio_label">0.4</span>
+    <input type="range" id="asset_performance_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6432,6 +6595,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6447,6 +6612,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -6470,6 +6637,14 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
     </div>
 </div>
 
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="facet_by_region_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="facet_by_region_aspect_ratio_label">0.4</span>
+    <input type="range" id="facet_by_region_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
 
 </div>
 
@@ -6500,6 +6675,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6516,8 +6693,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="product_development_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="product_development_aspect_ratio_label">0.4</span>
+    <input type="range" id="product_development_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6549,6 +6736,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6565,8 +6754,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="optimization_path_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="optimization_path_aspect_ratio_label">0.4</span>
+    <input type="range" id="optimization_path_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6598,6 +6797,8 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
     <div>
@@ -6614,8 +6815,18 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="business_metrics_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="business_metrics_aspect_ratio_label">0.4</span>
+    <input type="range" id="business_metrics_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -6624,6 +6835,6 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 <div id="business_metrics"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_data</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.2.</small></p>
 </body>
 </html>

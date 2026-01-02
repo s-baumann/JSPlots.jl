@@ -364,6 +364,50 @@ function applyAxisTransform(values, transformType) {
                 return (v - mean) / std;
             });
 
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
         default:
             return values;
     }
@@ -425,8 +469,55 @@ function getAxisLabel(originalLabel, transformType) {
             return 'log(' + originalLabel + ')';
         case 'z_score':
             return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
         default:
             return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
     }
 }
 
@@ -957,6 +1048,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_simple_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('simple_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart simple_kde:', error);
@@ -1308,6 +1402,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_multi_group_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('multi_group_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart multi_group_kde:', error);
@@ -1659,6 +1756,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_filtered_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('filtered_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart filtered_kde:', error);
@@ -2010,6 +2110,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_facet_one_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('facet_one_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart facet_one_kde:', error);
@@ -2361,6 +2464,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_facet_grid_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('facet_grid_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart facet_grid_kde:', error);
@@ -2712,6 +2818,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_bimodal_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('bimodal_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart bimodal_kde:', error);
@@ -3063,6 +3172,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_custom_bandwidth_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('custom_bandwidth_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart custom_bandwidth_kde:', error);
@@ -3417,6 +3529,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_multi_dropdown_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('multi_dropdown_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart multi_dropdown_kde:', error);
@@ -3771,6 +3886,9 @@ $(function(){
 
             // Initial plot
             updatePlotWithFilters_comprehensive_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('comprehensive_kde');
         });
     }).catch(function(error) {
         console.error('Error loading data for chart comprehensive_kde:', error);
@@ -14553,8 +14671,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="simple_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="simple_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="simple_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -14598,8 +14726,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="multi_group_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="multi_group_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="multi_group_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -14723,8 +14861,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="filtered_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="filtered_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="filtered_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -14768,6 +14916,8 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -14779,6 +14929,14 @@ value,treatment,timepoint
                 <option value="phase" selected>phase</option>                </select>
             </div>
             
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="facet_one_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="facet_one_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="facet_one_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
 
 </div>
 
@@ -14821,6 +14979,8 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -14842,6 +15002,14 @@ value,treatment,timepoint
                 </div>
             </div>
             
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="facet_grid_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="facet_grid_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="facet_grid_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
 
 </div>
 
@@ -14884,8 +15052,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="bimodal_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="bimodal_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="bimodal_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -14929,8 +15107,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="custom_bandwidth_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="custom_bandwidth_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="custom_bandwidth_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -14988,8 +15176,18 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="multi_dropdown_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="multi_dropdown_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="multi_dropdown_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
 
 </div>
@@ -15125,6 +15323,8 @@ value,treatment,timepoint
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -15136,6 +15336,14 @@ value,treatment,timepoint
                 <option value="project_type" selected>project_type</option>                </select>
             </div>
             
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="comprehensive_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="comprehensive_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="comprehensive_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
 
 </div>
 
@@ -15174,6 +15382,6 @@ value,treatment,timepoint
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.2.</small></p>
 </body>
 </html>
