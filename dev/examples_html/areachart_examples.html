@@ -332,6 +332,104 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -549,6 +647,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_stacked_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_stacked_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_stacked_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -631,8 +736,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -700,9 +809,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -766,8 +877,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -832,11 +947,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -911,8 +1029,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -977,11 +1099,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -1069,6 +1194,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_unstacked_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_unstacked_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_unstacked_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1151,8 +1283,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -1220,9 +1356,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -1286,8 +1424,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -1352,11 +1494,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -1431,8 +1576,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -1497,11 +1646,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -1589,6 +1741,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_normalized_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_normalized_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_normalized_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1671,8 +1830,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -1740,9 +1903,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -1806,8 +1971,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -1872,11 +2041,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -1951,8 +2123,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -2017,11 +2193,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -2109,6 +2288,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_discrete_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_discrete_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_discrete_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2191,8 +2377,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -2260,9 +2450,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -2326,8 +2518,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -2392,11 +2588,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -2471,8 +2670,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -2537,11 +2740,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -2629,6 +2835,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_filtered_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_filtered_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_filtered_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2711,8 +2924,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -2780,9 +2997,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -2846,8 +3065,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -2912,11 +3135,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -2991,8 +3217,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -3057,11 +3287,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -3149,6 +3382,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_facet_wrap_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_facet_wrap_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_facet_wrap_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3231,8 +3471,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -3300,9 +3544,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -3366,8 +3612,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -3432,11 +3682,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -3511,8 +3764,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -3577,11 +3834,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -3669,6 +3929,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_facet_grid_area');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_facet_grid_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_facet_grid_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3751,8 +4018,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -3820,9 +4091,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -3886,8 +4159,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -3952,11 +4229,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -4031,8 +4311,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -4097,11 +4381,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -4189,6 +4476,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_dynamic_grouping');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_dynamic_grouping');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_dynamic_grouping');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4271,8 +4565,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -4340,9 +4638,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -4406,8 +4706,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -4472,11 +4776,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -4551,8 +4858,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -4617,11 +4928,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -4709,6 +5023,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_unstack_mode');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_unstack_mode');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_unstack_mode');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4791,8 +5112,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -4860,9 +5185,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -4926,8 +5253,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -4992,11 +5323,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -5071,8 +5405,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -5137,11 +5475,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -5229,6 +5570,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_stack_mode');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_stack_mode');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_stack_mode');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -5311,8 +5659,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -5380,9 +5732,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -5446,8 +5800,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -5512,11 +5870,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -5591,8 +5952,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -5657,11 +6022,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -5749,6 +6117,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_normalized_mode');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_normalized_mode');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_normalized_mode');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -5831,8 +6206,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -5900,9 +6279,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -5966,8 +6347,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -6032,11 +6417,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -6111,8 +6499,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -6177,11 +6569,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -6269,6 +6664,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_dynamic_x_axis');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_dynamic_x_axis');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_dynamic_x_axis');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -6351,8 +6753,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -6420,9 +6826,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -6486,8 +6894,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -6552,11 +6964,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -6631,8 +7046,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -6697,11 +7116,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -6789,6 +7211,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_dodge_mode');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_dodge_mode');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_dodge_mode');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -6871,8 +7300,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -6940,9 +7373,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -7006,8 +7441,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -7072,11 +7511,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -7151,8 +7593,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -7217,11 +7663,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -7309,6 +7758,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_dodge_comparison');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_dodge_comparison');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_dodge_comparison');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -7391,8 +7847,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -7460,9 +7920,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -7526,8 +7988,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -7592,11 +8058,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -7671,8 +8140,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -7737,11 +8210,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -7829,6 +8305,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_stack_comparison');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_stack_comparison');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_stack_comparison');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -7911,8 +8394,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -7980,9 +8467,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -8046,8 +8535,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -8112,11 +8605,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -8191,8 +8687,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -8257,11 +8757,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -10692,9 +11195,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_stacked_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Date</span>
+    </div>
+    <div>
+        <label for="x_transform_select_stacked_area">X Transform: </label>
+        <select id="x_transform_select_stacked_area" style="padding: 5px 10px;" onchange="updatePlot_stacked_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Sales</span>
+    </div>
+    <div>
+        <label for="y_transform_select_stacked_area">Y Transform: </label>
+        <select id="y_transform_select_stacked_area" style="padding: 5px 10px;" onchange="updatePlot_stacked_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="stacked_area"></div>
@@ -10721,9 +11250,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_unstacked_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Time</span>
+    </div>
+    <div>
+        <label for="x_transform_select_unstacked_area">X Transform: </label>
+        <select id="x_transform_select_unstacked_area" style="padding: 5px 10px;" onchange="updatePlot_unstacked_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_unstacked_area">Y Transform: </label>
+        <select id="y_transform_select_unstacked_area" style="padding: 5px 10px;" onchange="updatePlot_unstacked_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="unstacked_area"></div>
@@ -10750,9 +11305,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_normalized_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Month</span>
+    </div>
+    <div>
+        <label for="x_transform_select_normalized_area">X Transform: </label>
+        <select id="x_transform_select_normalized_area" style="padding: 5px 10px;" onchange="updatePlot_normalized_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">MarketShare</span>
+    </div>
+    <div>
+        <label for="y_transform_select_normalized_area">Y Transform: </label>
+        <select id="y_transform_select_normalized_area" style="padding: 5px 10px;" onchange="updatePlot_normalized_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="normalized_area"></div>
@@ -10779,9 +11360,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_discrete_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Department</span>
+    </div>
+    <div>
+        <label for="x_transform_select_discrete_area">X Transform: </label>
+        <select id="x_transform_select_discrete_area" style="padding: 5px 10px;" onchange="updatePlot_discrete_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Headcount</span>
+    </div>
+    <div>
+        <label for="y_transform_select_discrete_area">Y Transform: </label>
+        <select id="y_transform_select_discrete_area" style="padding: 5px 10px;" onchange="updatePlot_discrete_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="discrete_area"></div>
@@ -10886,9 +11493,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_filtered_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Date</span>
+    </div>
+    <div>
+        <label for="x_transform_select_filtered_area">X Transform: </label>
+        <select id="x_transform_select_filtered_area" style="padding: 5px 10px;" onchange="updatePlot_filtered_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Revenue</span>
+    </div>
+    <div>
+        <label for="y_transform_select_filtered_area">Y Transform: </label>
+        <select id="y_transform_select_filtered_area" style="padding: 5px 10px;" onchange="updatePlot_filtered_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="filtered_area"></div>
@@ -10915,24 +11548,43 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_facet_wrap_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Week</span>
+    </div>
+    <div>
+        <label for="x_transform_select_facet_wrap_area">X Transform: </label>
+        <select id="x_transform_select_facet_wrap_area" style="padding: 5px 10px;" onchange="updatePlot_facet_wrap_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_facet_wrap_area">Y Transform: </label>
+        <select id="y_transform_select_facet_wrap_area" style="padding: 5px 10px;" onchange="updatePlot_facet_wrap_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+</div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0;">
+    <label for="facet1_select_facet_wrap_area">Facet by: </label>
+    <select id="facet1_select_facet_wrap_area" onchange="updatePlot_facet_wrap_area()">
+        <option value="None">None</option>
+<option value="Metric" selected>Metric</option>
+    </select>
 </div>
 
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet1_select_facet_wrap_area">Facet by: </label>
-                <select id="facet1_select_facet_wrap_area" onchange="updatePlot_facet_wrap_area()">
-                <option value="None">None</option>
-                <option value="Metric" selected>Metric</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet1_select_facet_wrap_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-        
+
 </div>
 
 <!-- Chart -->
@@ -10960,38 +11612,54 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_facet_grid_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Month</span>
+    </div>
+    <div>
+        <label for="x_transform_select_facet_grid_area">X Transform: </label>
+        <select id="x_transform_select_facet_grid_area" style="padding: 5px 10px;" onchange="updatePlot_facet_grid_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Sales</span>
+    </div>
+    <div>
+        <label for="y_transform_select_facet_grid_area">Y Transform: </label>
+        <select id="y_transform_select_facet_grid_area" style="padding: 5px 10px;" onchange="updatePlot_facet_grid_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+</div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_facet_grid_area">Facet 1: </label>
+        <select id="facet1_select_facet_grid_area" style="padding: 5px 10px;" onchange="updatePlot_facet_grid_area()">
+            <option value="None">None</option>
+<option value="Product" selected>Product</option>
+<option value="Region">Region</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_facet_grid_area">Facet 2: </label>
+        <select id="facet2_select_facet_grid_area" style="padding: 5px 10px;" onchange="updatePlot_facet_grid_area()">
+            <option value="None">None</option>
+<option value="Product">Product</option>
+<option value="Region" selected>Region</option>
+        </select>
+    </div>
 </div>
 
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet1_select_facet_grid_area">Facet 1: </label>
-                <select id="facet1_select_facet_grid_area" onchange="updatePlot_facet_grid_area()">
-                <option value="None">None</option>
-                <option value="Product" selected>Product</option>
-                <option value="Region">Region</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet1_select_facet_grid_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet2_select_facet_grid_area">Facet 2: </label>
-                <select id="facet2_select_facet_grid_area" onchange="updatePlot_facet_grid_area()">
-                <option value="None">None</option>
-                <option value="Product">Product</option>
-                <option value="Region" selected>Region</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet2_select_facet_grid_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-        
+
 </div>
 
 <!-- Chart -->
@@ -11006,19 +11674,6 @@ Category D,43.2005941081019,Segment 3
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="y_col_select_dynamic_grouping">Y dimension: </label>
-                <select id="y_col_select_dynamic_grouping" onchange="updatePlot_dynamic_grouping()">
-                <option value="Revenue" selected>Revenue</option>
-                <option value="Profit">Profit</option>
-                <option value="Growth">Growth</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="y_col_select_dynamic_grouping_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
                 <label for="color_col_select_dynamic_grouping">Color by: </label>
                 <select id="color_col_select_dynamic_grouping" onchange="updatePlot_dynamic_grouping()">
@@ -11044,38 +11699,58 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_dynamic_grouping_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Quarter</span>
+    </div>
+    <div>
+        <label for="x_transform_select_dynamic_grouping">X Transform: </label>
+        <select id="x_transform_select_dynamic_grouping" style="padding: 5px 10px;" onchange="updatePlot_dynamic_grouping()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_dynamic_grouping">Y: </label>
+        <select id="y_col_select_dynamic_grouping" style="padding: 5px 10px;" onchange="updatePlot_dynamic_grouping()">
+            <option value="Revenue" selected>Revenue</option>
+<option value="Profit">Profit</option>
+<option value="Growth">Growth</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_dynamic_grouping">Y Transform: </label>
+        <select id="y_transform_select_dynamic_grouping" style="padding: 5px 10px;" onchange="updatePlot_dynamic_grouping()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+</div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_dynamic_grouping">Facet 1: </label>
+        <select id="facet1_select_dynamic_grouping" style="padding: 5px 10px;" onchange="updatePlot_dynamic_grouping()">
+            <option value="None" selected>None</option>
+<option value="Industry">Industry</option>
+<option value="CompanySize">CompanySize</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_dynamic_grouping">Facet 2: </label>
+        <select id="facet2_select_dynamic_grouping" style="padding: 5px 10px;" onchange="updatePlot_dynamic_grouping()">
+            <option value="None" selected>None</option>
+<option value="Industry">Industry</option>
+<option value="CompanySize">CompanySize</option>
+        </select>
+    </div>
 </div>
 
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet1_select_dynamic_grouping">Facet 1: </label>
-                <select id="facet1_select_dynamic_grouping" onchange="updatePlot_dynamic_grouping()">
-                <option value="None" selected>None</option>
-                <option value="Industry">Industry</option>
-                <option value="CompanySize">CompanySize</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet1_select_dynamic_grouping_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet2_select_dynamic_grouping">Facet 2: </label>
-                <select id="facet2_select_dynamic_grouping" onchange="updatePlot_dynamic_grouping()">
-                <option value="None" selected>None</option>
-                <option value="Industry">Industry</option>
-                <option value="CompanySize">CompanySize</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet2_select_dynamic_grouping_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-        
+
 </div>
 
 <!-- Chart -->
@@ -11111,9 +11786,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_unstack_mode_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Time</span>
+    </div>
+    <div>
+        <label for="x_transform_select_unstack_mode">X Transform: </label>
+        <select id="x_transform_select_unstack_mode" style="padding: 5px 10px;" onchange="updatePlot_unstack_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_unstack_mode">Y Transform: </label>
+        <select id="y_transform_select_unstack_mode" style="padding: 5px 10px;" onchange="updatePlot_unstack_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="unstack_mode"></div>
@@ -11140,9 +11841,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_stack_mode_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Time</span>
+    </div>
+    <div>
+        <label for="x_transform_select_stack_mode">X Transform: </label>
+        <select id="x_transform_select_stack_mode" style="padding: 5px 10px;" onchange="updatePlot_stack_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_stack_mode">Y Transform: </label>
+        <select id="y_transform_select_stack_mode" style="padding: 5px 10px;" onchange="updatePlot_stack_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="stack_mode"></div>
@@ -11169,9 +11896,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_normalized_mode_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Time</span>
+    </div>
+    <div>
+        <label for="x_transform_select_normalized_mode">X Transform: </label>
+        <select id="x_transform_select_normalized_mode" style="padding: 5px 10px;" onchange="updatePlot_normalized_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_normalized_mode">Y Transform: </label>
+        <select id="y_transform_select_normalized_mode" style="padding: 5px 10px;" onchange="updatePlot_normalized_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="normalized_mode"></div>
@@ -11195,31 +11948,6 @@ Category D,43.2005941081019,Segment 3
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="x_col_select_dynamic_x_axis">X dimension: </label>
-                <select id="x_col_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
-                <option value="Quarter" selected>Quarter</option>
-                <option value="Month">Month</option>
-                <option value="Week">Week</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="x_col_select_dynamic_x_axis_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="y_col_select_dynamic_x_axis">Y dimension: </label>
-                <select id="y_col_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
-                <option value="Revenue" selected>Revenue</option>
-                <option value="Units">Units</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="y_col_select_dynamic_x_axis_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
                 <label for="stack_mode_select_dynamic_x_axis">Stack mode: </label>
                 <select id="stack_mode_select_dynamic_x_axis" onchange="updatePlot_dynamic_x_axis()">
                 <option value="unstack">unstack</option>
@@ -11232,9 +11960,42 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_dynamic_x_axis_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_dynamic_x_axis">X: </label>
+        <select id="x_col_select_dynamic_x_axis" style="padding: 5px 10px;" onchange="updatePlot_dynamic_x_axis()">
+            <option value="Quarter" selected>Quarter</option>
+<option value="Month">Month</option>
+<option value="Week">Week</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_dynamic_x_axis">X Transform: </label>
+        <select id="x_transform_select_dynamic_x_axis" style="padding: 5px 10px;" onchange="updatePlot_dynamic_x_axis()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_dynamic_x_axis">Y: </label>
+        <select id="y_col_select_dynamic_x_axis" style="padding: 5px 10px;" onchange="updatePlot_dynamic_x_axis()">
+            <option value="Revenue" selected>Revenue</option>
+<option value="Units">Units</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_dynamic_x_axis">Y Transform: </label>
+        <select id="y_transform_select_dynamic_x_axis" style="padding: 5px 10px;" onchange="updatePlot_dynamic_x_axis()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="dynamic_x_axis"></div>
@@ -11270,9 +12031,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_dodge_mode_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Store</span>
+    </div>
+    <div>
+        <label for="x_transform_select_dodge_mode">X Transform: </label>
+        <select id="x_transform_select_dodge_mode" style="padding: 5px 10px;" onchange="updatePlot_dodge_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Sales</span>
+    </div>
+    <div>
+        <label for="y_transform_select_dodge_mode">Y Transform: </label>
+        <select id="y_transform_select_dodge_mode" style="padding: 5px 10px;" onchange="updatePlot_dodge_mode()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="dodge_mode"></div>
@@ -11307,9 +12094,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_dodge_comparison_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Category</span>
+    </div>
+    <div>
+        <label for="x_transform_select_dodge_comparison">X Transform: </label>
+        <select id="x_transform_select_dodge_comparison" style="padding: 5px 10px;" onchange="updatePlot_dodge_comparison()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_dodge_comparison">Y Transform: </label>
+        <select id="y_transform_select_dodge_comparison" style="padding: 5px 10px;" onchange="updatePlot_dodge_comparison()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="dodge_comparison"></div>
@@ -11336,9 +12149,35 @@ Category D,43.2005941081019,Segment 3
                 <span id="stack_mode_select_stack_comparison_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Category</span>
+    </div>
+    <div>
+        <label for="x_transform_select_stack_comparison">X Transform: </label>
+        <select id="x_transform_select_stack_comparison" style="padding: 5px 10px;" onchange="updatePlot_stack_comparison()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_stack_comparison">Y Transform: </label>
+        <select id="y_transform_select_stack_comparison" style="padding: 5px 10px;" onchange="updatePlot_stack_comparison()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="stack_comparison"></div>
