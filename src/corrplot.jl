@@ -103,8 +103,8 @@ hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 ```
 """
 function cluster_from_correlation(corr_matrix::Matrix{Float64}; linkage::Symbol=:ward)
-    # Convert correlation to distance matrix
-    dist_matrix = pairwise(Euclidean(), sqrt.(0.5 .* (1 .- corr_matrix)))
+    # Convert correlation to distance matrix. Note we put in a max to avoid corr_matrix values that fall below 0.0 from numerical imprecision.
+    dist_matrix = pairwise(Euclidean(), sqrt.(max.(0.0, 0.5 .* (1 .- corr_matrix))))
 
     # Perform hierarchical clustering
     hc = hclust(dist_matrix, linkage=linkage)
