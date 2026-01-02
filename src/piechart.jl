@@ -128,6 +128,7 @@ normalized_filters = normalize_filters(filters, df)
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,
+            "",  # No axes controls for PieChart
             facet_dropdowns,
             title,
             notes

@@ -148,6 +148,7 @@ struct SanKey <: JSPlotsType
             filter_dropdowns,
             filter_sliders,
             vcat(color_col_dropdown, value_col_dropdown),
+            "",  # No axes controls for Sankey diagrams
             DropdownControl[],  # No faceting for Sankey diagrams
             title,
             notes

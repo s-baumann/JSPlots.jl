@@ -332,6 +332,104 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -665,22 +763,27 @@ $(function(){
         const Z_COL = getCol('scatter3d_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('scatter3d_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_scatter3d', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_scatter3d', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_scatter3d', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_scatter3d', 'None');
         const FACET2_COL = getCol('facet2_select_scatter3d', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -689,22 +792,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 4,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_scatter3d && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -713,9 +844,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_scatter3d || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -732,7 +863,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -753,10 +884,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -772,7 +912,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_scatter3d && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -795,9 +950,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_scatter3d ? (window.currentCamera_scatter3d || undefined) : undefined
             };
 
@@ -846,7 +1001,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_scatter3d(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -871,10 +1026,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -890,7 +1054,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_scatter3d && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -917,9 +1096,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_scatter3d ? (window.currentCamera_scatter3d || undefined) : undefined
                 };
 
@@ -1002,6 +1181,11 @@ $(function(){
         const Z_COL = getCol('scatter3d_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('scatter3d_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_scatter3d', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_scatter3d', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_scatter3d', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1030,11 +1214,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_scatter3d(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -1631,44 +1815,6 @@ const plotData = uniqueGroups.map((grp, index) => {
 </div>
 <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="scatter3d_x_col_select">X:</label>
-                    <select id="scatter3d_x_col_select" onchange="updatePlotWithFilters_scatter3d()">
-                    <option value="longitude" selected>longitude</option>
-                    <option value="latitude">latitude</option>
-                    <option value="sales">sales</option>
-                    <option value="quantity">quantity</option>
-                    <option value="profit">profit</option>
-                    <option value="cost">cost</option>
-                    <option value="customers">customers</option>
-                    <option value="satisfaction">satisfaction</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="scatter3d_y_col_select">Y:</label>
-                    <select id="scatter3d_y_col_select" onchange="updatePlotWithFilters_scatter3d()">
-                    <option value="longitude">longitude</option>
-                    <option value="latitude" selected>latitude</option>
-                    <option value="sales">sales</option>
-                    <option value="quantity">quantity</option>
-                    <option value="profit">profit</option>
-                    <option value="cost">cost</option>
-                    <option value="customers">customers</option>
-                    <option value="satisfaction">satisfaction</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="scatter3d_z_col_select">Z:</label>
-                    <select id="scatter3d_z_col_select" onchange="updatePlotWithFilters_scatter3d()">
-                    <option value="longitude">longitude</option>
-                    <option value="latitude">latitude</option>
-                    <option value="sales" selected>sales</option>
-                    <option value="quantity">quantity</option>
-                    <option value="profit">profit</option>
-                    <option value="cost">cost</option>
-                    <option value="customers">customers</option>
-                    <option value="satisfaction">satisfaction</option>                </select>
-                </div>
-                    </div>
-<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
                     <label for="scatter3d_color_col_select">Color:</label>
                     <select id="scatter3d_color_col_select" onchange="updatePlotWithFilters_scatter3d()">
                     <option value="region" selected>region</option>
@@ -1678,16 +1824,77 @@ const plotData = uniqueGroups.map((grp, index) => {
                     <option value="quarter">quarter</option>                </select>
                 </div>
                     </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_scatter3d">X: </label>
+        <select id="x_col_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="longitude" selected>longitude</option>
+<option value="latitude">latitude</option>
+<option value="sales">sales</option>
+<option value="quantity">quantity</option>
+<option value="profit">profit</option>
+<option value="cost">cost</option>
+<option value="customers">customers</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_scatter3d">X Transform: </label>
+        <select id="x_transform_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_scatter3d">Y: </label>
+        <select id="y_col_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="longitude">longitude</option>
+<option value="latitude" selected>latitude</option>
+<option value="sales">sales</option>
+<option value="quantity">quantity</option>
+<option value="profit">profit</option>
+<option value="cost">cost</option>
+<option value="customers">customers</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_scatter3d">Y Transform: </label>
+        <select id="y_transform_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_scatter3d">Z: </label>
+        <select id="z_col_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="longitude">longitude</option>
+<option value="latitude">latitude</option>
+<option value="sales" selected>sales</option>
+<option value="quantity">quantity</option>
+<option value="profit">profit</option>
+<option value="cost">cost</option>
+<option value="customers">customers</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_scatter3d">Z Transform: </label>
+        <select id="z_transform_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
-
-<!-- Faceting -->
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-                <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_scatter3d">Facet 1:</label>
-                    <select id="facet1_select_scatter3d" onchange="updatePlotWithFilters_scatter3d()">
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="facet1_select_scatter3d">Facet 1: </label>
+                    <select id="facet1_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="product">product</option>
@@ -1695,9 +1902,9 @@ const plotData = uniqueGroups.map((grp, index) => {
                 <option value="month">month</option>
                 <option value="quarter">quarter</option>                </select>
                 </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_scatter3d">Facet 2:</label>
-                    <select id="facet2_select_scatter3d" onchange="updatePlotWithFilters_scatter3d()">
+                <div>
+                    <label for="facet2_select_scatter3d">Facet 2: </label>
+                    <select id="facet2_select_scatter3d" style="padding: 5px 10px;" onchange="updatePlotWithFilters_scatter3d()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="product">product</option>
@@ -1707,6 +1914,7 @@ const plotData = uniqueGroups.map((grp, index) => {
                 </div>
             </div>
             
+
 </div>
 
 <!-- Chart -->
@@ -1740,8 +1948,6 @@ const plotData = uniqueGroups.map((grp, index) => {
 </div>
 
 <!-- Plot Attributes -->
-
-<!-- Faceting -->
 
 <!-- Chart -->
 <div id="surface3d"></div>

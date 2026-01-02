@@ -97,14 +97,6 @@ struct KernelDensity <: JSPlotsType
             "updateChart_$chart_title()"
         )
 
-        # Generate value column dropdown using html_controls abstraction
-        value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
-            string(chart_title),
-            value_cols,
-            default_value_col,
-            "updateChart_$(chart_title)();"
-        )
-
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
@@ -113,16 +105,24 @@ struct KernelDensity <: JSPlotsType
             "updateChart_$(chart_title)();"
         )
 
-        # Combine value/group dropdowns on same line
+        # Use only group dropdown (X dimension is controlled by axes section)
         combined_controls_html = ""
-        if value_dropdown_html != "" || group_dropdown_html != ""
+        if group_dropdown_html != ""
             combined_controls_html = """
             <div style="margin: 20px 0;">
-                $value_dropdown_html
                 $group_dropdown_html
             </div>
             """
         end
+
+        # Build axis controls HTML (only X axis for value dimension)
+        axes_html = build_axis_controls_html(
+            string(chart_title),
+            "updateChart_$(chart_title)()";
+            x_cols = value_cols,
+            default_x = default_value_col
+        )
+        combined_controls_html *= axes_html
 
         # Generate bandwidth slider (placed below chart)
         # Calculate automatic bandwidth using Silverman's rule to set appropriate slider range
@@ -235,7 +235,7 @@ struct KernelDensity <: JSPlotsType
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
 
-            function createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, xaxis='x', yaxis='y', showlegend=true) {
+            function createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
                 const traces = [];
 
                 if (GROUP_COL) {
@@ -251,7 +251,10 @@ struct KernelDensity <: JSPlotsType
 
                     groupKeys.forEach(function(key, idx) {
                         const groupData = groups[key];
-                        const values = groupData.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+                        let values = groupData.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+
+                        // Apply axis transformation
+                        values = applyAxisTransform(values, X_TRANSFORM);
 
                         if (values.length > 0) {
                             const kde = kernelDensity(values, BANDWIDTH);
@@ -277,7 +280,10 @@ struct KernelDensity <: JSPlotsType
                     });
                 } else {
                     // Single group
-                    const values = data.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+                    let values = data.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+
+                    // Apply axis transformation
+                    values = applyAxisTransform(values, X_TRANSFORM);
 
                     if (values.length > 0) {
                         const kde = kernelDensity(values, BANDWIDTH);
@@ -304,8 +310,8 @@ struct KernelDensity <: JSPlotsType
                 return traces;
             }
 
-            function renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH) {
-                const traces = createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH);
+            function renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM) {
+                const traces = createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
 
                 Plotly.newPlot('$chart_title', traces, {
                     title: '$title',
@@ -313,7 +319,7 @@ struct KernelDensity <: JSPlotsType
                     autosize: true,
                     hovermode: 'closest',
                     xaxis: {
-                        title: VALUE_COL,
+                        title: getAxisLabel(VALUE_COL, X_TRANSFORM),
                         showgrid: true,
                         zeroline: true
                     },
@@ -326,7 +332,7 @@ struct KernelDensity <: JSPlotsType
                 }, {responsive: true});
             }
 
-            function renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET_COL, BANDWIDTH) {
+            function renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET_COL, BANDWIDTH, X_TRANSFORM) {
                 const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
                 const nFacets = facetValues.length;
                 const cols = Math.ceil(Math.sqrt(nFacets));
@@ -337,7 +343,7 @@ struct KernelDensity <: JSPlotsType
                     const facetData = data.filter(row => row[FACET_COL] === facetVal);
                     const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                     const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                    traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, xaxis, yaxis, idx === 0));
+                    traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
                 });
 
                 const layout = {
@@ -359,14 +365,14 @@ struct KernelDensity <: JSPlotsType
 
                 facetValues.forEach((val, idx) => {
                     const ax = idx === 0 ? '' : (idx + 1);
-                    layout['xaxis' + ax] = {title: VALUE_COL};
+                    layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
                     layout['yaxis' + ax] = {title: 'Density'};
                 });
 
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
             }
 
-            function renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1_COL, FACET2_COL, BANDWIDTH) {
+            function renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1_COL, FACET2_COL, BANDWIDTH, X_TRANSFORM) {
                 const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
                 const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
                 const rows = facet1Values.length;
@@ -384,7 +390,7 @@ struct KernelDensity <: JSPlotsType
                         const idx = rowIdx * cols + colIdx;
                         const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                         const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                        traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, xaxis, yaxis, idx === 0));
+                        traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
                     });
                 });
 
@@ -422,7 +428,7 @@ struct KernelDensity <: JSPlotsType
                     facet2Values.forEach((v2, colIdx) => {
                         const idx = rowIdx * cols + colIdx;
                         const ax = idx === 0 ? '' : (idx + 1);
-                        layout['xaxis' + ax] = {title: VALUE_COL};
+                        layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
                         layout['yaxis' + ax] = {title: 'Density'};
                     });
                 });
@@ -431,9 +437,9 @@ struct KernelDensity <: JSPlotsType
             }
 
             function updatePlot_$(chart_title)(data) {
-                // Get current value column from dropdown or use default
+                // Get current value column from axes X selector or use default
                 const VALUE_COL = $(length(value_cols) >= 2 ?
-                    "document.getElementById('$(chart_title)_value_selector').value" :
+                    "document.getElementById('x_col_select_$(chart_title)').value" :
                     "'$(default_value_col)'");
 
                 // Get current group column from dropdown or use default
@@ -446,6 +452,10 @@ struct KernelDensity <: JSPlotsType
                     GROUP_COL = null;
                 }
 
+                // Get current axis transformation
+                const xTransformSelect = document.getElementById('x_transform_select_$(chart_title)');
+                const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
                 // Get bandwidth from slider (0 means auto)
                 const bandwidthSlider = document.getElementById('$(chart_title)_bandwidth_slider');
                 const BANDWIDTH = bandwidthSlider ? parseFloat(bandwidthSlider.value) : $(bandwidth_default);
@@ -456,11 +466,11 @@ struct KernelDensity <: JSPlotsType
                 if (FACET2 === 'None') FACET2 = null;
 
                 if (FACET1 && FACET2) {
-                    renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1, FACET2, BANDWIDTH);
+                    renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1, FACET2, BANDWIDTH, X_TRANSFORM);
                 } else if (FACET1) {
-                    renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET1, BANDWIDTH);
+                    renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET1, BANDWIDTH, X_TRANSFORM);
                 } else {
-                    renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH);
+                    renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
                 }
             }
 
@@ -510,8 +520,6 @@ struct KernelDensity <: JSPlotsType
 
                 // Initialize controls after data is loaded
                 \$(function() {
-                    $value_dropdown_js
-
                     $group_dropdown_js
 
                     $bandwidth_slider_js

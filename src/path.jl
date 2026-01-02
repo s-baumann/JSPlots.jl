@@ -167,6 +167,13 @@ normalized_filters = normalize_filters(filters, df)
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+                // Get current axis transformations
+                const xTransformSelect = document.getElementById('x_transform_select_$chart_title');
+                const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+                const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
+                const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
                 // Get categorical filter values (multiple selections)
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -246,9 +253,13 @@ normalized_filters = normalize_filters(filters, df)
                             return String(aVal).localeCompare(String(bVal));
                         });
 
-                        const xValues = group.data.map(row => row[X_COL]);
-                        const yValues = group.data.map(row => row[Y_COL]);
+                        let xValues = group.data.map(row => row[X_COL]);
+                        let yValues = group.data.map(row => row[Y_COL]);
                         const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const baseColor = COLOR_MAP[group.color] || '#000000';
                         const markerOpacity = getAlphaValues(xValues.length);
@@ -342,8 +353,8 @@ normalized_filters = normalize_filters(filters, df)
 
                     const layout = {
                         title: '$title',
-                        xaxis: { title: X_COL },
-                        yaxis: { title: Y_COL },
+                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                        yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
                         hovermode: 'closest',
                         showlegend: true,
                         annotations: annotations
@@ -404,9 +415,13 @@ normalized_filters = normalize_filters(filters, df)
                                 return String(aVal).localeCompare(String(bVal));
                             });
 
-                            const xValues = group.data.map(row => row[X_COL]);
-                            const yValues = group.data.map(row => row[Y_COL]);
+                            let xValues = group.data.map(row => row[X_COL]);
+                            let yValues = group.data.map(row => row[Y_COL]);
                             const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                            // Apply axis transformations
+                            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                             const legendGroup = group.color;
 
@@ -511,11 +526,11 @@ normalized_filters = normalize_filters(filters, df)
 
                         // Add axis configuration
                         layout[xaxis] = {
-                            title: row === nRows ? X_COL : '',
+                            title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                             anchor: yaxis
                         };
                         layout[yaxis] = {
-                            title: col === 1 ? Y_COL : '',
+                            title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                             anchor: xaxis
                         };
 
@@ -589,9 +604,13 @@ normalized_filters = normalize_filters(filters, df)
                                     return String(aVal).localeCompare(String(bVal));
                                 });
 
-                                const xValues = group.data.map(row => row[X_COL]);
-                                const yValues = group.data.map(row => row[Y_COL]);
+                                let xValues = group.data.map(row => row[X_COL]);
+                                let yValues = group.data.map(row => row[Y_COL]);
                                 const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                                // Apply axis transformations
+                                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                                 const legendGroup = group.color;
 
@@ -696,11 +715,11 @@ normalized_filters = normalize_filters(filters, df)
 
                             // Add axis configuration
                             layout[xaxis] = {
-                                title: rowIdx === nRows - 1 ? X_COL : '',
+                                title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                                 anchor: yaxis
                             };
                             layout[yaxis] = {
-                                title: colIdx === 0 ? Y_COL : '',
+                                title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                                 anchor: xaxis
                             };
 
@@ -762,30 +781,8 @@ normalized_filters = normalize_filters(filters, df)
         })();
         """
 
-        # Build attribute dropdowns
+        # Build attribute dropdowns (Path grouping/color only, not X/Y which are in axes)
         attribute_dropdowns = DropdownControl[]
-
-        # X dimension dropdown
-        if length(valid_x_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "x_col_select_$chart_title_str",
-                "X dimension",
-                [string(col) for col in valid_x_cols],
-                string(valid_x_cols[1]),
-                update_function
-            ))
-        end
-
-        # Y dimension dropdown
-        if length(valid_y_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "y_col_select_$chart_title_str",
-                "Y dimension",
-                [string(col) for col in valid_y_cols],
-                string(valid_y_cols[1]),
-                update_function
-            ))
-        end
 
         # Color column dropdown
         if length(valid_color_cols) > 1
@@ -798,6 +795,16 @@ normalized_filters = normalize_filters(filters, df)
             ))
         end
 
+        # Build axis controls HTML (X and Y dimensions + transforms)
+        axes_html = build_axis_controls_html(
+            chart_title_str,
+            update_function;
+            x_cols = valid_x_cols,
+            y_cols = valid_y_cols,
+            default_x = Symbol(default_x_col),
+            default_y = Symbol(default_y_col)
+        )
+
         # Build faceting dropdowns using html_controls abstraction
         facet_dropdowns = build_facet_dropdowns(chart_title_str, facet_choices, default_facet_array, update_function)
 
@@ -809,6 +816,7 @@ normalized_filters = normalize_filters(filters, df)
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,
+            axes_html,
             facet_dropdowns,
             title,
             notes

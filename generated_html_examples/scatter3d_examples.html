@@ -332,6 +332,104 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -665,22 +763,27 @@ $(function(){
         const Z_COL = getCol('basic_3d_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('basic_3d_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_basic_3d_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_basic_3d_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_basic_3d_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_basic_3d_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_basic_3d_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -689,22 +792,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 4,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_basic_3d_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -713,9 +844,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_basic_3d_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -732,7 +863,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -753,10 +884,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -772,7 +912,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_basic_3d_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -795,9 +950,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_basic_3d_scatter ? (window.currentCamera_basic_3d_scatter || undefined) : undefined
             };
 
@@ -846,7 +1001,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -871,10 +1026,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -890,7 +1054,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_basic_3d_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -917,9 +1096,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_basic_3d_scatter ? (window.currentCamera_basic_3d_scatter || undefined) : undefined
                 };
 
@@ -1002,6 +1181,11 @@ $(function(){
         const Z_COL = getCol('basic_3d_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('basic_3d_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_basic_3d_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_basic_3d_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_basic_3d_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1030,11 +1214,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_basic_3d_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -1200,22 +1384,27 @@ $(function(){
         const Z_COL = getCol('multi_dim_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('multi_dim_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_multi_dim_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_multi_dim_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_multi_dim_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_multi_dim_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_multi_dim_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -1224,22 +1413,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 4,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_multi_dim_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -1248,9 +1465,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_multi_dim_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -1267,7 +1484,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -1288,10 +1505,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -1307,7 +1533,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_multi_dim_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -1330,9 +1571,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_multi_dim_scatter ? (window.currentCamera_multi_dim_scatter || undefined) : undefined
             };
 
@@ -1381,7 +1622,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -1406,10 +1647,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -1425,7 +1675,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_multi_dim_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -1452,9 +1717,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_multi_dim_scatter ? (window.currentCamera_multi_dim_scatter || undefined) : undefined
                 };
 
@@ -1537,6 +1802,11 @@ $(function(){
         const Z_COL = getCol('multi_dim_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('multi_dim_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_multi_dim_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_multi_dim_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_multi_dim_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1565,11 +1835,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_multi_dim_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -1735,22 +2005,27 @@ $(function(){
         const Z_COL = getCol('filtered_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('filtered_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_filtered_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_filtered_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_filtered_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_filtered_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_filtered_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -1759,22 +2034,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 5,
-                opacity: 0.7,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 5,
+                    opacity: 0.7,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_filtered_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -1783,9 +2086,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_filtered_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -1802,7 +2105,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -1823,10 +2126,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -1842,7 +2154,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_filtered_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -1865,9 +2192,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_filtered_scatter ? (window.currentCamera_filtered_scatter || undefined) : undefined
             };
 
@@ -1916,7 +2243,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -1941,10 +2268,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -1960,7 +2296,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_filtered_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -1987,9 +2338,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_filtered_scatter ? (window.currentCamera_filtered_scatter || undefined) : undefined
                 };
 
@@ -2072,6 +2423,11 @@ $(function(){
         const Z_COL = getCol('filtered_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('filtered_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_filtered_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_filtered_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_filtered_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -2100,11 +2456,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_filtered_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -2270,22 +2626,27 @@ $(function(){
         const Z_COL = getCol('cluster_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('cluster_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_cluster_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_cluster_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_cluster_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_cluster_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_cluster_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -2294,22 +2655,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 6,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 6,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_cluster_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -2318,9 +2707,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_cluster_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -2337,7 +2726,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -2358,10 +2747,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -2377,7 +2775,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_cluster_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -2400,9 +2813,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_cluster_scatter ? (window.currentCamera_cluster_scatter || undefined) : undefined
             };
 
@@ -2451,7 +2864,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -2476,10 +2889,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -2495,7 +2917,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_cluster_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -2522,9 +2959,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_cluster_scatter ? (window.currentCamera_cluster_scatter || undefined) : undefined
                 };
 
@@ -2607,6 +3044,11 @@ $(function(){
         const Z_COL = getCol('cluster_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('cluster_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_cluster_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_cluster_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_cluster_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -2635,11 +3077,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_cluster_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -2805,22 +3247,27 @@ $(function(){
         const Z_COL = getCol('timeseries_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('timeseries_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_timeseries_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_timeseries_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_timeseries_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_timeseries_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_timeseries_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -2829,22 +3276,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 4,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_timeseries_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -2853,9 +3328,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_timeseries_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -2872,7 +3347,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -2893,10 +3368,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -2912,7 +3396,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_timeseries_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -2935,9 +3434,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_timeseries_scatter ? (window.currentCamera_timeseries_scatter || undefined) : undefined
             };
 
@@ -2986,7 +3485,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -3011,10 +3510,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -3030,7 +3538,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_timeseries_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -3057,9 +3580,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_timeseries_scatter ? (window.currentCamera_timeseries_scatter || undefined) : undefined
                 };
 
@@ -3142,6 +3665,11 @@ $(function(){
         const Z_COL = getCol('timeseries_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('timeseries_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_timeseries_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_timeseries_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_timeseries_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -3170,11 +3698,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_timeseries_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -3340,22 +3868,27 @@ $(function(){
         const Z_COL = getCol('faceted_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('faceted_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_faceted_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_faceted_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_faceted_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_faceted_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_faceted_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -3364,22 +3897,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 5,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 5,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_faceted_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -3388,9 +3949,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_faceted_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -3407,7 +3968,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -3428,10 +3989,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -3447,7 +4017,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_faceted_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -3470,9 +4055,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_faceted_scatter ? (window.currentCamera_faceted_scatter || undefined) : undefined
             };
 
@@ -3521,7 +4106,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -3546,10 +4131,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -3565,7 +4159,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_faceted_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -3592,9 +4201,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_faceted_scatter ? (window.currentCamera_faceted_scatter || undefined) : undefined
                 };
 
@@ -3677,6 +4286,11 @@ $(function(){
         const Z_COL = getCol('faceted_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('faceted_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_faceted_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_faceted_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_faceted_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -3705,11 +4319,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_faceted_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -3875,22 +4489,27 @@ $(function(){
         const Z_COL = getCol('comprehensive_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('comprehensive_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_comprehensive_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_comprehensive_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_comprehensive_scatter', 'identity');
+
         // Get facet selections
         const FACET1_COL = getCol('facet1_select_comprehensive_scatter', 'None');
         const FACET2_COL = getCol('facet2_select_comprehensive_scatter', 'None');
 
         if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-            renderNoFacets_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-            renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+            renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-            renderFacetGrid_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+            renderFacetGrid_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+            renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     }
 
-    function renderNoFacets_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+    function renderNoFacets_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const groups = {};
         data.forEach(row => {
             const key = row[COLOR_COL];
@@ -3899,22 +4518,50 @@ $(function(){
         });
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-        const traces = Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => parseFloat(d[X_COL])),
-            y: groupData.map(d => parseFloat(d[Y_COL])),
-            z: groupData.map(d => parseFloat(d[Z_COL])),
-            mode: 'markers',
-            name: key,
-            type: 'scatter3d',
-            marker: {
-                size: 4,
-                opacity: 0.6,
-                color: COLOR_MAP[key] || '#636efa'
-            }
-        }));
+        const traces = Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+            return {
+                x: xValues,
+                y: yValues,
+                z: zValues,
+                mode: 'markers',
+                name: key,
+                type: 'scatter3d',
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    color: COLOR_MAP[key] || '#636efa'
+                }
+            };
+        });
 
         if (window.showEigenvectors_comprehensive_scatter && data.length > 3) {
-            const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+            // Compute eigenvectors on transformed data
+            // First, extract and transform all data points
+            let allXValues = data.map(d => parseFloat(d[X_COL]));
+            let allYValues = data.map(d => parseFloat(d[Y_COL]));
+            let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+            // Create transformed data for eigenvector computation
+            const transformedData = data.map((row, i) => ({
+                [X_COL]: allXValues[i],
+                [Y_COL]: allYValues[i],
+                [Z_COL]: allZValues[i]
+            }));
+
+            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
             traces.push(...createEigenvectorTraces(eigData, 'scene'));
         }
 
@@ -3923,9 +4570,9 @@ $(function(){
             autosize: true,
             showlegend: true,
             scene: {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.currentCamera_comprehensive_scatter || undefined
             },
             margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -3942,7 +4589,7 @@ $(function(){
         });
     }
 
-    function renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length;
         const cols = Math.ceil(Math.sqrt(nFacets));
@@ -3963,10 +4610,19 @@ $(function(){
             });
 
             Object.entries(groups).forEach(([key, groupData]) => {
+                let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                 traces.push({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
+                    x: xValues,
+                    y: yValues,
+                    z: zValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -3982,7 +4638,22 @@ $(function(){
             });
 
             if (window.showEigenvectors_comprehensive_scatter && facetData.length > 3) {
-                const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                // Compute eigenvectors on transformed data
+                let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                const transformedData = facetData.map((row, i) => ({
+                    [X_COL]: allXValues[i],
+                    [Y_COL]: allYValues[i],
+                    [Z_COL]: allZValues[i]
+                }));
+
+                const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                 traces.push(...createEigenvectorTraces(eigData, sceneId));
             }
         });
@@ -4005,9 +4676,9 @@ $(function(){
 
             layout[sceneKey] = {
                 domain: { x: xDomain, y: yDomain },
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
-                zaxis: { title: Z_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                 camera: window.sharedCamera_comprehensive_scatter ? (window.currentCamera_comprehensive_scatter || undefined) : undefined
             };
 
@@ -4056,7 +4727,7 @@ $(function(){
         }
     }
 
-    function renderFacetGrid_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length;
@@ -4081,10 +4752,19 @@ $(function(){
                 });
 
                 Object.entries(groups).forEach(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                     traces.push({
-                        x: groupData.map(d => parseFloat(d[X_COL])),
-                        y: groupData.map(d => parseFloat(d[Y_COL])),
-                        z: groupData.map(d => parseFloat(d[Z_COL])),
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
                         mode: 'markers',
                         name: key,
                         legendgroup: key,
@@ -4100,7 +4780,22 @@ $(function(){
                 });
 
                 if (window.showEigenvectors_comprehensive_scatter && facetData.length > 3) {
-                    const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                    let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    const transformedData = facetData.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, sceneId));
                 }
             });
@@ -4127,9 +4822,9 @@ $(function(){
 
                 layout[sceneKey] = {
                     domain: { x: xDomain, y: yDomain },
-                    xaxis: { title: X_COL },
-                    yaxis: { title: Y_COL },
-                    zaxis: { title: Z_COL },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                    zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                     camera: window.sharedCamera_comprehensive_scatter ? (window.currentCamera_comprehensive_scatter || undefined) : undefined
                 };
 
@@ -4212,6 +4907,11 @@ $(function(){
         const Z_COL = getCol('comprehensive_scatter_z_col_select', DEFAULT_Z_COL);
         const COLOR_COL = getCol('comprehensive_scatter_color_col_select', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_comprehensive_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_comprehensive_scatter', 'identity');
+        const Z_TRANSFORM = getCol('z_transform_select_comprehensive_scatter', 'identity');
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -4240,11 +4940,11 @@ $(function(){
 
         // Render based on faceting
         if (facet1 && facet2) {
-            renderFacetGrid_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+            renderFacetGrid_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else if (facet1 || facet2) {
-            renderFacetWrap_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+            renderFacetWrap_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
-            renderNoFacets_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+            renderNoFacets_comprehensive_scatter(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         }
     };
 
@@ -6484,10 +7184,59 @@ indicating the directions of maximum variance. Toggle them on/off to see how the
         Hide Eigenvectors
     </button>
 </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_basic_3d_scatter">X: </label>
+        <select id="x_col_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="x" selected>x</option>
+<option value="y">y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_basic_3d_scatter">X Transform: </label>
+        <select id="x_transform_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_basic_3d_scatter">Y: </label>
+        <select id="y_col_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="x">x</option>
+<option value="y" selected>y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_basic_3d_scatter">Y Transform: </label>
+        <select id="y_transform_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_basic_3d_scatter">Z: </label>
+        <select id="z_col_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="x">x</option>
+<option value="y">y</option>
+<option value="z" selected>z</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_basic_3d_scatter">Z Transform: </label>
+        <select id="z_transform_select_basic_3d_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_basic_3d_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
-<!-- Faceting -->
+</div>
 
 <!-- Chart -->
 <div id="basic_3d_scatter"></div>
@@ -6516,42 +7265,68 @@ This is perfect for exploring high-dimensional data from different perspectives!
         Hide Eigenvectors
     </button>
 </div>
-<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="multi_dim_scatter_x_col_select">X:</label>
-                    <select id="multi_dim_scatter_x_col_select" onchange="updatePlotWithFilters_multi_dim_scatter()">
-                    <option value="dim1" selected>dim1</option>
-                    <option value="dim2">dim2</option>
-                    <option value="dim3">dim3</option>
-                    <option value="dim4">dim4</option>
-                    <option value="dim5">dim5</option>
-                    <option value="dim6">dim6</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="multi_dim_scatter_y_col_select">Y:</label>
-                    <select id="multi_dim_scatter_y_col_select" onchange="updatePlotWithFilters_multi_dim_scatter()">
-                    <option value="dim1">dim1</option>
-                    <option value="dim2" selected>dim2</option>
-                    <option value="dim3">dim3</option>
-                    <option value="dim4">dim4</option>
-                    <option value="dim5">dim5</option>
-                    <option value="dim6">dim6</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="multi_dim_scatter_z_col_select">Z:</label>
-                    <select id="multi_dim_scatter_z_col_select" onchange="updatePlotWithFilters_multi_dim_scatter()">
-                    <option value="dim1">dim1</option>
-                    <option value="dim2">dim2</option>
-                    <option value="dim3" selected>dim3</option>
-                    <option value="dim4">dim4</option>
-                    <option value="dim5">dim5</option>
-                    <option value="dim6">dim6</option>                </select>
-                </div>
-                    </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_multi_dim_scatter">X: </label>
+        <select id="x_col_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="dim1" selected>dim1</option>
+<option value="dim2">dim2</option>
+<option value="dim3">dim3</option>
+<option value="dim4">dim4</option>
+<option value="dim5">dim5</option>
+<option value="dim6">dim6</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_multi_dim_scatter">X Transform: </label>
+        <select id="x_transform_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_multi_dim_scatter">Y: </label>
+        <select id="y_col_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="dim1">dim1</option>
+<option value="dim2" selected>dim2</option>
+<option value="dim3">dim3</option>
+<option value="dim4">dim4</option>
+<option value="dim5">dim5</option>
+<option value="dim6">dim6</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_multi_dim_scatter">Y Transform: </label>
+        <select id="y_transform_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_multi_dim_scatter">Z: </label>
+        <select id="z_col_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="dim1">dim1</option>
+<option value="dim2">dim2</option>
+<option value="dim3" selected>dim3</option>
+<option value="dim4">dim4</option>
+<option value="dim5">dim5</option>
+<option value="dim6">dim6</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_multi_dim_scatter">Z Transform: </label>
+        <select id="z_transform_select_multi_dim_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dim_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
-<!-- Faceting -->
+</div>
 
 <!-- Chart -->
 <div id="multi_dim_scatter"></div>
@@ -6660,10 +7435,59 @@ the principal components of the filtered data!</p>
         Hide Eigenvectors
     </button>
 </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_filtered_scatter">X: </label>
+        <select id="x_col_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="x" selected>x</option>
+<option value="y">y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_filtered_scatter">X Transform: </label>
+        <select id="x_transform_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_filtered_scatter">Y: </label>
+        <select id="y_col_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="x">x</option>
+<option value="y" selected>y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_filtered_scatter">Y Transform: </label>
+        <select id="y_transform_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_filtered_scatter">Z: </label>
+        <select id="z_col_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="x">x</option>
+<option value="y">y</option>
+<option value="z" selected>z</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_filtered_scatter">Z Transform: </label>
+        <select id="z_transform_select_filtered_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
-<!-- Faceting -->
+</div>
 
 <!-- Chart -->
 <div id="filtered_scatter"></div>
@@ -6694,42 +7518,68 @@ The eigenvectors show the principal axes of variation across all clusters.</p>
 </div>
 <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="cluster_scatter_x_col_select">X:</label>
-                    <select id="cluster_scatter_x_col_select" onchange="updatePlotWithFilters_cluster_scatter()">
-                    <option value="x" selected>x</option>
-                    <option value="y">y</option>
-                    <option value="z">z</option>
-                    <option value="w">w</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="cluster_scatter_y_col_select">Y:</label>
-                    <select id="cluster_scatter_y_col_select" onchange="updatePlotWithFilters_cluster_scatter()">
-                    <option value="x">x</option>
-                    <option value="y" selected>y</option>
-                    <option value="z">z</option>
-                    <option value="w">w</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="cluster_scatter_z_col_select">Z:</label>
-                    <select id="cluster_scatter_z_col_select" onchange="updatePlotWithFilters_cluster_scatter()">
-                    <option value="x">x</option>
-                    <option value="y">y</option>
-                    <option value="z" selected>z</option>
-                    <option value="w">w</option>                </select>
-                </div>
-                    </div>
-<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
                     <label for="cluster_scatter_color_col_select">Color:</label>
                     <select id="cluster_scatter_color_col_select" onchange="updatePlotWithFilters_cluster_scatter()">
                     <option value="cluster" selected>cluster</option>
                     <option value="density">density</option>                </select>
                 </div>
                     </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_cluster_scatter">X: </label>
+        <select id="x_col_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="x" selected>x</option>
+<option value="y">y</option>
+<option value="z">z</option>
+<option value="w">w</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_cluster_scatter">X Transform: </label>
+        <select id="x_transform_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_cluster_scatter">Y: </label>
+        <select id="y_col_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="x">x</option>
+<option value="y" selected>y</option>
+<option value="z">z</option>
+<option value="w">w</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_cluster_scatter">Y Transform: </label>
+        <select id="y_transform_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_cluster_scatter">Z: </label>
+        <select id="z_col_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="x">x</option>
+<option value="y">y</option>
+<option value="z" selected>z</option>
+<option value="w">w</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_cluster_scatter">Z Transform: </label>
+        <select id="z_transform_select_cluster_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_cluster_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
-<!-- Faceting -->
+</div>
 
 <!-- Chart -->
 <div id="cluster_scatter"></div>
@@ -6824,10 +7674,59 @@ This is useful for understanding how multivariate time series evolve in 3D space
         Hide Eigenvectors
     </button>
 </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_timeseries_scatter">X: </label>
+        <select id="x_col_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="x" selected>x</option>
+<option value="y">y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_timeseries_scatter">X Transform: </label>
+        <select id="x_transform_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_timeseries_scatter">Y: </label>
+        <select id="y_col_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="x">x</option>
+<option value="y" selected>y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_timeseries_scatter">Y Transform: </label>
+        <select id="y_transform_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_timeseries_scatter">Z: </label>
+        <select id="z_col_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="x">x</option>
+<option value="y">y</option>
+<option value="z" selected>z</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_timeseries_scatter">Z Transform: </label>
+        <select id="z_transform_select_timeseries_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_timeseries_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
-<!-- Faceting -->
+</div>
 
 <!-- Chart -->
 <div id="timeseries_scatter"></div>
@@ -6856,19 +7755,66 @@ Rotating one plot rotates them all - perfect for comparing similar data across c
         Hide Eigenvectors
     </button>
 </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_faceted_scatter">X: </label>
+        <select id="x_col_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="x" selected>x</option>
+<option value="y">y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_faceted_scatter">X Transform: </label>
+        <select id="x_transform_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_faceted_scatter">Y: </label>
+        <select id="y_col_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="x">x</option>
+<option value="y" selected>y</option>
+<option value="z">z</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_faceted_scatter">Y Transform: </label>
+        <select id="y_transform_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_faceted_scatter">Z: </label>
+        <select id="z_col_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="x">x</option>
+<option value="y">y</option>
+<option value="z" selected>z</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_faceted_scatter">Z Transform: </label>
+        <select id="z_transform_select_faceted_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_faceted_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
-
-<!-- Faceting -->
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-                <div style="margin: 10px 0;">
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            <div style="margin: 10px 0;">
                 <label for="facet1_select_faceted_scatter">Facet by: </label>
                 <select id="facet1_select_faceted_scatter" onchange="updatePlotWithFilters_faceted_scatter()">
                 <option value="None">None</option>
                 <option value="experiment" selected>experiment</option>                </select>
             </div>
             
+
 </div>
 
 <!-- Chart -->
@@ -7040,35 +7986,6 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
 </div>
 <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="comprehensive_scatter_x_col_select">X:</label>
-                    <select id="comprehensive_scatter_x_col_select" onchange="updatePlotWithFilters_comprehensive_scatter()">
-                    <option value="measurement1" selected>measurement1</option>
-                    <option value="measurement2">measurement2</option>
-                    <option value="measurement3">measurement3</option>
-                    <option value="measurement4">measurement4</option>
-                    <option value="measurement5">measurement5</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="comprehensive_scatter_y_col_select">Y:</label>
-                    <select id="comprehensive_scatter_y_col_select" onchange="updatePlotWithFilters_comprehensive_scatter()">
-                    <option value="measurement1">measurement1</option>
-                    <option value="measurement2" selected>measurement2</option>
-                    <option value="measurement3">measurement3</option>
-                    <option value="measurement4">measurement4</option>
-                    <option value="measurement5">measurement5</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="comprehensive_scatter_z_col_select">Z:</label>
-                    <select id="comprehensive_scatter_z_col_select" onchange="updatePlotWithFilters_comprehensive_scatter()">
-                    <option value="measurement1">measurement1</option>
-                    <option value="measurement2">measurement2</option>
-                    <option value="measurement3" selected>measurement3</option>
-                    <option value="measurement4">measurement4</option>
-                    <option value="measurement5">measurement5</option>                </select>
-                </div>
-                    </div>
-<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
                     <label for="comprehensive_scatter_color_col_select">Color:</label>
                     <select id="comprehensive_scatter_color_col_select" onchange="updatePlotWithFilters_comprehensive_scatter()">
                     <option value="experiment" selected>experiment</option>
@@ -7076,29 +7993,82 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
                     <option value="location">location</option>                </select>
                 </div>
                     </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_comprehensive_scatter">X: </label>
+        <select id="x_col_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="measurement1" selected>measurement1</option>
+<option value="measurement2">measurement2</option>
+<option value="measurement3">measurement3</option>
+<option value="measurement4">measurement4</option>
+<option value="measurement5">measurement5</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_comprehensive_scatter">X Transform: </label>
+        <select id="x_transform_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_comprehensive_scatter">Y: </label>
+        <select id="y_col_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="measurement1">measurement1</option>
+<option value="measurement2" selected>measurement2</option>
+<option value="measurement3">measurement3</option>
+<option value="measurement4">measurement4</option>
+<option value="measurement5">measurement5</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_comprehensive_scatter">Y Transform: </label>
+        <select id="y_transform_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_col_select_comprehensive_scatter">Z: </label>
+        <select id="z_col_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="measurement1">measurement1</option>
+<option value="measurement2">measurement2</option>
+<option value="measurement3" selected>measurement3</option>
+<option value="measurement4">measurement4</option>
+<option value="measurement5">measurement5</option>
+        </select>
+    </div>
+    <div>
+        <label for="z_transform_select_comprehensive_scatter">Z Transform: </label>
+        <select id="z_transform_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
-
-<!-- Faceting -->
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-                <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_comprehensive_scatter">Facet 1:</label>
-                    <select id="facet1_select_comprehensive_scatter" onchange="updatePlotWithFilters_comprehensive_scatter()">
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="facet1_select_comprehensive_scatter">Facet 1: </label>
+                    <select id="facet1_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
                 <option value="None" selected>None</option>
                 <option value="experiment">experiment</option>
                 <option value="quality">quality</option>                </select>
                 </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_comprehensive_scatter">Facet 2:</label>
-                    <select id="facet2_select_comprehensive_scatter" onchange="updatePlotWithFilters_comprehensive_scatter()">
+                <div>
+                    <label for="facet2_select_comprehensive_scatter">Facet 2: </label>
+                    <select id="facet2_select_comprehensive_scatter" style="padding: 5px 10px;" onchange="updatePlotWithFilters_comprehensive_scatter()">
                 <option value="None" selected>None</option>
                 <option value="experiment">experiment</option>
                 <option value="quality">quality</option>                </select>
                 </div>
             </div>
             
+
 </div>
 
 <!-- Chart -->

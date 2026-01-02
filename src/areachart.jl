@@ -168,6 +168,13 @@ struct AreaChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title_safe');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+                // Get current axis transformations
+                const xTransformSelect = document.getElementById('x_transform_select_$chart_title_safe');
+                const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+                const yTransformSelect = document.getElementById('y_transform_select_$chart_title_safe');
+                const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
                 // Get categorical filter values (multiple selections)
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -250,8 +257,12 @@ struct AreaChart <: JSPlotsType
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const trace = {
@@ -319,9 +330,11 @@ struct AreaChart <: JSPlotsType
                     }
 
                     const layout = {
-                        xaxis: { title: X_COL },
+                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                         yaxis: {
-                            title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                            title: STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)
                         },
                         hovermode: 'closest',
                         showlegend: true,
@@ -385,8 +398,12 @@ struct AreaChart <: JSPlotsType
                                 return aVal - bVal;
                             });
 
-                            const xValues = groupData.map(row => row[X_COL]);
-                            const yValues = groupData.map(row => row[Y_COL]);
+                            let xValues = groupData.map(row => row[X_COL]);
+                            let yValues = groupData.map(row => row[Y_COL]);
+
+                            // Apply axis transformations
+                            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                             const color = COLOR_MAP[groupKey] || '#636efa';
                             const legendGroup = groupKey;
@@ -451,11 +468,14 @@ struct AreaChart <: JSPlotsType
 
                         // Add axis configuration
                         layout[xaxis] = {
-                            title: row === nRows ? X_COL : '',
+                            title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                             anchor: yaxis
                         };
                         layout[yaxis] = {
-                            title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                            title: col === 1 ?
+                                (STACK_MODE === 'normalised_stack' ?
+                                    getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                    getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                             anchor: xaxis
                         };
 
@@ -530,8 +550,12 @@ struct AreaChart <: JSPlotsType
                                     return aVal - bVal;
                                 });
 
-                                const xValues = groupData.map(row => row[X_COL]);
-                                const yValues = groupData.map(row => row[Y_COL]);
+                                let xValues = groupData.map(row => row[X_COL]);
+                                let yValues = groupData.map(row => row[Y_COL]);
+
+                                // Apply axis transformations
+                                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                                 const color = COLOR_MAP[groupKey] || '#636efa';
                                 const legendGroup = groupKey;
@@ -596,11 +620,14 @@ struct AreaChart <: JSPlotsType
 
                             // Add axis configuration
                             layout[xaxis] = {
-                                title: rowIdx === nRows - 1 ? X_COL : '',
+                                title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                                 anchor: yaxis
                             };
                             layout[yaxis] = {
-                                title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                                title: colIdx === 0 ?
+                                    (STACK_MODE === 'normalised_stack' ?
+                                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                        getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                                 anchor: xaxis
                             };
 
@@ -654,30 +681,18 @@ struct AreaChart <: JSPlotsType
         })();
         """
 
+        # Build axis controls HTML (X and Y dimensions + transforms)
+        axes_html = build_axis_controls_html(
+            chart_title_safe,
+            update_function;
+            x_cols = valid_x_cols,
+            y_cols = valid_y_cols,
+            default_x = valid_x_cols[1],
+            default_y = valid_y_cols[1]
+        )
+
         # Build attribute dropdowns
         attribute_dropdowns = DropdownControl[]
-
-        # X dimension dropdown
-        if length(valid_x_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "x_col_select_$chart_title_safe",
-                "X dimension",
-                [string(col) for col in valid_x_cols],
-                string(valid_x_cols[1]),
-                update_function
-            ))
-        end
-
-        # Y dimension dropdown
-        if length(valid_y_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "y_col_select_$chart_title_safe",
-                "Y dimension",
-                [string(col) for col in valid_y_cols],
-                string(valid_y_cols[1]),
-                update_function
-            ))
-        end
 
         # Group column dropdown
         if length(valid_color_cols) > 1
@@ -713,6 +728,7 @@ struct AreaChart <: JSPlotsType
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,
+            axes_html,
             facet_dropdowns,
             title,
             notes

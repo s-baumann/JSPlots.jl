@@ -54,7 +54,7 @@ end
 """
     ChartHtmlControls
 
-Complete specification for a chart's HTML controls (filters, attributes, facets).
+Complete specification for a chart's HTML controls (filters, attributes, axes, facets).
 
 # Fields
 - `chart_title_safe::String`: Sanitized chart title for use in HTML IDs
@@ -63,6 +63,7 @@ Complete specification for a chart's HTML controls (filters, attributes, facets)
 - `filter_dropdowns::Vector{DropdownControl}`: Categorical filter controls
 - `filter_sliders::Vector{RangeSliderControl}`: Continuous filter controls
 - `attribute_dropdowns::Vector{DropdownControl}`: Chart-specific attribute controls
+- `axes_html::String`: Pre-built HTML for axes controls (integrated into Plot Attributes)
 - `facet_dropdowns::Vector{DropdownControl}`: Faceting controls (0-2 elements)
 - `title::String`: Chart title to display
 - `notes::String`: Chart description/notes to display
@@ -74,6 +75,7 @@ struct ChartHtmlControls
     filter_dropdowns::Vector{DropdownControl}
     filter_sliders::Vector{RangeSliderControl}
     attribute_dropdowns::Vector{DropdownControl}
+    axes_html::String
     facet_dropdowns::Vector{DropdownControl}
     title::String
     notes::String
@@ -276,10 +278,9 @@ Generate complete appearance HTML for a chart including filters, attributes, fac
 - `String`: Complete appearance HTML string
 
 # HTML Structure
-The generated HTML includes three optional sections:
-1. Filters - for data filtering (with gray background)
-2. Plot Attributes - for chart-specific controls (with light blue background)
-3. Faceting - for facet selection (with light orange background)
+The generated HTML includes two optional sections:
+1. Filters - for data filtering (with pink background)
+2. Plot Attributes - for chart-specific controls, axes, and facets (with light green background)
 
 Each section is only included if it has controls to display.
 """
@@ -312,34 +313,73 @@ function generate_appearance_html(controls::ChartHtmlControls;
         """
     end
 
-    # Build attributes section
+    # Build Plot Attributes section (includes attributes, axes, and facets)
     attributes_html = ""
-    if !isempty(controls.attribute_dropdowns)
+    if !isempty(controls.attribute_dropdowns) || controls.axes_html != "" || !isempty(controls.facet_dropdowns)
         attribute_controls_html = ""
+
+        # Add attribute dropdowns
         for dropdown in controls.attribute_dropdowns
             attribute_controls_html *= generate_dropdown_html(dropdown; multiselect=false)
+        end
+
+        # Append axes HTML (which includes its own subheading)
+        attribute_controls_html *= controls.axes_html
+
+        # Add facets section with subheading if facets exist
+        if !isempty(controls.facet_dropdowns)
+            # Render facet dropdowns side-by-side on one line
+            facet_controls_html = if length(controls.facet_dropdowns) == 1
+                # Single facet - simple layout
+                dropdown = controls.facet_dropdowns[1]
+                options_html = join(["""<option value="$opt"$(opt == dropdown.default_value ? " selected" : "")>$opt</option>"""
+                                    for opt in dropdown.options], "\n")
+                """
+                <div style="margin: 10px 0;">
+                    <label for="$(dropdown.id)">$(dropdown.label): </label>
+                    <select id="$(dropdown.id)" onchange="$(dropdown.onchange)">
+                        $options_html
+                    </select>
+                </div>
+                """
+            else
+                # Two facets - side-by-side layout
+                dropdown1 = controls.facet_dropdowns[1]
+                dropdown2 = controls.facet_dropdowns[2]
+
+                options1_html = join(["""<option value="$opt"$(opt == dropdown1.default_value ? " selected" : "")>$opt</option>"""
+                                     for opt in dropdown1.options], "\n")
+                options2_html = join(["""<option value="$opt"$(opt == dropdown2.default_value ? " selected" : "")>$opt</option>"""
+                                     for opt in dropdown2.options], "\n")
+
+                """
+                <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label for="$(dropdown1.id)">$(dropdown1.label): </label>
+                        <select id="$(dropdown1.id)" style="padding: 5px 10px;" onchange="$(dropdown1.onchange)">
+                            $options1_html
+                        </select>
+                    </div>
+                    <div>
+                        <label for="$(dropdown2.id)">$(dropdown2.label): </label>
+                        <select id="$(dropdown2.id)" style="padding: 5px 10px;" onchange="$(dropdown2.onchange)">
+                            $options2_html
+                        </select>
+                    </div>
+                </div>
+                """
+            end
+
+            attribute_controls_html *= """
+            <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            $facet_controls_html
+            """
         end
 
         attributes_html = """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
             <h4 style="margin-top: 0;">Plot Attributes</h4>
             $attribute_controls_html
-        </div>
-        """
-    end
-
-    # Build faceting section
-    facets_html = ""
-    if !isempty(controls.facet_dropdowns)
-        facet_controls_html = ""
-        for dropdown in controls.facet_dropdowns
-            facet_controls_html *= generate_dropdown_html(dropdown; multiselect=false)
-        end
-
-        facets_html = """
-        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-            <h4 style="margin-top: 0;">Faceting</h4>
-            $facet_controls_html
         </div>
         """
     end
@@ -351,7 +391,6 @@ function generate_appearance_html(controls::ChartHtmlControls;
 
         $filters_html
         $attributes_html
-        $facets_html
         <!-- Chart -->
         <div id="$(controls.chart_div_id)"></div>
         """
@@ -597,15 +636,15 @@ $options                </select>
                        for col in facet_choices], "\n")
 
         return """
-            <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_$chart_title">Facet 1:</label>
-                    <select id="facet1_select_$chart_title" onchange="$update_function">
+            <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="facet1_select_$chart_title">Facet 1: </label>
+                    <select id="facet1_select_$chart_title" style="padding: 5px 10px;" onchange="$update_function">
 $options1                </select>
                 </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_$chart_title">Facet 2:</label>
-                    <select id="facet2_select_$chart_title" onchange="$update_function">
+                <div>
+                    <label for="facet2_select_$chart_title">Facet 2: </label>
+                    <select id="facet2_select_$chart_title" style="padding: 5px 10px;" onchange="$update_function">
 $options2                </select>
                 </div>
             </div>
@@ -723,19 +762,19 @@ end
 
 Generate appearance HTML from pre-built sections (for charts using custom controls).
 
-This function provides the standard three-section layout without requiring DropdownControl objects.
+This function provides the standard two-section layout without requiring DropdownControl objects.
 Useful for charts that build their HTML sections directly.
 
 # Arguments
 - `filters_html::String`: Pre-built HTML for filter controls
 - `plot_attributes_html::String`: Pre-built HTML for attribute controls
-- `faceting_html::String`: Pre-built HTML for faceting controls
+- `faceting_html::String`: Pre-built HTML for faceting controls (merged into Plot Attributes)
 - `title::String`: Chart title
 - `notes::String`: Chart notes/description
 - `chart_div_id::String`: ID for the chart container div
 
 # Returns
-- `String`: Complete appearance HTML with standard three-section layout
+- `String`: Complete appearance HTML with two-section layout (Filters + Plot Attributes with facets)
 """
 function generate_appearance_html_from_sections(filters_html::String,
                                                 plot_attributes_html::String,
@@ -754,21 +793,28 @@ function generate_appearance_html_from_sections(filters_html::String,
         </div>
         """ : ""
 
-    # Build plot attributes section
-    attributes_section = plot_attributes_html != "" ? """
+    # Build Plot Attributes section (includes facets if present)
+    attributes_section = if plot_attributes_html != "" || faceting_html != ""
+        # Combine plot attributes and facets
+        combined_content = plot_attributes_html
+
+        # Add facets section with subheading if facets exist
+        if faceting_html != ""
+            combined_content *= """
+            <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            $faceting_html
+            """
+        end
+
+        """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
             <h4 style="margin-top: 0;">Plot Attributes</h4>
-            $plot_attributes_html
+            $combined_content
         </div>
-        """ : ""
-
-    # Build faceting section
-    faceting_section = faceting_html != "" ? """
-        <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-            <h4 style="margin-top: 0;">Faceting</h4>
-            $faceting_html
-        </div>
-        """ : ""
+        """
+    else
+        ""
+    end
 
     return """
         <h2>$title</h2>
@@ -778,9 +824,207 @@ function generate_appearance_html_from_sections(filters_html::String,
         $filters_section
         <!-- Plot Attributes -->
         $attributes_section
-        <!-- Faceting -->
-        $faceting_section
         <!-- Chart -->
         <div id="$chart_div_id"></div>
         """
+end
+
+"""
+    build_axis_controls_html(chart_title_safe::String,
+                             update_function::String;
+                             x_cols::Vector{Symbol}=Symbol[],
+                             y_cols::Vector{Symbol}=Symbol[],
+                             z_cols::Vector{Symbol}=Symbol[],
+                             default_x::Union{Symbol,Nothing}=nothing,
+                             default_y::Union{Symbol,Nothing}=nothing,
+                             default_z::Union{Symbol,Nothing}=nothing)
+
+Build axis controls HTML in a 2-column layout (dimensions on left, transforms on right).
+Returns HTML string to be included in Plot Attributes section.
+
+# Arguments
+- `chart_title_safe::String`: Sanitized chart title for IDs
+- `update_function::String`: JavaScript update function name
+- `x_cols::Vector{Symbol}`: Available X dimension columns
+- `y_cols::Vector{Symbol}`: Available Y dimension columns
+- `z_cols::Vector{Symbol}`: Available Z dimension columns (for 3D charts)
+- `default_x::Union{Symbol,Nothing}`: Default X column
+- `default_y::Union{Symbol,Nothing}`: Default Y column
+- `default_z::Union{Symbol,Nothing}`: Default Z column
+
+# Returns
+- `String`: HTML for axes section with 2-column layout
+"""
+function build_axis_controls_html(chart_title_safe::String,
+                                  update_function::String;
+                                  x_cols::Vector{Symbol}=Symbol[],
+                                  y_cols::Vector{Symbol}=Symbol[],
+                                  z_cols::Vector{Symbol}=Symbol[],
+                                  default_x::Union{Symbol,Nothing}=nothing,
+                                  default_y::Union{Symbol,Nothing}=nothing,
+                                  default_z::Union{Symbol,Nothing}=nothing)::String
+
+    if isempty(x_cols) && isempty(y_cols) && isempty(z_cols)
+        return ""
+    end
+
+    # Transform options (only 3 now)
+    transform_options = ["identity", "log", "z_score"]
+    transform_default = "identity"
+
+    axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"
+    axes_html *= "<div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 10px;\">\n"
+
+    # X axis row
+    if !isempty(x_cols)
+        default_x_str = string(isnothing(default_x) ? x_cols[1] : default_x)
+
+        # Left column: X dimension
+        if length(x_cols) > 1
+            # Multiple options - show dropdown
+            x_options = join(["""<option value="$(col)"$(string(col) == default_x_str ? " selected" : "")>$(col)</option>"""
+                            for col in x_cols], "\n")
+            axes_html *= """
+                <div>
+                    <label for="x_col_select_$chart_title_safe">X: </label>
+                    <select id="x_col_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                        $x_options
+                    </select>
+                </div>
+            """
+        else
+            # Single option - show as text
+            axes_html *= """
+                <div>
+                    <label>X: </label>
+                    <span style="font-weight: bold;">$default_x_str</span>
+                </div>
+            """
+        end
+
+        # Right column: X transform
+        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                              for opt in transform_options], "\n")
+        axes_html *= """
+            <div>
+                <label for="x_transform_select_$chart_title_safe">X Transform: </label>
+                <select id="x_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                    $transform_opts
+                </select>
+            </div>
+        """
+    end
+
+    # Y axis row
+    if !isempty(y_cols)
+        default_y_str = string(isnothing(default_y) ? y_cols[1] : default_y)
+
+        # Left column: Y dimension
+        if length(y_cols) > 1
+            # Multiple options - show dropdown
+            y_options = join(["""<option value="$(col)"$(string(col) == default_y_str ? " selected" : "")>$(col)</option>"""
+                            for col in y_cols], "\n")
+            axes_html *= """
+                <div>
+                    <label for="y_col_select_$chart_title_safe">Y: </label>
+                    <select id="y_col_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                        $y_options
+                    </select>
+                </div>
+            """
+        else
+            # Single option - show as text
+            axes_html *= """
+                <div>
+                    <label>Y: </label>
+                    <span style="font-weight: bold;">$default_y_str</span>
+                </div>
+            """
+        end
+
+        # Right column: Y transform
+        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                              for opt in transform_options], "\n")
+        axes_html *= """
+            <div>
+                <label for="y_transform_select_$chart_title_safe">Y Transform: </label>
+                <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                    $transform_opts
+                </select>
+            </div>
+        """
+    end
+
+    # Z axis row (for 3D charts)
+    if !isempty(z_cols)
+        default_z_str = string(isnothing(default_z) ? z_cols[1] : default_z)
+
+        # Left column: Z dimension
+        if length(z_cols) > 1
+            # Multiple options - show dropdown
+            z_options = join(["""<option value="$(col)"$(string(col) == default_z_str ? " selected" : "")>$(col)</option>"""
+                            for col in z_cols], "\n")
+            axes_html *= """
+                <div>
+                    <label for="z_col_select_$chart_title_safe">Z: </label>
+                    <select id="z_col_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                        $z_options
+                    </select>
+                </div>
+            """
+        else
+            # Single option - show as text
+            axes_html *= """
+                <div>
+                    <label>Z: </label>
+                    <span style="font-weight: bold;">$default_z_str</span>
+                </div>
+            """
+        end
+
+        # Right column: Z transform
+        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                              for opt in transform_options], "\n")
+        axes_html *= """
+            <div>
+                <label for="z_transform_select_$chart_title_safe">Z Transform: </label>
+                <select id="z_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                    $transform_opts
+                </select>
+            </div>
+        """
+    end
+
+    axes_html *= "</div>\n"
+
+    return axes_html
+end
+
+"""
+    generate_axes_section_html(axis_controls::Vector{DropdownControl})
+
+Generate the "Axes" section HTML containing dimension and transformation selectors.
+
+# Arguments
+- `axis_controls::Vector{DropdownControl}`: Axis control dropdowns
+
+# Returns
+- `String`: HTML for the axes section
+"""
+function generate_axes_section_html(axis_controls::Vector{DropdownControl})::String
+    if isempty(axis_controls)
+        return ""
+    end
+
+    controls_html = ""
+    for dropdown in axis_controls
+        controls_html *= generate_dropdown_html(dropdown; multiselect=false)
+    end
+
+    return """
+    <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fffaf0;">
+        <h4 style="margin-top: 0;">Axes</h4>
+        $controls_html
+    </div>
+    """
 end

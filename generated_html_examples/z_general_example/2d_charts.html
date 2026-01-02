@@ -332,6 +332,104 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
@@ -628,6 +726,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_LineChart');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_LineChart');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_LineChart');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
@@ -726,8 +831,12 @@ $(function(){
 
                 // Use centralized aggregation function
                 const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                const xValues = result.xValues;
-                const yValues = result.yValues;
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 traces.push({
                     x: xValues,
@@ -744,8 +853,8 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
                 hovermode: 'closest',
                 showlegend: true
             };
@@ -818,8 +927,12 @@ $(function(){
 
                     // Use centralized aggregation function
                     const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                    const xValues = result.xValues;
-                    const yValues = result.yValues;
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const legendGroup = group.color;
 
@@ -843,11 +956,11 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? Y_COL : '',
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis
                 };
 
@@ -935,8 +1048,12 @@ $(function(){
 
                         // Use centralized aggregation function
                         const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                        const xValues = result.xValues;
-                        const yValues = result.yValues;
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const legendGroup = group.color;
 
@@ -960,11 +1077,11 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? Y_COL : '',
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis
                     };
 
@@ -1052,6 +1169,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_AreaChart');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_AreaChart');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_AreaChart');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1134,8 +1258,12 @@ $(function(){
                     return aVal - bVal;
                 });
 
-                const xValues = groupData.map(row => row[X_COL]);
-                const yValues = groupData.map(row => row[Y_COL]);
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const color = COLOR_MAP[groupKey] || '#636efa';
                 const trace = {
@@ -1203,9 +1331,11 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
                 yaxis: {
-                    title: STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
                 },
                 hovermode: 'closest',
                 showlegend: true,
@@ -1269,8 +1399,12 @@ $(function(){
                         return aVal - bVal;
                     });
 
-                    const xValues = groupData.map(row => row[X_COL]);
-                    const yValues = groupData.map(row => row[Y_COL]);
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const color = COLOR_MAP[groupKey] || '#636efa';
                     const legendGroup = groupKey;
@@ -1335,11 +1469,14 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                     anchor: xaxis
                 };
 
@@ -1414,8 +1551,12 @@ $(function(){
                             return aVal - bVal;
                         });
 
-                        const xValues = groupData.map(row => row[X_COL]);
-                        const yValues = groupData.map(row => row[Y_COL]);
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const color = COLOR_MAP[groupKey] || '#636efa';
                         const legendGroup = groupKey;
@@ -1480,11 +1621,14 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? (STACK_MODE === 'normalised_stack' ? Y_COL + ' (%)' : Y_COL) : '',
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
                         anchor: xaxis
                     };
 
@@ -1553,7 +1697,7 @@ $(function(){
         return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
     };
 
-    function createTraces(data, X_COL, Y_COL, COLOR_COL, xaxis='x', yaxis='y', showlegend=true) {
+    function createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
         const symbolMap = buildSymbolMap(data, COLOR_COL);
         const groups = {};
         data.forEach(row => {
@@ -1562,9 +1706,17 @@ $(function(){
             groups[key].push(row);
         });
 
-        return Object.entries(groups).map(([key, groupData]) => ({
-            x: groupData.map(d => d[X_COL]),
-            y: groupData.map(d => d[Y_COL]),
+        return Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => d[X_COL]);
+            let yValues = groupData.map(d => d[Y_COL]);
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+            return {
+            x: xValues,
+            y: yValues,
             mode: 'markers',
             name: key,
             legendgroup: key,
@@ -1577,36 +1729,47 @@ $(function(){
                 symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
             },
             type: 'scatter'
-        }));
+            };
+        });
     }
 
-    function renderNoFacets(data, X_COL, Y_COL, COLOR_COL) {
-        const traces = createTraces(data, X_COL, Y_COL, COLOR_COL);
+    function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM) {
+        const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
 
         if (window.showDensity_scatter) {
+            let xDensityValues = data.map(d => d[X_COL]);
+            let yDensityValues = data.map(d => d[Y_COL]);
+            xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+            yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
             traces.push({
-                x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                x: xDensityValues, y: yDensityValues,
                 name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                 showscale: false, type: 'histogram2dcontour', showlegend: false
             });
         }
 
+        let xHistValues = data.map(d => d[X_COL]);
+        let yHistValues = data.map(d => d[Y_COL]);
+        xHistValues = applyAxisTransform(xHistValues, X_TRANSFORM);
+        yHistValues = applyAxisTransform(yHistValues, Y_TRANSFORM);
+
         traces.push(
-            { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
-            { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+            { x: xHistValues, name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+            { y: yHistValues, name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
         );
 
         Plotly.newPlot('scatter', traces, {
             title: 'Scatter Plot', showlegend: true, autosize: true, hovermode: 'closest',
-            xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
-            yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+            xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+            yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
             xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
             yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
             margin: {t: 100, r: 100, b: 100, l: 100}
         }, {responsive: true});
     }
 
-    function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL) {
+    function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM) {
         const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
         const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
         const traces = [];
@@ -1615,11 +1778,16 @@ $(function(){
             const facetData = data.filter(row => row[FACET_COL] === facetVal);
             const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
             const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-            traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
+            traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
 
             if (window.showDensity_scatter) {
+                let xDensityValues = facetData.map(d => d[X_COL]);
+                let yDensityValues = facetData.map(d => d[Y_COL]);
+                xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
                 traces.push({
-                    x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                    x: xDensityValues, y: yDensityValues,
                     name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                     showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                 });
@@ -1638,13 +1806,13 @@ $(function(){
         };
         facetValues.forEach((val, idx) => {
             const ax = idx === 0 ? '' : (idx + 1);
-            layout['xaxis' + ax] = {title: X_COL};
-            layout['yaxis' + ax] = {title: Y_COL};
+            layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+            layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
         });
         Plotly.newPlot('scatter', traces, layout, {responsive: true});
     }
 
-    function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+    function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM) {
         const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
         const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
         const rows = facet1Values.length, cols = facet2Values.length;
@@ -1658,11 +1826,16 @@ $(function(){
                 const idx = rowIdx * cols + colIdx;
                 const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                 const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
+                traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
 
                 if (window.showDensity_scatter) {
+                    let xDensityValues = facetData.map(d => d[X_COL]);
+                    let yDensityValues = facetData.map(d => d[Y_COL]);
+                    xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                    yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
                     traces.push({
-                        x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                        x: xDensityValues, y: yDensityValues,
                         name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                         showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                     });
@@ -1691,8 +1864,8 @@ $(function(){
         facet1Values.forEach((v1, rowIdx) => {
             facet2Values.forEach((v2, colIdx) => {
                 const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
-                layout['xaxis' + ax] = {title: X_COL};
-                layout['yaxis' + ax] = {title: Y_COL};
+                layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+                layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
             });
         });
         Plotly.newPlot('scatter', traces, layout, {responsive: true});
@@ -1703,17 +1876,21 @@ $(function(){
         const Y_COL = getCol('y_col_select_scatter', DEFAULT_Y_COL);
         const COLOR_COL = getCol('color_col_select_scatter', DEFAULT_COLOR_COL);
 
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_scatter', 'identity');
+
         let FACET1 = getCol('facet1_select_scatter', null);
         let FACET2 = getCol('facet2_select_scatter', null);
         if (FACET1 === 'None') FACET1 = null;
         if (FACET2 === 'None') FACET2 = null;
 
         if (FACET1 && FACET2) {
-            renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2);
+            renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2, X_TRANSFORM, Y_TRANSFORM);
         } else if (FACET1) {
-            renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1);
+            renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1, X_TRANSFORM, Y_TRANSFORM);
         } else {
-            renderNoFacets(data, X_COL, Y_COL, COLOR_COL);
+            renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
         }
     }
 
@@ -1820,6 +1997,13 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_path');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_path');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_path');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1899,9 +2083,13 @@ $(function(){
                     return String(aVal).localeCompare(String(bVal));
                 });
 
-                const xValues = group.data.map(row => row[X_COL]);
-                const yValues = group.data.map(row => row[Y_COL]);
+                let xValues = group.data.map(row => row[X_COL]);
+                let yValues = group.data.map(row => row[Y_COL]);
                 const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                 const baseColor = COLOR_MAP[group.color] || '#000000';
                 const markerOpacity = getAlphaValues(xValues.length);
@@ -1995,8 +2183,8 @@ $(function(){
 
             const layout = {
                 title: 'Path Chart',
-                xaxis: { title: X_COL },
-                yaxis: { title: Y_COL },
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
                 hovermode: 'closest',
                 showlegend: true,
                 annotations: annotations
@@ -2057,9 +2245,13 @@ $(function(){
                         return String(aVal).localeCompare(String(bVal));
                     });
 
-                    const xValues = group.data.map(row => row[X_COL]);
-                    const yValues = group.data.map(row => row[Y_COL]);
+                    let xValues = group.data.map(row => row[X_COL]);
+                    let yValues = group.data.map(row => row[Y_COL]);
                     const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                     const legendGroup = group.color;
 
@@ -2164,11 +2356,11 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? X_COL : '',
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
-                    title: col === 1 ? Y_COL : '',
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis
                 };
 
@@ -2242,9 +2434,13 @@ $(function(){
                             return String(aVal).localeCompare(String(bVal));
                         });
 
-                        const xValues = group.data.map(row => row[X_COL]);
-                        const yValues = group.data.map(row => row[Y_COL]);
+                        let xValues = group.data.map(row => row[X_COL]);
+                        let yValues = group.data.map(row => row[Y_COL]);
                         const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         const legendGroup = group.color;
 
@@ -2349,11 +2545,11 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
-                        title: colIdx === 0 ? Y_COL : '',
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis
                     };
 
@@ -2441,33 +2637,6 @@ $(function(){
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="x_col_select_LineChart">X dimension: </label>
-                <select id="x_col_select_LineChart" onchange="updateChart_LineChart()">
-                <option value="date" selected>date</option>
-                <option value="quarter">quarter</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="x_col_select_LineChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="y_col_select_LineChart">Y dimension: </label>
-                <select id="y_col_select_LineChart" onchange="updateChart_LineChart()">
-                <option value="sales" selected>sales</option>
-                <option value="quantity">quantity</option>
-                <option value="profit">profit</option>
-                <option value="customers">customers</option>
-                <option value="satisfaction">satisfaction</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="y_col_select_LineChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
                 <label for="color_col_select_LineChart">Color by: </label>
                 <select id="color_col_select_LineChart" onchange="updateChart_LineChart()">
                 <option value="product" selected>product</option>
@@ -2496,42 +2665,67 @@ $(function(){
                 <span id="aggregator_select_LineChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_LineChart">X: </label>
+        <select id="x_col_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="date" selected>date</option>
+<option value="quarter">quarter</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_LineChart">X Transform: </label>
+        <select id="x_transform_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_LineChart">Y: </label>
+        <select id="y_col_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="sales" selected>sales</option>
+<option value="quantity">quantity</option>
+<option value="profit">profit</option>
+<option value="customers">customers</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_LineChart">Y Transform: </label>
+        <select id="y_transform_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+</div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_LineChart">Facet 1: </label>
+        <select id="facet1_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="None" selected>None</option>
+<option value="region">region</option>
+<option value="segment">segment</option>
+<option value="product">product</option>
+<option value="month">month</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_LineChart">Facet 2: </label>
+        <select id="facet2_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+            <option value="None" selected>None</option>
+<option value="region">region</option>
+<option value="segment">segment</option>
+<option value="product">product</option>
+<option value="month">month</option>
+        </select>
+    </div>
 </div>
 
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet1_select_LineChart">Facet 1: </label>
-                <select id="facet1_select_LineChart" onchange="updateChart_LineChart()">
-                <option value="None" selected>None</option>
-                <option value="region">region</option>
-                <option value="segment">segment</option>
-                <option value="product">product</option>
-                <option value="month">month</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet1_select_LineChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet2_select_LineChart">Facet 2: </label>
-                <select id="facet2_select_LineChart" onchange="updateChart_LineChart()">
-                <option value="None" selected>None</option>
-                <option value="region">region</option>
-                <option value="segment">segment</option>
-                <option value="product">product</option>
-                <option value="month">month</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet2_select_LineChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-        
+
 </div>
 
 <!-- Chart -->
@@ -2593,33 +2787,6 @@ $(function(){
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="x_col_select_AreaChart">X dimension: </label>
-                <select id="x_col_select_AreaChart" onchange="updatePlot_AreaChart()">
-                <option value="date" selected>date</option>
-                <option value="quarter">quarter</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="x_col_select_AreaChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="y_col_select_AreaChart">Y dimension: </label>
-                <select id="y_col_select_AreaChart" onchange="updatePlot_AreaChart()">
-                <option value="sales" selected>sales</option>
-                <option value="quantity">quantity</option>
-                <option value="cost">cost</option>
-                <option value="customers">customers</option>
-                <option value="satisfaction">satisfaction</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="y_col_select_AreaChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
                 <label for="color_col_select_AreaChart">Color by: </label>
                 <select id="color_col_select_AreaChart" onchange="updatePlot_AreaChart()">
                 <option value="product" selected>product</option>
@@ -2645,40 +2812,65 @@ $(function(){
                 <span id="stack_mode_select_AreaChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_AreaChart">X: </label>
+        <select id="x_col_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="date" selected>date</option>
+<option value="quarter">quarter</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_AreaChart">X Transform: </label>
+        <select id="x_transform_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_AreaChart">Y: </label>
+        <select id="y_col_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="sales" selected>sales</option>
+<option value="quantity">quantity</option>
+<option value="cost">cost</option>
+<option value="customers">customers</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_AreaChart">Y Transform: </label>
+        <select id="y_transform_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+</div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_AreaChart">Facet 1: </label>
+        <select id="facet1_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="None" selected>None</option>
+<option value="region">region</option>
+<option value="product">product</option>
+<option value="segment">segment</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_AreaChart">Facet 2: </label>
+        <select id="facet2_select_AreaChart" style="padding: 5px 10px;" onchange="updatePlot_AreaChart()">
+            <option value="None" selected>None</option>
+<option value="region">region</option>
+<option value="product">product</option>
+<option value="segment">segment</option>
+        </select>
+    </div>
 </div>
 
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-            <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet1_select_AreaChart">Facet 1: </label>
-                <select id="facet1_select_AreaChart" onchange="updatePlot_AreaChart()">
-                <option value="None" selected>None</option>
-                <option value="region">region</option>
-                <option value="product">product</option>
-                <option value="segment">segment</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet1_select_AreaChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="facet2_select_AreaChart">Facet 2: </label>
-                <select id="facet2_select_AreaChart" onchange="updatePlot_AreaChart()">
-                <option value="None" selected>None</option>
-                <option value="region">region</option>
-                <option value="product">product</option>
-                <option value="segment">segment</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="facet2_select_AreaChart_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-        
+
 </div>
 
 <!-- Chart -->
@@ -2701,28 +2893,6 @@ $(function(){
 </div>
 <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
                 <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="x_col_select_scatter">X:</label>
-                    <select id="x_col_select_scatter" onchange="updateChart_scatter()">
-                    <option value="profit" selected>profit</option>
-                    <option value="sales">sales</option>
-                    <option value="quantity">quantity</option>
-                    <option value="customers">customers</option>
-                    <option value="cost">cost</option>
-                    <option value="satisfaction">satisfaction</option>                </select>
-                </div>
-                            <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="y_col_select_scatter">Y:</label>
-                    <select id="y_col_select_scatter" onchange="updateChart_scatter()">
-                    <option value="profit">profit</option>
-                    <option value="sales" selected>sales</option>
-                    <option value="quantity">quantity</option>
-                    <option value="customers">customers</option>
-                    <option value="cost">cost</option>
-                    <option value="satisfaction">satisfaction</option>                </select>
-                </div>
-                    </div>
-<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
                     <label for="color_col_select_scatter">Color/Point type:</label>
                     <select id="color_col_select_scatter" onchange="updateChart_scatter()">
                     <option value="product" selected>product</option>
@@ -2731,24 +2901,60 @@ $(function(){
                     <option value="month">month</option>                </select>
                 </div>
                     </div>
-
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_scatter">X: </label>
+        <select id="x_col_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
+            <option value="profit" selected>profit</option>
+<option value="sales">sales</option>
+<option value="quantity">quantity</option>
+<option value="customers">customers</option>
+<option value="cost">cost</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_scatter">X Transform: </label>
+        <select id="x_transform_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_scatter">Y: </label>
+        <select id="y_col_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
+            <option value="profit">profit</option>
+<option value="sales" selected>sales</option>
+<option value="quantity">quantity</option>
+<option value="customers">customers</option>
+<option value="cost">cost</option>
+<option value="satisfaction">satisfaction</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_scatter">Y Transform: </label>
+        <select id="y_transform_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
-
-<!-- Faceting -->
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0f8ff;">
-    <h4 style="margin-top: 0;">Faceting</h4>
-                <div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet1_select_scatter">Facet 1:</label>
-                    <select id="facet1_select_scatter" onchange="updateChart_scatter()">
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+            <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <label for="facet1_select_scatter">Facet 1: </label>
+                    <select id="facet1_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="product">product</option>
                 <option value="segment">segment</option>                </select>
                 </div>
-                <div style="display: flex; gap: 5px; align-items: center;">
-                    <label for="facet2_select_scatter">Facet 2:</label>
-                    <select id="facet2_select_scatter" onchange="updateChart_scatter()">
+                <div>
+                    <label for="facet2_select_scatter">Facet 2: </label>
+                    <select id="facet2_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
                 <option value="None" selected>None</option>
                 <option value="region">region</option>
                 <option value="product">product</option>
@@ -2756,6 +2962,7 @@ $(function(){
                 </div>
             </div>
             
+
 </div>
 
 <!-- Chart -->
@@ -2818,32 +3025,6 @@ $(function(){
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="x_col_select_path">X dimension: </label>
-                <select id="x_col_select_path" onchange="updateChart_path()">
-                <option value="Cost" selected>Cost</option>
-                <option value="Profit">Profit</option>
-                <option value="Sales">Sales</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="x_col_select_path_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
-                <label for="y_col_select_path">Y dimension: </label>
-                <select id="y_col_select_path" onchange="updateChart_path()">
-                <option value="Profit" selected>Profit</option>
-                <option value="Sales">Sales</option>
-                <option value="Cost">Cost</option>
-            </select>
-            </div>
-            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="y_col_select_path_obs_count" style="font-size: 0.9em; color: #666;"></span>
-            </div>
-        </div>
-                <div style="margin: 10px; display: flex; align-items: center;">
-            <div style="flex: 0 0 70%;">
                 <label for="color_col_select_path">Path grouping: </label>
                 <select id="color_col_select_path" onchange="updateChart_path()">
                 <option value="Product" selected>Product</option>
@@ -2855,9 +3036,43 @@ $(function(){
                 <span id="color_col_select_path_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_path">X: </label>
+        <select id="x_col_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
+            <option value="Cost" selected>Cost</option>
+<option value="Profit">Profit</option>
+<option value="Sales">Sales</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_path">X Transform: </label>
+        <select id="x_transform_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_path">Y: </label>
+        <select id="y_col_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
+            <option value="Profit" selected>Profit</option>
+<option value="Sales">Sales</option>
+<option value="Cost">Cost</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_path">Y Transform: </label>
+        <select id="y_transform_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+        </select>
+    </div>
 </div>
 
+</div>
 
 <!-- Chart -->
 <div id="path"></div>

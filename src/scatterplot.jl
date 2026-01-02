@@ -116,7 +116,7 @@ $options                </select>
                 return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
             };
 
-            function createTraces(data, X_COL, Y_COL, COLOR_COL, xaxis='x', yaxis='y', showlegend=true) {
+            function createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
                 const symbolMap = buildSymbolMap(data, COLOR_COL);
                 const groups = {};
                 data.forEach(row => {
@@ -125,9 +125,17 @@ $options                </select>
                     groups[key].push(row);
                 });
 
-                return Object.entries(groups).map(([key, groupData]) => ({
-                    x: groupData.map(d => d[X_COL]),
-                    y: groupData.map(d => d[Y_COL]),
+                return Object.entries(groups).map(([key, groupData]) => {
+                    let xValues = groupData.map(d => d[X_COL]);
+                    let yValues = groupData.map(d => d[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    return {
+                    x: xValues,
+                    y: yValues,
                     mode: 'markers',
                     name: key,
                     legendgroup: key,
@@ -140,36 +148,47 @@ $options                </select>
                         symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
                     },
                     type: 'scatter'
-                }));
+                    };
+                });
             }
 
-            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL) {
-                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL);
+            function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM) {
+                const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
 
                 if (window.showDensity_$(chart_title)) {
+                    let xDensityValues = data.map(d => d[X_COL]);
+                    let yDensityValues = data.map(d => d[Y_COL]);
+                    xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                    yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
                     traces.push({
-                        x: data.map(d => d[X_COL]), y: data.map(d => d[Y_COL]),
+                        x: xDensityValues, y: yDensityValues,
                         name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                         showscale: false, type: 'histogram2dcontour', showlegend: false
                     });
                 }
 
+                let xHistValues = data.map(d => d[X_COL]);
+                let yHistValues = data.map(d => d[Y_COL]);
+                xHistValues = applyAxisTransform(xHistValues, X_TRANSFORM);
+                yHistValues = applyAxisTransform(yHistValues, Y_TRANSFORM);
+
                 traces.push(
-                    { x: data.map(d => d[X_COL]), name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
-                    { y: data.map(d => d[Y_COL]), name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                    { x: xHistValues, name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: yHistValues, name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
                 );
 
                 Plotly.newPlot('$chart_title', traces, {
                     title: '$title', showlegend: true, autosize: true, hovermode: 'closest',
-                    xaxis: { title: X_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
-                    yaxis: { title: Y_COL, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
                     xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
                     yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
                     margin: {t: 100, r: 100, b: 100, l: 100}
                 }, {responsive: true});
             }
 
-            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL) {
+            function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM) {
                 const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
                 const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
                 const traces = [];
@@ -178,11 +197,16 @@ $options                </select>
                     const facetData = data.filter(row => row[FACET_COL] === facetVal);
                     const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                     const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
+                    traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
 
                     if (window.showDensity_$(chart_title)) {
+                        let xDensityValues = facetData.map(d => d[X_COL]);
+                        let yDensityValues = facetData.map(d => d[Y_COL]);
+                        xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                        yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
                         traces.push({
-                            x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                            x: xDensityValues, y: yDensityValues,
                             name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                             showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                         });
@@ -201,13 +225,13 @@ $options                </select>
                 };
                 facetValues.forEach((val, idx) => {
                     const ax = idx === 0 ? '' : (idx + 1);
-                    layout['xaxis' + ax] = {title: X_COL};
-                    layout['yaxis' + ax] = {title: Y_COL};
+                    layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+                    layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
                 });
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
             }
 
-            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+            function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM) {
                 const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
                 const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
                 const rows = facet1Values.length, cols = facet2Values.length;
@@ -221,11 +245,16 @@ $options                </select>
                         const idx = rowIdx * cols + colIdx;
                         const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                         const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, xaxis, yaxis, idx === 0));
+                        traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
 
                         if (window.showDensity_$(chart_title)) {
+                            let xDensityValues = facetData.map(d => d[X_COL]);
+                            let yDensityValues = facetData.map(d => d[Y_COL]);
+                            xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                            yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
                             traces.push({
-                                x: facetData.map(d => d[X_COL]), y: facetData.map(d => d[Y_COL]),
+                                x: xDensityValues, y: yDensityValues,
                                 name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
                                 showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
                             });
@@ -254,8 +283,8 @@ $options                </select>
                 facet1Values.forEach((v1, rowIdx) => {
                     facet2Values.forEach((v2, colIdx) => {
                         const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
-                        layout['xaxis' + ax] = {title: X_COL};
-                        layout['yaxis' + ax] = {title: Y_COL};
+                        layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+                        layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
                     });
                 });
                 Plotly.newPlot('$chart_title', traces, layout, {responsive: true});
@@ -266,17 +295,21 @@ $options                </select>
                 const Y_COL = getCol('y_col_select_$chart_title', DEFAULT_Y_COL);
                 const COLOR_COL = getCol('color_col_select_$chart_title', DEFAULT_COLOR_COL);
 
+                // Get current axis transformations
+                const X_TRANSFORM = getCol('x_transform_select_$chart_title', 'identity');
+                const Y_TRANSFORM = getCol('y_transform_select_$chart_title', 'identity');
+
                 let FACET1 = getCol('facet1_select_$chart_title', null);
                 let FACET2 = getCol('facet2_select_$chart_title', null);
                 if (FACET1 === 'None') FACET1 = null;
                 if (FACET2 === 'None') FACET2 = null;
 
                 if (FACET1 && FACET2) {
-                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2);
+                    renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2, X_TRANSFORM, Y_TRANSFORM);
                 } else if (FACET1) {
-                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1);
+                    renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1, X_TRANSFORM, Y_TRANSFORM);
                 } else {
-                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL);
+                    renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
                 }
             }
 
@@ -340,7 +373,7 @@ $options                </select>
         plot_attributes_html = ""
         faceting_html = ""
 
-        # Build plot attributes section (density toggle, X/Y selectors, color selector)
+        # Build plot attributes section (density toggle, color selector)
         plot_attributes_html = """
         <div style="margin: 10px 0;">
             <button id="$(chart_title)_density_toggle" style="padding: 5px 15px; cursor: pointer;">
@@ -349,15 +382,6 @@ $options                </select>
         </div>
         """
 
-        # X and Y dropdowns (on same line if either has multiple options)
-        xy_html = build_dropdown("x_col_select", "X", valid_x_cols, chart_title, default_x_col) *
-                  build_dropdown("y_col_select", "Y", valid_y_cols, chart_title, default_y_col)
-        if !isempty(xy_html)
-            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-$xy_html        </div>
-"""
-        end
-
         # Style dropdown (color/point type)
         style_html = build_dropdown("color_col_select", "Color/Point type", valid_color_cols, chart_title, default_color_col)
         if !isempty(style_html)
@@ -365,6 +389,17 @@ $xy_html        </div>
 $style_html        </div>
 """
         end
+
+        # Build axis controls HTML (X and Y dimensions + transforms)
+        axes_html = build_axis_controls_html(
+            string(chart_title),
+            "updateChart_$chart_title()";
+            x_cols = valid_x_cols,
+            y_cols = valid_y_cols,
+            default_x = Symbol(default_x_col),
+            default_y = Symbol(default_y_col)
+        )
+        plot_attributes_html *= axes_html
 
         # Build faceting section using html_controls abstraction
         faceting_html = generate_facet_dropdowns_html(

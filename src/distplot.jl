@@ -59,14 +59,6 @@ struct DistPlot <: JSPlotsType
         # Default selections
         default_value_col = first(value_cols)
         default_color_col = isempty(color_cols) ? nothing : first(color_cols)
-        
-        # Generate value column dropdown using html_controls abstraction
-        value_dropdown_html, value_dropdown_js = generate_value_column_dropdown_html(
-            string(chart_title),
-            value_cols,
-            default_value_col,
-            "updatePlotWithFilters_$(chart_title)();"
-        )
 
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
@@ -76,16 +68,23 @@ struct DistPlot <: JSPlotsType
             "updatePlotWithFilters_$(chart_title)();"
         )
 
-        # Combine dropdowns on same line if either exists
+        # Use only group dropdown (X dimension is controlled by axes section)
         combined_dropdown_html = ""
-        if value_dropdown_html != "" || group_dropdown_html != ""
+        if group_dropdown_html != ""
             combined_dropdown_html = """
             <div style="margin: 20px 0;">
-                $value_dropdown_html
                 $group_dropdown_html
             </div>
             """
         end
+
+        # Build axis controls HTML (only X axis for value dimension)
+        axes_html = build_axis_controls_html(
+            string(chart_title),
+            "updatePlotWithFilters_$(chart_title)()";
+            x_cols = value_cols,
+            default_x = default_value_col
+        )
 
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title)()"
@@ -103,9 +102,9 @@ struct DistPlot <: JSPlotsType
         
         # Generate trace creation JavaScript
         trace_js = """
-            // Get current selections from dropdowns
+            // Get current selections from dropdowns and axes
             var currentValueCol = $(length(value_cols) >= 2 ?
-                "document.getElementById('$(chart_title)_value_selector').value" :
+                "document.getElementById('x_col_select_$(chart_title)').value" :
                 "'$(default_value_col)'");
             var currentGroupCol = $(length(color_cols) >= 2 ?
                 "document.getElementById('$(chart_title)_group_selector').value" :
@@ -115,6 +114,10 @@ struct DistPlot <: JSPlotsType
             if (currentGroupCol === '_none_') {
                 currentGroupCol = null;
             }
+
+            // Get current axis transformation
+            var xTransformSelect = document.getElementById('x_transform_select_$(chart_title)');
+            var X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
 
             // Get current bins from slider
             var binsSlider = document.getElementById('$(chart_title)_bins_slider');
@@ -136,6 +139,9 @@ struct DistPlot <: JSPlotsType
                 groupKeys.forEach(function(key, idx) {
                     var groupData = groups[key];
                     var values = groupData.map(d => d[currentValueCol]);
+
+                    // Apply axis transformation
+                    values = applyAxisTransform(values, X_TRANSFORM);
 
                     // Box plot (top portion)
                     if (window.showBox_$(chart_title)) {
@@ -196,6 +202,9 @@ struct DistPlot <: JSPlotsType
             } else {
                 // No grouping
                 var values = data.map(d => d[currentValueCol]);
+
+                // Apply axis transformation
+                values = applyAxisTransform(values, X_TRANSFORM);
 
                 // Box plot (top portion)
                 if (window.showBox_$(chart_title)) {
@@ -269,7 +278,7 @@ struct DistPlot <: JSPlotsType
                     roworder: 'top to bottom'
                 },
                 xaxis: {
-                    title: currentValueCol,
+                    title: getAxisLabel(currentValueCol, X_TRANSFORM),
                     domain: [0, 1],
                     showgrid: true,
                     zeroline: true
@@ -325,7 +334,7 @@ struct DistPlot <: JSPlotsType
 
         # Separate filters from plot attributes
         filter_dropdowns_html = filters_html
-        plot_attributes_html = toggle_buttons_html * combined_dropdown_html
+        plot_attributes_html = toggle_buttons_html * combined_dropdown_html * axes_html
 
         # Generate bins slider (placed below chart)
         bins_slider_html = """
@@ -395,8 +404,6 @@ struct DistPlot <: JSPlotsType
                             updatePlotWithFilters_$(chart_title)();
                         });
                         """ : "")
-
-                        $value_dropdown_js
 
                         $group_dropdown_js
 

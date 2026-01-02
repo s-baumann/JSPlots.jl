@@ -218,6 +218,13 @@ struct LineChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
+                // Get current axis transformations
+                const xTransformSelect = document.getElementById('x_transform_select_$chart_title');
+                const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+                const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
+                const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
                 // Get current filter values
                 const filters = {};
                 const rangeFilters = {};
@@ -316,8 +323,12 @@ struct LineChart <: JSPlotsType
 
                         // Use centralized aggregation function
                         const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                        const xValues = result.xValues;
-                        const yValues = result.yValues;
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                         traces.push({
                             x: xValues,
@@ -334,8 +345,8 @@ struct LineChart <: JSPlotsType
                     }
 
                     const layout = {
-                        xaxis: { title: X_COL },
-                        yaxis: { title: Y_COL },
+                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                        yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
                         hovermode: 'closest',
                         showlegend: true
                     };
@@ -408,8 +419,12 @@ struct LineChart <: JSPlotsType
 
                             // Use centralized aggregation function
                             const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                            const xValues = result.xValues;
-                            const yValues = result.yValues;
+                            let xValues = result.xValues;
+                            let yValues = result.yValues;
+
+                            // Apply axis transformations
+                            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                             const legendGroup = group.color;
 
@@ -433,11 +448,11 @@ struct LineChart <: JSPlotsType
 
                         // Add axis configuration
                         layout[xaxis] = {
-                            title: row === nRows ? X_COL : '',
+                            title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                             anchor: yaxis
                         };
                         layout[yaxis] = {
-                            title: col === 1 ? Y_COL : '',
+                            title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                             anchor: xaxis
                         };
 
@@ -525,8 +540,12 @@ struct LineChart <: JSPlotsType
 
                                 // Use centralized aggregation function
                                 const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
-                                const xValues = result.xValues;
-                                const yValues = result.yValues;
+                                let xValues = result.xValues;
+                                let yValues = result.yValues;
+
+                                // Apply axis transformations
+                                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
                                 const legendGroup = group.color;
 
@@ -550,11 +569,11 @@ struct LineChart <: JSPlotsType
 
                             // Add axis configuration
                             layout[xaxis] = {
-                                title: rowIdx === nRows - 1 ? X_COL : '',
+                                title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                                 anchor: yaxis
                             };
                             layout[yaxis] = {
-                                title: colIdx === 0 ? Y_COL : '',
+                                title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                                 anchor: xaxis
                             };
 
@@ -608,30 +627,18 @@ struct LineChart <: JSPlotsType
         })();
         """
 
+        # Build axis controls HTML (X and Y dimensions + transforms)
+        axes_html = build_axis_controls_html(
+            chart_title_str,
+            update_function;
+            x_cols = valid_x_cols,
+            y_cols = valid_y_cols,
+            default_x = valid_x_cols[1],
+            default_y = valid_y_cols[1]
+        )
+
         # Build attribute dropdowns
         attribute_dropdowns = DropdownControl[]
-
-        # X dimension dropdown
-        if length(valid_x_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "x_col_select_$chart_title_str",
-                "X dimension",
-                [string(col) for col in valid_x_cols],
-                string(valid_x_cols[1]),
-                update_function
-            ))
-        end
-
-        # Y dimension dropdown
-        if length(valid_y_cols) > 1
-            push!(attribute_dropdowns, DropdownControl(
-                "y_col_select_$chart_title_str",
-                "Y dimension",
-                [string(col) for col in valid_y_cols],
-                string(valid_y_cols[1]),
-                update_function
-            ))
-        end
 
         # Color column dropdown
         if length(valid_color_cols) > 1
@@ -664,6 +671,7 @@ struct LineChart <: JSPlotsType
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,
+            axes_html,
             facet_dropdowns,
             title,
             notes

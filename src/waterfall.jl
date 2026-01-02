@@ -151,6 +151,7 @@ struct Waterfall <: JSPlotsType
             filter_dropdowns,
             DropdownControl[],  # No sliders
             vcat(color_mode_dropdown, color_col_dropdown),  # Color mode + category column dropdowns
+            "",  # No axes controls for Waterfall
             DropdownControl[],  # No faceting
             title,
             notes

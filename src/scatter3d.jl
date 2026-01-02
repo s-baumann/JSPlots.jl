@@ -107,19 +107,6 @@ $options                </select>
         </div>
         """
 
-        # X, Y, Z dropdowns (only show if more than 3 dimensions)
-        xyz_html = ""
-        if length(dimensions) > 3
-            xyz_html = build_dropdown("$(chart_title_safe)_x_col_select", "X", dimensions, default_x_col, "updatePlotWithFilters_$(chart_title_safe)()") *
-                       build_dropdown("$(chart_title_safe)_y_col_select", "Y", dimensions, default_y_col, "updatePlotWithFilters_$(chart_title_safe)()") *
-                       build_dropdown("$(chart_title_safe)_z_col_select", "Z", dimensions, default_z_col, "updatePlotWithFilters_$(chart_title_safe)()")
-        end
-        if !isempty(xyz_html)
-            plot_attributes_html *= """<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
-$xyz_html        </div>
-"""
-        end
-
         # Style dropdown (color only)
         style_html = build_dropdown("$(chart_title_safe)_color_col_select", "Color", valid_color_cols, default_color_col, "updatePlotWithFilters_$(chart_title_safe)()")
         if !isempty(style_html)
@@ -127,6 +114,19 @@ $xyz_html        </div>
 $style_html        </div>
 """
         end
+
+        # Build axis controls HTML (X, Y, and Z dimensions + transforms)
+        axes_html = build_axis_controls_html(
+            string(chart_title_safe),
+            "updatePlotWithFilters_$(chart_title_safe)()";
+            x_cols = dimensions,
+            y_cols = dimensions,
+            z_cols = dimensions,
+            default_x = Symbol(default_x_col),
+            default_y = Symbol(default_y_col),
+            default_z = Symbol(default_z_col)
+        )
+        plot_attributes_html *= axes_html
 
         # Generate faceting section using html_controls abstraction
         faceting_html = generate_facet_dropdowns_html(
@@ -298,22 +298,27 @@ $style_html        </div>
                 const Z_COL = getCol('$(chart_title_safe)_z_col_select', DEFAULT_Z_COL);
                 const COLOR_COL = getCol('$(chart_title_safe)_color_col_select', DEFAULT_COLOR_COL);
 
+                // Get current axis transformations
+                const X_TRANSFORM = getCol('x_transform_select_$(chart_title_safe)', 'identity');
+                const Y_TRANSFORM = getCol('y_transform_select_$(chart_title_safe)', 'identity');
+                const Z_TRANSFORM = getCol('z_transform_select_$(chart_title_safe)', 'identity');
+
                 // Get facet selections
                 const FACET1_COL = getCol('facet1_select_$(chart_title_safe)', 'None');
                 const FACET2_COL = getCol('facet2_select_$(chart_title_safe)', 'None');
 
                 if (FACET1_COL === 'None' && FACET2_COL === 'None') {
-                    renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL);
+                    renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
-                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL);
+                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
-                    renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL);
+                    renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else {
-                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL);
+                    renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 }
             }
 
-            function renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL) {
+            function renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
                 const groups = {};
                 data.forEach(row => {
                     const key = row[COLOR_COL];
@@ -322,22 +327,50 @@ $style_html        </div>
                 });
 
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
-                const traces = Object.entries(groups).map(([key, groupData]) => ({
-                    x: groupData.map(d => parseFloat(d[X_COL])),
-                    y: groupData.map(d => parseFloat(d[Y_COL])),
-                    z: groupData.map(d => parseFloat(d[Z_COL])),
-                    mode: 'markers',
-                    name: key,
-                    type: 'scatter3d',
-                    marker: {
-                        size: $marker_size,
-                        opacity: $marker_opacity,
-                        color: COLOR_MAP[key] || '#636efa'
-                    }
-                }));
+                const traces = Object.entries(groups).map(([key, groupData]) => {
+                    let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                    let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                    let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
+                    return {
+                        x: xValues,
+                        y: yValues,
+                        z: zValues,
+                        mode: 'markers',
+                        name: key,
+                        type: 'scatter3d',
+                        marker: {
+                            size: $marker_size,
+                            opacity: $marker_opacity,
+                            color: COLOR_MAP[key] || '#636efa'
+                        }
+                    };
+                });
 
                 if (window.showEigenvectors_$(chart_title_safe) && data.length > 3) {
-                    const eigData = computeEigenvectors(data, X_COL, Y_COL, Z_COL);
+                    // Compute eigenvectors on transformed data
+                    // First, extract and transform all data points
+                    let allXValues = data.map(d => parseFloat(d[X_COL]));
+                    let allYValues = data.map(d => parseFloat(d[Y_COL]));
+                    let allZValues = data.map(d => parseFloat(d[Z_COL]));
+
+                    allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                    allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                    allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                    // Create transformed data for eigenvector computation
+                    const transformedData = data.map((row, i) => ({
+                        [X_COL]: allXValues[i],
+                        [Y_COL]: allYValues[i],
+                        [Z_COL]: allZValues[i]
+                    }));
+
+                    const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                     traces.push(...createEigenvectorTraces(eigData, 'scene'));
                 }
 
@@ -346,9 +379,9 @@ $style_html        </div>
                     autosize: true,
                     showlegend: true,
                     scene: {
-                        xaxis: { title: X_COL },
-                        yaxis: { title: Y_COL },
-                        zaxis: { title: Z_COL },
+                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                        yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                        zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                         camera: window.currentCamera_$(chart_title_safe) || undefined
                     },
                     margin: { t: 50, r: 50, b: 50, l: 50 }
@@ -365,7 +398,7 @@ $style_html        </div>
                 });
             }
 
-            function renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL) {
+            function renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
                 const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
                 const nFacets = facetValues.length;
                 const cols = Math.ceil(Math.sqrt(nFacets));
@@ -386,10 +419,19 @@ $style_html        </div>
                     });
 
                     Object.entries(groups).forEach(([key, groupData]) => {
+                        let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                        let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                        let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                         traces.push({
-                            x: groupData.map(d => parseFloat(d[X_COL])),
-                            y: groupData.map(d => parseFloat(d[Y_COL])),
-                            z: groupData.map(d => parseFloat(d[Z_COL])),
+                            x: xValues,
+                            y: yValues,
+                            z: zValues,
                             mode: 'markers',
                             name: key,
                             legendgroup: key,
@@ -405,7 +447,22 @@ $style_html        </div>
                     });
 
                     if (window.showEigenvectors_$(chart_title_safe) && facetData.length > 3) {
-                        const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                        // Compute eigenvectors on transformed data
+                        let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                        let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                        let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                        allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                        allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                        allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                        const transformedData = facetData.map((row, i) => ({
+                            [X_COL]: allXValues[i],
+                            [Y_COL]: allYValues[i],
+                            [Z_COL]: allZValues[i]
+                        }));
+
+                        const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                         traces.push(...createEigenvectorTraces(eigData, sceneId));
                     }
                 });
@@ -428,9 +485,9 @@ $style_html        </div>
 
                     layout[sceneKey] = {
                         domain: { x: xDomain, y: yDomain },
-                        xaxis: { title: X_COL },
-                        yaxis: { title: Y_COL },
-                        zaxis: { title: Z_COL },
+                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                        yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                        zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                         camera: window.sharedCamera_$(chart_title_safe) ? (window.currentCamera_$(chart_title_safe) || undefined) : undefined
                     };
 
@@ -479,7 +536,7 @@ $style_html        </div>
                 }
             }
 
-            function renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL) {
+            function renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM) {
                 const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
                 const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
                 const rows = facet1Values.length;
@@ -504,10 +561,19 @@ $style_html        </div>
                         });
 
                         Object.entries(groups).forEach(([key, groupData]) => {
+                            let xValues = groupData.map(d => parseFloat(d[X_COL]));
+                            let yValues = groupData.map(d => parseFloat(d[Y_COL]));
+                            let zValues = groupData.map(d => parseFloat(d[Z_COL]));
+
+                            // Apply axis transformations
+                            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                            zValues = applyAxisTransform(zValues, Z_TRANSFORM);
+
                             traces.push({
-                                x: groupData.map(d => parseFloat(d[X_COL])),
-                                y: groupData.map(d => parseFloat(d[Y_COL])),
-                                z: groupData.map(d => parseFloat(d[Z_COL])),
+                                x: xValues,
+                                y: yValues,
+                                z: zValues,
                                 mode: 'markers',
                                 name: key,
                                 legendgroup: key,
@@ -523,7 +589,22 @@ $style_html        </div>
                         });
 
                         if (window.showEigenvectors_$(chart_title_safe) && facetData.length > 3) {
-                            const eigData = computeEigenvectors(facetData, X_COL, Y_COL, Z_COL);
+                            // Compute eigenvectors on transformed data
+                            let allXValues = facetData.map(d => parseFloat(d[X_COL]));
+                            let allYValues = facetData.map(d => parseFloat(d[Y_COL]));
+                            let allZValues = facetData.map(d => parseFloat(d[Z_COL]));
+
+                            allXValues = applyAxisTransform(allXValues, X_TRANSFORM);
+                            allYValues = applyAxisTransform(allYValues, Y_TRANSFORM);
+                            allZValues = applyAxisTransform(allZValues, Z_TRANSFORM);
+
+                            const transformedData = facetData.map((row, i) => ({
+                                [X_COL]: allXValues[i],
+                                [Y_COL]: allYValues[i],
+                                [Z_COL]: allZValues[i]
+                            }));
+
+                            const eigData = computeEigenvectors(transformedData, X_COL, Y_COL, Z_COL);
                             traces.push(...createEigenvectorTraces(eigData, sceneId));
                         }
                     });
@@ -550,9 +631,9 @@ $style_html        </div>
 
                         layout[sceneKey] = {
                             domain: { x: xDomain, y: yDomain },
-                            xaxis: { title: X_COL },
-                            yaxis: { title: Y_COL },
-                            zaxis: { title: Z_COL },
+                            xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                            yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                            zaxis: { title: getAxisLabel(Z_COL, Z_TRANSFORM) },
                             camera: window.sharedCamera_$(chart_title_safe) ? (window.currentCamera_$(chart_title_safe) || undefined) : undefined
                         };
 
@@ -635,6 +716,11 @@ $style_html        </div>
                 const Z_COL = getCol('$(chart_title_safe)_z_col_select', DEFAULT_Z_COL);
                 const COLOR_COL = getCol('$(chart_title_safe)_color_col_select', DEFAULT_COLOR_COL);
 
+                // Get current axis transformations
+                const X_TRANSFORM = getCol('x_transform_select_$(chart_title_safe)', 'identity');
+                const Y_TRANSFORM = getCol('y_transform_select_$(chart_title_safe)', 'identity');
+                const Z_TRANSFORM = getCol('z_transform_select_$(chart_title_safe)', 'identity');
+
                 // Get filter values (multiple selections)
                 const filters = {};
                 FILTER_COLS.forEach(col => {
@@ -663,11 +749,11 @@ $style_html        </div>
 
                 // Render based on faceting
                 if (facet1 && facet2) {
-                    renderFacetGrid_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2);
+                    renderFacetGrid_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1, facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else if (facet1 || facet2) {
-                    renderFacetWrap_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2);
+                    renderFacetWrap_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, facet1 || facet2, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else {
-                    renderNoFacets_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL);
+                    renderNoFacets_$(chart_title_safe)(filteredData, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 }
             };
 
