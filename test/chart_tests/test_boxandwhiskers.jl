@@ -157,7 +157,7 @@ import JSPlots: BoxAndWhiskers
 
         # Check for wavy line and markers for mean/stdev (no longer using error bars)
         @test occursin("numWaves", bw.functional_html)
-        @test occursin("symbol: 'diamond'", bw.functional_html)
+        @test occursin("markerSymbols", bw.functional_html)
         @test occursin("Mean ± StDev", bw.functional_html)
     end
 
