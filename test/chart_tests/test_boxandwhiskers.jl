@@ -46,8 +46,8 @@ import JSPlots: BoxAndWhiskers
         @test !isempty(bw.functional_html)
         @test !isempty(bw.appearance_html)
 
-        # Check for box plot elements
-        @test occursin("type: 'box'", bw.functional_html)
+        # Check for box plot elements (now using scatter traces)
+        @test occursin("type: 'scatter'", bw.functional_html)
         @test occursin("computeStats", bw.functional_html)
         @test occursin("updateChart_test_bw", bw.functional_html)
     end
@@ -155,8 +155,8 @@ import JSPlots: BoxAndWhiskers
             x_cols = [:value],
             group_col = :group)
 
-        # Check for error bars and markers for mean/stdev
-        @test occursin("error_x:", bw.functional_html)
+        # Check for wavy line and markers for mean/stdev (no longer using error bars)
+        @test occursin("numWaves", bw.functional_html)
         @test occursin("symbol: 'diamond'", bw.functional_html)
         @test occursin("Mean ± StDev", bw.functional_html)
     end
@@ -179,7 +179,9 @@ import JSPlots: BoxAndWhiskers
             x_cols = [:value],
             group_col = :group)
 
-        @test occursin("orientation: 'h'", bw.functional_html)
+        # Check for horizontal layout (values on x-axis, groups on y-axis)
+        @test occursin("xaxis:", bw.functional_html)
+        @test occursin("yaxis:", bw.functional_html)
     end
 
     @testset "Aspect ratio control" begin
@@ -363,8 +365,9 @@ import JSPlots: BoxAndWhiskers
             group_col = :group)
 
         @test occursin("hovertemplate:", bw.functional_html)
-        @test occursin("Mean:", bw.functional_html)
-        @test occursin("StDev:", bw.functional_html)
+        # Check for Greek symbols and marker labels used in new implementation
+        @test occursin("μ", bw.functional_html)
+        @test occursin("σ", bw.functional_html)
     end
 
     @testset "Spacing between grouping sections" begin
