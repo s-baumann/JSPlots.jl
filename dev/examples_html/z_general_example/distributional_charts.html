@@ -1622,6 +1622,484 @@ if (currentGroupCol) {
         console.error('Error loading data for chart pie:', error);
     });
 })();
+(function() {
+// Color maps for BoxAndWhiskers boxwhiskers
+const colorMaps_boxwhiskers = {"segment":{"SMB":"#EF553B","Enterprise":"#636efa","Consumer":"#00cc96"},"region":{"Latin America":"#ab63fa","Europe":"#EF553B","North America":"#636efa","Asia Pacific":"#00cc96"},"product":{"Premium":"#636efa","Standard":"#EF553B","Economy":"#00cc96"}};
+
+// Available columns
+const xCols_boxwhiskers = ['revenue', 'satisfaction'];
+const colorCols_boxwhiskers = ['product', 'segment', 'region'];
+const groupingCols_boxwhiskers = ['region', 'product', 'segment'];
+const groupCol_boxwhiskers = 'group';
+
+// Filter configuration
+const categoricalFilters_boxwhiskers = ['region', 'quarter'];
+const continuousFilters_boxwhiskers = [];
+
+// State variables
+let currentData_boxwhiskers = null;
+let filters_boxwhiskers = {};
+let rangeFilters_boxwhiskers = {};
+
+// Helper function to safely get dropdown value
+const getCol_boxwhiskers = function(id, def) {
+    var el = document.getElementById(id);
+    return el ? el.value : def;
+};
+
+// Initialize filters from dropdowns
+function initializeFilters_boxwhiskers() {
+    categoricalFilters_boxwhiskers.forEach(function(col) {
+        var selectElement = document.getElementById(col + '_select_boxwhiskers');
+        if (selectElement) {
+            var options = Array.from(selectElement.options);
+            filters_boxwhiskers[col] = options
+                .filter(function(opt) { return opt.selected; })
+                .map(function(opt) { return opt.value; });
+        }
+    });
+
+    continuousFilters_boxwhiskers.forEach(function(col) {
+        var slider = $('#' + col + '_range_boxwhiskers' + '_slider');
+        if (slider.length > 0) {
+            rangeFilters_boxwhiskers[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+}
+
+// Compute box and whiskers statistics for a group
+function computeStats(values) {
+    if (values.length === 0) return null;
+
+    // Sort values
+    var sorted = values.slice().sort(function(a, b) { return a - b; });
+    var n = sorted.length;
+
+    // Helper function to compute quantile
+    function quantile(arr, p) {
+        var index = (arr.length - 1) * p;
+        var lower = Math.floor(index);
+        var upper = Math.ceil(index);
+        var weight = index - lower;
+        return arr[lower] * (1 - weight) + arr[upper] * weight;
+    }
+
+    // Compute quantiles
+    var min = sorted[0];
+    var max = sorted[n - 1];
+    var p10 = quantile(sorted, 0.10);
+    var q1 = quantile(sorted, 0.25);
+    var median = quantile(sorted, 0.50);
+    var q3 = quantile(sorted, 0.75);
+    var p90 = quantile(sorted, 0.90);
+
+    // Compute mean and stdev
+    var mean = values.reduce(function(a, b) { return a + b; }, 0) / n;
+    var variance = values.reduce(function(sum, val) {
+        return sum + Math.pow(val - mean, 2);
+    }, 0) / n;
+    var stdev = Math.sqrt(variance);
+
+    return {
+        min: min,
+        max: max,
+        p10: p10,
+        q1: q1,
+        median: median,
+        q3: q3,
+        p90: p90,
+        mean: mean,
+        stdev: stdev
+    };
+}
+
+// Update chart
+function updateChart_boxwhiskers() {
+    if (!currentData_boxwhiskers) return;
+
+    // Get selected values using helper function
+    var xCol = getCol_boxwhiskers('x_col_select_boxwhiskers', 'revenue');
+    var colorCol = getCol_boxwhiskers('color_col_select_boxwhiskers', 'none');
+    var groupingCol = getCol_boxwhiskers('grouping_col_select_boxwhiskers', 'none');
+
+    // Get toggle states
+    var showQuantiles = document.getElementById('show_quantiles_boxwhiskers');
+    var showMeanStd = document.getElementById('show_mean_std_boxwhiskers');
+    var displayQuantiles = showQuantiles ? showQuantiles.checked : true;
+    var displayMeanStd = showMeanStd ? showMeanStd.checked : true;
+
+    // Re-read filter values from dropdowns/sliders (they may have changed)
+    var currentFilters = {};
+    categoricalFilters_boxwhiskers.forEach(function(col) {
+        var selectElement = document.getElementById(col + '_select_boxwhiskers');
+        if (selectElement) {
+            currentFilters[col] = Array.from(selectElement.selectedOptions).map(function(opt) {
+                return opt.value;
+            });
+        }
+    });
+
+    var currentRangeFilters = {};
+    continuousFilters_boxwhiskers.forEach(function(col) {
+        var slider = $('#' + col + '_range_boxwhiskers' + '_slider');
+        if (slider.length > 0) {
+            currentRangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    // Apply filters
+    var filteredData = applyFiltersWithCounting(
+        currentData_boxwhiskers,
+        'boxwhiskers',
+        categoricalFilters_boxwhiskers,
+        continuousFilters_boxwhiskers,
+        currentFilters,
+        currentRangeFilters
+    );
+
+    // Group data
+    var groupedData = {};
+    var groupMetadata = {};  // Store metadata for each group
+
+    filteredData.forEach(function(row) {
+        var groupName = String(row[groupCol_boxwhiskers]);
+        if (!groupedData[groupName]) {
+            groupedData[groupName] = [];
+            groupMetadata[groupName] = {
+                color: colorCol !== 'none' ? String(row[colorCol]) : '',
+                grouping: groupingCol !== 'none' ? String(row[groupingCol]) : ''
+            };
+        }
+
+        var value = parseFloat(row[xCol]);
+        if (!isNaN(value)) {
+            groupedData[groupName].push(value);
+        }
+    });
+
+    // Sort groups by grouping column if specified
+    var groupNames = Object.keys(groupedData);
+    if (groupingCol !== 'none') {
+        groupNames.sort(function(a, b) {
+            var aGrouping = groupMetadata[a].grouping;
+            var bGrouping = groupMetadata[b].grouping;
+            if (aGrouping !== bGrouping) {
+                return aGrouping.localeCompare(bGrouping);
+            }
+            return a.localeCompare(b);
+        });
+    } else {
+        groupNames.sort();
+    }
+
+    // Create traces for box plots
+    var traces = [];
+    var annotations = [];
+    var yPos = 0;
+    var prevGrouping = null;
+
+    groupNames.forEach(function(groupName, index) {
+        var values = groupedData[groupName];
+        var stats = computeStats(values);
+
+        if (!stats) return;
+
+        // Add spacing between different grouping values
+        if (groupingCol !== 'none' && prevGrouping !== null &&
+            prevGrouping !== groupMetadata[groupName].grouping) {
+            yPos--;  // Add extra spacing
+        }
+        prevGrouping = groupMetadata[groupName].grouping;
+
+        // Determine color
+        var boxColor = '#636efa';  // Default color
+        if (colorCol !== 'none' && colorMaps_boxwhiskers[colorCol]) {
+            var colorValue = groupMetadata[groupName].color;
+            boxColor = colorMaps_boxwhiskers[colorCol][colorValue] || boxColor;
+        }
+
+        // Draw box and whiskers if enabled
+        if (displayQuantiles) {
+            // Draw box and whiskers manually with custom quantiles (10%, 25%, 50%, 75%, 90%)
+            var boxHeight = 0.4;
+            var whiskerCapSize = 0.15;
+
+            // Draw the box (Q1 to Q3) as a filled rectangle using scatter
+            traces.push({
+                type: 'scatter',
+                x: [stats.q1, stats.q3, stats.q3, stats.q1, stats.q1],
+                y: [yPos - boxHeight/2, yPos - boxHeight/2, yPos + boxHeight/2, yPos + boxHeight/2, yPos - boxHeight/2],
+                fill: 'toself',
+                fillcolor: boxColor,
+                opacity: 0.5,
+                line: { color: boxColor, width: 2 },
+                mode: 'lines',
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+
+            // Draw median line
+            traces.push({
+                type: 'scatter',
+                x: [stats.median, stats.median],
+                y: [yPos - boxHeight/2, yPos + boxHeight/2],
+                mode: 'lines',
+                line: { color: boxColor, width: 3 },
+                showlegend: false,
+                hovertemplate: groupName + '<br>Median: %{x:.3f}<extra></extra>'
+            });
+
+            // Lower whisker (Q1 to P10)
+            traces.push({
+                type: 'scatter',
+                x: [stats.p10, stats.q1],
+                y: [yPos, yPos],
+                mode: 'lines',
+                line: { color: boxColor, width: 1.5 },
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+
+            // Upper whisker (Q3 to P90)
+            traces.push({
+                type: 'scatter',
+                x: [stats.q3, stats.p90],
+                y: [yPos, yPos],
+                mode: 'lines',
+                line: { color: boxColor, width: 1.5 },
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+
+            // Lower whisker cap at P10
+            traces.push({
+                type: 'scatter',
+                x: [stats.p10, stats.p10],
+                y: [yPos - whiskerCapSize, yPos + whiskerCapSize],
+                mode: 'lines',
+                line: { color: boxColor, width: 1.5 },
+                showlegend: false,
+                hovertemplate: groupName + '<br>P10: %{x:.3f}<extra></extra>'
+            });
+
+            // Upper whisker cap at P90
+            traces.push({
+                type: 'scatter',
+                x: [stats.p90, stats.p90],
+                y: [yPos - whiskerCapSize, yPos + whiskerCapSize],
+                mode: 'lines',
+                line: { color: boxColor, width: 1.5 },
+                showlegend: false,
+                hovertemplate: groupName + '<br>P90: %{x:.3f}<extra></extra>'
+            });
+
+            // Add hover info for Q1 and Q3
+            traces.push({
+                type: 'scatter',
+                x: [stats.q1, stats.q3],
+                y: [yPos, yPos],
+                mode: 'markers',
+                marker: { size: 0.1, color: boxColor },
+                showlegend: false,
+                hovertemplate: groupName + '<br>Q1/Q3: %{x:.3f}<extra></extra>'
+            });
+
+            // Add dots for minimum and maximum observations
+            traces.push({
+                type: 'scatter',
+                x: [stats.min, stats.max],
+                y: [yPos, yPos],
+                mode: 'markers',
+                marker: {
+                    size: 6,
+                    color: boxColor,
+                    symbol: 'circle',
+                    line: { width: 1, color: '#FFFFFF' }
+                },
+                showlegend: false,
+                hovertemplate: groupName + '<br>Min/Max: %{x:.3f}<extra></extra>'
+            });
+        }  // End of displayQuantiles
+
+        // Mean and stdev trace if enabled
+        if (displayMeanStd) {
+            // Mean and stdev trace - positioned below the box with wavy line
+            var meanYPos = yPos - 0.35;  // Position below the box
+
+            // Create wavy line through mean ± stdev points
+            var numWaves = 30;  // Number of points for smooth wave
+            var xPoints = [];
+            var yPoints = [];
+
+            // Generate wavy line from mean-2*stdev to mean+2*stdev
+            for (var i = 0; i <= numWaves; i++) {
+                var t = i / numWaves;  // 0 to 1
+                var xVal = stats.mean - 2*stats.stdev + t * 4 * stats.stdev;
+                // Sinusoidal wave with 2 complete cycles
+                var waveAmplitude = 0.08;
+                var yWave = meanYPos + waveAmplitude * Math.sin(t * Math.PI * 4);
+                xPoints.push(xVal);
+                yPoints.push(yWave);
+            }
+
+            // Wavy line trace
+            traces.push({
+                type: 'scatter',
+                x: xPoints,
+                y: yPoints,
+                mode: 'lines',
+                line: {
+                    color: boxColor,
+                    width: 2.5,
+                    shape: 'spline'
+                },
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+
+            // Add markers at key points: mean-2*std, mean-std, mean, mean+std, mean+2*std
+            var markerX = [
+                stats.mean - 2*stats.stdev,
+                stats.mean - stats.stdev,
+                stats.mean,
+                stats.mean + stats.stdev,
+                stats.mean + 2*stats.stdev
+            ];
+            var markerY = Array(5).fill(meanYPos);
+            var markerSymbols = ['diamond', 'circle', 'diamond', 'circle', 'diamond'];
+            var markerSizes = [8, 10, 12, 10, 8];
+            var markerLabels = ['μ-2σ', 'μ-σ', 'μ', 'μ+σ', 'μ+2σ'];
+
+            traces.push({
+                type: 'scatter',
+                x: markerX,
+                y: markerY,
+                mode: 'markers',
+                marker: {
+                    symbol: markerSymbols,
+                    size: markerSizes,
+                    color: boxColor,
+                    line: { width: 2, color: '#FFFFFF' }
+                },
+                name: 'Mean ± StDev',
+                showlegend: index === 0,
+                hovertemplate: groupName + '<br>%{text}<br>Value: %{x:.3f}<extra></extra>',
+                text: markerLabels
+            });
+        }  // End of displayMeanStd
+
+        // Add group label
+        var dataRange = stats.p90 - stats.p10;
+        annotations.push({
+            x: stats.p10 - dataRange * 0.05,
+            y: yPos,
+            text: groupName,
+            xanchor: 'right',
+            yanchor: 'middle',
+            showarrow: false,
+            font: { size: 11, color: '#333' }
+        });
+
+        yPos--;
+    });
+
+    // Add grouping section labels if applicable
+    if (groupingCol !== 'none') {
+        var currentGrouping = null;
+        var groupingStartY = 0;
+        var yPos = 0;
+
+        groupNames.forEach(function(groupName, index) {
+            var thisGrouping = groupMetadata[groupName].grouping;
+
+            if (currentGrouping !== thisGrouping) {
+                if (currentGrouping !== null) {
+                    // Add label for previous grouping
+                    var midY = (groupingStartY + yPos + 1) / 2;
+                    annotations.push({
+                        x: 0,
+                        y: midY,
+                        text: '<b>' + currentGrouping + '</b>',
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        xref: 'paper',
+                        showarrow: false,
+                        font: { size: 13, color: '#000' },
+                        xshift: -100
+                    });
+                }
+                currentGrouping = thisGrouping;
+                groupingStartY = yPos;
+            }
+
+            if (prevGrouping !== null && prevGrouping !== thisGrouping) {
+                yPos--;
+            }
+            prevGrouping = thisGrouping;
+            yPos--;
+        });
+
+        // Add label for last grouping
+        if (currentGrouping !== null) {
+            var midY = (groupingStartY + yPos + 1) / 2;
+            annotations.push({
+                x: 0,
+                y: midY,
+                text: '<b>' + currentGrouping + '</b>',
+                xanchor: 'left',
+                yanchor: 'middle',
+                xref: 'paper',
+                showarrow: false,
+                font: { size: 13, color: '#000' },
+                xshift: -100
+            });
+        }
+    }
+
+    // Layout
+    var layout = {
+        title: '',
+        xaxis: {
+            title: xCol,
+            showgrid: true,
+            zeroline: true
+        },
+        yaxis: {
+            showticklabels: false,
+            showgrid: false,
+            zeroline: false,
+            range: [yPos - 0.5, 0.5]
+        },
+        margin: { l: 150, r: 50, t: 20, b: 60 },
+        hovermode: 'closest',
+        annotations: annotations,
+        height: Math.max(400, Math.abs(yPos) * 40)
+    };
+
+    Plotly.react('boxwhiskers', traces, layout, {responsive: true});
+}
+
+// Expose updateChart to global scope for dropdown onchange handlers
+window.updateChart_boxwhiskers = updateChart_boxwhiskers;
+
+// Initialize on load
+loadDataset('boxwhiskers_data').then(function(data) {
+    currentData_boxwhiskers = data;
+    initializeFilters_boxwhiskers();
+    updateChart_boxwhiskers();
+    setupAspectRatioControl('boxwhiskers');
+}).catch(function(error) {
+    console.error('Error loading data for BoxAndWhiskers boxwhiskers:', error);
+    document.getElementById('boxwhiskers').innerHTML =
+        '<p style="color: red;">Error loading data: ' + error.message + '</p>';
+});
+})();
 
 
 });
@@ -1629,12 +2107,12 @@ if (currentGroupCol) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script>
+<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Distributional Charts</h1>
-<p>This shows examples of DistPlot, KernelDensity and PieChart.</p>
+<p>This shows examples of DistPlot, KernelDensity, PieChart and BoxAndWhiskers.</p>
 
     <div class="textblock-content">
         <h1>Distributional Plots</h1>
@@ -1755,7 +2233,7 @@ if (currentGroupCol) {
            max="100"
            step="1"
            value="30"
-           style="width: 300px; margin-left: 10px;">
+           style="width: 75%; margin-left: 10px;">
 </div>
 
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
@@ -1894,7 +2372,7 @@ if (currentGroupCol) {
            max="7438.09"
            step="148.7618"
            value="0.0"
-           style="width: 300px; margin-left: 10px;">
+           style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto, max ≈ 7438.1)</span>
 </div>
 
@@ -1951,7 +2429,123 @@ if (currentGroupCol) {
 
 <!-- Chart -->
 <div id="pie"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
+<hr>
+<br>
+<h2>BoxAndWhiskers</h2>
+<p>Box and Whiskers plots represent the distribution of various groups of observations in an aligned way. <strong>Key Features:</strong> Each horizontal box shows min, 10% quantile, 25% quantile, median, 75% quantile, 90% quantile, and max values. In addition there is a seperate bar with the mean, mean ± 1 standard deviation and mean ± 2 standard deviations. You can differentiate the various gropus using colour or by rearranging them with 'Color by' or 'Group by'. You can also switch the variable being summarised with the Value dropdown. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html" style="color: blue; font-weight: bold;">See here for BoxAndWhiskers examples</a></p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="boxwhiskers_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_boxwhiskers">region: </label>
+                <select id="region_select_boxwhiskers" multiple onchange="updateChart_boxwhiskers()">
+                <option value="Asia Pacific" selected>Asia Pacific</option>
+                <option value="Europe" selected>Europe</option>
+                <option value="Latin America" selected>Latin America</option>
+                <option value="North America" selected>North America</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_boxwhiskers_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="quarter_select_boxwhiskers">quarter: </label>
+                <select id="quarter_select_boxwhiskers" multiple onchange="updateChart_boxwhiskers()">
+                <option value="Q1" selected>Q1</option>
+                <option value="Q2" selected>Q2</option>
+                <option value="Q3" selected>Q3</option>
+                <option value="Q4" selected>Q4</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="quarter_select_boxwhiskers_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="x_col_select_boxwhiskers">Value: </label>
+                <select id="x_col_select_boxwhiskers" onchange="updateChart_boxwhiskers()">
+                <option value="revenue" selected>revenue</option>
+                <option value="satisfaction">satisfaction</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="x_col_select_boxwhiskers_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_boxwhiskers">Color by: </label>
+                <select id="color_col_select_boxwhiskers" onchange="updateChart_boxwhiskers()">
+                <option value="none">none</option>
+                <option value="product" selected>product</option>
+                <option value="segment">segment</option>
+                <option value="region">region</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_boxwhiskers_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="grouping_col_select_boxwhiskers">Group by: </label>
+                <select id="grouping_col_select_boxwhiskers" onchange="updateChart_boxwhiskers()">
+                <option value="none">none</option>
+                <option value="region" selected>region</option>
+                <option value="product">product</option>
+                <option value="segment">segment</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="grouping_col_select_boxwhiskers_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="display: flex; align-items: center; padding: 5px 10px; border-bottom: 1px solid #ddd;">
+        <div style="flex: 1; padding-left: 10px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="show_quantiles_boxwhiskers" checked onchange="updateChart_boxwhiskers()" style="margin-right: 8px;">
+                <span>Show Quantiles</span>
+            </label>
+        </div>
+        <div style="flex: 1; padding-left: 10px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="show_mean_std_boxwhiskers" checked onchange="updateChart_boxwhiskers()" style="margin-right: 8px;">
+                <span>Show Mean ± Std Dev</span>
+            </label>
+        </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="boxwhiskers_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="boxwhiskers_aspect_ratio_label">0.6</span>
+    <input type="range" id="boxwhiskers_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="boxwhiskers"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: boxwhiskers_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.2.</small></p>
 </body>
