@@ -82,15 +82,17 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:test_corr, cors.pearson, cors.spearman, hc,
-                           string.(vars);
+                           string.(vars), :test_corr_data;
                            title = "Test Correlation Plot")
 
         @test corrplot.chart_title == :test_corr
+        @test corrplot.data_label == :test_corr_data
         @test !isempty(corrplot.functional_html)
         @test !isempty(corrplot.appearance_html)
 
         # Check that HTML contains key elements
         @test occursin("test_corr", corrplot.functional_html)
+        @test occursin("loadDataset", corrplot.functional_html)
         @test occursin("dendrogram", corrplot.appearance_html)
         @test occursin("corrmatrix", corrplot.appearance_html)
     end
@@ -101,7 +103,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:average)
 
         corrplot = CorrPlot(:multi_corr, cors.pearson, cors.spearman, hc,
-                           string.(vars);
+                           string.(vars), :multi_corr_data;
                            title = "Multi-Variable Correlation")
 
         @test occursin("Multi-Variable Correlation", corrplot.appearance_html)
@@ -116,12 +118,12 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         # Wrong size pearson matrix
         bad_pearson = cors.pearson[1:2, 1:2]
         @test_throws ErrorException CorrPlot(:bad_size, bad_pearson, cors.spearman, hc,
-                                             string.(vars))
+                                             string.(vars), :bad_size_data)
 
         # Wrong size spearman matrix
         bad_spearman = cors.spearman[1:2, 1:2]
         @test_throws ErrorException CorrPlot(:bad_size, cors.pearson, bad_spearman, hc,
-                                             string.(vars))
+                                             string.(vars), :bad_size_data)
     end
 
     @testset "CorrPlot dendrogram validation" begin
@@ -134,7 +136,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc_wrong = cluster_from_correlation(cors_wrong.pearson, linkage=:ward)
 
         @test_throws ErrorException CorrPlot(:bad_dendro, cors.pearson, cors.spearman,
-                                             hc_wrong, string.(vars))
+                                             hc_wrong, string.(vars), :bad_dendro_data)
     end
 
     @testset "CorrPlot visualization elements" begin
@@ -143,7 +145,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:viz_elements, cors.pearson, cors.spearman, hc,
-                           string.(vars))
+                           string.(vars), :viz_data)
 
         # Check for Plotly plot creation
         @test occursin("Plotly.newPlot", corrplot.functional_html)
@@ -166,7 +168,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:custom_text, cors.pearson, cors.spearman, hc,
-                           string.(vars);
+                           string.(vars), :custom_data;
                            title = title,
                            notes = notes)
 
@@ -180,10 +182,10 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:deps, cors.pearson, cors.spearman, hc,
-                           string.(vars))
+                           string.(vars), :deps_data)
 
         deps = dependencies(corrplot)
-        @test deps == []  # Should return empty array (uses Plotly which is in base)
+        @test deps == [:deps_data]  # Should return data_label
     end
 
     @testset "CorrPlot page integration" begin
@@ -192,12 +194,15 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:page_test, cors.pearson, cors.spearman, hc,
-                           string.(vars);
+                           string.(vars), :page_test_data;
                            title = "Page Integration Test")
+
+        # Prepare correlation data for external storage
+        corr_data = JSPlots.prepare_corrplot_data(cors.pearson, cors.spearman, hc, string.(vars))
 
         mktempdir() do tmpdir
             page = JSPlotPage(
-                Dict{Symbol, DataFrame}(),  # CorrPlot doesn't use data
+                Dict{Symbol, DataFrame}(:page_test_data => corr_data),
                 [corrplot];
                 dataformat=:csv_embedded
             )
@@ -221,7 +226,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:many_vars, cors.pearson, cors.spearman, hc,
-                           string.(vars))
+                           string.(vars), :many_vars_data)
 
         @test !isempty(corrplot.functional_html)
         @test !isempty(corrplot.appearance_html)
@@ -236,7 +241,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:minimal, cors.pearson, cors.spearman, hc,
-                           string.(vars))
+                           string.(vars), :minimal_data)
 
         @test !isempty(corrplot.functional_html)
         @test !isempty(corrplot.appearance_html)
@@ -274,10 +279,10 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
         corrplot = CorrPlot(:ordered, cors.pearson, cors.spearman, hc,
-                           string.(vars))
+                           string.(vars), :ordered_data)
 
         # Variables should be reordered in the plot
-        @test occursin("corrData", corrplot.functional_html)
+        @test occursin("loadDataset", corrplot.functional_html)
         @test occursin("labels", corrplot.functional_html)
     end
 
@@ -329,13 +334,14 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         scenario3 = CorrelationScenario("All Variables", cors3.pearson, cors3.spearman, hc3, string.(vars3))
 
         # Create advanced CorrPlot
-        corrplot = CorrPlot(:advanced_test, [scenario1, scenario2, scenario3];
+        corrplot = CorrPlot(:advanced_test, [scenario1, scenario2, scenario3], :adv_test_data;
                            title="Advanced Test",
                            default_scenario="All Variables",
                            default_variables=["x1", "x2"],
                            allow_manual_order=true)
 
         @test corrplot.chart_title == :advanced_test
+        @test corrplot.data_label == :adv_test_data
         @test !isempty(corrplot.functional_html)
         @test !isempty(corrplot.appearance_html)
 
@@ -361,6 +367,9 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         @test occursin("updateChart_advanced_test", corrplot.functional_html)
         @test occursin("populateVarSelector", corrplot.functional_html)
         @test occursin("initializeSortable", corrplot.functional_html)
+
+        # Check for external data loading
+        @test occursin("loadDataset", corrplot.functional_html)
     end
 
     @testset "Advanced CorrPlot without manual ordering" begin
@@ -369,7 +378,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
         scenario = CorrelationScenario("Test", cors.pearson, cors.spearman, hc, string.(vars))
 
-        corrplot = CorrPlot(:no_manual, [scenario];
+        corrplot = CorrPlot(:no_manual, [scenario], :no_manual_data;
                            allow_manual_order=false)
 
         # Should not have sortable elements when manual ordering is disabled
@@ -382,14 +391,14 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
         scenario = CorrelationScenario("Single", cors.pearson, cors.spearman, hc, string.(vars))
 
-        corrplot = CorrPlot(:single_scenario, [scenario])
+        corrplot = CorrPlot(:single_scenario, [scenario], :single_data)
 
         # Should not have scenario dropdown with single scenario
         @test !occursin("scenario_select", corrplot.appearance_html)
     end
 
     @testset "Advanced CorrPlot error - empty scenarios" begin
-        @test_throws ErrorException CorrPlot(:empty, CorrelationScenario[])
+        @test_throws ErrorException CorrPlot(:empty, CorrelationScenario[], :empty_data)
     end
 
     @testset "Advanced CorrPlot error - invalid default scenario" begin
@@ -398,7 +407,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
         scenario = CorrelationScenario("Test", cors.pearson, cors.spearman, hc, string.(vars))
 
-        @test_throws ErrorException CorrPlot(:bad_default, [scenario];
+        @test_throws ErrorException CorrPlot(:bad_default, [scenario], :bad_default_data;
                                             default_scenario="Nonexistent")
     end
 
@@ -408,7 +417,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc = cluster_from_correlation(cors.pearson, linkage=:ward)
         scenario = CorrelationScenario("Test", cors.pearson, cors.spearman, hc, string.(vars))
 
-        @test_throws ErrorException CorrPlot(:bad_vars, [scenario];
+        @test_throws ErrorException CorrPlot(:bad_vars, [scenario], :bad_vars_data;
                                             default_variables=["nonexistent"])
     end
 
@@ -423,13 +432,16 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         hc2 = cluster_from_correlation(cors2.pearson, linkage=:ward)
         scenario2 = CorrelationScenario("Second", cors2.pearson, cors2.spearman, hc2, string.(vars2))
 
-        corrplot = CorrPlot(:adv_integration, [scenario1, scenario2];
+        corrplot = CorrPlot(:adv_integration, [scenario1, scenario2], :adv_int_data;
                            title="Advanced Integration Test",
                            default_scenario="First")
 
+        # Prepare correlation data for external storage
+        corr_data = JSPlots.prepare_corrplot_advanced_data([scenario1, scenario2])
+
         mktempdir() do tmpdir
             page = JSPlotPage(
-                Dict{Symbol, DataFrame}(),
+                Dict{Symbol, DataFrame}(:adv_int_data => corr_data),
                 [corrplot];
                 dataformat=:csv_embedded
             )

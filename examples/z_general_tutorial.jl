@@ -565,8 +565,8 @@ od["3D Plots"] = [
     ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
     ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
     ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
+od["Variable Relationships"] = [("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations.")]
 od["Situational Charts"] = [
-    ("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations."),
     ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
     ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
 
@@ -738,8 +738,11 @@ hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
 scenario_vol = CorrelationScenario("Volatility Correlations",
     cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
 
+# Prepare correlation data for CorrPlot
+stock_corr_data = JSPlots.prepare_corrplot_advanced_data([scenario_short, scenario_long, scenario_vol])
+
 # Create advanced CorrPlot with multiple scenarios
-corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol];
+corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol], :stock_corr_data;
     title = "Stock Market Correlation Analysis - Multiple Scenarios",
     notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. Note that it will only appear if i) you select order by dendrogram and ii) you select all of the variables. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
     default_scenario = "Short-term Returns (Daily)",
@@ -1147,6 +1150,7 @@ financial_slides = Slides(
     delay = 1.0
 )
 
+
 # Collect all data
 all_data = Dict{Symbol, DataFrame}(
     :sales_data => df,
@@ -1156,7 +1160,8 @@ all_data = Dict{Symbol, DataFrame}(
     :business_path_data => df_business_path,
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
-    :boxwhiskers_data => boxwhiskers_data
+    :boxwhiskers_data => boxwhiskers_data,
+    :stock_corr_data => stock_corr_data
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -1210,18 +1215,28 @@ images_page =  JSPlotPage(
     dataformat = :parquet
 )
 
+variable_relationships_page =  JSPlotPage(
+    all_data,
+    [corrplot5],
+    tab_title="Variable Relationship Charts",
+    page_header = "Variable Relationship Charts",
+    notes = "This shows examples of CorrPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
+    dataformat = :parquet
+)
+
+
 situational_plot_page =  JSPlotPage(
     all_data,
-    [corrplot5, waterfall_chart, sankey_chart],
+    [waterfall_chart, sankey_chart],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
-    notes = "This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.  CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
+    notes = "This shows examples of Waterfall and SanKey. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.",
     dataformat = :parquet
 )
 
 
 subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page],
-    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, situational_plot_page])
+    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page])
 
 
 # Create final Pages object with all pages including the new theoretical ones

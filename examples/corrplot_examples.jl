@@ -94,7 +94,7 @@ hc1 = cluster_from_correlation(cors1.pearson, linkage=:ward)
 
 # Create correlation plot
 corrplot1 = CorrPlot(:financial_corr, cors1.pearson, cors1.spearman, hc1,
-                     string.(financial_vars);
+                     string.(financial_vars), :financial_corr_data;
     title = "Financial Metrics Correlation Analysis",
     notes = "This correlation plot shows relationships between financial metrics. The dendrogram groups similar metrics based on correlation patterns. Variables are automatically reordered by clustering to reveal correlation blocks. Top-right triangle shows Pearson correlations (linear relationships), while bottom-left shows Spearman correlations (rank-based, captures non-linear monotonic relationships)."
 )
@@ -176,7 +176,7 @@ hc2 = cluster_from_correlation(cors2.pearson, linkage=:average)
 
 # Create correlation plot
 corrplot2 = CorrPlot(:sales_corr, cors2.pearson, cors2.spearman, hc2,
-                     string.(sales_vars);
+                     string.(sales_vars), :sales_corr_data;
     title = "Sales Performance Metrics Correlation (Average Linkage)",
     notes = "Explore how different sales and operational metrics relate to each other. This example uses average linkage clustering (compare to Ward linkage in Example 1). The dendrogram reveals which metrics cluster together. For example, you might see that customer satisfaction groups with response time, while revenue metrics cluster separately."
 )
@@ -256,7 +256,7 @@ hc3 = cluster_from_correlation(cors3.pearson, linkage=:single)
 
 # Create correlation plot
 corrplot3 = CorrPlot(:science_corr, cors3.pearson, cors3.spearman, hc3,
-                     string.(science_vars);
+                     string.(science_vars), :science_corr_data;
     title = "Scientific Measurements Correlation (Single Linkage)",
     notes = "This correlation plot reveals clusters of related physical, thermal, chemical, and spectroscopic properties. Single linkage clustering creates elongated clusters by merging based on nearest neighbors. Notice how the dendrogram groups density-related properties together, thermal properties in another cluster, and spectroscopic measurements in a third cluster. The dual correlation display (Pearson vs Spearman) helps identify non-linear relationships."
 )
@@ -339,7 +339,7 @@ hc4 = cluster_from_correlation(cors4.pearson, linkage=:complete)
 
 # Create correlation plot
 corrplot4 = CorrPlot(:patient_corr, cors4.pearson, cors4.spearman, hc4,
-                     string.(patient_vars);
+                     string.(patient_vars), :patient_corr_data;
     title = "Patient Health Metrics Correlation (Complete Linkage)",
     notes = "This correlation analysis helps identify relationships between vital signs, lab results, and cardiovascular risk. Complete linkage clustering (farthest neighbor) tends to create compact, well-separated clusters. The dendrogram reveals natural groupings: blood pressure metrics cluster together, lipid panel values form another group, and glucose-related metrics cluster separately. Compare Pearson (upper right) vs Spearman (lower left) correlations to see if relationships are linear or non-linear."
 )
@@ -434,7 +434,7 @@ scenario_ap = CorrelationScenario("Asia-Pacific",
     cors_ap.pearson, cors_ap.spearman, hc_ap, indicators)
 
 # Create advanced CorrPlot
-corrplot6 = CorrPlot(:econ_advanced, [scenario_na, scenario_eu, scenario_ap];
+corrplot6 = CorrPlot(:econ_advanced, [scenario_na, scenario_eu, scenario_ap], :econ_adv_data;
     title = "Economic Indicators - Regional Comparison",
     notes = "Compare how economic indicators correlate across North America, Europe, and Asia-Pacific. Switch between regions to see different correlation patterns. Select specific indicators to focus your analysis. Notice how GDP Growth correlates differently with other indicators in each region, reflecting different economic structures and policies.",
     default_scenario = "North America",
@@ -547,7 +547,7 @@ scenario_winter = CorrelationScenario("Winter",
     cors_winter.pearson, cors_winter.spearman, hc_winter, climate_vars)
 
 # Create advanced CorrPlot
-corrplot7 = CorrPlot(:climate_advanced, [scenario_spring, scenario_summer, scenario_fall, scenario_winter];
+corrplot7 = CorrPlot(:climate_advanced, [scenario_spring, scenario_summer, scenario_fall, scenario_winter], :climate_adv_data;
     title = "Climate Variable Correlations - Seasonal Analysis",
     notes = "Explore how climate variable correlations change across seasons. Switch between Spring, Summer, Fall, and Winter to see seasonal patterns. Notice how Temperature-Humidity correlations flip between seasons (negative in Spring/Fall, positive in Summer/Winter). Use variable selection to focus on specific climate factors. Try manual ordering to group related variables by type (temperature-related, precipitation-related, etc.).",
     default_scenario = "Summer",
@@ -654,9 +654,27 @@ if !isdir(output_dir)
     mkpath(output_dir)
 end
 
-# Create embedded format (CorrPlot doesn't use data, so empty dict is fine)
+# Prepare correlation data for all corrplots
+corr_data1 = JSPlots.prepare_corrplot_data(cors1.pearson, cors1.spearman, hc1, string.(financial_vars))
+corr_data2 = JSPlots.prepare_corrplot_data(cors2.pearson, cors2.spearman, hc2, string.(sales_vars))
+corr_data3 = JSPlots.prepare_corrplot_data(cors3.pearson, cors3.spearman, hc3, string.(science_vars))
+corr_data4 = JSPlots.prepare_corrplot_data(cors4.pearson, cors4.spearman, hc4, string.(patient_vars))
+corr_data6 = JSPlots.prepare_corrplot_advanced_data([scenario_na, scenario_eu, scenario_ap])
+corr_data7 = JSPlots.prepare_corrplot_advanced_data([scenario_spring, scenario_summer, scenario_fall, scenario_winter])
+
+# Create data dictionary with all correlation data
+data_dict = Dict{Symbol, DataFrame}(
+    :financial_corr_data => corr_data1,
+    :sales_corr_data => corr_data2,
+    :science_corr_data => corr_data3,
+    :patient_corr_data => corr_data4,
+    :econ_adv_data => corr_data6,
+    :climate_adv_data => corr_data7
+)
+
+# Create embedded format
 page = JSPlotPage(
-    Dict{Symbol, DataFrame}(),
+    data_dict,
     [header,
      example1_text, corrplot1,
      example2_text, corrplot2,

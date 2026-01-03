@@ -114,7 +114,8 @@ end
 
 """
     CorrPlot(chart_title::Symbol, pearson::AbstractMatrix, spearman::AbstractMatrix,
-             hc::Clustering.Hclust, var_labels::Union{Vector{String}, Vector{Symbol}}; kwargs...)
+             hc::Clustering.Hclust, var_labels::Union{Vector{String}, Vector{Symbol}},
+             data_label::Symbol; kwargs...)
 
 Create an interactive correlation plot with hierarchical clustering dendrogram.
 
@@ -124,6 +125,7 @@ Create an interactive correlation plot with hierarchical clustering dendrogram.
 - `spearman::AbstractMatrix{<:Real}`: Spearman correlation matrix (accepts Matrix, Hermitian, etc.)
 - `hc::Clustering.Hclust`: Hierarchical clustering result from `cluster_from_correlation`
 - `var_labels::Union{Vector{String}, Vector{Symbol}}`: Variable names for labeling
+- `data_label::Symbol`: Label for the correlation data to be stored externally
 
 # Keyword Arguments
 - `title::String`: Chart title (default: `"Correlation Plot with Dendrogram"`)
@@ -136,10 +138,15 @@ vars = [:revenue, :cost, :profit, :units]
 cors = compute_correlations(df, vars)
 hc = cluster_from_correlation(cors.pearson, linkage=:ward)
 
+# Prepare correlation data for external storage
+corr_df = prepare_corrplot_data(cors.pearson, cors.spearman, hc, vars)
+
 # Create plot
-corrplot = CorrPlot(:correlations, cors.pearson, cors.spearman, hc,
-                    string.(vars);
+corrplot = CorrPlot(:correlations, cors.pearson, cors.spearman, hc, vars, :corr_data;
                     title="Business Metrics Correlation")
+
+# Create page with data
+page = JSPlotPage(Dict(:corr_data => corr_df), [corrplot])
 ```
 
 # Interactive Features
@@ -152,6 +159,7 @@ corrplot = CorrPlot(:correlations, cors.pearson, cors.spearman, hc,
 """
 struct CorrPlot <: JSPlotsType
     chart_title::Symbol
+    data_label::Symbol
     functional_html::String
     appearance_html::String
 
@@ -159,7 +167,8 @@ struct CorrPlot <: JSPlotsType
                       pearson::AbstractMatrix{<:Real},
                       spearman::AbstractMatrix{<:Real},
                       hc::Clustering.Hclust,
-                      var_labels::Union{Vector{String}, Vector{Symbol}};
+                      var_labels::Union{Vector{String}, Vector{Symbol}},
+                      data_label::Symbol;
                       title::String = "Correlation Plot with Dendrogram",
                       notes::String = "")
 
@@ -189,36 +198,41 @@ struct CorrPlot <: JSPlotsType
         pearson_ordered = pearson_mat[ordered_indices, ordered_indices]
         spearman_ordered = spearman_mat[ordered_indices, ordered_indices]
 
-        # Build JSON data for correlations (asymmetric matrix)
-        corr_data = []
+        # Build DataFrame for correlations in long format
+        # Create vectors for all combinations
+        asset1_vec = String[]
+        asset2_vec = String[]
+        correlation_vec = Float64[]
+        scenario_vec = String[]  # Will be "default" for basic CorrPlot
+        correlation_method_vec = String[]
+
         for i in 1:n
             for j in 1:n
-                if i == j
-                    push!(corr_data, Dict(
-                        "var1" => ordered_labels[i],
-                        "var2" => ordered_labels[j],
-                        "correlation" => 1.0,
-                        "type" => "diagonal"
-                    ))
-                elseif i < j
-                    # Upper triangle: Pearson
-                    push!(corr_data, Dict(
-                        "var1" => ordered_labels[i],
-                        "var2" => ordered_labels[j],
-                        "correlation" => pearson_ordered[i, j],
-                        "type" => "Pearson"
-                    ))
-                else
-                    # Lower triangle: Spearman
-                    push!(corr_data, Dict(
-                        "var1" => ordered_labels[i],
-                        "var2" => ordered_labels[j],
-                        "correlation" => spearman_ordered[i, j],
-                        "type" => "Spearman"
-                    ))
-                end
+                # Store both Pearson and Spearman for each pair
+                # Pearson
+                push!(asset1_vec, ordered_labels[i])
+                push!(asset2_vec, ordered_labels[j])
+                push!(correlation_vec, pearson_ordered[i, j])
+                push!(scenario_vec, "default")
+                push!(correlation_method_vec, "pearson")
+
+                # Spearman
+                push!(asset1_vec, ordered_labels[i])
+                push!(asset2_vec, ordered_labels[j])
+                push!(correlation_vec, spearman_ordered[i, j])
+                push!(scenario_vec, "default")
+                push!(correlation_method_vec, "spearman")
             end
         end
+
+        # Create DataFrame
+        corr_df = DataFrame(
+            asset1 = asset1_vec,
+            asset2 = asset2_vec,
+            correlation = correlation_vec,
+            scenario = scenario_vec,
+            correlation_method = correlation_method_vec
+        )
 
         # Extract dendrogram structure
         # Build merge tree to draw dendrogram
@@ -237,43 +251,66 @@ struct CorrPlot <: JSPlotsType
         """
 
         # Build functional HTML (JavaScript)
-        corr_json = JSON.json(corr_data)
         dendro_json = JSON.json(dendro_data)
         labels_json = JSON.json(ordered_labels)
 
         functional_html = """
         (function() {
-            const corrData = $corr_json;
             const dendroData = $dendro_json;
             const labels = $labels_json;
             const n = labels.length;
 
-            // Build correlation matrix for heatmap
-            const zValues = [];
-            const textValues = [];
-            const hoverText = [];
+            // Load correlation data from external file
+            loadDataset('$(data_label)').then(function(corrDataRaw) {
+                // Build correlation matrix for heatmap from loaded data
+                const zValues = [];
+                const textValues = [];
+                const hoverText = [];
 
-            for (let i = 0; i < n; i++) {
-                zValues[i] = [];
-                textValues[i] = [];
-                hoverText[i] = [];
-                for (let j = 0; j < n; j++) {
-                    const item = corrData.find(d => d.var1 === labels[i] && d.var2 === labels[j]);
-                    const corr = item.correlation;
-                    zValues[i][j] = corr;
+                for (let i = 0; i < n; i++) {
+                    zValues[i] = [];
+                    textValues[i] = [];
+                    hoverText[i] = [];
+                    for (let j = 0; j < n; j++) {
+                        // Get Pearson correlation (upper triangle)
+                        const pearsonItem = corrDataRaw.find(d =>
+                            d.asset1 === labels[i] && d.asset2 === labels[j] &&
+                            d.correlation_method === 'pearson');
+                        const pearsonCorr = pearsonItem ? pearsonItem.correlation : 0;
 
-                    if (item.type === 'diagonal') {
-                        textValues[i][j] = '1.00';
-                        hoverText[i][j] = labels[i];
-                    } else if (item.type === 'Pearson') {
-                        textValues[i][j] = 'P: ' + corr.toFixed(2);
-                        hoverText[i][j] = labels[i] + ' vs ' + labels[j] + '<br>Pearson: ' + corr.toFixed(3);
-                    } else {
-                        textValues[i][j] = 'S: ' + corr.toFixed(2);
-                        hoverText[i][j] = labels[i] + ' vs ' + labels[j] + '<br>Spearman: ' + corr.toFixed(3);
+                        // Get Spearman correlation (lower triangle)
+                        const spearmanItem = corrDataRaw.find(d =>
+                            d.asset1 === labels[i] && d.asset2 === labels[j] &&
+                            d.correlation_method === 'spearman');
+                        const spearmanCorr = spearmanItem ? spearmanItem.correlation : 0;
+
+                        // Use Pearson for upper triangle and diagonal, Spearman for lower
+                        let corr, type;
+                        if (i === j) {
+                            corr = pearsonCorr;
+                            type = 'diagonal';
+                        } else if (i < j) {
+                            corr = pearsonCorr;
+                            type = 'Pearson';
+                        } else {
+                            corr = spearmanCorr;
+                            type = 'Spearman';
+                        }
+
+                        zValues[i][j] = corr;
+
+                        if (type === 'diagonal') {
+                            textValues[i][j] = '1.00';
+                            hoverText[i][j] = labels[i];
+                        } else if (type === 'Pearson') {
+                            textValues[i][j] = 'P: ' + corr.toFixed(2);
+                            hoverText[i][j] = labels[i] + ' vs ' + labels[j] + '<br>Pearson: ' + corr.toFixed(3);
+                        } else {
+                            textValues[i][j] = 'S: ' + corr.toFixed(2);
+                            hoverText[i][j] = labels[i] + ' vs ' + labels[j] + '<br>Spearman: ' + corr.toFixed(3);
+                        }
                     }
                 }
-            }
 
             // Create correlation heatmap
             const heatmapTrace = {
@@ -319,49 +356,127 @@ struct CorrPlot <: JSPlotsType
                 }
             }
 
-            Plotly.newPlot('corrmatrix_$chart_title_str', [heatmapTrace], heatmapLayout, {responsive: true});
+                Plotly.newPlot('corrmatrix_$chart_title_str', [heatmapTrace], heatmapLayout, {responsive: true});
 
-            // Draw dendrogram
-            if (dendroData.shapes && dendroData.shapes.length > 0) {
-                const leafTrace = {
-                    x: dendroData.leafPositions,
-                    y: Array(n).fill(0),
-                    mode: 'text',
-                    type: 'scatter',
-                    text: dendroData.leafLabels,
-                    textposition: 'bottom center',
-                    textfont: { size: 10 },
-                    hoverinfo: 'text',
-                    showlegend: false
-                };
+                // Draw dendrogram
+                if (dendroData.shapes && dendroData.shapes.length > 0) {
+                    const leafTrace = {
+                        x: dendroData.leafPositions,
+                        y: Array(n).fill(0),
+                        mode: 'text',
+                        type: 'scatter',
+                        text: dendroData.leafLabels,
+                        textposition: 'bottom center',
+                        textfont: { size: 10 },
+                        hoverinfo: 'text',
+                        showlegend: false
+                    };
 
-                const dendroLayout = {
-                    title: 'Hierarchical Clustering Dendrogram',
-                    xaxis: {
-                        visible: false,
-                        range: [-0.5, n - 0.5]
-                    },
-                    yaxis: {
-                        title: 'Height',
-                        range: [0, dendroData.maxHeight * 1.15]
-                    },
-                    margin: { l: 80, r: 50, b: 120, t: 50 },
-                    showlegend: false,
-                    shapes: dendroData.shapes
-                };
+                    const dendroLayout = {
+                        title: 'Hierarchical Clustering Dendrogram',
+                        xaxis: {
+                            visible: false,
+                            range: [-0.5, n - 0.5]
+                        },
+                        yaxis: {
+                            title: 'Height',
+                            range: [0, dendroData.maxHeight * 1.15]
+                        },
+                        margin: { l: 80, r: 50, b: 120, t: 50 },
+                        showlegend: false,
+                        shapes: dendroData.shapes
+                    };
 
-                Plotly.newPlot('dendrogram_$chart_title_str', [leafTrace], dendroLayout, {responsive: true});
-            }
+                    Plotly.newPlot('dendrogram_$chart_title_str', [leafTrace], dendroLayout, {responsive: true});
+                }
+            }).catch(function(error) {
+                console.error('Error loading correlation data:', error);
+                document.getElementById('corrmatrix_$chart_title_str').innerHTML =
+                    '<p style="color: red;">Error loading correlation data: ' + error.message + '</p>';
+            });
         })();
         """
 
-        new(chart_title, functional_html, appearance_html)
+        new(chart_title, data_label, functional_html, appearance_html)
     end
 
     # Simple inner constructor for direct construction (used by advanced CorrPlot)
-    function CorrPlot(chart_title::Symbol, functional_html::String, appearance_html::String)
-        new(chart_title, functional_html, appearance_html)
+    function CorrPlot(chart_title::Symbol, data_label::Symbol, functional_html::String, appearance_html::String)
+        new(chart_title, data_label, functional_html, appearance_html)
     end
+end
+
+# Add dependencies function for CorrPlot
+dependencies(cp::CorrPlot) = [cp.data_label]
+
+"""
+    prepare_corrplot_data(pearson::AbstractMatrix, spearman::AbstractMatrix,
+                          hc::Clustering.Hclust, var_labels::Vector; scenario::String="default")
+
+Helper function to create the correlation DataFrame needed for external storage.
+
+Returns a DataFrame with columns:
+- `asset1::String`: First variable name
+- `asset2::String`: Second variable name
+- `correlation::Float64`: Correlation coefficient (-1 to 1)
+- `scenario::String`: Scenario name
+- `correlation_method::String`: "pearson" or "spearman"
+
+# Example
+```julia
+corr_df = prepare_corrplot_data(pearson, spearman, hc, [:x1, :x2, :x3])
+page = JSPlotPage(Dict(:corr_data => corr_df), [corrplot])
+```
+"""
+function prepare_corrplot_data(pearson::AbstractMatrix{<:Real},
+                               spearman::AbstractMatrix{<:Real},
+                               hc::Clustering.Hclust,
+                               var_labels::Union{Vector{String}, Vector{Symbol}};
+                               scenario::String="default")
+    # Convert to standard types
+    pearson_mat = Matrix{Float64}(pearson)
+    spearman_mat = Matrix{Float64}(spearman)
+    labels = string.(var_labels)
+    n = length(labels)
+
+    # Reorder according to dendrogram
+    ordered_indices = hc.order
+    ordered_labels = labels[ordered_indices]
+    pearson_ordered = pearson_mat[ordered_indices, ordered_indices]
+    spearman_ordered = spearman_mat[ordered_indices, ordered_indices]
+
+    # Build DataFrame
+    asset1_vec = String[]
+    asset2_vec = String[]
+    correlation_vec = Float64[]
+    scenario_vec = String[]
+    correlation_method_vec = String[]
+
+    for i in 1:n
+        for j in 1:n
+            # Pearson
+            push!(asset1_vec, ordered_labels[i])
+            push!(asset2_vec, ordered_labels[j])
+            push!(correlation_vec, pearson_ordered[i, j])
+            push!(scenario_vec, scenario)
+            push!(correlation_method_vec, "pearson")
+
+            # Spearman
+            push!(asset1_vec, ordered_labels[i])
+            push!(asset2_vec, ordered_labels[j])
+            push!(correlation_vec, spearman_ordered[i, j])
+            push!(scenario_vec, scenario)
+            push!(correlation_method_vec, "spearman")
+        end
+    end
+
+    return DataFrame(
+        asset1 = asset1_vec,
+        asset2 = asset2_vec,
+        correlation = correlation_vec,
+        scenario = scenario_vec,
+        correlation_method = correlation_method_vec
+    )
 end
 
 """
@@ -442,11 +557,6 @@ function extract_dendrogram_structure(hc::Clustering.Hclust, labels::Vector{Stri
         "leafPositions" => leaf_positions,
         "leafLabels" => leaf_labels
     )
-end
-
-# Dependencies function for CorrPlot
-function dependencies(x::CorrPlot)
-    return []  # Uses Plotly.js which is already included in the base template
 end
 
 # Export the new functions and structs

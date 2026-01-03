@@ -1,13 +1,14 @@
 # Advanced CorrPlot constructor with multiple scenarios, variable selection, and manual ordering
 
 """
-    CorrPlot(chart_title::Symbol, scenarios::Vector{CorrelationScenario}; kwargs...)
+    CorrPlot(chart_title::Symbol, scenarios::Vector{CorrelationScenario}, data_label::Symbol; kwargs...)
 
 Create an advanced interactive correlation plot with multiple scenarios, variable selection, and manual ordering.
 
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this chart
 - `scenarios::Vector{CorrelationScenario}`: Multiple correlation scenarios to switch between
+- `data_label::Symbol`: Label for the correlation data in external storage
 
 # Keyword Arguments
 - `title::String`: Chart title (default: `"Correlation Plot with Dendrogram"`)
@@ -24,7 +25,7 @@ scenario1 = CorrelationScenario("Price Returns",
 scenario2 = CorrelationScenario("Volume",
     pearson_vol, spearman_vol, hc_vol, asset_names)
 
-corrplot = CorrPlot(:multi_corr, [scenario1, scenario2];
+corrplot = CorrPlot(:multi_corr, [scenario1, scenario2], :corr_data;
     title="Asset Correlations",
     default_scenario="Price Returns",
     default_variables=["AAPL", "MSFT", "GOOGL"],
@@ -39,7 +40,8 @@ corrplot = CorrPlot(:multi_corr, [scenario1, scenario2];
 - Heatmap with Pearson (upper-right) and Spearman (lower-left) correlations
 """
 function CorrPlot(chart_title::Symbol,
-                  scenarios::Vector{CorrelationScenario};
+                  scenarios::Vector{CorrelationScenario},
+                  data_label::Symbol;
                   title::String = "Correlation Plot with Dendrogram",
                   notes::String = "",
                   default_scenario::Union{String, Nothing} = nothing,
@@ -61,29 +63,15 @@ function CorrPlot(chart_title::Symbol,
 
     chart_title_str = string(chart_title)
 
-    # Prepare scenarios data for JavaScript
+    # Prepare correlation DataFrame for external storage
+    corr_df = prepare_corrplot_advanced_data(scenarios)
+
+    # Prepare scenarios data for JavaScript (dendrogram and labels only)
     scenarios_data = []
     for scenario in scenarios
         n = length(scenario.var_labels)
         ordered_indices = scenario.hc.order
         ordered_labels = scenario.var_labels[ordered_indices]
-
-        # Reorder correlation matrices
-        pearson_ordered = scenario.pearson[ordered_indices, ordered_indices]
-        spearman_ordered = scenario.spearman[ordered_indices, ordered_indices]
-
-        # Build correlation data - store both Pearson and Spearman for each pair
-        corr_data = []
-        for i in 1:n
-            for j in i+1:n  # Only upper triangle (excluding diagonal)
-                push!(corr_data, Dict(
-                    "var1" => ordered_labels[i],
-                    "var2" => ordered_labels[j],
-                    "pearson" => pearson_ordered[i, j],
-                    "spearman" => spearman_ordered[i, j]
-                ))
-            end
-        end
 
         # Extract dendrogram structure
         dendro_data = extract_dendrogram_structure(scenario.hc, ordered_labels)
@@ -92,7 +80,6 @@ function CorrPlot(chart_title::Symbol,
             "name" => scenario.name,
             "labels" => ordered_labels,
             "allLabels" => scenario.var_labels,  # Unordered for selection
-            "corrData" => corr_data,
             "dendroData" => dendro_data
         ))
     end
@@ -207,6 +194,16 @@ function CorrPlot(chart_title::Symbol,
         let currentScenario = scenarios[$(default_idx - 1)];
         let selectedVars = $default_vars_json;
         let manualOrder = null;
+        let corrDataRaw = null;
+
+        // Load correlation data from external dataset
+        loadDataset('$(data_label)').then(function(data) {
+            corrDataRaw = data;
+            populateVarSelector();
+            updateChart_$chart_title();
+        }).catch(function(error) {
+            console.error('Failed to load correlation data:', error);
+        });
 
         // Initialize variable selector
         function populateVarSelector() {
@@ -247,16 +244,52 @@ function CorrPlot(chart_title::Symbol,
         }
 
         window.updateChart_$chart_title = function() {
-            // Update scenario
-            const scenarioSelect = document.getElementById('scenario_select_$chart_title_str');
-            if (scenarioSelect) {
-                const scenarioName = scenarioSelect.value;
-                currentScenario = scenarios.find(s => s.name === scenarioName);
+            if (!corrDataRaw) {
+                console.warn('Correlation data not loaded yet');
+                return;
             }
 
-            // Update selected variables
-            const varSelect = document.getElementById('var_select_$chart_title_str');
-            selectedVars = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+            // Check if scenario changed
+            const scenarioSelect = document.getElementById('scenario_select_$chart_title_str');
+            let scenarioChanged = false;
+            if (scenarioSelect) {
+                const scenarioName = scenarioSelect.value;
+                const newScenario = scenarios.find(s => s.name === scenarioName);
+                if (newScenario !== currentScenario) {
+                    scenarioChanged = true;
+                    // Remember currently selected variables
+                    const varSelect = document.getElementById('var_select_$chart_title_str');
+                    const previouslySelected = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+                    // Update to new scenario
+                    currentScenario = newScenario;
+
+                    // Repopulate variable selector with new scenario's variables
+                    populateVarSelector();
+
+                    // Try to keep the same variables selected if they exist in new scenario
+                    const newVarSelect = document.getElementById('var_select_$chart_title_str');
+                    const availableVars = Array.from(newVarSelect.options).map(opt => opt.value);
+                    const varsToSelect = previouslySelected.filter(v => availableVars.includes(v));
+
+                    // If none of the previous variables exist in new scenario, select all
+                    if (varsToSelect.length < 2) {
+                        selectedVars = currentScenario.allLabels;
+                        Array.from(newVarSelect.options).forEach(opt => opt.selected = true);
+                    } else {
+                        selectedVars = varsToSelect;
+                        Array.from(newVarSelect.options).forEach(opt => {
+                            opt.selected = varsToSelect.includes(opt.value);
+                        });
+                    }
+                }
+            }
+
+            // Update selected variables (if scenario didn't change)
+            if (!scenarioChanged) {
+                const varSelect = document.getElementById('var_select_$chart_title_str');
+                selectedVars = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+            }
 
             if (selectedVars.length < 2) {
                 console.warn('Select at least 2 variables');
@@ -305,23 +338,36 @@ function CorrPlot(chart_title::Symbol,
                         textValues[i][j] = '1.00';
                         hoverText[i][j] = orderedVars[i];
                     } else {
-                        // Find correlation pair in either direction
-                        const item = currentScenario.corrData.find(d =>
-                            (d.var1 === orderedVars[i] && d.var2 === orderedVars[j]) ||
-                            (d.var1 === orderedVars[j] && d.var2 === orderedVars[i]));
+                        // Find correlation values from external data
+                        // Data can have either (asset1, asset2) or (asset2, asset1) ordering
+                        let pearsonCorr = 0;
+                        let spearmanCorr = 0;
+
+                        const pearsonItem = corrDataRaw.find(d =>
+                            d.scenario === currentScenario.name &&
+                            d.correlation_method === 'pearson' &&
+                            ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
+                             (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+
+                        const spearmanItem = corrDataRaw.find(d =>
+                            d.scenario === currentScenario.name &&
+                            d.correlation_method === 'spearman' &&
+                            ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
+                             (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+
+                        pearsonCorr = pearsonItem ? pearsonItem.correlation : 0;
+                        spearmanCorr = spearmanItem ? spearmanItem.correlation : 0;
 
                         if (i < j) {
                             // Upper-right triangle: always show Pearson
-                            const corr = item ? item.pearson : 0;
-                            zValues[i][j] = corr;
-                            textValues[i][j] = 'P: ' + corr.toFixed(2);
-                            hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Pearson: ' + corr.toFixed(3);
+                            zValues[i][j] = pearsonCorr;
+                            textValues[i][j] = 'P: ' + pearsonCorr.toFixed(2);
+                            hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Pearson: ' + pearsonCorr.toFixed(3);
                         } else {
                             // Lower-left triangle: always show Spearman
-                            const corr = item ? item.spearman : 0;
-                            zValues[i][j] = corr;
-                            textValues[i][j] = 'S: ' + corr.toFixed(2);
-                            hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Spearman: ' + corr.toFixed(3);
+                            zValues[i][j] = spearmanCorr;
+                            textValues[i][j] = 'S: ' + spearmanCorr.toFixed(2);
+                            hoverText[i][j] = orderedVars[i] + ' vs ' + orderedVars[j] + '<br>Spearman: ' + spearmanCorr.toFixed(3);
                         }
                     }
                 }
@@ -415,12 +461,54 @@ function CorrPlot(chart_title::Symbol,
             }
         };
 
-        // Initial setup
-        populateVarSelector();
-        updateChart_$chart_title();
+        // Note: populateVarSelector() and updateChart_$chart_title() are called
+        // after data loads in the loadDataset promise above
     })();
     """
 
-    # Use the simple inner constructor from corrplot.jl
-    return CorrPlot(chart_title, functional_html, appearance_html)
+    # Use the inner constructor from corrplot.jl
+    return CorrPlot(chart_title, data_label, functional_html, appearance_html)
+end
+
+# Helper function to prepare correlation data for advanced CorrPlot
+function prepare_corrplot_advanced_data(scenarios::Vector{CorrelationScenario})
+    asset1_vec = String[]
+    asset2_vec = String[]
+    correlation_vec = Float64[]
+    scenario_vec = String[]
+    correlation_method_vec = String[]
+
+    for scenario in scenarios
+        n = length(scenario.var_labels)
+
+        # Store correlations for all unique pairs
+        for i in 1:n
+            for j in (i+1):n  # Only upper triangle, excluding diagonal
+                asset1 = scenario.var_labels[i]
+                asset2 = scenario.var_labels[j]
+
+                # Add Pearson correlation
+                push!(asset1_vec, asset1)
+                push!(asset2_vec, asset2)
+                push!(correlation_vec, scenario.pearson[i, j])
+                push!(scenario_vec, scenario.name)
+                push!(correlation_method_vec, "pearson")
+
+                # Add Spearman correlation
+                push!(asset1_vec, asset1)
+                push!(asset2_vec, asset2)
+                push!(correlation_vec, scenario.spearman[i, j])
+                push!(scenario_vec, scenario.name)
+                push!(correlation_method_vec, "spearman")
+            end
+        end
+    end
+
+    return DataFrame(
+        asset1 = asset1_vec,
+        asset2 = asset2_vec,
+        correlation = correlation_vec,
+        scenario = scenario_vec,
+        correlation_method = correlation_method_vec
+    )
 end
