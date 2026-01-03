@@ -130,7 +130,8 @@ od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/exam
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
-    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering"),
+    ("BoxAndWhiskers", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html", "Make horizontal Box and Whiskers plots showing distribution statistics (min, Q1, median, Q3, max) with mean and standard deviation overlays for grouped data.")]
 od["3D Plots"] = [
     ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
     ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
@@ -166,7 +167,8 @@ od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/exam
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
-    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering"),
+    ("BoxAndWhiskers", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html", "Make horizontal Box and Whiskers plots showing distribution statistics (min, Q1, median, Q3, max) with mean and standard deviation overlays for grouped data.")]
 od["3D Plots"] = [
     ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
     ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),

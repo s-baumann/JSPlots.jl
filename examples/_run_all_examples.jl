@@ -1,5 +1,6 @@
 
 include("areachart_examples.jl")
+include("boxandwhiskers_examples.jl")
 include("codeblock_examples.jl")
 include("distplot_examples.jl")
 include("kerneldensity_examples.jl")

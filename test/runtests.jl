@@ -78,6 +78,10 @@ using Random
         include("chart_tests/test_waterfall.jl")
     end
 
+    @testset "BoxAndWhiskers Tests" begin
+        include("chart_tests/test_boxandwhiskers.jl")
+    end
+
     @testset "SanKey Tests" begin
         include("chart_tests/test_sankey.jl")
     end

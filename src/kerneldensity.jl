@@ -160,7 +160,7 @@ struct KernelDensity <: JSPlotsType
                    max="$(bandwidth_slider_max)"
                    step="$(bandwidth_slider_step)"
                    value="$(bandwidth_default)"
-                   style="width: 300px; margin-left: 10px;">
+                   style="width: 75%; margin-left: 10px;">
             <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto, max ≈ $(round(bandwidth_slider_max, digits=1)))</span>
         </div>
         """

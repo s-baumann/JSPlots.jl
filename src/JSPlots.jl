@@ -385,6 +385,9 @@ module JSPlots
     include("waterfall.jl")
     export Waterfall
 
+    include("boxandwhiskers.jl")
+    export BoxAndWhiskers
+
     include("sankey.jl")
     export SanKey
 

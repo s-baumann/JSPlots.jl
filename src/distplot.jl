@@ -346,7 +346,7 @@ struct DistPlot <: JSPlotsType
                    max="100"
                    step="1"
                    value="$histogram_bins"
-                   style="width: 300px; margin-left: 10px;">
+                   style="width: 75%; margin-left: 10px;">
         </div>
         """
         bins_slider_js = """

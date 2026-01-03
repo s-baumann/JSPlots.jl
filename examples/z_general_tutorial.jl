@@ -559,7 +559,8 @@ od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/exam
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
-    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering")]
+    ("PieChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html", "Pie charts with faceting and filtering"),
+    ("BoxAndWhiskers", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html", "Make horizontal Box and Whiskers plots showing distribution statistics (min, Q1, median, Q3, max) with mean and standard deviation overlays for grouped data.")]
 od["3D Plots"] = [
     ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
     ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
@@ -864,6 +865,7 @@ sankey_chart = SanKey(:ribbon, sankey_df, :sankey_data;
     title = "Trader Portfolio Evolution (2015-2023)",
     notes="A SanKey diagram showing how 50 traders' portfolios evolved from 2015 to 2023. Use the 'Affiliation' dropdown to switch between crypto holdings and stock holdings. The ribbon width represents portfolio value. In 2015, all traders held Bitcoin; by 2023, holdings diversified into various cryptocurrencies and stock categories. Notice migration patterns: early Bitcoin holders moving to Ethereum/Solana, and tech stock investors shifting to growth/crypto stocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html\" style=\"color: blue; font-weight: bold;\">See here for SanKey examples</a>")
 
+
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
 
@@ -888,6 +890,63 @@ pie_chart = PieChart(:pie, df, :sales_data,
     color_cols=[:region, :product, :segment, :month, :quarter],
     value_cols=[:sales, :profit, :quantity, :cost, :customers, :satisfaction],
     notes="This gives piecharts. Note that piecharts are generally pretty bad (google it to see more on this) but up to you if you like them. There is faceting available, filtering and you can change the grouping variable and the numeric variable being aggregated over to determine pie width. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for PieChart examples</a>")
+
+# BoxAndWhiskers
+# Create detailed product performance data with multiple grouping levels
+ll = DataFrame[]
+rng_bw = StableRNG(999)
+for region in ["North America", "Europe", "Asia Pacific", "Latin America"]
+    for product in ["Premium", "Standard", "Economy"]
+        for segment in ["Enterprise", "SMB", "Consumer"]
+            # Generate realistic performance metrics
+            n_samples = 150
+            base_value = (region == "North America" ? 100 :
+                         region == "Europe" ? 90 :
+                         region == "Asia Pacific" ? 110 :
+                         80)
+            product_mult = (product == "Premium" ? 1.5 :
+                           product == "Standard" ? 1.0 :
+                           0.7)
+            segment_mult = (segment == "Enterprise" ? 1.4 :
+                           segment == "SMB" ? 1.0 :
+                           0.8)
+
+            mean_revenue = base_value * product_mult * segment_mult
+            std_revenue = mean_revenue * 0.25
+
+            # Create group identifier
+            group_name = "$(product)-$(segment)-$(region[1:4])"  # Abbreviated region name
+
+            revenues = abs.(randn(rng_bw, n_samples) .* std_revenue .+ mean_revenue)
+            satisfaction = 5.0 .- (randn(rng_bw, n_samples) .* 0.5)  # Out of 5
+
+            temp_df = DataFrame(
+                group = fill(group_name, n_samples),
+                revenue = revenues,
+                satisfaction = satisfaction,
+                region = fill(region, n_samples),
+                product = fill(product, n_samples),
+                segment = fill(segment, n_samples),
+                quarter = rand(rng_bw, ["Q1", "Q2", "Q3", "Q4"], n_samples)
+            )
+            push!(ll, temp_df)
+        end
+    end
+end
+boxwhiskers_data = reduce(vcat, ll)
+
+
+boxwhiskers_chart = BoxAndWhiskers(:boxwhiskers, boxwhiskers_data, :boxwhiskers_data;
+    x_cols = [:revenue, :satisfaction],
+    color_cols = [:product, :segment, :region],
+    grouping_cols = [:region, :product, :segment],
+    group_col = :group,
+    filters = Dict{Symbol,Any}(
+        :quarter => ["Q1", "Q2", "Q3", "Q4"],
+        :region => ["North America", "Europe", "Asia Pacific", "Latin America"]
+    ),
+    title = "BoxAndWhiskers",
+    notes="Box and Whiskers plots represent the distribution of various groups of observations in an aligned way. <strong>Key Features:</strong> Each horizontal box shows min, 10% quantile, 25% quantile, median, 75% quantile, 90% quantile, and max values. In addition there is a seperate bar with the mean, mean ± 1 standard deviation and mean ± 2 standard deviations. You can differentiate the various gropus using colour or by rearranging them with 'Color by' or 'Group by'. You can also switch the variable being summarised with the Value dropdown. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BoxAndWhiskers examples</a>")
 
 # ===== 3D Plotting =====
 plotting_3d_section = TextBlock("<h1>Three-Dimensional Plots</h1>")
@@ -1097,6 +1156,7 @@ all_data = Dict{Symbol, DataFrame}(
     :business_path_data => df_business_path,
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
+    :boxwhiskers_data => boxwhiskers_data
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -1125,10 +1185,10 @@ two_d_plot_page =  JSPlotPage(
 
 distributional_plot_page =  JSPlotPage(
     all_data,
-    [distribution_section, dist_chart, kde_chart, pie_chart],
+    [distribution_section, dist_chart, kde_chart, pie_chart, boxwhiskers_chart],
     tab_title="Distributional Charts",
     page_header = "Distributional Charts",
-    notes = "This shows examples of DistPlot, KernelDensity and PieChart.",
+    notes = "This shows examples of DistPlot, KernelDensity, PieChart and BoxAndWhiskers.",
     dataformat = :parquet
 )
 
@@ -1155,7 +1215,7 @@ situational_plot_page =  JSPlotPage(
     [corrplot5, waterfall_chart, sankey_chart],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
-    notes = "This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
+    notes = "This shows examples of Waterfall, SanKey, and CorrPlot. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.  CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
     dataformat = :parquet
 )
 
