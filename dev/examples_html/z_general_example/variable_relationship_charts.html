@@ -899,6 +899,41 @@ $(function(){
     // Load graph data
     loadDataset('stock_corr_data').then(function(data) {
         graphData = data;
+
+        // Check if data has correlation_method column and populate selector dynamically
+        if (data.length > 0) {
+            const firstRow = data[0];
+            const hasCorrelationMethod = 'correlation_method' in firstRow || firstRow.hasOwnProperty('correlation_method');
+            if (hasCorrelationMethod) {
+                // Get unique correlation methods from data
+                const corrMethods = [...new Set(data.map(row => row.correlation_method).filter(m => m))];
+
+                if (corrMethods.length > 0) {
+                    const select = document.getElementById('corr_method_select_stock_network');
+                    const container = document.getElementById('corr_method_container_stock_network');
+
+                    if (select && container) {
+                        // Clear existing options
+                        select.innerHTML = '';
+
+                        // Add options for each correlation method (first one is default)
+                        corrMethods.forEach((method, idx) => {
+                            const option = document.createElement('option');
+                            option.value = method;
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            if (idx === 0) {
+                                option.selected = true;
+                            }
+                            select.appendChild(option);
+                        });
+
+                        // Show the selector
+                        container.style.display = 'block';
+                    }
+                }
+            }
+        }
+
         populateVarSelector_stock_network();  // Populate selector BEFORE initializing graph
         initializeGraph_stock_network();
     }).catch(function(error) {
@@ -1192,10 +1227,21 @@ $(function(){
 
     function getEdgesForScenario_stock_network(scenario, varsToShow, cutoffValue, showEdgeLabels) {
         const edges = [];
-        const scenarioData = graphData.filter(row =>
-            (!row.scenario || row.scenario === scenario.name) &&
-            varsToShow.includes(row.node1) && varsToShow.includes(row.node2)
-        );
+
+        // Get selected correlation method (if selector exists)
+        const corrMethodSelect = document.getElementById('corr_method_select_stock_network');
+        const selectedCorrMethod = corrMethodSelect ? corrMethodSelect.value : null;
+
+        const scenarioData = graphData.filter(row => {
+            // Basic filters
+            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
+
+            // Correlation method filter (only if data has this column AND selector exists)
+            const corrMethodMatch = !selectedCorrMethod || !row.correlation_method || row.correlation_method === selectedCorrMethod;
+
+            return scenarioMatch && nodeMatch && corrMethodMatch;
+        });
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
@@ -1315,8 +1361,8 @@ $(function(){
 <br>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
 <div class="graph-container">
-    <h2>Stock Correlation Network - Multiple Scenarios</h2>
-    <p>This Graph uses the EXACT SAME data as the CorrPlot above - no duplication! Both charts consume stock_corr_data with columns: node1, node2, strength, scenario, correlation_method, sector. <strong>Scenario switching:</strong> Select different scenarios (Short-term, Long-term, Volatility) and watch how the edges change while nodes stay in the same positions. <strong>Variable selection:</strong> Deselect stocks to make them translucent, then click 'Recalculate Graph' to remove them. Stocks are colored by sector showing how same-sector stocks cluster together. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html" style="color: blue; font-weight: bold;">See here for more Graph examples</a></p>
+    <h2>Graph</h2>
+    <p>This Graph allows you to visualise the relationships between variables. The dataformat to make this is a DataFrame with columns: node1, node2, strength, scenario, correlation_method, sector. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html" style="color: blue; font-weight: bold;">See here for more Graph examples</a></p>
     <div style="margin-bottom: 10px;">
     <label for="scenario_select_stock_network"><strong>Scenario:</strong></label>
     <select id="scenario_select_stock_network" onchange="updateEdges_stock_network()">
@@ -1340,6 +1386,13 @@ $(function(){
     <span style="margin-left: 10px; font-size: 12px; color: #666;">
         (Apply variable selection & reorganize layout)
     </span>
+</div>
+
+    <div id="corr_method_container_stock_network" style="margin-bottom: 10px; display: none;">
+    <label for="corr_method_select_stock_network"><strong>Correlation method:</strong></label>
+    <select id="corr_method_select_stock_network" onchange="updateEdges_stock_network()">
+        <!-- Options will be populated dynamically from data -->
+    </select>
 </div>
 
     <div style="margin-bottom: 10px;">
