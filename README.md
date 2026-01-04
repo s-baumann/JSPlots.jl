@@ -46,10 +46,15 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[Surface3D](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html)** - 3D surface visualization
 - **[ScatterSurface3D](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html)** - 3D scatter plots with fitted surfaces (L1/L2 minimization)
 
-#### Situational Plots
+#### Variable Relationship Plots
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
+- **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
+
+#### Situational Plots
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
 - **[SanKey](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html)** - Make SanKey plots showing how observations change affiliation over multiple waves.
+- **[RadarChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html)** - Make RadarCharts showing how a single entity performs on various metrics.
+
 
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 
 
