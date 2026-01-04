@@ -355,9 +355,9 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
         @test occursin("var_select_advanced_test", corrplot.appearance_html)
         @test occursin("Select Variables", corrplot.appearance_html)
 
-        # Check for order toggle
-        @test occursin("use_dendro_order_advanced_test", corrplot.appearance_html)
-        @test occursin("Order by Dendrogram", corrplot.appearance_html)
+        # Check for order mode dropdown
+        @test occursin("order_mode_advanced_test", corrplot.appearance_html)
+        @test occursin("Order by dendrogram", corrplot.appearance_html)
 
         # Check for sortable functionality
         @test occursin("sortable_vars_advanced_test", corrplot.appearance_html)
@@ -455,7 +455,7 @@ import JSPlots: CorrPlot, dependencies, compute_correlations, cluster_from_corre
             @test occursin("Advanced Integration Test", html_content)
             @test occursin("scenario_select", html_content)
             @test occursin("var_select", html_content)
-            @test occursin("Order by Dendrogram", html_content)
+            @test occursin("Order by dendrogram", html_content)
             @test occursin("Sortable", html_content)
         end
     end

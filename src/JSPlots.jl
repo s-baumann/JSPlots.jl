@@ -395,6 +395,9 @@ module JSPlots
     include("corrplot_advanced.jl")
     export CorrPlot, CorrelationScenario, compute_correlations, cluster_from_correlation
 
+    include("graph.jl")
+    export Graph, GraphScenario, calculate_smart_cutoff
+
     include("table.jl")
     export Table
 

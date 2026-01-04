@@ -738,8 +738,18 @@ hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
 scenario_vol = CorrelationScenario("Volatility Correlations",
     cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
 
-# Prepare correlation data for CorrPlot
+# Prepare correlation data - this will be used by BOTH CorrPlot and Graph
+# The data has columns: node1, node2, strength, scenario, correlation_method
 stock_corr_data = JSPlots.prepare_corrplot_advanced_data([scenario_short, scenario_long, scenario_vol])
+
+# Add sector information for Graph node coloring
+stock_sectors = Dict(
+    "AAPL" => "Technology", "MSFT" => "Technology", "GOOGL" => "Technology",
+    "AMZN" => "Technology", "TSLA" => "Technology",
+    "JPM" => "Finance", "BAC" => "Finance", "GS" => "Finance",
+    "JNJ" => "Healthcare", "PFE" => "Healthcare"
+)
+stock_corr_data[!, :sector] = [stock_sectors[asset] for asset in stock_corr_data.node1]
 
 # Create advanced CorrPlot with multiple scenarios
 corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol], :stock_corr_data;
@@ -748,6 +758,33 @@ corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_v
     default_scenario = "Short-term Returns (Daily)",
     default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
     allow_manual_order = true
+)
+
+# Graph - Network visualization using the EXACT SAME data as CorrPlot
+# Both charts read from :stock_corr_data - no data duplication!
+stock_names_for_graph = unique([stock_corr_data.node1; stock_corr_data.node2])
+
+# Create GraphScenario objects for all three scenarios
+graph_scenario_short = GraphScenario("Short-term Returns (Daily)", true, stock_names_for_graph)
+graph_scenario_long = GraphScenario("Long-term Returns (20-day)", true, stock_names_for_graph)
+graph_scenario_vol = GraphScenario("Volatility Correlations", true, stock_names_for_graph)
+
+# Calculate smart cutoff using Pearson correlations only
+pearson_data = filter(r -> r.correlation_method == "pearson", stock_corr_data)
+smart_cutoff = calculate_smart_cutoff(pearson_data, "Short-term Returns (Daily)", true, 0.15)
+
+# Create Graph using the SAME data as CorrPlot
+graph_stock = Graph(:stock_network,
+                    [graph_scenario_short, graph_scenario_long, graph_scenario_vol],
+                    :stock_corr_data;  # SAME data label as CorrPlot!
+    title = "Stock Correlation Network - Multiple Scenarios",
+    notes = "This Graph uses the EXACT SAME data as the CorrPlot above - no duplication! Both charts consume stock_corr_data with columns: node1, node2, strength, scenario, correlation_method, sector. <strong>Scenario switching:</strong> Select different scenarios (Short-term, Long-term, Volatility) and watch how the edges change while nodes stay in the same positions. <strong>Variable selection:</strong> Deselect stocks to make them translucent, then click 'Recalculate Graph' to remove them. Stocks are colored by sector showing how same-sector stocks cluster together. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Graph examples</a>",
+    cutoff = smart_cutoff,
+    color_cols = [:sector],
+    default_color_col = :sector,
+    show_edge_labels = false,
+    layout = :cose,
+    default_scenario = "Short-term Returns (Daily)"
 )
 
 # Waterfall
@@ -1161,7 +1198,7 @@ all_data = Dict{Symbol, DataFrame}(
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
     :boxwhiskers_data => boxwhiskers_data,
-    :stock_corr_data => stock_corr_data
+    :stock_corr_data => stock_corr_data  # Shared by both CorrPlot and Graph!
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -1217,10 +1254,10 @@ images_page =  JSPlotPage(
 
 variable_relationships_page =  JSPlotPage(
     all_data,
-    [corrplot5],
+    [corrplot5, graph_stock],
     tab_title="Variable Relationship Charts",
     page_header = "Variable Relationship Charts",
-    notes = "This shows examples of CorrPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.",
+    notes = "This shows examples of CorrPlot and Graph using the same underlying correlation data. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network with nodes and edges. Both charts demonstrate different ways to explore the same correlation structure.",
     dataformat = :parquet
 )
 

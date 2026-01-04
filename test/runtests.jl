@@ -90,6 +90,10 @@ using Random
         include("chart_tests/test_corrplot.jl")
     end
 
+    @testset "Graph Tests" begin
+        include("chart_tests/test_graph.jl")
+    end
+
     @testset "Table Tests" begin
         include("chart_tests/test_table.jl")
     end

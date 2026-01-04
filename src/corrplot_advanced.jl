@@ -116,10 +116,12 @@ function CorrPlot(chart_title::Symbol,
     order_toggle_html = if allow_manual_order
         """
         <div style="margin-bottom: 15px;">
-            <label>
-                <input type="checkbox" id="use_dendro_order_$chart_title_str" checked onchange="updateChart_$chart_title()">
-                <strong>Order by Dendrogram</strong>
-            </label>
+            <label for="order_mode_$chart_title_str"><strong>Variable ordering:</strong></label>
+            <select id="order_mode_$chart_title_str" onchange="updateChart_$chart_title()">
+                <option value="dendrogram" selected>Order by dendrogram</option>
+                <option value="alphabetical">Order alphabetically</option>
+                <option value="manual">Order manually</option>
+            </select>
         </div>
         """
     else
@@ -297,26 +299,29 @@ function CorrPlot(chart_title::Symbol,
             }
 
             // Check order mode
-            const useDendroOrder = document.getElementById('use_dendro_order_$chart_title_str');
-            const useManual = useDendroOrder && !useDendroOrder.checked;
+            const orderModeSelect = document.getElementById('order_mode_$chart_title_str');
+            const orderMode = orderModeSelect ? orderModeSelect.value : 'dendrogram';
 
             // Show/hide manual ordering UI
             const manualDiv = document.getElementById('manual_order_$chart_title_str');
             if (manualDiv) {
-                manualDiv.style.display = useManual ? 'block' : 'none';
+                manualDiv.style.display = (orderMode === 'manual') ? 'block' : 'none';
             }
 
-            if (useManual) {
+            if (orderMode === 'manual') {
                 initializeSortable();
             }
 
             // Determine variable order
             let orderedVars;
-            if (useManual && manualOrder) {
+            if (orderMode === 'manual' && manualOrder) {
                 // Use manual order, filtered to selected vars
                 orderedVars = manualOrder.filter(v => selectedVars.includes(v));
+            } else if (orderMode === 'alphabetical') {
+                // Use alphabetical order
+                orderedVars = selectedVars.slice().sort();
             } else {
-                // Use dendrogram order
+                // Use dendrogram order (default)
                 orderedVars = currentScenario.labels.filter(v => selectedVars.includes(v));
             }
 
@@ -339,24 +344,24 @@ function CorrPlot(chart_title::Symbol,
                         hoverText[i][j] = orderedVars[i];
                     } else {
                         // Find correlation values from external data
-                        // Data can have either (asset1, asset2) or (asset2, asset1) ordering
+                        // Data can have either (node1, node2) or (node2, node1) ordering
                         let pearsonCorr = 0;
                         let spearmanCorr = 0;
 
                         const pearsonItem = corrDataRaw.find(d =>
                             d.scenario === currentScenario.name &&
                             d.correlation_method === 'pearson' &&
-                            ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
-                             (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+                            ((d.node1 === orderedVars[i] && d.node2 === orderedVars[j]) ||
+                             (d.node1 === orderedVars[j] && d.node2 === orderedVars[i])));
 
                         const spearmanItem = corrDataRaw.find(d =>
                             d.scenario === currentScenario.name &&
                             d.correlation_method === 'spearman' &&
-                            ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
-                             (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+                            ((d.node1 === orderedVars[i] && d.node2 === orderedVars[j]) ||
+                             (d.node1 === orderedVars[j] && d.node2 === orderedVars[i])));
 
-                        pearsonCorr = pearsonItem ? pearsonItem.correlation : 0;
-                        spearmanCorr = spearmanItem ? spearmanItem.correlation : 0;
+                        pearsonCorr = pearsonItem ? pearsonItem.strength : 0;
+                        spearmanCorr = spearmanItem ? spearmanItem.strength : 0;
 
                         if (i < j) {
                             // Upper-right triangle: always show Pearson
@@ -423,7 +428,7 @@ function CorrPlot(chart_title::Symbol,
             const dendroDiv = document.getElementById('dendrogram_$chart_title_str');
             const allVarsSelected = selectedVars.length === currentScenario.allLabels.length;
 
-            if (!useManual && allVarsSelected && currentScenario.dendroData.shapes && currentScenario.dendroData.shapes.length > 0) {
+            if (orderMode === 'dendrogram' && allVarsSelected && currentScenario.dendroData.shapes && currentScenario.dendroData.shapes.length > 0) {
                 dendroDiv.style.display = 'block';
 
                 // Show full dendrogram with all variables
@@ -505,9 +510,9 @@ function prepare_corrplot_advanced_data(scenarios::Vector{CorrelationScenario})
     end
 
     return DataFrame(
-        asset1 = asset1_vec,
-        asset2 = asset2_vec,
-        correlation = correlation_vec,
+        node1 = asset1_vec,        # Using generic names so Graph can also use this data
+        node2 = asset2_vec,
+        strength = correlation_vec,
         scenario = scenario_vec,
         correlation_method = correlation_method_vec
     )
