@@ -398,6 +398,9 @@ module JSPlots
     include("graph.jl")
     export Graph, GraphScenario, calculate_smart_cutoff
 
+    include("radarchart.jl")
+    export RadarChart
+
     include("table.jl")
     export Table
 

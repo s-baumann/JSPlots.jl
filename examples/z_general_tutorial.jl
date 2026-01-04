@@ -905,6 +905,158 @@ sankey_chart = SanKey(:ribbon, sankey_df, :sankey_data;
     title = "Trader Portfolio Evolution (2015-2023)",
     notes="A SanKey diagram showing how 50 traders' portfolios evolved from 2015 to 2023. Use the 'Affiliation' dropdown to switch between crypto holdings and stock holdings. The ribbon width represents portfolio value. In 2015, all traders held Bitcoin; by 2023, holdings diversified into various cryptocurrencies and stock categories. Notice migration patterns: early Bitcoin holders moving to Ethereum/Solana, and tech stock investors shifting to growth/crypto stocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html\" style=\"color: blue; font-weight: bold;\">See here for SanKey examples</a>")
 
+# ===== RadarChart =====
+# Create comprehensive product performance data for radar chart
+rng_radar = StableRNG(777)
+radar_products = [
+    "Cloud Platform Pro", "Cloud Platform Starter", "Cloud Platform Enterprise",
+    "Analytics Suite Pro", "Analytics Suite Starter", "Analytics Suite Enterprise",
+    "Security Shield Pro", "Security Shield Starter", "Security Shield Enterprise",
+    "Collaboration Hub Pro", "Collaboration Hub Starter", "Collaboration Hub Enterprise"
+]
+
+radar_data_rows = []
+for product in radar_products
+    # Determine product category and tier
+    if occursin("Cloud Platform", product)
+        category = "Infrastructure"
+        base_tech = 85.0
+        base_ui = 70.0
+        base_perf = 90.0
+    elseif occursin("Analytics", product)
+        category = "Data & AI"
+        base_tech = 90.0
+        base_ui = 85.0
+        base_perf = 80.0
+    elseif occursin("Security", product)
+        category = "Security"
+        base_tech = 95.0
+        base_ui = 65.0
+        base_perf = 85.0
+    else  # Collaboration
+        category = "Productivity"
+        base_tech = 75.0
+        base_ui = 95.0
+        base_perf = 70.0
+    end
+
+    # Determine tier
+    if occursin("Enterprise", product)
+        tier = "Enterprise"
+        tier_mult = 1.2
+        price_mult = 3.0
+    elseif occursin("Pro", product)
+        tier = "Professional"
+        tier_mult = 1.0
+        price_mult = 1.5
+    else
+        tier = "Starter"
+        tier_mult = 0.8
+        price_mult = 1.0
+    end
+
+    # Technical Performance metrics (grouped)
+    tech_reliability = min(100.0, base_tech * tier_mult + randn(rng_radar) * 3)
+    tech_scalability = min(100.0, (base_tech - 5) * tier_mult + randn(rng_radar) * 3)
+    tech_api_quality = min(100.0, (base_tech + 5) * tier_mult + randn(rng_radar) * 3)
+    tech_integration = min(100.0, base_tech * tier_mult + randn(rng_radar) * 4)
+
+    # User Experience metrics (grouped)
+    ux_ease_of_use = min(100.0, base_ui * tier_mult + randn(rng_radar) * 4)
+    ux_design = min(100.0, (base_ui + 5) * tier_mult + randn(rng_radar) * 3)
+    ux_customization = min(100.0, (base_ui - 10) * tier_mult + randn(rng_radar) * 5)
+    ux_mobile = min(100.0, base_ui * tier_mult + randn(rng_radar) * 6)
+
+    # Performance metrics (grouped)
+    perf_speed = min(100.0, base_perf * tier_mult + randn(rng_radar) * 4)
+    perf_efficiency = min(100.0, (base_perf + 5) * tier_mult + randn(rng_radar) * 3)
+    perf_uptime = min(100.0, (base_perf + 10) * tier_mult + randn(rng_radar) * 2)
+
+    # Business Value metrics (grouped)
+    biz_roi = min(100.0, 100.0 - (price_mult - 1) * 20 + randn(rng_radar) * 5)
+    biz_support = min(100.0, 60.0 * tier_mult + randn(rng_radar) * 8)
+    biz_documentation = min(100.0, 70.0 * tier_mult + randn(rng_radar) * 5)
+    biz_training = min(100.0, 65.0 * tier_mult + randn(rng_radar) * 7)
+
+    # Market Position metrics (grouped)
+    market_adoption = min(100.0, 50.0 + randn(rng_radar) * 15)
+    market_satisfaction = min(100.0, 75.0 + randn(rng_radar) * 10)
+    market_growth = min(100.0, 60.0 + randn(rng_radar) * 12)
+
+    push!(radar_data_rows, (
+        label = product,
+        category = category,
+        tier = tier,
+        # Technical Performance
+        Reliability = tech_reliability,
+        Scalability = tech_scalability,
+        API_Quality = tech_api_quality,
+        Integration = tech_integration,
+        # User Experience
+        Ease_of_Use = ux_ease_of_use,
+        Design = ux_design,
+        Customization = ux_customization,
+        Mobile = ux_mobile,
+        # Performance
+        Speed = perf_speed,
+        Efficiency = perf_efficiency,
+        Uptime = perf_uptime,
+        # Business Value
+        ROI = biz_roi,
+        Support = biz_support,
+        Documentation = biz_documentation,
+        Training = biz_training,
+        # Market Position
+        Adoption = market_adoption,
+        Satisfaction = market_satisfaction,
+        Growth = market_growth
+    ))
+end
+
+radar_df = DataFrame(radar_data_rows)
+
+# Define grouping for radar chart axes
+radar_group_mapping = Dict{Symbol, String}(
+    :Reliability => "Technical Performance",
+    :Scalability => "Technical Performance",
+    :API_Quality => "Technical Performance",
+    :Integration => "Technical Performance",
+    :Ease_of_Use => "User Experience",
+    :Design => "User Experience",
+    :Customization => "User Experience",
+    :Mobile => "User Experience",
+    :Speed => "Performance",
+    :Efficiency => "Performance",
+    :Uptime => "Performance",
+    :ROI => "Business Value",
+    :Support => "Business Value",
+    :Documentation => "Business Value",
+    :Training => "Business Value",
+    :Adoption => "Market Position",
+    :Satisfaction => "Market Position",
+    :Growth => "Market Position"
+)
+
+radar_chart = RadarChart(:product_radar, :radar_data;
+    value_cols = [:Reliability, :Scalability, :API_Quality, :Integration,
+                  :Ease_of_Use, :Design, :Customization, :Mobile,
+                  :Speed, :Efficiency, :Uptime,
+                  :ROI, :Support, :Documentation, :Training,
+                  :Adoption, :Satisfaction, :Growth],
+    label_col = :label,
+    group_mapping = radar_group_mapping,
+    facet_x = :category,
+    facet_y = :tier,
+    color_col = :category,
+    variable_selector = true,
+    max_variables = 3,
+    title = "Product Performance RadarChart",
+    notes = "RadarChart (spider chart) displaying multi-dimensional product analysis across 18 metrics grouped into 5 categories: Technical Performance, User Experience, Performance, Business Value, and Market Position. <strong>Interactive Features:</strong> (1) <strong>Variable Selector:</strong> Choose which metrics to display (minimum 3, recommended 6-8 for clarity). (2) <strong>Item Selector:</strong> Select which products to compare. (3) <strong>Faceting:</strong> Filter by product category (Infrastructure/Data & AI/Security/Productivity) and tier (Enterprise/Professional/Starter). (4) <strong>Grouped Axes:</strong> Related metrics are grouped together with category labels. (5) <strong>Color Coding:</strong> Products colored by category for easy identification. All scores normalized to 0-100 scale where higher is better. <strong>Tip:</strong> Start by selecting 6-8 metrics from different groups and 2-3 products to compare their strengths and weaknesses. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for RadarChart examples</a>",
+    max_value = 100.0,
+    show_legend = true,
+    show_grid_labels = true
+)
+
 
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
@@ -1197,6 +1349,7 @@ all_data = Dict{Symbol, DataFrame}(
     :business_path_data => df_business_path,
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
+    :radar_data => radar_df,
     :boxwhiskers_data => boxwhiskers_data,
     :stock_corr_data => stock_corr_data
 )
@@ -1264,10 +1417,10 @@ variable_relationships_page =  JSPlotPage(
 
 situational_plot_page =  JSPlotPage(
     all_data,
-    [waterfall_chart, sankey_chart],
+    [waterfall_chart, sankey_chart, radar_chart],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
-    notes = "This shows examples of Waterfall and SanKey. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.",
+    notes = "This shows examples of Waterfall, SanKey, and RadarChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics.",
     dataformat = :parquet
 )
 

@@ -1208,6 +1208,431 @@ $(function(){
         console.error('Error loading data for chart ribbon:', error);
     });
 })();
+(function() {
+    let radarData_product_radar = null;
+    let selectedVariables_product_radar = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
+    let selectedLabels_product_radar = [];
+
+    const VALUE_COLS = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
+    const LABEL_COL = "label";
+    const GROUP_MAPPING = {"Scalability":"Technical Performance","Adoption":"Market Position","ROI":"Business Value","Uptime":"Performance","Reliability":"Technical Performance","Support":"Business Value","API_Quality":"Technical Performance","Design":"User Experience","Documentation":"Business Value","Mobile":"User Experience","Growth":"Market Position","Integration":"Technical Performance","Training":"Business Value","Satisfaction":"Market Position","Customization":"User Experience","Ease_of_Use":"User Experience","Speed":"Performance","Efficiency":"Performance"};
+    const FACET_X = "category";
+    const FACET_Y = "tier";
+    const COLOR_COL = "category";
+    const DEFAULT_COLOR = "#1f77b4";
+    const MAX_VALUE = 100.0;
+    const MAX_VARIABLES = 3;
+    const SHOW_LEGEND = true;
+    const SHOW_GRID_LABELS = true;
+    const VARIABLE_SELECTOR = true;
+
+    // Load data
+    loadDataset('radar_data').then(function(data) {
+        radarData_product_radar = data;
+        initializeRadarChart_product_radar();
+    }).catch(function(error) {
+        console.error('Error loading data:', error);
+        document.getElementById('radar_product_radar').innerHTML =
+            '<p style="color: red;">Error loading data: ' + error.message + '</p>';
+    });
+
+    function initializeRadarChart_product_radar() {
+        const data = radarData_product_radar;
+        if (!data || data.length === 0) {
+            document.getElementById('radar_product_radar').innerHTML = '<p>No data available</p>';
+            return;
+        }
+
+        // Populate variable selector
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_product_radar');
+            if (varSelect) {
+                varSelect.innerHTML = '';
+                VALUE_COLS.forEach(function(col) {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.text = col.replace(/_/g, ' ');
+                    option.selected = selectedVariables_product_radar.includes(col);
+                    varSelect.appendChild(option);
+                });
+            }
+        } else {
+            selectedVariables_product_radar = VALUE_COLS;
+        }
+
+        // Populate label selector
+        const labelSelect = document.getElementById('label_select_product_radar');
+        if (labelSelect) {
+            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            labelSelect.innerHTML = '';
+            uniqueLabels.forEach(function(label) {
+                const option = document.createElement('option');
+                option.value = label;
+                option.text = label;
+                option.selected = true;
+                labelSelect.appendChild(option);
+            });
+            const maxToSelect = MAX_VARIABLES || uniqueLabels.length;
+            selectedLabels_product_radar = uniqueLabels.slice(0, maxToSelect);
+
+            // Set selected options
+            Array.from(labelSelect.options).forEach(function(opt) {
+                opt.selected = selectedLabels_product_radar.includes(opt.value);
+            });
+        }
+
+        // Populate facet selectors
+        if (FACET_X) {
+            const facetXSelect = document.getElementById('facet_x_product_radar');
+            if (facetXSelect) {
+                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
+                uniqueX.forEach(function(val) {
+                    const option = document.createElement('option');
+                    option.value = val;
+                    option.text = val;
+                    facetXSelect.appendChild(option);
+                });
+            }
+        }
+
+        if (FACET_Y) {
+            const facetYSelect = document.getElementById('facet_y_product_radar');
+            if (facetYSelect) {
+                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
+                uniqueY.forEach(function(val) {
+                    const option = document.createElement('option');
+                    option.value = val;
+                    option.text = val;
+                    facetYSelect.appendChild(option);
+                });
+            }
+        }
+
+        updateRadarChart_product_radar();
+    }
+
+    window.updateRadarChart_product_radar = function() {
+        // Get selected variables
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_product_radar');
+            if (varSelect) {
+                selectedVariables_product_radar = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+                if (selectedVariables_product_radar.length < 3) {
+                    document.getElementById('radar_product_radar').innerHTML =
+                        '<p style="color: orange;">Please select at least 3 variables to display a radar chart.</p>';
+                    return;
+                }
+            }
+        }
+
+        // Get selected labels
+        const labelSelect = document.getElementById('label_select_product_radar');
+        if (labelSelect) {
+            selectedLabels_product_radar = Array.from(labelSelect.selectedOptions).map(opt => opt.value);
+
+            if (selectedLabels_product_radar.length === 0) {
+                document.getElementById('radar_product_radar').innerHTML =
+                    '<p style="color: orange;">Please select at least one item to display.</p>';
+                return;
+            }
+        }
+
+        // Get facet values
+        let facetXVal = null;
+        let facetYVal = null;
+        if (FACET_X) {
+            const facetXSelect = document.getElementById('facet_x_product_radar');
+            if (facetXSelect) facetXVal = facetXSelect.value;
+        }
+        if (FACET_Y) {
+            const facetYSelect = document.getElementById('facet_y_product_radar');
+            if (facetYSelect) facetYVal = facetYSelect.value;
+        }
+
+        renderRadarChart_product_radar(selectedVariables_product_radar, selectedLabels_product_radar, facetXVal, facetYVal);
+    }
+
+    function renderRadarChart_product_radar(variables, labels, facetX, facetY) {
+        const data = radarData_product_radar;
+        const container = document.getElementById('radar_product_radar');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        // Filter data
+        let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
+
+        if (facetX && facetX !== '') {
+            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
+        }
+        if (facetY && facetY !== '') {
+            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        }
+
+        if (filteredData.length === 0) {
+            container.innerHTML = '<p>No data matches the selected filters.</p>';
+            return;
+        }
+
+        // Calculate max value if not specified
+        let maxVal = MAX_VALUE;
+        if (!maxVal) {
+            maxVal = 0;
+            filteredData.forEach(function(d) {
+                variables.forEach(function(v) {
+                    const val = parseFloat(d[v]);
+                    if (!isNaN(val) && val > maxVal) {
+                        maxVal = val;
+                    }
+                });
+            });
+            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
+        }
+
+        // Group variables
+        const groupedVars = {};
+        const ungroupedVars = [];
+
+        variables.forEach(function(v) {
+            if (GROUP_MAPPING.hasOwnProperty(v)) {
+                const group = GROUP_MAPPING[v];
+                if (!groupedVars[group]) {
+                    groupedVars[group] = [];
+                }
+                groupedVars[group].push(v);
+            } else {
+                ungroupedVars.push(v);
+            }
+        });
+
+        // Create ordered list of axes
+        const axes = [];
+        Object.keys(groupedVars).sort().forEach(function(group) {
+            groupedVars[group].forEach(function(v) {
+                axes.push({ name: v, group: group });
+            });
+        });
+        ungroupedVars.forEach(function(v) {
+            axes.push({ name: v, group: null });
+        });
+
+        // Create color mapping
+        const colorMap = {};
+        if (COLOR_COL) {
+            const uniqueColors = [...new Set(filteredData.map(d => d[COLOR_COL]))];
+            // D3 v3 API: use d3.scale.category10()
+            const colorScale = d3.scale.category10();
+            uniqueColors.forEach(function(c, i) {
+                colorMap[c] = colorScale(i);
+            });
+        }
+
+        // Calculate layout
+        const numCharts = filteredData.length;
+        const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
+        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+
+        // Create SVG container
+        const svg = d3.select(container)
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', Math.ceil(numCharts / chartsPerRow) * chartSize);
+
+        // Draw each radar chart
+        filteredData.forEach(function(d, idx) {
+            const row = Math.floor(idx / chartsPerRow);
+            const col = idx % chartsPerRow;
+            const x = col * chartSize;
+            const y = row * chartSize;
+
+            const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
+
+            drawSingleRadar_product_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+        });
+
+        // Add legend
+        if (SHOW_LEGEND && COLOR_COL) {
+            addLegend_product_radar(container, colorMap);
+        }
+    }
+
+    function drawSingleRadar_product_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
+        const margin = 50;
+        const radius = (size - 2 * margin) / 2;
+        const centerX = offsetX + size / 2;
+        const centerY = offsetY + size / 2;
+
+        const g = svg.append('g')
+            .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Draw grid circles
+        const levels = 5;
+        for (let i = 1; i <= levels; i++) {
+            const r = radius * i / levels;
+            g.append('circle')
+                .attr('r', r)
+                .attr('fill', 'none')
+                .attr('stroke', '#ddd')
+                .attr('stroke-width', 1);
+
+            if (SHOW_GRID_LABELS && i === levels) {
+                g.append('text')
+                    .attr('x', 5)
+                    .attr('y', -r)
+                    .attr('font-size', '10px')
+                    .attr('fill', '#666')
+                    .text(maxVal.toFixed(1));
+            }
+        }
+
+        // Draw axes and track groups
+        const angleSlice = Math.PI * 2 / axes.length;
+        let currentGroup = null;
+        let groupStartAngle = 0;
+        const groupRanges = [];
+
+        axes.forEach(function(axis, i) {
+            const angle = angleSlice * i - Math.PI / 2;
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle);
+
+            // Draw axis line
+            g.append('line')
+                .attr('x1', 0)
+                .attr('y1', 0)
+                .attr('x2', x)
+                .attr('y2', y)
+                .attr('stroke', '#999')
+                .attr('stroke-width', 1);
+
+            // Draw axis label
+            const labelRadius = radius + 15;
+            const labelX = labelRadius * Math.cos(angle);
+            const labelY = labelRadius * Math.sin(angle);
+
+            g.append('text')
+                .attr('x', labelX)
+                .attr('y', labelY)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '10px')
+                .attr('fill', '#333')
+                .text(axis.name.replace(/_/g, ' '));
+
+            // Track group changes
+            if (axis.group && axis.group !== currentGroup) {
+                if (currentGroup !== null) {
+                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
+                }
+                currentGroup = axis.group;
+                groupStartAngle = angle;
+            }
+        });
+
+        // Add final group
+        if (currentGroup !== null) {
+            const finalAngle = angleSlice * axes.length - Math.PI / 2;
+            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
+        }
+
+        // Draw group labels
+        groupRanges.forEach(function(range) {
+            const midAngle = (range.start + range.end) / 2;
+            const labelRadius = radius + 35;
+            const x = labelRadius * Math.cos(midAngle);
+            const y = labelRadius * Math.sin(midAngle);
+
+            g.append('text')
+                .attr('x', x)
+                .attr('y', y)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '11px')
+                .attr('font-weight', 'bold')
+                .attr('fill', '#666')
+                .text(range.group);
+        });
+
+        // Draw data polygon
+        const points = [];
+        axes.forEach(function(axis, i) {
+            const value = parseFloat(dataPoint[axis.name]) || 0;
+            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            const angle = angleSlice * i - Math.PI / 2;
+            const r = radius * normalizedValue;
+            const x = r * Math.cos(angle);
+            const y = r * Math.sin(angle);
+            points.push([x, y]);
+        });
+
+        // Close the polygon
+        if (points.length > 0) {
+            const pathData = 'M' + points.map(p => p.join(',')).join('L') + 'Z';
+
+            g.append('path')
+                .attr('d', pathData)
+                .attr('fill', color)
+                .attr('fill-opacity', 0.3)
+                .attr('stroke', color)
+                .attr('stroke-width', 2);
+
+            // Draw points
+            points.forEach(function(p) {
+                g.append('circle')
+                    .attr('cx', p[0])
+                    .attr('cy', p[1])
+                    .attr('r', 3)
+                    .attr('fill', color);
+            });
+        }
+
+        // Add title
+        g.append('text')
+            .attr('x', 0)
+            .attr('y', -radius - 40)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', '12px')
+            .attr('font-weight', 'bold')
+            .attr('fill', '#333')
+            .text(dataPoint[LABEL_COL]);
+    }
+
+    function addLegend_product_radar(container, colorMap) {
+        const legendDiv = document.createElement('div');
+        legendDiv.style.marginTop = '20px';
+        legendDiv.innerHTML = '<strong>Legend:</strong>';
+
+        const legendItems = document.createElement('div');
+        legendItems.style.display = 'flex';
+        legendItems.style.flexWrap = 'wrap';
+        legendItems.style.gap = '15px';
+        legendItems.style.marginTop = '10px';
+
+        Object.keys(colorMap).forEach(function(key) {
+            const item = document.createElement('div');
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '5px';
+
+            const colorBox = document.createElement('div');
+            colorBox.style.width = '20px';
+            colorBox.style.height = '20px';
+            colorBox.style.backgroundColor = colorMap[key];
+            colorBox.style.border = '1px solid #ccc';
+
+            const label = document.createElement('span');
+            label.textContent = key;
+
+            item.appendChild(colorBox);
+            item.appendChild(label);
+            legendItems.appendChild(item);
+        });
+
+        legendDiv.appendChild(legendItems);
+        container.appendChild(legendDiv);
+    }
+})();
 
 
 });
@@ -1215,12 +1640,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script>
+<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Situational Charts</h1>
-<p>This shows examples of Waterfall and SanKey. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.</p>
+<p>This shows examples of Waterfall, SanKey, and RadarChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics.</p>
 
 <h2>Profit & Loss Waterfall</h2>
 <p>A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement. <strong>Features:</strong> Automatic cumulative calculation, side-by-side table grouped by category, click bars or table rows to exclude items, toggle categories with checkboxes, switch between value-based (green/red) and category-based coloring, black total bar (toggleable). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html" style="color: blue; font-weight: bold;">See here for more Waterfall examples</a></p>
@@ -1392,8 +1817,59 @@ $(function(){
 <div class="sankey-container-ribbon">
     <div id="ribbon"></div>
 </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sankey_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sankey_data.parquet</p><br>
+<hr>
+<br>
+<div class="chart-container" id="container_product_radar">
+    <h3>Product Performance RadarChart</h3>
+    <p>RadarChart (spider chart) displaying multi-dimensional product analysis across 18 metrics grouped into 5 categories: Technical Performance, User Experience, Performance, Business Value, and Market Position. <strong>Interactive Features:</strong> (1) <strong>Variable Selector:</strong> Choose which metrics to display (minimum 3, recommended 6-8 for clarity). (2) <strong>Item Selector:</strong> Select which products to compare. (3) <strong>Faceting:</strong> Filter by product category (Infrastructure/Data & AI/Security/Productivity) and tier (Enterprise/Professional/Starter). (4) <strong>Grouped Axes:</strong> Related metrics are grouped together with category labels. (5) <strong>Color Coding:</strong> Products colored by category for easy identification. All scores normalized to 0-100 scale where higher is better. <strong>Tip:</strong> Start by selecting 6-8 metrics from different groups and 2-3 products to compare their strengths and weaknesses. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html" style="color: blue; font-weight: bold;">See here for RadarChart examples</a></p>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+        <div style="flex: 0 0 auto; min-width: 200px;">
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+<div style="margin-bottom: 15px;">
+    <label for="var_select_product_radar"><strong>Select variables:</strong></label>
+    <select id="var_select_product_radar" multiple size="8" style="width: 100%; max-width: 300px;" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+        Hold Ctrl (Cmd on Mac) to select multiple
+    </div>
+</div>
+
+<div style="margin-bottom: 15px;">
+    <label for="label_select_product_radar"><strong>Select items to display:</strong></label>
+    <select id="label_select_product_radar" multiple size="6" style="width: 100%; max-width: 300px;" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+        Hold Ctrl (Cmd on Mac) to select multiple
+    </div>
+</div>
+
+<div style="margin-bottom: 10px;">
+    <label for="facet_x_product_radar"><strong>Facet X:</strong></label>
+    <select id="facet_x_product_radar" onchange="updateRadarChart_product_radar()">
+        <option value="">All</option>
+        <!-- Options will be populated dynamically -->
+    </select>
+</div>
+
+<div style="margin-bottom: 10px;">
+    <label for="facet_y_product_radar"><strong>Facet Y:</strong></label>
+    <select id="facet_y_product_radar" onchange="updateRadarChart_product_radar()">
+        <option value="">All</option>
+        <!-- Options will be populated dynamically -->
+    </select>
+</div>
+
+        </div>
+        <div style="flex: 1 1 auto; min-width: 400px;">
+            <div id="radar_product_radar" style="width: 100%;"></div>
+        </div>
+    </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: radar_data.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.5.</small></p>
 </body>
 </html>
