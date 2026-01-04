@@ -232,6 +232,16 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
     </div>
     """
 
+    # Correlation method selector (dynamically populated based on data)
+    corr_method_selector = """
+    <div id="corr_method_container_$chart_title_str" style="margin-bottom: 10px; display: none;">
+        <label for="corr_method_select_$chart_title_str"><strong>Correlation method:</strong></label>
+        <select id="corr_method_select_$chart_title_str" onchange="updateEdges_$chart_title_str()">
+            <!-- Options will be populated dynamically from data -->
+        </select>
+    </div>
+    """
+
     # Color selector
     color_selector_html = if !isnothing(color_cols) && !isempty(color_cols)
         options = join(["""<option value="$col" $(col == default_color ? "selected" : "")>$col</option>"""
@@ -295,6 +305,7 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
         $scenario_selector_html
         $variable_selector_html
         $recalculate_button
+        $corr_method_selector
         $color_selector_html
         $layout_selector_html
         $edge_label_toggle
@@ -330,6 +341,41 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
         // Load graph data
         loadDataset('$(data_label)').then(function(data) {
             graphData = data;
+
+            // Check if data has correlation_method column and populate selector dynamically
+            if (data.length > 0) {
+                const firstRow = data[0];
+                const hasCorrelationMethod = 'correlation_method' in firstRow || firstRow.hasOwnProperty('correlation_method');
+                if (hasCorrelationMethod) {
+                    // Get unique correlation methods from data
+                    const corrMethods = [...new Set(data.map(row => row.correlation_method).filter(m => m))];
+
+                    if (corrMethods.length > 0) {
+                        const select = document.getElementById('corr_method_select_$chart_title_str');
+                        const container = document.getElementById('corr_method_container_$chart_title_str');
+
+                        if (select && container) {
+                            // Clear existing options
+                            select.innerHTML = '';
+
+                            // Add options for each correlation method (first one is default)
+                            corrMethods.forEach((method, idx) => {
+                                const option = document.createElement('option');
+                                option.value = method;
+                                option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                                if (idx === 0) {
+                                    option.selected = true;
+                                }
+                                select.appendChild(option);
+                            });
+
+                            // Show the selector
+                            container.style.display = 'block';
+                        }
+                    }
+                }
+            }
+
             populateVarSelector_$chart_title_str();  // Populate selector BEFORE initializing graph
             initializeGraph_$chart_title_str();
         }).catch(function(error) {
@@ -631,10 +677,21 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
 
         function getEdgesForScenario_$chart_title_str(scenario, varsToShow, cutoffValue, showEdgeLabels) {
             const edges = [];
-            const scenarioData = graphData.filter(row =>
-                (!row.scenario || row.scenario === scenario.name) &&
-                varsToShow.includes(row.node1) && varsToShow.includes(row.node2)
-            );
+
+            // Get selected correlation method (if selector exists)
+            const corrMethodSelect = document.getElementById('corr_method_select_$chart_title_str');
+            const selectedCorrMethod = corrMethodSelect ? corrMethodSelect.value : null;
+
+            const scenarioData = graphData.filter(row => {
+                // Basic filters
+                const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+                const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
+
+                // Correlation method filter (only if data has this column AND selector exists)
+                const corrMethodMatch = !selectedCorrMethod || !row.correlation_method || row.correlation_method === selectedCorrMethod;
+
+                return scenarioMatch && nodeMatch && corrMethodMatch;
+            });
 
             scenarioData.forEach((row, idx) => {
                 let strength = row.strength;

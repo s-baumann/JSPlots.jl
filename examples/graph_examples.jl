@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Statistics, Random, StableRNGs
+using JSPlots, DataFrames, Statistics, Random, StableRNGs, StatsBase
 
 println("Creating Graph examples...")
 
@@ -231,76 +231,147 @@ graph1 = Graph(:stock_network, [scenario_short, scenario_long, scenario_vol], :s
 # =============================================================================
 
 example2_text = TextBlock("""
-<h2>Example 2: City Proximity Network by Region</h2>
-<p>This example shows a distance-based network of cities. Closer cities have stronger connections.</p>
+<h2>Example 2: City Proximity Network with Correlation Methods</h2>
+<p>This example shows similarity between cities based on their economic indicators, with both Pearson and Spearman correlations available.</p>
 <p><strong>Features demonstrated:</strong></p>
 <ul>
-    <li>Distance matrix input (low distance = strong connection)</li>
+    <li>Correlation method selector (Pearson vs Spearman)</li>
     <li>Node coloring by geographic region</li>
     <li>Circle layout showing regional grouping</li>
-    <li>Edge widths proportional to proximity</li>
+    <li>Dynamic edge filtering based on selected method</li>
 </ul>
-<p><strong>Interpretation:</strong> Cities in the same region (same color) tend to cluster together.
-The cutoff controls which city pairs are connected based on distance.</p>
+<p><strong>Try this:</strong> Switch between Pearson and Spearman correlation methods to see how the network changes.
+Pearson measures linear relationships while Spearman measures rank-based relationships.</p>
 """)
 
-# Cities with coordinates and regions
+# Cities with regions
 cities = [
-    ("New York", 40.7, -74.0, "Northeast"),
-    ("Boston", 42.4, -71.1, "Northeast"),
-    ("Philadelphia", 40.0, -75.2, "Northeast"),
-    ("Washington DC", 38.9, -77.0, "Northeast"),
-    ("Chicago", 41.9, -87.6, "Midwest"),
-    ("Detroit", 42.3, -83.0, "Midwest"),
-    ("Minneapolis", 45.0, -93.3, "Midwest"),
-    ("Los Angeles", 34.1, -118.2, "West"),
-    ("San Francisco", 37.8, -122.4, "West"),
-    ("Seattle", 47.6, -122.3, "West"),
-    ("Portland", 45.5, -122.7, "West"),
-    ("Miami", 25.8, -80.2, "Southeast"),
-    ("Atlanta", 33.7, -84.4, "Southeast"),
-    ("Houston", 29.8, -95.4, "Southeast")
+    ("New York", "Northeast"),
+    ("Boston", "Northeast"),
+    ("Philadelphia", "Northeast"),
+    ("Washington DC", "Northeast"),
+    ("Chicago", "Midwest"),
+    ("Detroit", "Midwest"),
+    ("Minneapolis", "Midwest"),
+    ("Los Angeles", "West"),
+    ("San Francisco", "West"),
+    ("Seattle", "West"),
+    ("Portland", "West"),
+    ("Miami", "Southeast"),
+    ("Atlanta", "Southeast"),
+    ("Houston", "Southeast")
 ]
 
 city_names = [c[1] for c in cities]
-regions = [c[4] for c in cities]
+regions = [c[2] for c in cities]
 n_cities = length(cities)
 
-# Compute distance matrix (Euclidean distance in lat/lon space)
-dist_matrix = zeros(n_cities, n_cities)
+# Generate economic indicator data for cities
+# Each city has time series of: GDP growth, unemployment rate, housing prices, tech jobs
+rng_cities = StableRNG(999)
+n_quarters = 40
+
+city_indicators = zeros(n_quarters, n_cities, 4)  # 4 indicators per city
 for i in 1:n_cities
-    for j in 1:n_cities
-        if i != j
-            lat1, lon1 = cities[i][2], cities[i][3]
-            lat2, lon2 = cities[j][2], cities[j][3]
-            dist_matrix[i, j] = sqrt((lat1 - lat2)^2 + (lon1 - lon2)^2)
-        end
+    region = regions[i]
+
+    # Regional economic factors
+    if region == "Northeast"
+        base_gdp = 2.5
+        base_unemp = 4.0
+        base_housing = 1.8
+        base_tech = 3.0
+    elseif region == "Midwest"
+        base_gdp = 2.0
+        base_unemp = 4.5
+        base_housing = 1.2
+        base_tech = 2.0
+    elseif region == "West"
+        base_gdp = 3.0
+        base_unemp = 3.5
+        base_housing = 2.5
+        base_tech = 4.0
+    else  # Southeast
+        base_gdp = 2.8
+        base_unemp = 4.2
+        base_housing = 2.0
+        base_tech = 2.5
+    end
+
+    for q in 1:n_quarters
+        city_indicators[q, i, 1] = base_gdp + randn(rng_cities) * 0.5  # GDP growth
+        city_indicators[q, i, 2] = base_unemp + randn(rng_cities) * 0.8  # Unemployment
+        city_indicators[q, i, 3] = base_housing + randn(rng_cities) * 0.6  # Housing price growth
+        city_indicators[q, i, 4] = base_tech + randn(rng_cities) * 0.7  # Tech job growth
     end
 end
 
-# Normalize distances to [0, 1]
-max_dist = maximum(dist_matrix)
-dist_matrix_norm = dist_matrix ./ max_dist
+# Reshape data for correlation calculation (quarters x cities)
+# Stack all 4 indicators together for each city
+city_data_matrix = zeros(n_quarters * 4, n_cities)
+for i in 1:n_cities
+    city_data_matrix[:, i] = vec(city_indicators[:, i, :])
+end
 
-# Create node attributes
-city_attrs = DataFrame(
-    node = city_names,
-    region = regions
+# Calculate Pearson correlation
+pearson_corr = cor(city_data_matrix)
+
+# Calculate Spearman correlation (rank-based)
+# Convert each column to ranks
+city_data_ranks = zeros(size(city_data_matrix))
+for i in 1:n_cities
+    city_data_ranks[:, i] = ordinalrank(city_data_matrix[:, i])
+end
+spearman_corr = cor(city_data_ranks)
+
+# Create graph data with BOTH correlation methods
+graph_data2 = DataFrame(
+    node1 = String[],
+    node2 = String[],
+    strength = Float64[],
+    region = String[],
+    correlation_method = String[],
+    scenario = String[]
 )
 
-# Create graph data
-graph_data2 = create_graph_data_from_distance(city_names, dist_matrix_norm;
-                                              attributes = city_attrs)
+# Add Pearson correlations
+for i in 1:n_cities
+    for j in (i+1):n_cities
+        push!(graph_data2, (
+            node1 = city_names[i],
+            node2 = city_names[j],
+            strength = pearson_corr[i, j],
+            region = regions[i],  # Use first node's region
+            correlation_method = "pearson",
+            scenario = "Economic Indicators"
+        ))
+    end
+end
 
-# Add scenario column
-graph_data2[!, :scenario] .= "City Distances"
+# Add Spearman correlations
+for i in 1:n_cities
+    for j in (i+1):n_cities
+        push!(graph_data2, (
+            node1 = city_names[i],
+            node2 = city_names[j],
+            strength = spearman_corr[i, j],
+            region = regions[i],  # Use first node's region
+            correlation_method = "spearman",
+            scenario = "Economic Indicators"
+        ))
+    end
+end
+
+# Calculate smart cutoff using Pearson correlations only
+pearson_data2 = filter(r -> r.correlation_method == "pearson", graph_data2)
+smart_cutoff_cities = calculate_smart_cutoff(pearson_data2, "Economic Indicators", true, 0.15)
 
 # Create GraphScenario
-scenario2 = GraphScenario("City Distances", false, city_names)
+scenario2 = GraphScenario("Economic Indicators", true, city_names)
 
 graph2 = Graph(:city_network, [scenario2], :city_graph_data;
-    title = "City Proximity Network by Region",
-    cutoff = 0.5,
+    title = "City Economic Similarity Network",
+    cutoff = smart_cutoff_cities,
     color_cols = [:region],
     default_color_col = :region,
     show_edge_labels = false,

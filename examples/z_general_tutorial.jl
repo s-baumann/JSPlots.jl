@@ -776,9 +776,9 @@ smart_cutoff = calculate_smart_cutoff(pearson_data, "Short-term Returns (Daily)"
 # Create Graph using the SAME data as CorrPlot
 graph_stock = Graph(:stock_network,
                     [graph_scenario_short, graph_scenario_long, graph_scenario_vol],
-                    :stock_corr_data;  # SAME data label as CorrPlot!
-    title = "Stock Correlation Network - Multiple Scenarios",
-    notes = "This Graph uses the EXACT SAME data as the CorrPlot above - no duplication! Both charts consume stock_corr_data with columns: node1, node2, strength, scenario, correlation_method, sector. <strong>Scenario switching:</strong> Select different scenarios (Short-term, Long-term, Volatility) and watch how the edges change while nodes stay in the same positions. <strong>Variable selection:</strong> Deselect stocks to make them translucent, then click 'Recalculate Graph' to remove them. Stocks are colored by sector showing how same-sector stocks cluster together. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Graph examples</a>",
+                    :stock_corr_data;
+    title = "Graph",
+    notes = "This Graph allows you to visualise the relationships between variables. The dataformat to make this is a DataFrame with columns: node1, node2, strength, scenario, correlation_method, sector. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Graph examples</a>",
     cutoff = smart_cutoff,
     color_cols = [:sector],
     default_color_col = :sector,
@@ -1198,7 +1198,7 @@ all_data = Dict{Symbol, DataFrame}(
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
     :boxwhiskers_data => boxwhiskers_data,
-    :stock_corr_data => stock_corr_data  # Shared by both CorrPlot and Graph!
+    :stock_corr_data => stock_corr_data
 )
 
 tabular_plot_page =  JSPlotPage(
