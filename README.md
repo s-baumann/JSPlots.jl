@@ -19,12 +19,14 @@ For the Julia code that generated this see
 
 The plot types are below. For each you can click on the name of the chart and see a page that demonstrates the different ways the plot can be used.
 
-#### Tabular Data and Text
-- **[PivotTable](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html)** - Interactive drag-and-drop pivot tables (via PivotTable.js)
-- **[Table](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html)** - Interactive data tables with CSV download capability
+#### Text
 - **[TextBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html)** - Rich text and HTML content for annotations
 - **[CodeBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html)** - Display code in a nice format. There is proper syntax highlighting for several languages (Julia, Python, R, C++, C, Java, JavaScript, Rust, SQL, PostgreSQL) without others in black.
 - **[LinkList](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html)** - Styled lists of hyperlinks for multi-page navigation with optional subheadings
+
+#### Tabular Data
+- **[Table](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html)** - Data tables
+- **[PivotTable](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html)** - Interactive drag-and-drop pivot tables (via PivotTable.js)
 
 #### Multimedia
 - **[Picture](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html)** - Display static images or plots from VegaLite.jl, Plots.jl or Makie.jl
@@ -32,7 +34,7 @@ The plot types are below. For each you can click on the name of the chart and se
 
 #### 2D Plotting
 - **[LineChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html)** - Time series and trend visualization with faceting
-- **[AreaChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html)** - Stacked area charts or bar charts (auto-detects continuous vs discrete x-axis)
+- **[AreaChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html)** - This does both Area Charts as well as Bar Charts
 - **[ScatterPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html)** - 2D scatter plots with marginal distributions
 - **[Path](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html)** - Trajectory visualization showing ordered paths through 2D space with direction arrows
 
@@ -49,11 +51,13 @@ The plot types are below. For each you can click on the name of the chart and se
 #### Variable Relationship Plots
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
 - **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
+- **[TSne](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsne_examples.html)** - Coming Soon
 
 #### Situational Plots
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
 - **[SanKey](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html)** - Make SanKey plots showing how observations change affiliation over multiple waves.
 - **[RadarChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html)** - Make RadarCharts showing how a single entity performs on various metrics.
+- **[OHLCVChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcv_examples.html)** - Coming Soon
 
 
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 
