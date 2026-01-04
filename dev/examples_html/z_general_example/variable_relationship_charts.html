@@ -718,26 +718,29 @@ $(function(){
         }
 
         // Check order mode
-        const useDendroOrder = document.getElementById('use_dendro_order_stock_advanced');
-        const useManual = useDendroOrder && !useDendroOrder.checked;
+        const orderModeSelect = document.getElementById('order_mode_stock_advanced');
+        const orderMode = orderModeSelect ? orderModeSelect.value : 'dendrogram';
 
         // Show/hide manual ordering UI
         const manualDiv = document.getElementById('manual_order_stock_advanced');
         if (manualDiv) {
-            manualDiv.style.display = useManual ? 'block' : 'none';
+            manualDiv.style.display = (orderMode === 'manual') ? 'block' : 'none';
         }
 
-        if (useManual) {
+        if (orderMode === 'manual') {
             initializeSortable();
         }
 
         // Determine variable order
         let orderedVars;
-        if (useManual && manualOrder) {
+        if (orderMode === 'manual' && manualOrder) {
             // Use manual order, filtered to selected vars
             orderedVars = manualOrder.filter(v => selectedVars.includes(v));
+        } else if (orderMode === 'alphabetical') {
+            // Use alphabetical order
+            orderedVars = selectedVars.slice().sort();
         } else {
-            // Use dendrogram order
+            // Use dendrogram order (default)
             orderedVars = currentScenario.labels.filter(v => selectedVars.includes(v));
         }
 
@@ -760,24 +763,24 @@ $(function(){
                     hoverText[i][j] = orderedVars[i];
                 } else {
                     // Find correlation values from external data
-                    // Data can have either (asset1, asset2) or (asset2, asset1) ordering
+                    // Data can have either (node1, node2) or (node2, node1) ordering
                     let pearsonCorr = 0;
                     let spearmanCorr = 0;
 
                     const pearsonItem = corrDataRaw.find(d =>
                         d.scenario === currentScenario.name &&
                         d.correlation_method === 'pearson' &&
-                        ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
-                         (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+                        ((d.node1 === orderedVars[i] && d.node2 === orderedVars[j]) ||
+                         (d.node1 === orderedVars[j] && d.node2 === orderedVars[i])));
 
                     const spearmanItem = corrDataRaw.find(d =>
                         d.scenario === currentScenario.name &&
                         d.correlation_method === 'spearman' &&
-                        ((d.asset1 === orderedVars[i] && d.asset2 === orderedVars[j]) ||
-                         (d.asset1 === orderedVars[j] && d.asset2 === orderedVars[i])));
+                        ((d.node1 === orderedVars[i] && d.node2 === orderedVars[j]) ||
+                         (d.node1 === orderedVars[j] && d.node2 === orderedVars[i])));
 
-                    pearsonCorr = pearsonItem ? pearsonItem.correlation : 0;
-                    spearmanCorr = spearmanItem ? spearmanItem.correlation : 0;
+                    pearsonCorr = pearsonItem ? pearsonItem.strength : 0;
+                    spearmanCorr = spearmanItem ? spearmanItem.strength : 0;
 
                     if (i < j) {
                         // Upper-right triangle: always show Pearson
@@ -844,7 +847,7 @@ $(function(){
         const dendroDiv = document.getElementById('dendrogram_stock_advanced');
         const allVarsSelected = selectedVars.length === currentScenario.allLabels.length;
 
-        if (!useManual && allVarsSelected && currentScenario.dendroData.shapes && currentScenario.dendroData.shapes.length > 0) {
+        if (orderMode === 'dendrogram' && allVarsSelected && currentScenario.dendroData.shapes && currentScenario.dendroData.shapes.length > 0) {
             dendroDiv.style.display = 'block';
 
             // Show full dendrogram with all variables
@@ -885,6 +888,364 @@ $(function(){
     // Note: populateVarSelector() and updateChart_stock_advanced() are called
     // after data loads in the loadDataset promise above
 })();
+(function() {
+    const scenarios = [{"name":"Short-term Returns (Daily)","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"]},{"name":"Long-term Returns (20-day)","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"]},{"name":"Volatility Correlations","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"]}];
+    let currentScenario = scenarios[0];
+    let selectedVars = ["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","JNJ","PFE"];
+    let graphData = null;
+    let cy = null;
+    let nodePositions = {};  // Store node positions to keep them stable
+
+    // Load graph data
+    loadDataset('stock_corr_data').then(function(data) {
+        graphData = data;
+        populateVarSelector_stock_network();  // Populate selector BEFORE initializing graph
+        initializeGraph_stock_network();
+    }).catch(function(error) {
+        console.error('Failed to load graph data:', error);
+    });
+
+    function populateVarSelector_stock_network() {
+        const select = document.getElementById('var_select_stock_network');
+        select.innerHTML = '';
+        currentScenario.node_labels.forEach(v => {
+            const option = document.createElement('option');
+            option.value = v;
+            option.text = v;
+            option.selected = selectedVars.includes(v);
+            select.appendChild(option);
+        });
+    }
+
+    function initializeGraph_stock_network() {
+        if (!graphData || graphData.length === 0) {
+            console.warn('No graph data loaded');
+            return;
+        }
+
+        // Initialize Cytoscape
+        cy = cytoscape({
+            container: document.getElementById('graph_stock_network'),
+
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'background-color': '#3498db',
+                        'label': 'data(label)',
+                        'color': '#000',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'font-size': '10px',
+                        'width': '30px',
+                        'height': '30px',
+                        'opacity': 1.0
+                    }
+                },
+                {
+                    selector: 'node.deselected',
+                    style: {
+                        'opacity': 0.15
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 'data(displayWidth)',
+                        'line-color': '#95a5a6',
+                        'opacity': 0.6,
+                        'curve-style': 'bezier'
+                    }
+                },
+                {
+                    selector: 'edge[label]',
+                    style: {
+                        'label': 'data(label)',
+                        'font-size': '8px',
+                        'text-rotation': 'autorotate',
+                        'text-margin-y': -10,
+                        'color': '#555'
+                    }
+                },
+                {
+                    selector: ':selected',
+                    style: {
+                        'background-color': '#e74c3c',
+                        'line-color': '#e74c3c',
+                        'width': '40px',
+                        'height': '40px'
+                    }
+                }
+            ],
+
+            layout: {
+                name: 'cose'
+            }
+        });
+
+        // Store initial positions after layout
+        cy.on('layoutstop', function() {
+            cy.nodes().forEach(node => {
+                const pos = node.position();
+                nodePositions[node.id()] = {x: pos.x, y: pos.y};
+            });
+        });
+
+        recalculateGraph_stock_network();
+    }
+
+    // Recalculate graph - full rebuild with selected variables
+    window.recalculateGraph_stock_network = function() {
+        if (!cy || !graphData) return;
+
+        const layoutType = document.getElementById('layout_select_stock_network').value;
+
+        // Update selected variables from selector
+        const varSelect = document.getElementById('var_select_stock_network');
+        selectedVars = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+        if (selectedVars.length === 0) {
+            console.warn('Select at least one variable');
+            return;
+        }
+
+        // Clear existing graph
+        cy.elements().remove();
+        nodePositions = {};  // Clear stored positions for full recalculation
+
+        // Build new graph with only selected variables
+        buildGraph_stock_network(selectedVars, layoutType);
+    };
+
+    // Update edges when scenario or cutoff changes (keep node positions)
+    window.updateEdges_stock_network = function() {
+        if (!cy || !graphData) return;
+
+        // Update scenario
+        const scenarioSelect = document.getElementById('scenario_select_stock_network');
+        if (scenarioSelect) {
+            const scenarioName = scenarioSelect.value;
+            const newScenario = scenarios.find(s => s.name === scenarioName);
+            if (newScenario !== currentScenario) {
+                currentScenario = newScenario;
+                populateVarSelector_stock_network();
+            }
+        }
+
+        // Remove and rebuild edges (keep nodes)
+        cy.edges().remove();
+        const cutoffValue = parseFloat(document.getElementById('cutoff_slider_stock_network').value);
+        const showEdgeLabels = document.getElementById('show_edges_stock_network').checked;
+
+        // Add edges based on current scenario and cutoff
+        const edges = getEdgesForScenario_stock_network(currentScenario, selectedVars, cutoffValue, showEdgeLabels);
+        cy.add(edges);
+    };
+
+    // Update node opacity when variable selection changes
+    window.updateNodeOpacity_stock_network = function() {
+        if (!cy) return;
+
+        const varSelect = document.getElementById('var_select_stock_network');
+        const currentlySelected = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+        // Make deselected nodes translucent
+        cy.nodes().forEach(node => {
+            if (currentlySelected.includes(node.id())) {
+                node.removeClass('deselected');
+            } else {
+                node.addClass('deselected');
+            }
+        });
+    };
+
+    // Update colors
+    window.updateColors_stock_network = function() {
+        if (!cy) return;
+
+        const colorBy = document.getElementById('color_select_stock_network').value;
+
+        if (colorBy === 'none') {
+            cy.nodes().style('background-color', '#3498db');
+        } else {
+            // Apply colors based on attribute
+            const uniqueValues = new Set();
+            cy.nodes().forEach(node => {
+                const val = node.data(colorBy);
+                if (val) uniqueValues.add(val);
+            });
+
+            const colors = generateColors_stock_network(uniqueValues.size);
+            const colorMap = {};
+            Array.from(uniqueValues).forEach((val, idx) => {
+                colorMap[val] = colors[idx];
+            });
+
+            cy.nodes().forEach(node => {
+                const val = node.data(colorBy);
+                const color = val ? (colorMap[val] || '#3498db') : '#3498db';
+                node.style('background-color', color);
+            });
+        }
+    };
+
+    // Update edge labels
+    window.updateEdgeLabels_stock_network = function() {
+        const showLabels = document.getElementById('show_edges_stock_network').checked;
+        cy.edges().forEach(edge => {
+            if (showLabels) {
+                edge.data('label', edge.data('strength').toFixed(2));
+            } else {
+                edge.removeData('label');
+            }
+        });
+    };
+
+    function buildGraph_stock_network(varsToShow, layoutType) {
+        const cutoffValue = parseFloat(document.getElementById('cutoff_slider_stock_network').value);
+        const showEdgeLabels = document.getElementById('show_edges_stock_network').checked;
+
+        const colorBy = document.getElementById('color_select_stock_network').value;
+
+        // Collect all nodes and their attributes
+        const nodeSet = new Set();
+        const nodeAttributes = {};
+
+        graphData.forEach(row => {
+            if (!row.node1 || !row.node2) return;
+            if (!varsToShow.includes(row.node1) || !varsToShow.includes(row.node2)) return;
+
+            nodeSet.add(row.node1);
+            nodeSet.add(row.node2);
+
+            if (!nodeAttributes[row.node1]) nodeAttributes[row.node1] = {};
+            if (!nodeAttributes[row.node2]) nodeAttributes[row.node2] = {};
+
+            Object.keys(row).forEach(key => {
+                if (key !== 'node1' && key !== 'node2' && key !== 'strength' && key !== 'scenario') {
+                    nodeAttributes[row.node1][key] = row[key];
+                    nodeAttributes[row.node2][key] = row[key];
+                }
+            });
+        });
+
+        // Create color mapping
+        let colorMap = {};
+        if (colorBy !== 'none') {
+            const uniqueValues = new Set();
+            Object.values(nodeAttributes).forEach(attrs => {
+                if (attrs[colorBy]) uniqueValues.add(attrs[colorBy]);
+            });
+            const colors = generateColors_stock_network(uniqueValues.size);
+            Array.from(uniqueValues).forEach((val, idx) => {
+                colorMap[val] = colors[idx];
+            });
+        }
+
+        // Add nodes
+        Array.from(nodeSet).forEach(nodeName => {
+            const attrs = nodeAttributes[nodeName] || {};
+            const colorValue = (colorBy !== 'none' && attrs[colorBy]) ? attrs[colorBy] : null;
+            const nodeColor = colorValue ? (colorMap[colorValue] || '#3498db') : '#3498db';
+
+            const nodeData = {
+                id: nodeName,
+                label: nodeName,
+                color: nodeColor,
+                ...attrs
+            };
+
+            // Use stored position if available
+            if (nodePositions[nodeName]) {
+                cy.add({
+                    data: nodeData,
+                    position: nodePositions[nodeName]
+                });
+            } else {
+                cy.add({data: nodeData});
+            }
+        });
+
+        // Add edges
+        const edges = getEdgesForScenario_stock_network(currentScenario, varsToShow, cutoffValue, showEdgeLabels);
+        cy.add(edges);
+
+        // Apply colors
+        if (colorBy !== 'none') {
+            cy.nodes().forEach(node => {
+                node.style('background-color', node.data('color'));
+            });
+        }
+
+        // Apply layout only if no positions stored
+        const hasStoredPositions = Array.from(nodeSet).every(n => nodePositions[n]);
+        if (!hasStoredPositions) {
+            cy.layout({
+                name: layoutType,
+                animate: true,
+                animationDuration: 500,
+                fit: true,
+                padding: 30
+            }).run();
+        }
+    }
+
+    function getEdgesForScenario_stock_network(scenario, varsToShow, cutoffValue, showEdgeLabels) {
+        const edges = [];
+        const scenarioData = graphData.filter(row =>
+            (!row.scenario || row.scenario === scenario.name) &&
+            varsToShow.includes(row.node1) && varsToShow.includes(row.node2)
+        );
+
+        scenarioData.forEach((row, idx) => {
+            let strength = row.strength;
+            let distance = strength;
+
+            if (scenario.is_correlation) {
+                distance = 1 - Math.abs(strength);
+            }
+
+            if (distance <= cutoffValue) {
+                const edgeWidth = scenario.is_correlation ?
+                    Math.abs(strength) * 5 + 1 :
+                    (1 - distance) * 5 + 1;
+
+                const edgeData = {
+                    id: 'edge_' + scenario.name + '_' + idx,
+                    source: row.node1,
+                    target: row.node2,
+                    strength: strength,
+                    displayWidth: edgeWidth
+                };
+
+                if (showEdgeLabels) {
+                    edgeData.label = strength.toFixed(2);
+                }
+
+                edges.push({data: edgeData});
+            }
+        });
+
+        return edges;
+    }
+
+    function generateColors_stock_network(n) {
+        const colors = [
+            '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+            '#1abc9c', '#34495e', '#e67e22', '#95a5a6', '#d35400',
+            '#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#16a085'
+        ];
+
+        if (n <= colors.length) return colors.slice(0, n);
+
+        const result = [...colors];
+        for (let i = colors.length; i < n; i++) {
+            const hue = (i * 137.508) % 360;
+            result.push(`hsl(${hue}, 70%, 50%)`);
+        }
+        return result;
+    }
+})();
 
 
 });
@@ -897,7 +1258,7 @@ $(function(){
 <!-- ACTUAL CONTENT -->
 
 <h1>Variable Relationship Charts</h1>
-<p>This shows examples of CorrPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. The advanced CorrPlot example demonstrates scenario switching, variable selection, and manual ordering.</p>
+<p>This shows examples of CorrPlot and Graph using the same underlying correlation data. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network with nodes and edges. Both charts demonstrate different ways to explore the same correlation structure.</p>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <div class="corrplot-container">
@@ -918,10 +1279,12 @@ $(function(){
         </select>
     </div>
     <div style="margin-bottom: 15px;">
-    <label>
-        <input type="checkbox" id="use_dendro_order_stock_advanced" checked onchange="updateChart_stock_advanced()">
-        <strong>Order by Dendrogram</strong>
-    </label>
+    <label for="order_mode_stock_advanced"><strong>Variable ordering:</strong></label>
+    <select id="order_mode_stock_advanced" onchange="updateChart_stock_advanced()">
+        <option value="dendrogram" selected>Order by dendrogram</option>
+        <option value="alphabetical">Order alphabetically</option>
+        <option value="manual">Order manually</option>
+    </select>
 </div>
 
     <div id="manual_order_stock_advanced" style="margin-bottom: 15px; display: none;">
@@ -947,6 +1310,84 @@ $(function(){
 }
 </style>
 
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_corr_data.parquet</p><br>
+<hr>
+<br>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+<div class="graph-container">
+    <h2>Stock Correlation Network - Multiple Scenarios</h2>
+    <p>This Graph uses the EXACT SAME data as the CorrPlot above - no duplication! Both charts consume stock_corr_data with columns: node1, node2, strength, scenario, correlation_method, sector. <strong>Scenario switching:</strong> Select different scenarios (Short-term, Long-term, Volatility) and watch how the edges change while nodes stay in the same positions. <strong>Variable selection:</strong> Deselect stocks to make them translucent, then click 'Recalculate Graph' to remove them. Stocks are colored by sector showing how same-sector stocks cluster together. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html" style="color: blue; font-weight: bold;">See here for more Graph examples</a></p>
+    <div style="margin-bottom: 10px;">
+    <label for="scenario_select_stock_network"><strong>Scenario:</strong></label>
+    <select id="scenario_select_stock_network" onchange="updateEdges_stock_network()">
+        <option value="Short-term Returns (Daily)">Short-term Returns (Daily)</option>
+                <option value="Long-term Returns (20-day)">Long-term Returns (20-day)</option>
+                <option value="Volatility Correlations">Volatility Correlations</option>
+    </select>
+</div>
+
+    <div style="margin-bottom: 15px;">
+    <label for="var_select_stock_network"><strong>Select Variables:</strong></label><br>
+    <select id="var_select_stock_network" multiple size="6" style="width: 300px;" onchange="updateNodeOpacity_stock_network()">
+    </select>
+</div>
+
+    <div style="margin-bottom: 15px;">
+    <button id="recalc_btn_stock_network" onclick="recalculateGraph_stock_network()"
+            style="padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+        Recalculate Graph
+    </button>
+    <span style="margin-left: 10px; font-size: 12px; color: #666;">
+        (Apply variable selection & reorganize layout)
+    </span>
+</div>
+
+    <div style="margin-bottom: 10px;">
+    <label for="color_select_stock_network"><strong>Color nodes by:</strong></label>
+    <select id="color_select_stock_network" onchange="updateColors_stock_network()">
+        <option value="none">None</option>
+        <option value="sector" selected>sector</option>
+    </select>
+</div>
+
+    <div style="margin-bottom: 10px;">
+    <label for="layout_select_stock_network"><strong>Layout:</strong></label>
+    <select id="layout_select_stock_network" onchange="recalculateGraph_stock_network()">
+        <option value="cose" selected>Cose</option>
+                <option value="circle" >Circle</option>
+                <option value="grid" >Grid</option>
+                <option value="concentric" >Concentric</option>
+                <option value="breadthfirst" >Breadthfirst</option>
+                <option value="random" >Random</option>
+    </select>
+    <span style="margin-left: 5px; font-size: 11px; color: #666;">(Changing layout recalculates)</span>
+</div>
+
+    <div style="margin-bottom: 10px;">
+    <label>
+        <input type="checkbox" id="show_edges_stock_network"
+               
+               onchange="updateEdgeLabels_stock_network()">
+        <strong>Show edge strengths</strong>
+    </label>
+</div>
+
+    <div style="margin-bottom: 15px;">
+    <label for="cutoff_slider_stock_network"><strong>Connection cutoff:</strong>
+           <span id="cutoff_value_stock_network">0.6849176421207755</span>
+    </label>
+    <input type="range" id="cutoff_slider_stock_network"
+           min="0" max="1" step="0.05" value="0.6849176421207755"
+           style="width: 75%; margin-left: 10px;"
+           oninput="document.getElementById('cutoff_value_stock_network').textContent = this.value; updateEdges_stock_network()">
+</div>
+
+    <div id="graph_stock_network" style="width: 100%; height: 600px; border: 1px solid #ccc;"></div>
+    <div style="margin-top: 10px; font-size: 12px; color: #666;">
+        <strong>Tip:</strong> Deselected variables become translucent. Click "Recalculate Graph" to remove them and reorganize.
+        Switching scenarios updates edges but keeps node positions.
+    </div>
+</div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_corr_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.3.</small></p>
