@@ -253,6 +253,21 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
     </div>
     """
 
+    # Aspect ratio slider (using logarithmic scale like other charts)
+    # Default aspect ratio of 0.6
+    aspect_ratio_default = 0.6
+    log_default = log(aspect_ratio_default)
+    aspect_ratio_slider = """
+    <div style="margin-bottom: 15px;">
+        <label for="aspect_ratio_slider_$chart_title_str"><strong>Aspect Ratio:</strong>
+               <span id="aspect_ratio_label_$chart_title_str">$aspect_ratio_default</span>
+        </label>
+        <input type="range" id="aspect_ratio_slider_$chart_title_str"
+               min="-1.61" max="0.69" step="0.01" value="$log_default"
+               style="width: 75%; margin-left: 10px;">
+    </div>
+    """
+
     return """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
     <div class="graph-container">
@@ -266,7 +281,8 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
         $layout_selector_html
         $edge_label_toggle
         $cutoff_slider
-        <div id="graph_$chart_title_str" style="width: 100%; height: 600px; border: 1px solid #ccc;"></div>
+        $aspect_ratio_slider
+        <div id="graph_$chart_title_str" style="width: 100%; border: 1px solid #ccc;"></div>
         <div style="margin-top: 10px; font-size: 12px; color: #666;">
             <strong>Tip:</strong> Deselected variables become translucent. Click "Recalculate Graph" to remove them and reorganize.
             Switching scenarios updates edges but keeps node positions.
@@ -429,6 +445,50 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
             });
 
             recalculateGraph_$chart_title_str();
+
+            // Setup aspect ratio control for Cytoscape
+            setupGraphAspectRatio_$chart_title_str();
+        }
+
+        function setupGraphAspectRatio_$chart_title_str() {
+            const slider = document.getElementById('aspect_ratio_slider_$chart_title_str');
+            const label = document.getElementById('aspect_ratio_label_$chart_title_str');
+            const graphDiv = document.getElementById('graph_$chart_title_str');
+
+            if (!slider || !label || !graphDiv) return;
+
+            slider.addEventListener('input', function() {
+                // Convert from log space to linear space
+                const logValue = parseFloat(this.value);
+                const aspectRatio = Math.exp(logValue);
+                label.textContent = aspectRatio.toFixed(2);
+
+                // Get current width of graph div
+                const width = graphDiv.offsetWidth;
+                const height = width * aspectRatio;
+
+                // Update graph div height
+                graphDiv.style.height = height + 'px';
+
+                // Resize Cytoscape container (without refitting/zooming)
+                // This gives more vertical space while keeping current zoom level
+                if (cy) {
+                    cy.resize();
+                }
+            });
+
+            // Trigger initial sizing
+            const initialLogValue = parseFloat(slider.value);
+            const initialAspectRatio = Math.exp(initialLogValue);
+            label.textContent = initialAspectRatio.toFixed(2);
+
+            const width = graphDiv.offsetWidth;
+            const height = width * initialAspectRatio;
+            graphDiv.style.height = height + 'px';
+
+            if (cy) {
+                cy.resize();
+            }
         }
 
         // Recalculate graph - full rebuild with selected variables
