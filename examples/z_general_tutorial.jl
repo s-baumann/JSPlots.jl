@@ -555,7 +555,8 @@ od["Multimedia"] = [
 od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
     ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
     ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
-    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows"),
+    ("BumpChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html", "Rankings over time with dense ranking and cross-facet highlighting")]
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
@@ -569,6 +570,9 @@ od["Variable Relationships"] = [("CorrPlot", "https://s-baumann.github.io/JSPlot
 od["Situational Charts"] = [
     ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
     ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
+od["Financial Charts"] = [
+    ("OHLCChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcchart_examples.html", "OHLC candlestick charts with volume, renormalization, and time range controls"),
+    ("ExecutionPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html", "Trade execution analysis with implementation shortfall, VWAP comparison, and spread crossing metrics")]
 
 
 linklist_chart = LinkList(od, chart_title=:links, notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
@@ -655,6 +659,26 @@ path_chart = Path(:path, df_business_path, :business_path_data;
     show_arrows=true,
     use_alpharange=true,
     notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
+
+# BumpChart - Rankings over time
+# Aggregate data by quarter and product to show rankings
+df_rankings = @linq df |>
+    groupby([:quarter, :product, :region, :segment]) |>
+    combine(:sales_total = sum(:sales),
+            :profit_total = sum(:profit),
+            :quantity_total = sum(:quantity),
+            :satisfaction_avg = mean(:satisfaction))
+
+bump_chart = BumpChart(:bump_rankings, df_rankings, :rankings_data;
+    x_col=:quarter,
+    performance_cols=[:sales_total, :profit_total, :quantity_total, :satisfaction_avg],
+    entity_col=:product,
+    filters=Dict{Symbol,Any}(:region => unique(df_rankings.region), :segment => unique(df_rankings.segment)),
+    facet_cols=[:region, :segment],
+    y_mode="Ranking",
+    line_width=3,
+    title="Product Rankings Over Time",
+    notes="A BumpChart shows how entities rank over time based on different performance metrics. This chart displays product rankings (Laptop, Tablet, Phone) across quarters. Use the Performance Metric dropdown to switch between sales, profit, quantity, or satisfaction metrics. Filter by region and segment to focus on specific market areas. Toggle between 'Ranking' mode (shows relative position with dense ranking) and 'Absolute' mode (shows actual metric values). Enable faceting to see rankings broken down by region or segment. Hover over a line to highlight it - all other lines turn grey to emphasize the selected product across all facets. Dense ranking is used: if two products tie for rank 1, both get rank 1, and the next product gets rank 2 (no gaps). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BumpChart examples</a>")
 
 # More Exotic Plot Types
 # Corrplot.
@@ -771,6 +795,147 @@ graph_stock = Graph(:stock_network,
     scenario_col = :scenario,
     default_scenario = "Short-term Returns (Daily)"
 )
+
+# ===== Financial Charts =====
+financial_section = TextBlock("<h1>Financial Charts</h1>")
+
+# Generate OHLC data for multiple stocks
+using Random
+rng_ohlc = Random.MersenneTwister(789)
+trading_dates = Date(2024, 1, 1):Day(1):Date(2024, 3, 31)  # Q1 2024
+trading_dates = filter(d -> dayofweek(d) < 6, collect(trading_dates))  # Remove weekends
+
+ohlc_symbols = ["AAPL", "MSFT", "GOOGL"]
+ohlc_data_parts = []
+
+for symbol in ohlc_symbols
+    # Different base prices for each stock
+    base_price = Dict("AAPL" => 175.0, "MSFT" => 380.0, "GOOGL" => 140.0)[symbol]
+    price = base_price
+
+    for date in trading_dates
+        # Simulate daily price movement
+        daily_return = randn(rng_ohlc) * 0.02  # 2% daily volatility
+
+        open_price = price
+        close_price = price * (1 + daily_return)
+
+        # High and low with some randomness
+        high_price = max(open_price, close_price) * (1 + abs(randn(rng_ohlc)) * 0.01)
+        low_price = min(open_price, close_price) * (1 - abs(randn(rng_ohlc)) * 0.01)
+
+        # Volume varies with volatility
+        volume = round(Int, 50_000_000 * (1 + abs(daily_return) * 2 + rand(rng_ohlc) * 0.5))
+
+        push!(ohlc_data_parts, (
+            time_from = date,
+            time_to = date,
+            symbol = symbol,
+            open = open_price,
+            high = high_price,
+            low = low_price,
+            close = close_price,
+            volume = volume,
+            sector = symbol == "AAPL" ? "Technology" : (symbol == "MSFT" ? "Technology" : "Technology")
+        ))
+
+        price = close_price  # Next day starts where previous closed
+    end
+end
+
+ohlc_df = DataFrame(ohlc_data_parts)
+
+ohlc_chart = OHLCChart(:financial_ohlc, ohlc_df, :ohlc_data;
+    time_from_col=:time_from,
+    time_to_col=:time_to,
+    symbol_col=:symbol,
+    open_col=:open,
+    high_col=:high,
+    low_col=:low,
+    close_col=:close,
+    volume_col=:volume,
+    filters=Dict{Symbol,Any}(:sector => ["Technology"]),
+    display_mode="Overlay",
+    show_volume=true,
+    title="Stock Price Analysis - Q1 2024",
+    notes="An OHLC (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and OHLC (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the OHLC bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for OHLCChart examples</a>")
+
+# Generate ExecutionPlot data for trade execution analysis
+rng_exec = Random.MersenneTwister(456)
+exec_start_time = DateTime(2024, 1, 15, 10, 0, 0)
+exec_time_points = [exec_start_time + Second(i*20) for i in 0:180]  # Every 20 seconds for 1 hour
+
+# Simulate realistic stock price with bid-ask spread
+exec_base_price = 125.0
+exec_prices = exec_base_price .+ cumsum(randn(rng_exec, length(exec_time_points)) .* 0.04)
+exec_spread = 0.02
+
+exec_tob_df = DataFrame(
+    time = exec_time_points,
+    bid = exec_prices .- exec_spread/2,
+    ask = exec_prices .+ exec_spread/2
+)
+
+# Volume data in 5-minute buckets
+exec_volume_times = [exec_start_time + Minute(i*5) for i in 0:11]
+exec_volume_df = DataFrame(
+    time_from = exec_volume_times[1:end-1],
+    time_to = exec_volume_times[2:end],
+    volume = rand(rng_exec, 80000:200000, length(exec_volume_times)-1)
+)
+
+# Generate two different execution strategies for comparison
+# Strategy 1: Aggressive (buys quickly, higher implementation shortfall)
+aggr_fill_times = sort(exec_start_time .+ Second.(rand(rng_exec, 180:1200, 18)))
+aggr_quantities = rand(rng_exec, 400:600, 18)
+aggr_venues = rand(rng_exec, ["NYSE", "NASDAQ", "ARCA"], 18)
+
+fills_aggressive = DataFrame(
+    time = aggr_fill_times,
+    quantity = aggr_quantities,
+    price = [exec_tob_df[findfirst(t -> t >= ft, exec_tob_df.time), :ask] + rand(rng_exec, 0:0.001:0.015)
+             for ft in aggr_fill_times],
+    execution_name = fill("Aggressive Strategy", 18),
+    venue = aggr_venues,
+    urgency = fill("High", 18)
+)
+
+# Strategy 2: Patient (takes more time, better prices)
+patient_fill_times = sort(exec_start_time .+ Second.(rand(rng_exec, 600:3300, 28)))
+patient_quantities = rand(rng_exec, 250:450, 28)
+patient_venues = rand(rng_exec, ["NYSE", "NASDAQ", "ARCA", "BATS"], 28)
+
+fills_patient = DataFrame(
+    time = patient_fill_times,
+    quantity = patient_quantities,
+    price = [exec_tob_df[findfirst(t -> t >= ft, exec_tob_df.time), :ask] - rand(rng_exec, 0:0.001:0.01)
+             for ft in patient_fill_times],
+    execution_name = fill("Patient Strategy", 28),
+    venue = patient_venues,
+    urgency = fill("Low", 28)
+)
+
+# Combine all fills
+exec_fills_df = vcat(fills_aggressive, fills_patient)
+
+# Metadata for both executions
+exec_metadata_df = DataFrame(
+    execution_name = ["Aggressive Strategy", "Patient Strategy"],
+    arrival_price = [125.0, 125.0],
+    side = ["buy", "buy"],
+    desired_quantity = [9000, 12000]
+)
+
+executionplot_chart = ExecutionPlot(
+    :tutorial_execution,
+    exec_tob_df,
+    exec_volume_df,
+    exec_fills_df,
+    exec_metadata_df,
+    (:exec_tob_data, :exec_volume_data, :exec_fills_data, :exec_metadata);
+    color_cols=[:venue, :urgency],
+    title="Trade Execution Analysis - Comparing Strategies",
+    notes="An ExecutionPlot chart analyzes trade execution quality by comparing fill prices against benchmarks. This example compares two strategies for buying the same stock. <strong>Key Features:</strong> Execution selector dropdown to switch between different executions (Aggressive vs Patient strategy), Benchmark selector to choose between Arrival Price (price when order started) and First Fill Mid (mid-price at first fill), Show Volume checkbox to toggle market volume bars at the bottom of the chart, Bid/Ask lines showing the top of book prices over time, Fill points sized by quantity (larger circles = larger fills) and colored by category (venue or urgency), Interactive fills table with Time, Price, Quantity, and category columns, Running Implementation Shortfall showing cumulative cost vs benchmark (negative is worse), VWAP Shortfall showing cost vs volume-weighted average price of execution, Spread Crossing percentage showing how aggressive each fill was (0%=bought at bid, 100%=bought at ask), Remaining percentage showing how much of desired quantity is left to execute, Summary table aggregating metrics by category (e.g., by venue or urgency level), showing total implementation shortfall, VWAP shortfall, and average spread crossing for each category. Users can click fills in the table to exclude them from calculations, and hover over table rows to highlight corresponding points in the chart. This visualization is essential for transaction cost analysis (TCA) and evaluating execution algorithms. The aggressive strategy completes faster but typically has higher implementation shortfall, while the patient strategy takes longer but may achieve better prices. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ExecutionPlot examples</a>")
 
 # Waterfall
 # Create waterfall data showing profit breakdown
@@ -1338,6 +1503,12 @@ all_data = Dict{Symbol, DataFrame}(
     :daily_product => daily_product,
     :surface_df => surface_df,
     :business_path_data => df_business_path,
+    :rankings_data => df_rankings,
+    :ohlc_data => ohlc_df,
+    :exec_tob_data => exec_tob_df,
+    :exec_volume_data => exec_volume_df,
+    :exec_fills_data => exec_fills_df,
+    :exec_metadata => exec_metadata_df,
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
     :radar_data => radar_df,
@@ -1362,10 +1533,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, bump_chart],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, and Path.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and BumpChart.",
     dataformat = :parquet
 )
 
@@ -1415,9 +1586,18 @@ situational_plot_page =  JSPlotPage(
     dataformat = :parquet
 )
 
+financial_plot_page =  JSPlotPage(
+    all_data,
+    [financial_section, ohlc_chart, executionplot_chart],
+    tab_title="Financial Charts",
+    page_header = "Financial Charts",
+    notes = "This shows examples of financial market visualization charts. OHLCChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls. ExecutionPlot analyzes trade execution quality with implementation shortfall calculations, VWAP comparison, spread crossing metrics, and interactive fills table for transaction cost analysis.",
+    dataformat = :parquet
+)
+
 
 subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page],
-    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page])
+    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page, financial_plot_page])
 
 
 # Create final Pages object with all pages including the new theoretical ones

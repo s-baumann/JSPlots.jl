@@ -1,0 +1,2933 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSPlots.jl</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    
+
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const TIME_COL = 'time';
+    const BID_COL = 'bid';
+    const ASK_COL = 'ask';
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const VOLUME_COL = 'volume';
+    const FILL_TIME_COL = 'time';
+    const QUANTITY_COL = 'quantity';
+    const PRICE_COL = 'price';
+    const EXECUTION_NAME_COL = 'execution_name';
+    const ARRIVAL_PRICE_COL = 'arrival_price';
+    const HAS_ARRIVAL = true;
+    const SIDE_COL = 'side';
+    const DESIRED_QUANTITY_COL = 'desired_quantity';
+    const COLOR_COLS = ['venue', 'aggressiveness'];
+    const COLOR_MAPS = {'venue': {'NYSE': '#ab63fa', 'ARCA': '#636efa', 'BATS': '#EF553B', 'NASDAQ': '#00cc96'}, 'aggressiveness': {'Mid': '#636efa', 'Aggressive': '#00cc96', 'Passive': '#EF553B'}};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+    let tobData = [];
+    let volumeData = [];
+    let fillsData = [];
+    let metadataData = [];
+    let deselectedFills = new Set();  // Track manually deselected fills
+
+    window.updateChart_example1_exec = function() {
+        // Get current controls
+        const execSelect = document.getElementById('execution_select_example1_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Execution_1';
+
+        const benchmarkSelect = document.getElementById('benchmark_select_example1_exec');
+        const benchmark = benchmarkSelect ? benchmarkSelect.value : (HAS_ARRIVAL ? 'arrival' : 'first');
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example1_exec');
+        const showVolume = showVolumeCheckbox ? showVolumeCheckbox.checked : true;
+
+        // Get data for current execution
+        const execMetadata = metadataData.find(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        if (!execMetadata) {
+            console.error('No metadata found for execution:', currentExecution);
+            return;
+        }
+
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const side = execMetadata[SIDE_COL];
+        const desiredQty = execMetadata[DESIRED_QUANTITY_COL];
+
+        // Calculate benchmark price
+        let benchmarkPrice;
+        if (benchmark === 'arrival' && HAS_ARRIVAL) {
+            benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL];
+        } else {
+            // Use mid price right before first fill
+            if (execFills.length > 0) {
+                const firstFillTime = execFills[0][FILL_TIME_COL];
+                const tobBeforeFirst = tobData.filter(row => row[TIME_COL] <= firstFillTime);
+                if (tobBeforeFirst.length > 0) {
+                    const lastTob = tobBeforeFirst[tobBeforeFirst.length - 1];
+                    benchmarkPrice = (lastTob[BID_COL] + lastTob[ASK_COL]) / 2;
+                } else {
+                    benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+                }
+            } else {
+                benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+            }
+        }
+
+        // Render chart
+        renderChart(execFills, benchmarkPrice, side, desiredQty, showVolume);
+
+        // Render tables
+        renderFillsTable(execFills, benchmarkPrice, side, desiredQty);
+        renderSummaryTable(execFills, benchmarkPrice, side, desiredQty);
+    };
+
+    function renderChart(fills, benchmarkPrice, side, desiredQty, showVolume) {
+        const traces = [];
+
+        // Bid and ask lines
+        const tobTimes = tobData.map(row => row[TIME_COL]);
+        const bids = tobData.map(row => row[BID_COL]);
+        const asks = tobData.map(row => row[ASK_COL]);
+
+        traces.push({
+            x: tobTimes,
+            y: bids,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Bid',
+            line: {color: '#EF553B', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        traces.push({
+            x: tobTimes,
+            y: asks,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Ask',
+            line: {color: '#00cc96', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        // Volume bars if enabled
+        if (showVolume) {
+            const volTimes = volumeData.map(row => row[TIME_FROM_COL]);
+            const volumes = volumeData.map(row => row[VOLUME_COL]);
+
+            traces.push({
+                x: volTimes,
+                y: volumes,
+                type: 'bar',
+                name: 'Volume',
+                marker: {color: '#636efa'},
+                xaxis: 'x',
+                yaxis: 'y2'
+            });
+        }
+
+        // Fill points
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        if (COLOR_COLS.length > 0) {
+            // Group by first color column
+            const colorCol = COLOR_COLS[0];
+            const fillsByColor = {};
+            activeFills.forEach((fill, idx) => {
+                const colorValue = String(fill[colorCol]);
+                if (!fillsByColor[colorValue]) fillsByColor[colorValue] = [];
+                fillsByColor[colorValue].push({fill, originalIdx: idx});
+            });
+
+            for (let colorValue in fillsByColor) {
+                const items = fillsByColor[colorValue];
+                const fillGroup = items.map(item => item.fill);
+                const color = COLOR_MAPS[colorCol] && COLOR_MAPS[colorCol][colorValue] ?
+                             COLOR_MAPS[colorCol][colorValue] :
+                             COLOR_PALETTE[0];
+
+                traces.push({
+                    x: fillGroup.map(f => f[FILL_TIME_COL]),
+                    y: fillGroup.map(f => f[PRICE_COL]),
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: colorValue,
+                    marker: {
+                        size: fillGroup.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                        color: color
+                    },
+                    xaxis: 'x',
+                    yaxis: 'y'
+                });
+            }
+        } else {
+            // No color grouping
+            traces.push({
+                x: activeFills.map(f => f[FILL_TIME_COL]),
+                y: activeFills.map(f => f[PRICE_COL]),
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Fills',
+                marker: {
+                    size: activeFills.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                    color: '#636efa'
+                },
+                xaxis: 'x',
+                yaxis: 'y'
+            });
+        }
+
+        const layout = {
+            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
+            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume) {
+            layout.yaxis2 = {
+                title: 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+        }
+
+        Plotly.newPlot('example1_exec', traces, layout, {responsive: true});
+    }
+
+    function calculateVWAP(fills) {
+        // Calculate VWAP for active (non-deselected) fills
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+        if (activeFills.length === 0) return 0;
+
+        let totalValue = 0;
+        let totalQty = 0;
+        activeFills.forEach(fill => {
+            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+            totalQty += fill[QUANTITY_COL];
+        });
+        return totalQty > 0 ? totalValue / totalQty : 0;
+    }
+
+    function getSpreadCrossing(fill, side) {
+        // Find the bid/ask at the fill time
+        const fillTime = fill[FILL_TIME_COL];
+        const tobAtFill = tobData.filter(row => row[TIME_COL] <= fillTime);
+        if (tobAtFill.length === 0) return null;
+
+        const lastTob = tobAtFill[tobAtFill.length - 1];
+        const bid = lastTob[BID_COL];
+        const ask = lastTob[ASK_COL];
+        const spread = ask - bid;
+
+        if (spread <= 0) return null;
+
+        const fillPrice = fill[PRICE_COL];
+        if (side === 'buy') {
+            // 0 = bought at bid (neartouch), 1 = bought at ask (fartouch)
+            return Math.max(0, Math.min(1, (fillPrice - bid) / spread));
+        } else {
+            // 0 = sold at ask (neartouch), 1 = sold at bid (fartouch)
+            return Math.max(0, Math.min(1, (ask - fillPrice) / spread));
+        }
+    }
+
+    function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('fills_table_example1_exec');
+        if (!container) return;
+
+        // Calculate VWAP once
+        const vwap = calculateVWAP(fills);
+
+        let html = '<h4>Fill Details</h4>';
+        html += '<table id="fills_table_content_example1_exec" style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Time</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Price</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        COLOR_COLS.forEach(col => {
+            html += `<th style="border: 1px solid #ddd; padding: 8px;">${col}</th>`;
+        });
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Spread Cross %</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Remaining %</th>';
+        html += '</tr></thead><tbody>';
+
+        let cumQty = 0;
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            const isDeselected = deselectedFills.has(idx);
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const sideMultiplier = side === 'buy' ? 1 : -1;
+
+            if (!isDeselected) {
+                cumQty += qty;
+            }
+
+            const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            if (!isDeselected) {
+                cumImpShortfall += impShortfall;
+                cumVwapShortfall += vwapShortfall;
+            }
+
+            const bgColor = isDeselected ? '#f0f0f0' : 'white';
+
+            html += `<tr id="fill_row_${idx}_example1_exec"
+                         style="background-color: ${bgColor}; cursor: pointer; transition: background-color 0.2s;"
+                         onclick="toggleFill_example1_exec(${idx})"
+                         onmouseover="highlightFill_example1_exec(${idx}, true)"
+                         onmouseout="highlightFill_example1_exec(${idx}, false)">`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[FILL_TIME_COL]}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${price.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${qty}</td>`;
+            COLOR_COLS.forEach(col => {
+                html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[col]}</td>`;
+            });
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${spreadCrossing !== null ? (spreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${remaining.toFixed(1)}%</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function renderSummaryTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('summary_table_example1_exec');
+        if (!container) return;
+
+        // Calculate VWAP
+        const vwap = calculateVWAP(fills);
+
+        // Get active fills only
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        let html = '<h4>Summary by Category</h4>';
+
+        if (COLOR_COLS.length === 0) {
+            // No color columns, just show overall summary
+            html += '<p>No categories to aggregate by. Add color_cols for detailed breakdown.</p>';
+            container.innerHTML = html;
+            return;
+        }
+
+        // Use first color column for aggregation
+        const colorCol = COLOR_COLS[0];
+        const categories = {};
+
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+
+        activeFills.forEach(fill => {
+            const category = String(fill[colorCol]);
+            if (!categories[category]) {
+                categories[category] = {
+                    totalImpShortfall: 0,
+                    totalVwapShortfall: 0,
+                    spreadCrossings: [],
+                    count: 0,
+                    totalQty: 0
+                };
+            }
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            categories[category].totalImpShortfall += impShortfall;
+            categories[category].totalVwapShortfall += vwapShortfall;
+            if (spreadCrossing !== null) {
+                categories[category].spreadCrossings.push(spreadCrossing);
+            }
+            categories[category].count += 1;
+            categories[category].totalQty += qty;
+        });
+
+        // Calculate overall totals
+        let overallImpShortfall = 0;
+        let overallVwapShortfall = 0;
+        let overallSpreadCrossings = [];
+        let overallCount = 0;
+        let overallQty = 0;
+
+        for (let cat in categories) {
+            overallImpShortfall += categories[cat].totalImpShortfall;
+            overallVwapShortfall += categories[cat].totalVwapShortfall;
+            overallSpreadCrossings.push(...categories[cat].spreadCrossings);
+            overallCount += categories[cat].count;
+            overallQty += categories[cat].totalQty;
+        }
+
+        html += '<table style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += `<th style="border: 1px solid #ddd; padding: 8px;">${colorCol}</th>`;
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Fills</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Avg Spread Cross %</th>';
+        html += '</tr></thead><tbody>';
+
+        // Sort categories alphabetically
+        const sortedCategories = Object.keys(categories).sort();
+
+        sortedCategories.forEach(category => {
+            const data = categories[category];
+            const avgSpreadCrossing = data.spreadCrossings.length > 0 ?
+                data.spreadCrossings.reduce((a, b) => a + b, 0) / data.spreadCrossings.length : null;
+
+            html += '<tr>';
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${category}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.count}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalQty}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${avgSpreadCrossing !== null ? (avgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += '</tr>';
+        });
+
+        // Add overall row
+        const overallAvgSpreadCrossing = overallSpreadCrossings.length > 0 ?
+            overallSpreadCrossings.reduce((a, b) => a + b, 0) / overallSpreadCrossings.length : null;
+
+        html += '<tr style="font-weight: bold; background-color: #f9f9f9;">';
+        html += '<td style="border: 1px solid #ddd; padding: 8px;">Overall</td>';
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallCount}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallQty}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallImpShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallVwapShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallAvgSpreadCrossing !== null ? (overallAvgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+        html += '</tr>';
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    window.toggleFill_example1_exec = function(idx) {
+        if (deselectedFills.has(idx)) {
+            deselectedFills.delete(idx);
+        } else {
+            deselectedFills.add(idx);
+        }
+        updateChart_example1_exec();
+    };
+
+    window.highlightFill_example1_exec = function(idx, isHighlighted) {
+        // Get the chart element
+        const chartDiv = document.getElementById('example1_exec');
+        if (!chartDiv || !chartDiv.data) return;
+
+        // Find which trace contains this fill
+        const execSelect = document.getElementById('execution_select_example1_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Execution_1';
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const fill = execFills[idx];
+        if (!fill) return;
+
+        // Find the trace and point index
+        const fillTime = fill[FILL_TIME_COL];
+        const fillPrice = fill[PRICE_COL];
+
+        // Iterate through traces to find the matching fill point
+        chartDiv.data.forEach((trace, traceIdx) => {
+            if (trace.mode === 'markers' || trace.mode === 'markers+lines') {
+                trace.x.forEach((x, pointIdx) => {
+                    if (x === fillTime && Math.abs(trace.y[pointIdx] - fillPrice) < 0.01) {
+                        // Found the point, update its marker
+                        const update = {};
+                        if (isHighlighted) {
+                            // Increase size and add border
+                            const currentSize = trace.marker.size[pointIdx] || trace.marker.size || 8;
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? s * 1.5 : s
+                            );
+                            update['marker.line'] = {
+                                color: 'black',
+                                width: trace.marker.size.map((s, i) => i === pointIdx ? 2 : 0)
+                            };
+                        } else {
+                            // Reset to original size
+                            const originalSize = Math.max(5, 5 + Math.log(fill[QUANTITY_COL] + 1) * 2);
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? originalSize : s
+                            );
+                            update['marker.line'] = {width: 0};
+                        }
+                        Plotly.restyle(chartDiv, update, [traceIdx]);
+                    }
+                });
+            }
+        });
+    };
+
+    // Load data
+    Promise.all([
+        loadDataset('tob_data1'),
+        loadDataset('volume_data1'),
+        loadDataset('fills_data1'),
+        loadDataset('metadata1')
+    ]).then(function([tob, vol, fills, metadata]) {
+        tobData = tob;
+        volumeData = vol;
+        fillsData = fills;
+        metadataData = metadata;
+
+        updateChart_example1_exec();
+    }).catch(function(error) {
+        console.error('Error loading data for chart example1_exec:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_COL = 'time';
+    const BID_COL = 'bid';
+    const ASK_COL = 'ask';
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const VOLUME_COL = 'volume';
+    const FILL_TIME_COL = 'time';
+    const QUANTITY_COL = 'quantity';
+    const PRICE_COL = 'price';
+    const EXECUTION_NAME_COL = 'execution_name';
+    const ARRIVAL_PRICE_COL = '';
+    const HAS_ARRIVAL = false;
+    const SIDE_COL = 'side';
+    const DESIRED_QUANTITY_COL = 'desired_quantity';
+    const COLOR_COLS = ['strategy', 'fill_type'];
+    const COLOR_MAPS = {'strategy': {'VWAP': '#00cc96', 'POV': '#636efa', 'Opportunistic': '#EF553B', 'TWAP': '#ab63fa'}, 'fill_type': {'Market': '#00cc96', 'Peg': '#636efa', 'Limit': '#EF553B'}};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+    let tobData = [];
+    let volumeData = [];
+    let fillsData = [];
+    let metadataData = [];
+    let deselectedFills = new Set();  // Track manually deselected fills
+
+    window.updateChart_example2_exec = function() {
+        // Get current controls
+        const execSelect = document.getElementById('execution_select_example2_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Execution_2';
+
+        const benchmarkSelect = document.getElementById('benchmark_select_example2_exec');
+        const benchmark = benchmarkSelect ? benchmarkSelect.value : (HAS_ARRIVAL ? 'arrival' : 'first');
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example2_exec');
+        const showVolume = showVolumeCheckbox ? showVolumeCheckbox.checked : true;
+
+        // Get data for current execution
+        const execMetadata = metadataData.find(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        if (!execMetadata) {
+            console.error('No metadata found for execution:', currentExecution);
+            return;
+        }
+
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const side = execMetadata[SIDE_COL];
+        const desiredQty = execMetadata[DESIRED_QUANTITY_COL];
+
+        // Calculate benchmark price
+        let benchmarkPrice;
+        if (benchmark === 'arrival' && HAS_ARRIVAL) {
+            benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL];
+        } else {
+            // Use mid price right before first fill
+            if (execFills.length > 0) {
+                const firstFillTime = execFills[0][FILL_TIME_COL];
+                const tobBeforeFirst = tobData.filter(row => row[TIME_COL] <= firstFillTime);
+                if (tobBeforeFirst.length > 0) {
+                    const lastTob = tobBeforeFirst[tobBeforeFirst.length - 1];
+                    benchmarkPrice = (lastTob[BID_COL] + lastTob[ASK_COL]) / 2;
+                } else {
+                    benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+                }
+            } else {
+                benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+            }
+        }
+
+        // Render chart
+        renderChart(execFills, benchmarkPrice, side, desiredQty, showVolume);
+
+        // Render tables
+        renderFillsTable(execFills, benchmarkPrice, side, desiredQty);
+        renderSummaryTable(execFills, benchmarkPrice, side, desiredQty);
+    };
+
+    function renderChart(fills, benchmarkPrice, side, desiredQty, showVolume) {
+        const traces = [];
+
+        // Bid and ask lines
+        const tobTimes = tobData.map(row => row[TIME_COL]);
+        const bids = tobData.map(row => row[BID_COL]);
+        const asks = tobData.map(row => row[ASK_COL]);
+
+        traces.push({
+            x: tobTimes,
+            y: bids,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Bid',
+            line: {color: '#EF553B', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        traces.push({
+            x: tobTimes,
+            y: asks,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Ask',
+            line: {color: '#00cc96', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        // Volume bars if enabled
+        if (showVolume) {
+            const volTimes = volumeData.map(row => row[TIME_FROM_COL]);
+            const volumes = volumeData.map(row => row[VOLUME_COL]);
+
+            traces.push({
+                x: volTimes,
+                y: volumes,
+                type: 'bar',
+                name: 'Volume',
+                marker: {color: '#636efa'},
+                xaxis: 'x',
+                yaxis: 'y2'
+            });
+        }
+
+        // Fill points
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        if (COLOR_COLS.length > 0) {
+            // Group by first color column
+            const colorCol = COLOR_COLS[0];
+            const fillsByColor = {};
+            activeFills.forEach((fill, idx) => {
+                const colorValue = String(fill[colorCol]);
+                if (!fillsByColor[colorValue]) fillsByColor[colorValue] = [];
+                fillsByColor[colorValue].push({fill, originalIdx: idx});
+            });
+
+            for (let colorValue in fillsByColor) {
+                const items = fillsByColor[colorValue];
+                const fillGroup = items.map(item => item.fill);
+                const color = COLOR_MAPS[colorCol] && COLOR_MAPS[colorCol][colorValue] ?
+                             COLOR_MAPS[colorCol][colorValue] :
+                             COLOR_PALETTE[0];
+
+                traces.push({
+                    x: fillGroup.map(f => f[FILL_TIME_COL]),
+                    y: fillGroup.map(f => f[PRICE_COL]),
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: colorValue,
+                    marker: {
+                        size: fillGroup.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                        color: color
+                    },
+                    xaxis: 'x',
+                    yaxis: 'y'
+                });
+            }
+        } else {
+            // No color grouping
+            traces.push({
+                x: activeFills.map(f => f[FILL_TIME_COL]),
+                y: activeFills.map(f => f[PRICE_COL]),
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Fills',
+                marker: {
+                    size: activeFills.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                    color: '#636efa'
+                },
+                xaxis: 'x',
+                yaxis: 'y'
+            });
+        }
+
+        const layout = {
+            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
+            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume) {
+            layout.yaxis2 = {
+                title: 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+        }
+
+        Plotly.newPlot('example2_exec', traces, layout, {responsive: true});
+    }
+
+    function calculateVWAP(fills) {
+        // Calculate VWAP for active (non-deselected) fills
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+        if (activeFills.length === 0) return 0;
+
+        let totalValue = 0;
+        let totalQty = 0;
+        activeFills.forEach(fill => {
+            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+            totalQty += fill[QUANTITY_COL];
+        });
+        return totalQty > 0 ? totalValue / totalQty : 0;
+    }
+
+    function getSpreadCrossing(fill, side) {
+        // Find the bid/ask at the fill time
+        const fillTime = fill[FILL_TIME_COL];
+        const tobAtFill = tobData.filter(row => row[TIME_COL] <= fillTime);
+        if (tobAtFill.length === 0) return null;
+
+        const lastTob = tobAtFill[tobAtFill.length - 1];
+        const bid = lastTob[BID_COL];
+        const ask = lastTob[ASK_COL];
+        const spread = ask - bid;
+
+        if (spread <= 0) return null;
+
+        const fillPrice = fill[PRICE_COL];
+        if (side === 'buy') {
+            // 0 = bought at bid (neartouch), 1 = bought at ask (fartouch)
+            return Math.max(0, Math.min(1, (fillPrice - bid) / spread));
+        } else {
+            // 0 = sold at ask (neartouch), 1 = sold at bid (fartouch)
+            return Math.max(0, Math.min(1, (ask - fillPrice) / spread));
+        }
+    }
+
+    function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('fills_table_example2_exec');
+        if (!container) return;
+
+        // Calculate VWAP once
+        const vwap = calculateVWAP(fills);
+
+        let html = '<h4>Fill Details</h4>';
+        html += '<table id="fills_table_content_example2_exec" style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Time</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Price</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        COLOR_COLS.forEach(col => {
+            html += `<th style="border: 1px solid #ddd; padding: 8px;">${col}</th>`;
+        });
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Spread Cross %</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Remaining %</th>';
+        html += '</tr></thead><tbody>';
+
+        let cumQty = 0;
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            const isDeselected = deselectedFills.has(idx);
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const sideMultiplier = side === 'buy' ? 1 : -1;
+
+            if (!isDeselected) {
+                cumQty += qty;
+            }
+
+            const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            if (!isDeselected) {
+                cumImpShortfall += impShortfall;
+                cumVwapShortfall += vwapShortfall;
+            }
+
+            const bgColor = isDeselected ? '#f0f0f0' : 'white';
+
+            html += `<tr id="fill_row_${idx}_example2_exec"
+                         style="background-color: ${bgColor}; cursor: pointer; transition: background-color 0.2s;"
+                         onclick="toggleFill_example2_exec(${idx})"
+                         onmouseover="highlightFill_example2_exec(${idx}, true)"
+                         onmouseout="highlightFill_example2_exec(${idx}, false)">`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[FILL_TIME_COL]}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${price.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${qty}</td>`;
+            COLOR_COLS.forEach(col => {
+                html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[col]}</td>`;
+            });
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${spreadCrossing !== null ? (spreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${remaining.toFixed(1)}%</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function renderSummaryTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('summary_table_example2_exec');
+        if (!container) return;
+
+        // Calculate VWAP
+        const vwap = calculateVWAP(fills);
+
+        // Get active fills only
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        let html = '<h4>Summary by Category</h4>';
+
+        if (COLOR_COLS.length === 0) {
+            // No color columns, just show overall summary
+            html += '<p>No categories to aggregate by. Add color_cols for detailed breakdown.</p>';
+            container.innerHTML = html;
+            return;
+        }
+
+        // Use first color column for aggregation
+        const colorCol = COLOR_COLS[0];
+        const categories = {};
+
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+
+        activeFills.forEach(fill => {
+            const category = String(fill[colorCol]);
+            if (!categories[category]) {
+                categories[category] = {
+                    totalImpShortfall: 0,
+                    totalVwapShortfall: 0,
+                    spreadCrossings: [],
+                    count: 0,
+                    totalQty: 0
+                };
+            }
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            categories[category].totalImpShortfall += impShortfall;
+            categories[category].totalVwapShortfall += vwapShortfall;
+            if (spreadCrossing !== null) {
+                categories[category].spreadCrossings.push(spreadCrossing);
+            }
+            categories[category].count += 1;
+            categories[category].totalQty += qty;
+        });
+
+        // Calculate overall totals
+        let overallImpShortfall = 0;
+        let overallVwapShortfall = 0;
+        let overallSpreadCrossings = [];
+        let overallCount = 0;
+        let overallQty = 0;
+
+        for (let cat in categories) {
+            overallImpShortfall += categories[cat].totalImpShortfall;
+            overallVwapShortfall += categories[cat].totalVwapShortfall;
+            overallSpreadCrossings.push(...categories[cat].spreadCrossings);
+            overallCount += categories[cat].count;
+            overallQty += categories[cat].totalQty;
+        }
+
+        html += '<table style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += `<th style="border: 1px solid #ddd; padding: 8px;">${colorCol}</th>`;
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Fills</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Avg Spread Cross %</th>';
+        html += '</tr></thead><tbody>';
+
+        // Sort categories alphabetically
+        const sortedCategories = Object.keys(categories).sort();
+
+        sortedCategories.forEach(category => {
+            const data = categories[category];
+            const avgSpreadCrossing = data.spreadCrossings.length > 0 ?
+                data.spreadCrossings.reduce((a, b) => a + b, 0) / data.spreadCrossings.length : null;
+
+            html += '<tr>';
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${category}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.count}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalQty}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${avgSpreadCrossing !== null ? (avgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += '</tr>';
+        });
+
+        // Add overall row
+        const overallAvgSpreadCrossing = overallSpreadCrossings.length > 0 ?
+            overallSpreadCrossings.reduce((a, b) => a + b, 0) / overallSpreadCrossings.length : null;
+
+        html += '<tr style="font-weight: bold; background-color: #f9f9f9;">';
+        html += '<td style="border: 1px solid #ddd; padding: 8px;">Overall</td>';
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallCount}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallQty}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallImpShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallVwapShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallAvgSpreadCrossing !== null ? (overallAvgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+        html += '</tr>';
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    window.toggleFill_example2_exec = function(idx) {
+        if (deselectedFills.has(idx)) {
+            deselectedFills.delete(idx);
+        } else {
+            deselectedFills.add(idx);
+        }
+        updateChart_example2_exec();
+    };
+
+    window.highlightFill_example2_exec = function(idx, isHighlighted) {
+        // Get the chart element
+        const chartDiv = document.getElementById('example2_exec');
+        if (!chartDiv || !chartDiv.data) return;
+
+        // Find which trace contains this fill
+        const execSelect = document.getElementById('execution_select_example2_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Execution_2';
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const fill = execFills[idx];
+        if (!fill) return;
+
+        // Find the trace and point index
+        const fillTime = fill[FILL_TIME_COL];
+        const fillPrice = fill[PRICE_COL];
+
+        // Iterate through traces to find the matching fill point
+        chartDiv.data.forEach((trace, traceIdx) => {
+            if (trace.mode === 'markers' || trace.mode === 'markers+lines') {
+                trace.x.forEach((x, pointIdx) => {
+                    if (x === fillTime && Math.abs(trace.y[pointIdx] - fillPrice) < 0.01) {
+                        // Found the point, update its marker
+                        const update = {};
+                        if (isHighlighted) {
+                            // Increase size and add border
+                            const currentSize = trace.marker.size[pointIdx] || trace.marker.size || 8;
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? s * 1.5 : s
+                            );
+                            update['marker.line'] = {
+                                color: 'black',
+                                width: trace.marker.size.map((s, i) => i === pointIdx ? 2 : 0)
+                            };
+                        } else {
+                            // Reset to original size
+                            const originalSize = Math.max(5, 5 + Math.log(fill[QUANTITY_COL] + 1) * 2);
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? originalSize : s
+                            );
+                            update['marker.line'] = {width: 0};
+                        }
+                        Plotly.restyle(chartDiv, update, [traceIdx]);
+                    }
+                });
+            }
+        });
+    };
+
+    // Load data
+    Promise.all([
+        loadDataset('tob_data2'),
+        loadDataset('volume_data2'),
+        loadDataset('fills_data2'),
+        loadDataset('metadata2')
+    ]).then(function([tob, vol, fills, metadata]) {
+        tobData = tob;
+        volumeData = vol;
+        fillsData = fills;
+        metadataData = metadata;
+
+        updateChart_example2_exec();
+    }).catch(function(error) {
+        console.error('Error loading data for chart example2_exec:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_COL = 'time';
+    const BID_COL = 'bid';
+    const ASK_COL = 'ask';
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const VOLUME_COL = 'volume';
+    const FILL_TIME_COL = 'time';
+    const QUANTITY_COL = 'quantity';
+    const PRICE_COL = 'price';
+    const EXECUTION_NAME_COL = 'execution_name';
+    const ARRIVAL_PRICE_COL = 'arrival_price';
+    const HAS_ARRIVAL = true;
+    const SIDE_COL = 'side';
+    const DESIRED_QUANTITY_COL = 'desired_quantity';
+    const COLOR_COLS = ['urgency', 'venue'];
+    const COLOR_MAPS = {'urgency': {'Low': '#EF553B', 'High': '#636efa'}, 'venue': {'NYSE': '#EF553B', 'ARCA': '#636efa', 'BATS': '#ab63fa', 'NASDAQ': '#00cc96'}};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+    let tobData = [];
+    let volumeData = [];
+    let fillsData = [];
+    let metadataData = [];
+    let deselectedFills = new Set();  // Track manually deselected fills
+
+    window.updateChart_example3_exec = function() {
+        // Get current controls
+        const execSelect = document.getElementById('execution_select_example3_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Aggressive_Buy';
+
+        const benchmarkSelect = document.getElementById('benchmark_select_example3_exec');
+        const benchmark = benchmarkSelect ? benchmarkSelect.value : (HAS_ARRIVAL ? 'arrival' : 'first');
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example3_exec');
+        const showVolume = showVolumeCheckbox ? showVolumeCheckbox.checked : true;
+
+        // Get data for current execution
+        const execMetadata = metadataData.find(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        if (!execMetadata) {
+            console.error('No metadata found for execution:', currentExecution);
+            return;
+        }
+
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const side = execMetadata[SIDE_COL];
+        const desiredQty = execMetadata[DESIRED_QUANTITY_COL];
+
+        // Calculate benchmark price
+        let benchmarkPrice;
+        if (benchmark === 'arrival' && HAS_ARRIVAL) {
+            benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL];
+        } else {
+            // Use mid price right before first fill
+            if (execFills.length > 0) {
+                const firstFillTime = execFills[0][FILL_TIME_COL];
+                const tobBeforeFirst = tobData.filter(row => row[TIME_COL] <= firstFillTime);
+                if (tobBeforeFirst.length > 0) {
+                    const lastTob = tobBeforeFirst[tobBeforeFirst.length - 1];
+                    benchmarkPrice = (lastTob[BID_COL] + lastTob[ASK_COL]) / 2;
+                } else {
+                    benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+                }
+            } else {
+                benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
+            }
+        }
+
+        // Render chart
+        renderChart(execFills, benchmarkPrice, side, desiredQty, showVolume);
+
+        // Render tables
+        renderFillsTable(execFills, benchmarkPrice, side, desiredQty);
+        renderSummaryTable(execFills, benchmarkPrice, side, desiredQty);
+    };
+
+    function renderChart(fills, benchmarkPrice, side, desiredQty, showVolume) {
+        const traces = [];
+
+        // Bid and ask lines
+        const tobTimes = tobData.map(row => row[TIME_COL]);
+        const bids = tobData.map(row => row[BID_COL]);
+        const asks = tobData.map(row => row[ASK_COL]);
+
+        traces.push({
+            x: tobTimes,
+            y: bids,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Bid',
+            line: {color: '#EF553B', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        traces.push({
+            x: tobTimes,
+            y: asks,
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Ask',
+            line: {color: '#00cc96', width: 2},
+            xaxis: 'x',
+            yaxis: 'y'
+        });
+
+        // Volume bars if enabled
+        if (showVolume) {
+            const volTimes = volumeData.map(row => row[TIME_FROM_COL]);
+            const volumes = volumeData.map(row => row[VOLUME_COL]);
+
+            traces.push({
+                x: volTimes,
+                y: volumes,
+                type: 'bar',
+                name: 'Volume',
+                marker: {color: '#636efa'},
+                xaxis: 'x',
+                yaxis: 'y2'
+            });
+        }
+
+        // Fill points
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        if (COLOR_COLS.length > 0) {
+            // Group by first color column
+            const colorCol = COLOR_COLS[0];
+            const fillsByColor = {};
+            activeFills.forEach((fill, idx) => {
+                const colorValue = String(fill[colorCol]);
+                if (!fillsByColor[colorValue]) fillsByColor[colorValue] = [];
+                fillsByColor[colorValue].push({fill, originalIdx: idx});
+            });
+
+            for (let colorValue in fillsByColor) {
+                const items = fillsByColor[colorValue];
+                const fillGroup = items.map(item => item.fill);
+                const color = COLOR_MAPS[colorCol] && COLOR_MAPS[colorCol][colorValue] ?
+                             COLOR_MAPS[colorCol][colorValue] :
+                             COLOR_PALETTE[0];
+
+                traces.push({
+                    x: fillGroup.map(f => f[FILL_TIME_COL]),
+                    y: fillGroup.map(f => f[PRICE_COL]),
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: colorValue,
+                    marker: {
+                        size: fillGroup.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                        color: color
+                    },
+                    xaxis: 'x',
+                    yaxis: 'y'
+                });
+            }
+        } else {
+            // No color grouping
+            traces.push({
+                x: activeFills.map(f => f[FILL_TIME_COL]),
+                y: activeFills.map(f => f[PRICE_COL]),
+                type: 'scatter',
+                mode: 'markers',
+                name: 'Fills',
+                marker: {
+                    size: activeFills.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
+                    color: '#636efa'
+                },
+                xaxis: 'x',
+                yaxis: 'y'
+            });
+        }
+
+        const layout = {
+            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
+            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume) {
+            layout.yaxis2 = {
+                title: 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+        }
+
+        Plotly.newPlot('example3_exec', traces, layout, {responsive: true});
+    }
+
+    function calculateVWAP(fills) {
+        // Calculate VWAP for active (non-deselected) fills
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+        if (activeFills.length === 0) return 0;
+
+        let totalValue = 0;
+        let totalQty = 0;
+        activeFills.forEach(fill => {
+            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+            totalQty += fill[QUANTITY_COL];
+        });
+        return totalQty > 0 ? totalValue / totalQty : 0;
+    }
+
+    function getSpreadCrossing(fill, side) {
+        // Find the bid/ask at the fill time
+        const fillTime = fill[FILL_TIME_COL];
+        const tobAtFill = tobData.filter(row => row[TIME_COL] <= fillTime);
+        if (tobAtFill.length === 0) return null;
+
+        const lastTob = tobAtFill[tobAtFill.length - 1];
+        const bid = lastTob[BID_COL];
+        const ask = lastTob[ASK_COL];
+        const spread = ask - bid;
+
+        if (spread <= 0) return null;
+
+        const fillPrice = fill[PRICE_COL];
+        if (side === 'buy') {
+            // 0 = bought at bid (neartouch), 1 = bought at ask (fartouch)
+            return Math.max(0, Math.min(1, (fillPrice - bid) / spread));
+        } else {
+            // 0 = sold at ask (neartouch), 1 = sold at bid (fartouch)
+            return Math.max(0, Math.min(1, (ask - fillPrice) / spread));
+        }
+    }
+
+    function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('fills_table_example3_exec');
+        if (!container) return;
+
+        // Calculate VWAP once
+        const vwap = calculateVWAP(fills);
+
+        let html = '<h4>Fill Details</h4>';
+        html += '<table id="fills_table_content_example3_exec" style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Time</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Price</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        COLOR_COLS.forEach(col => {
+            html += `<th style="border: 1px solid #ddd; padding: 8px;">${col}</th>`;
+        });
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Spread Cross %</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Remaining %</th>';
+        html += '</tr></thead><tbody>';
+
+        let cumQty = 0;
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            const isDeselected = deselectedFills.has(idx);
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const sideMultiplier = side === 'buy' ? 1 : -1;
+
+            if (!isDeselected) {
+                cumQty += qty;
+            }
+
+            const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            if (!isDeselected) {
+                cumImpShortfall += impShortfall;
+                cumVwapShortfall += vwapShortfall;
+            }
+
+            const bgColor = isDeselected ? '#f0f0f0' : 'white';
+
+            html += `<tr id="fill_row_${idx}_example3_exec"
+                         style="background-color: ${bgColor}; cursor: pointer; transition: background-color 0.2s;"
+                         onclick="toggleFill_example3_exec(${idx})"
+                         onmouseover="highlightFill_example3_exec(${idx}, true)"
+                         onmouseout="highlightFill_example3_exec(${idx}, false)">`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[FILL_TIME_COL]}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${price.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${qty}</td>`;
+            COLOR_COLS.forEach(col => {
+                html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[col]}</td>`;
+            });
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${spreadCrossing !== null ? (spreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${remaining.toFixed(1)}%</td>`;
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function renderSummaryTable(fills, benchmarkPrice, side, desiredQty) {
+        const container = document.getElementById('summary_table_example3_exec');
+        if (!container) return;
+
+        // Calculate VWAP
+        const vwap = calculateVWAP(fills);
+
+        // Get active fills only
+        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
+
+        let html = '<h4>Summary by Category</h4>';
+
+        if (COLOR_COLS.length === 0) {
+            // No color columns, just show overall summary
+            html += '<p>No categories to aggregate by. Add color_cols for detailed breakdown.</p>';
+            container.innerHTML = html;
+            return;
+        }
+
+        // Use first color column for aggregation
+        const colorCol = COLOR_COLS[0];
+        const categories = {};
+
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+
+        activeFills.forEach(fill => {
+            const category = String(fill[colorCol]);
+            if (!categories[category]) {
+                categories[category] = {
+                    totalImpShortfall: 0,
+                    totalVwapShortfall: 0,
+                    spreadCrossings: [],
+                    count: 0,
+                    totalQty: 0
+                };
+            }
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const spreadCrossing = getSpreadCrossing(fill, side);
+
+            categories[category].totalImpShortfall += impShortfall;
+            categories[category].totalVwapShortfall += vwapShortfall;
+            if (spreadCrossing !== null) {
+                categories[category].spreadCrossings.push(spreadCrossing);
+            }
+            categories[category].count += 1;
+            categories[category].totalQty += qty;
+        });
+
+        // Calculate overall totals
+        let overallImpShortfall = 0;
+        let overallVwapShortfall = 0;
+        let overallSpreadCrossings = [];
+        let overallCount = 0;
+        let overallQty = 0;
+
+        for (let cat in categories) {
+            overallImpShortfall += categories[cat].totalImpShortfall;
+            overallVwapShortfall += categories[cat].totalVwapShortfall;
+            overallSpreadCrossings.push(...categories[cat].spreadCrossings);
+            overallCount += categories[cat].count;
+            overallQty += categories[cat].totalQty;
+        }
+
+        html += '<table style="width:100%; border-collapse: collapse;">';
+        html += '<thead><tr>';
+        html += `<th style="border: 1px solid #ddd; padding: 8px;">${colorCol}</th>`;
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Fills</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
+        html += '<th style="border: 1px solid #ddd; padding: 8px;">Avg Spread Cross %</th>';
+        html += '</tr></thead><tbody>';
+
+        // Sort categories alphabetically
+        const sortedCategories = Object.keys(categories).sort();
+
+        sortedCategories.forEach(category => {
+            const data = categories[category];
+            const avgSpreadCrossing = data.spreadCrossings.length > 0 ?
+                data.spreadCrossings.reduce((a, b) => a + b, 0) / data.spreadCrossings.length : null;
+
+            html += '<tr>';
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${category}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.count}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalQty}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalImpShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalVwapShortfall.toFixed(2)}</td>`;
+            html += `<td style="border: 1px solid #ddd; padding: 8px;">${avgSpreadCrossing !== null ? (avgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+            html += '</tr>';
+        });
+
+        // Add overall row
+        const overallAvgSpreadCrossing = overallSpreadCrossings.length > 0 ?
+            overallSpreadCrossings.reduce((a, b) => a + b, 0) / overallSpreadCrossings.length : null;
+
+        html += '<tr style="font-weight: bold; background-color: #f9f9f9;">';
+        html += '<td style="border: 1px solid #ddd; padding: 8px;">Overall</td>';
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallCount}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallQty}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallImpShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallVwapShortfall.toFixed(2)}</td>`;
+        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallAvgSpreadCrossing !== null ? (overallAvgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
+        html += '</tr>';
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    window.toggleFill_example3_exec = function(idx) {
+        if (deselectedFills.has(idx)) {
+            deselectedFills.delete(idx);
+        } else {
+            deselectedFills.add(idx);
+        }
+        updateChart_example3_exec();
+    };
+
+    window.highlightFill_example3_exec = function(idx, isHighlighted) {
+        // Get the chart element
+        const chartDiv = document.getElementById('example3_exec');
+        if (!chartDiv || !chartDiv.data) return;
+
+        // Find which trace contains this fill
+        const execSelect = document.getElementById('execution_select_example3_exec');
+        const currentExecution = execSelect ? execSelect.value : 'Aggressive_Buy';
+        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
+        const fill = execFills[idx];
+        if (!fill) return;
+
+        // Find the trace and point index
+        const fillTime = fill[FILL_TIME_COL];
+        const fillPrice = fill[PRICE_COL];
+
+        // Iterate through traces to find the matching fill point
+        chartDiv.data.forEach((trace, traceIdx) => {
+            if (trace.mode === 'markers' || trace.mode === 'markers+lines') {
+                trace.x.forEach((x, pointIdx) => {
+                    if (x === fillTime && Math.abs(trace.y[pointIdx] - fillPrice) < 0.01) {
+                        // Found the point, update its marker
+                        const update = {};
+                        if (isHighlighted) {
+                            // Increase size and add border
+                            const currentSize = trace.marker.size[pointIdx] || trace.marker.size || 8;
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? s * 1.5 : s
+                            );
+                            update['marker.line'] = {
+                                color: 'black',
+                                width: trace.marker.size.map((s, i) => i === pointIdx ? 2 : 0)
+                            };
+                        } else {
+                            // Reset to original size
+                            const originalSize = Math.max(5, 5 + Math.log(fill[QUANTITY_COL] + 1) * 2);
+                            update['marker.size'] = trace.marker.size.map((s, i) =>
+                                i === pointIdx ? originalSize : s
+                            );
+                            update['marker.line'] = {width: 0};
+                        }
+                        Plotly.restyle(chartDiv, update, [traceIdx]);
+                    }
+                });
+            }
+        });
+    };
+
+    // Load data
+    Promise.all([
+        loadDataset('tob_data3'),
+        loadDataset('volume_data3'),
+        loadDataset('fills_data3'),
+        loadDataset('metadata3')
+    ]).then(function([tob, vol, fills, metadata]) {
+        tobData = tob;
+        volumeData = vol;
+        fillsData = fills;
+        metadataData = metadata;
+
+        updateChart_example3_exec();
+    }).catch(function(error) {
+        console.error('Error loading data for chart example3_exec:', error);
+    });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="volume_data3" data-format="csv_embedded" data-src="">
+time_from,time_to,volume
+2024-01-16T10:00:00.0,2024-01-16T10:02:00.0,98079
+2024-01-16T10:02:00.0,2024-01-16T10:04:00.0,225323
+2024-01-16T10:04:00.0,2024-01-16T10:06:00.0,103268
+2024-01-16T10:06:00.0,2024-01-16T10:08:00.0,190110
+2024-01-16T10:08:00.0,2024-01-16T10:10:00.0,138420
+2024-01-16T10:10:00.0,2024-01-16T10:12:00.0,200284
+2024-01-16T10:12:00.0,2024-01-16T10:14:00.0,109940
+2024-01-16T10:14:00.0,2024-01-16T10:16:00.0,191506
+2024-01-16T10:16:00.0,2024-01-16T10:18:00.0,193437
+2024-01-16T10:18:00.0,2024-01-16T10:20:00.0,158627
+2024-01-16T10:20:00.0,2024-01-16T10:22:00.0,120887
+2024-01-16T10:22:00.0,2024-01-16T10:24:00.0,247751
+2024-01-16T10:24:00.0,2024-01-16T10:26:00.0,233887
+2024-01-16T10:26:00.0,2024-01-16T10:28:00.0,239507
+2024-01-16T10:28:00.0,2024-01-16T10:30:00.0,212853
+2024-01-16T10:30:00.0,2024-01-16T10:32:00.0,159395
+2024-01-16T10:32:00.0,2024-01-16T10:34:00.0,146127
+2024-01-16T10:34:00.0,2024-01-16T10:36:00.0,190504
+2024-01-16T10:36:00.0,2024-01-16T10:38:00.0,227894
+2024-01-16T10:38:00.0,2024-01-16T10:40:00.0,223284
+2024-01-16T10:40:00.0,2024-01-16T10:42:00.0,236198
+2024-01-16T10:42:00.0,2024-01-16T10:44:00.0,137065
+2024-01-16T10:44:00.0,2024-01-16T10:46:00.0,234508
+2024-01-16T10:46:00.0,2024-01-16T10:48:00.0,219593
+2024-01-16T10:48:00.0,2024-01-16T10:50:00.0,144539
+2024-01-16T10:50:00.0,2024-01-16T10:52:00.0,88673
+2024-01-16T10:52:00.0,2024-01-16T10:54:00.0,88978
+2024-01-16T10:54:00.0,2024-01-16T10:56:00.0,133124
+2024-01-16T10:56:00.0,2024-01-16T10:58:00.0,107724
+2024-01-16T10:58:00.0,2024-01-16T11:00:00.0,183037
+
+</script><script type="text/plain" id="fills_data1" data-format="csv_embedded" data-src="">
+time,quantity,price,execution_name,venue,aggressiveness
+2024-01-15T09:35:15.0,300,150.02141675092048,Execution_1,ARCA,Mid
+2024-01-15T09:36:05.0,400,150.01925378550183,Execution_1,BATS,Passive
+2024-01-15T09:41:38.0,500,149.858755824218,Execution_1,NASDAQ,Mid
+2024-01-15T09:41:44.0,350,149.86175582421802,Execution_1,ARCA,Mid
+2024-01-15T09:42:04.0,450,149.91579073197664,Execution_1,BATS,Passive
+2024-01-15T09:42:16.0,400,149.92579073197663,Execution_1,ARCA,Mid
+2024-01-15T09:43:34.0,350,149.84780444394696,Execution_1,NASDAQ,Aggressive
+2024-01-15T09:43:52.0,500,149.84580444394695,Execution_1,BATS,Passive
+2024-01-15T09:43:54.0,400,149.84680444394695,Execution_1,ARCA,Mid
+2024-01-15T09:43:58.0,350,149.85980444394696,Execution_1,ARCA,Mid
+2024-01-15T09:44:40.0,450,149.75796154835777,Execution_1,ARCA,Mid
+2024-01-15T09:45:31.0,400,149.71514105728198,Execution_1,NASDAQ,Mid
+2024-01-15T09:51:47.0,500,149.86477045993465,Execution_1,ARCA,Mid
+2024-01-15T09:54:18.0,350,149.93934998275444,Execution_1,BATS,Mid
+2024-01-15T09:56:08.0,400,150.01359817525508,Execution_1,NYSE,Mid
+2024-01-15T09:57:04.0,450,149.94680421135345,Execution_1,NASDAQ,Aggressive
+2024-01-15T09:58:23.0,350,150.00524869975672,Execution_1,ARCA,Aggressive
+2024-01-15T10:02:42.0,500,149.9933290702978,Execution_1,ARCA,Aggressive
+2024-01-15T10:02:53.0,400,150.0013290702978,Execution_1,NASDAQ,Aggressive
+2024-01-15T10:10:43.0,350,149.96689103407377,Execution_1,ARCA,Mid
+2024-01-15T10:11:50.0,450,149.85011406216537,Execution_1,BATS,Passive
+2024-01-15T10:12:11.0,400,149.78917115692124,Execution_1,NYSE,Mid
+2024-01-15T10:14:11.0,500,149.76779019406374,Execution_1,NYSE,Passive
+2024-01-15T10:20:52.0,350,149.61748741699896,Execution_1,NYSE,Passive
+2024-01-15T10:22:53.0,400,149.60932756264958,Execution_1,NASDAQ,Mid
+
+</script><script type="text/plain" id="fills_data3" data-format="csv_embedded" data-src="">
+time,quantity,price,execution_name,venue,urgency
+2024-01-16T10:01:50.0,443,200.1620969007741,Aggressive_Buy,ARCA,High
+2024-01-16T10:02:19.0,583,200.14663278244137,Aggressive_Buy,NYSE,High
+2024-01-16T10:02:21.0,582,200.15163278244137,Aggressive_Buy,ARCA,High
+2024-01-16T10:02:31.0,403,200.101580918924,Aggressive_Buy,ARCA,High
+2024-01-16T10:04:12.0,427,200.06002548854394,Aggressive_Buy,ARCA,High
+2024-01-16T10:05:47.0,518,200.00130425212544,Aggressive_Buy,NYSE,High
+2024-01-16T10:07:32.0,425,200.2920144864467,Aggressive_Buy,NYSE,High
+2024-01-16T10:08:12.0,464,200.34564358982868,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:08:41.0,496,200.40748076939127,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:08:53.0,546,200.38810311987595,Aggressive_Buy,ARCA,High
+2024-01-16T10:09:24.0,442,200.5536945702827,Aggressive_Buy,ARCA,High
+2024-01-16T10:10:53.0,553,200.5832553453047,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:11:09.0,530,200.50224081982358,Aggressive_Buy,NYSE,High
+2024-01-16T10:11:16.0,455,200.62396730428003,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:11:43.0,515,200.71668432420503,Aggressive_Buy,NYSE,High
+2024-01-16T10:12:07.0,596,200.80576470737478,Aggressive_Buy,NYSE,High
+2024-01-16T10:12:39.0,499,201.00082525308343,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:13:42.0,576,201.25982503463644,Aggressive_Buy,ARCA,High
+2024-01-16T10:13:54.0,450,201.21469139298185,Aggressive_Buy,NYSE,High
+2024-01-16T10:14:39.0,520,201.42100626156963,Aggressive_Buy,ARCA,High
+2024-01-16T10:05:08.0,294,200.0637169580096,Patient_Buy,NASDAQ,Low
+2024-01-16T10:05:26.0,392,200.03904480294085,Patient_Buy,NYSE,Low
+2024-01-16T10:05:40.0,389,199.96461425086943,Patient_Buy,ARCA,Low
+2024-01-16T10:05:49.0,393,199.96930425212543,Patient_Buy,BATS,Low
+2024-01-16T10:06:23.0,333,199.9408047470197,Patient_Buy,NYSE,Low
+2024-01-16T10:07:37.0,372,200.2650144864467,Patient_Buy,ARCA,Low
+2024-01-16T10:07:51.0,279,200.3558485492289,Patient_Buy,NYSE,Low
+2024-01-16T10:12:20.0,324,200.9286416073004,Patient_Buy,NYSE,Low
+2024-01-16T10:12:29.0,272,200.9286416073004,Patient_Buy,NASDAQ,Low
+2024-01-16T10:17:32.0,336,201.76251635554624,Patient_Buy,ARCA,Low
+2024-01-16T10:21:11.0,269,202.00981215341096,Patient_Buy,BATS,Low
+2024-01-16T10:21:30.0,277,202.02946184414708,Patient_Buy,NYSE,Low
+2024-01-16T10:21:54.0,308,202.0738153032822,Patient_Buy,NASDAQ,Low
+2024-01-16T10:23:37.0,356,202.50371495472154,Patient_Buy,NASDAQ,Low
+2024-01-16T10:24:28.0,343,202.83086054131408,Patient_Buy,BATS,Low
+2024-01-16T10:28:00.0,309,202.52241529756867,Patient_Buy,BATS,Low
+2024-01-16T10:30:20.0,280,202.38812168461718,Patient_Buy,NASDAQ,Low
+2024-01-16T10:30:38.0,368,202.370283355948,Patient_Buy,NASDAQ,Low
+2024-01-16T10:30:44.0,360,202.356283355948,Patient_Buy,BATS,Low
+2024-01-16T10:32:25.0,321,202.28954294862666,Patient_Buy,ARCA,Low
+2024-01-16T10:37:08.0,382,202.1943810782973,Patient_Buy,NASDAQ,Low
+2024-01-16T10:37:34.0,327,202.15534618076842,Patient_Buy,NASDAQ,Low
+2024-01-16T10:38:43.0,322,202.05842512779233,Patient_Buy,NYSE,Low
+2024-01-16T10:39:53.0,384,202.2840214671257,Patient_Buy,BATS,Low
+2024-01-16T10:39:59.0,383,202.2770214671257,Patient_Buy,NYSE,Low
+2024-01-16T10:41:10.0,253,202.35608318242174,Patient_Buy,NYSE,Low
+2024-01-16T10:43:24.0,360,202.2051244931828,Patient_Buy,NYSE,Low
+2024-01-16T10:43:59.0,300,202.12795172715371,Patient_Buy,ARCA,Low
+2024-01-16T10:46:47.0,323,202.0656112197591,Patient_Buy,ARCA,Low
+2024-01-16T10:46:50.0,389,202.06861121975908,Patient_Buy,BATS,Low
+2024-01-16T10:47:15.0,380,202.08952820342324,Patient_Buy,BATS,Low
+2024-01-16T10:47:18.0,277,202.15894176855835,Patient_Buy,BATS,Low
+2024-01-16T10:48:33.0,257,202.2463510811069,Patient_Buy,NYSE,Low
+2024-01-16T10:49:24.0,341,202.24899938493988,Patient_Buy,BATS,Low
+2024-01-16T10:51:39.0,254,202.02088592852112,Patient_Buy,NYSE,Low
+
+</script><script type="text/plain" id="metadata2" data-format="csv_embedded" data-src="">
+execution_name,side,desired_quantity
+Execution_2,sell,15000
+
+</script><script type="text/plain" id="volume_data1" data-format="csv_embedded" data-src="">
+time_from,time_to,volume
+2024-01-15T09:30:00.0,2024-01-15T09:35:00.0,174477
+2024-01-15T09:35:00.0,2024-01-15T09:40:00.0,93214
+2024-01-15T09:40:00.0,2024-01-15T09:45:00.0,70552
+2024-01-15T09:45:00.0,2024-01-15T09:50:00.0,81018
+2024-01-15T09:50:00.0,2024-01-15T09:55:00.0,128572
+2024-01-15T09:55:00.0,2024-01-15T10:00:00.0,123509
+2024-01-15T10:00:00.0,2024-01-15T10:05:00.0,104360
+2024-01-15T10:05:00.0,2024-01-15T10:10:00.0,102773
+2024-01-15T10:10:00.0,2024-01-15T10:15:00.0,149678
+2024-01-15T10:15:00.0,2024-01-15T10:20:00.0,100951
+2024-01-15T10:20:00.0,2024-01-15T10:25:00.0,79413
+
+</script><script type="text/plain" id="fills_data2" data-format="csv_embedded" data-src="">
+time,quantity,price,execution_name,strategy,fill_type
+2024-01-15T14:03:59.0,492,75.04298778755887,Execution_2,POV,Peg
+2024-01-15T14:05:21.0,499,74.97133288678181,Execution_2,Opportunistic,Limit
+2024-01-15T14:07:44.0,345,75.04717396678068,Execution_2,VWAP,Limit
+2024-01-15T14:10:58.0,546,75.05644183152558,Execution_2,TWAP,Peg
+2024-01-15T14:12:32.0,438,74.96672663195659,Execution_2,VWAP,Peg
+2024-01-15T14:13:01.0,567,75.01944269767814,Execution_2,TWAP,Market
+2024-01-15T14:14:51.0,589,75.02604379260183,Execution_2,POV,Limit
+2024-01-15T14:15:16.0,453,75.05380027318965,Execution_2,TWAP,Peg
+2024-01-15T14:16:39.0,330,75.1041805527839,Execution_2,Opportunistic,Peg
+2024-01-15T14:26:22.0,456,75.26514039009747,Execution_2,POV,Limit
+2024-01-15T14:27:01.0,226,75.27559543195936,Execution_2,TWAP,Limit
+2024-01-15T14:27:27.0,504,75.26299948225198,Execution_2,TWAP,Peg
+2024-01-15T14:34:04.0,269,75.1242307632933,Execution_2,Opportunistic,Limit
+2024-01-15T14:34:18.0,372,75.1272307632933,Execution_2,VWAP,Market
+2024-01-15T14:34:45.0,509,75.13938773091266,Execution_2,POV,Limit
+2024-01-15T14:41:06.0,452,75.06384824038588,Execution_2,POV,Limit
+2024-01-15T14:42:08.0,403,75.01528963471839,Execution_2,TWAP,Peg
+2024-01-15T14:45:48.0,540,74.98305048283824,Execution_2,POV,Peg
+2024-01-15T14:46:49.0,261,74.99180479430507,Execution_2,TWAP,Limit
+2024-01-15T14:47:03.0,412,74.93585654731956,Execution_2,TWAP,Limit
+2024-01-15T14:47:08.0,411,74.92885654731955,Execution_2,TWAP,Limit
+2024-01-15T14:48:50.0,214,74.85214444185853,Execution_2,TWAP,Limit
+2024-01-15T14:49:28.0,340,74.90785731005262,Execution_2,Opportunistic,Limit
+2024-01-15T14:49:41.0,387,74.97386757988194,Execution_2,POV,Market
+2024-01-15T14:52:10.0,550,74.82531811618843,Execution_2,POV,Market
+2024-01-15T14:52:20.0,230,74.82431811618844,Execution_2,Opportunistic,Market
+2024-01-15T14:52:34.0,540,74.83416264693132,Execution_2,Opportunistic,Peg
+2024-01-15T14:54:52.0,542,74.7966278983489,Execution_2,Opportunistic,Market
+2024-01-15T14:56:20.0,274,74.77825918469078,Execution_2,Opportunistic,Market
+2024-01-15T14:56:30.0,324,74.77504285984166,Execution_2,VWAP,Peg
+
+</script><script type="text/plain" id="metadata1" data-format="csv_embedded" data-src="">
+execution_name,arrival_price,side,desired_quantity
+Execution_1,150.0,buy,10000
+
+</script><script type="text/plain" id="metadata3" data-format="csv_embedded" data-src="">
+execution_name,arrival_price,side,desired_quantity
+Aggressive_Buy,200.0,buy,10000
+Patient_Buy,200.0,buy,12000
+
+</script><script type="text/plain" id="tob_data1" data-format="csv_embedded" data-src="">
+time,bid,ask
+2024-01-15T09:30:00.0,150.01018516783137,150.03018516783135
+2024-01-15T09:30:30.0,149.9642659969191,149.98426599691908
+2024-01-15T09:31:00.0,149.97135400472754,149.99135400472753
+2024-01-15T09:31:30.0,149.9534023165777,149.97340231657768
+2024-01-15T09:32:00.0,149.8746122007755,149.89461220077547
+2024-01-15T09:32:30.0,149.95973761783097,149.97973761783095
+2024-01-15T09:33:00.0,149.96633188733156,149.98633188733154
+2024-01-15T09:33:30.0,149.93486025842017,149.95486025842015
+2024-01-15T09:34:00.0,149.89936123303747,149.91936123303745
+2024-01-15T09:34:30.0,150.0127432617367,150.03274326173667
+2024-01-15T09:35:00.0,149.9944509924121,150.0144509924121
+2024-01-15T09:35:30.0,150.0024167509205,150.02241675092048
+2024-01-15T09:36:00.0,150.0000964641433,150.02009646414328
+2024-01-15T09:36:30.0,149.99525378550186,150.01525378550184
+2024-01-15T09:37:00.0,150.02538729053757,150.04538729053755
+2024-01-15T09:37:30.0,149.97992497456528,149.99992497456526
+2024-01-15T09:38:00.0,149.96361635446792,149.9836163544679
+2024-01-15T09:38:30.0,150.01627657604217,150.03627657604216
+2024-01-15T09:39:00.0,149.97191314343266,149.99191314343264
+2024-01-15T09:39:30.0,149.94484368042316,149.96484368042314
+2024-01-15T09:40:00.0,149.93152634095406,149.95152634095405
+2024-01-15T09:40:30.0,149.8998925497726,149.91989254977258
+2024-01-15T09:41:00.0,149.91867939491425,149.93867939491423
+2024-01-15T09:41:30.0,149.9158370037136,149.93583700371357
+2024-01-15T09:42:00.0,149.83375582421803,149.853755824218
+2024-01-15T09:42:30.0,149.89979073197665,149.91979073197663
+2024-01-15T09:43:00.0,149.82010464763732,149.8401046476373
+2024-01-15T09:43:30.0,149.83058486403672,149.8505848640367
+2024-01-15T09:44:00.0,149.83280444394697,149.85280444394695
+2024-01-15T09:44:30.0,149.76784702869466,149.78784702869464
+2024-01-15T09:45:00.0,149.74196154835778,149.76196154835776
+2024-01-15T09:45:30.0,149.68104662281647,149.70104662281645
+2024-01-15T09:46:00.0,149.698141057282,149.71814105728197
+2024-01-15T09:46:30.0,149.7041226900902,149.72412269009018
+2024-01-15T09:47:00.0,149.66450259451335,149.68450259451333
+2024-01-15T09:47:30.0,149.68387987962478,149.70387987962476
+2024-01-15T09:48:00.0,149.748581226088,149.76858122608797
+2024-01-15T09:48:30.0,149.77529873165238,149.79529873165237
+2024-01-15T09:49:00.0,149.83809602290467,149.85809602290465
+2024-01-15T09:49:30.0,149.88311736594363,149.90311736594361
+2024-01-15T09:50:00.0,149.8649562244354,149.88495622443537
+2024-01-15T09:50:30.0,149.86476588060737,149.88476588060735
+2024-01-15T09:51:00.0,149.79600966807257,149.81600966807255
+2024-01-15T09:51:30.0,149.83786475083326,149.85786475083324
+2024-01-15T09:52:00.0,149.84977045993466,149.86977045993464
+2024-01-15T09:52:30.0,149.83931243288436,149.85931243288434
+2024-01-15T09:53:00.0,149.84062362950962,149.8606236295096
+2024-01-15T09:53:30.0,149.81951087824146,149.83951087824144
+2024-01-15T09:54:00.0,149.8967134784312,149.91671347843118
+2024-01-15T09:54:30.0,149.92334998275444,149.94334998275443
+2024-01-15T09:55:00.0,149.86585390956438,149.88585390956436
+2024-01-15T09:55:30.0,149.9157384206054,149.9357384206054
+2024-01-15T09:56:00.0,149.9354435836601,149.95544358366007
+2024-01-15T09:56:30.0,149.9865981752551,150.00659817525508
+2024-01-15T09:57:00.0,149.977456555998,149.99745655599799
+2024-01-15T09:57:30.0,149.93680421135346,149.95680421135344
+2024-01-15T09:58:00.0,149.97165857810185,149.99165857810183
+2024-01-15T09:58:30.0,149.99324869975675,150.01324869975673
+2024-01-15T09:59:00.0,150.04852589143988,150.06852589143986
+2024-01-15T09:59:30.0,150.07848491807584,150.09848491807583
+2024-01-15T10:00:00.0,150.05372764865888,150.07372764865886
+2024-01-15T10:00:30.0,150.02000997631166,150.04000997631164
+2024-01-15T10:01:00.0,149.96156842154164,149.98156842154162
+2024-01-15T10:01:30.0,150.06601521763508,150.08601521763507
+2024-01-15T10:02:00.0,150.00882802835716,150.02882802835714
+2024-01-15T10:02:30.0,149.9803682942784,150.0003682942784
+2024-01-15T10:03:00.0,149.9793290702978,149.9993290702978
+2024-01-15T10:03:30.0,149.92655291997576,149.94655291997574
+2024-01-15T10:04:00.0,149.9626271453463,149.98262714534627
+2024-01-15T10:04:30.0,149.88409154394128,149.90409154394126
+2024-01-15T10:05:00.0,149.88964995766187,149.90964995766186
+2024-01-15T10:05:30.0,149.9468189428001,149.96681894280007
+2024-01-15T10:06:00.0,149.96666772089603,149.986667720896
+2024-01-15T10:06:30.0,150.00578794900122,150.0257879490012
+2024-01-15T10:07:00.0,150.01305868019574,150.03305868019572
+2024-01-15T10:07:30.0,149.99560679524757,150.01560679524755
+2024-01-15T10:08:00.0,149.8859354493055,149.90593544930547
+2024-01-15T10:08:30.0,149.87234218362607,149.89234218362606
+2024-01-15T10:09:00.0,149.88726888850042,149.9072688885004
+2024-01-15T10:09:30.0,149.85661527558315,149.87661527558313
+2024-01-15T10:10:00.0,149.93562075705378,149.95562075705377
+2024-01-15T10:10:30.0,149.86618736174174,149.88618736174172
+2024-01-15T10:11:00.0,149.95089103407378,149.97089103407376
+2024-01-15T10:11:30.0,149.9044726753741,149.9244726753741
+2024-01-15T10:12:00.0,149.8261140621654,149.84611406216538
+2024-01-15T10:12:30.0,149.75917115692127,149.77917115692125
+2024-01-15T10:13:00.0,149.72635174558124,149.74635174558122
+2024-01-15T10:13:30.0,149.67502142607873,149.6950214260787
+2024-01-15T10:14:00.0,149.73809448701735,149.75809448701733
+2024-01-15T10:14:30.0,149.74079019406375,149.76079019406373
+2024-01-15T10:15:00.0,149.71457462455382,149.7345746245538
+2024-01-15T10:15:30.0,149.63120109441772,149.6512010944177
+2024-01-15T10:16:00.0,149.57890973440297,149.59890973440295
+2024-01-15T10:16:30.0,149.4941194388043,149.51411943880427
+2024-01-15T10:17:00.0,149.45767229273736,149.47767229273734
+2024-01-15T10:17:30.0,149.5675349960944,149.58753499609438
+2024-01-15T10:18:00.0,149.56129708136064,149.58129708136062
+2024-01-15T10:18:30.0,149.50050733389844,149.52050733389842
+2024-01-15T10:19:00.0,149.55449592832494,149.57449592832492
+2024-01-15T10:19:30.0,149.50042703168836,149.52042703168834
+2024-01-15T10:20:00.0,149.51989197841098,149.53989197841096
+2024-01-15T10:20:30.0,149.57096115941613,149.5909611594161
+2024-01-15T10:21:00.0,149.59348741699898,149.61348741699896
+2024-01-15T10:21:30.0,149.52409098431642,149.5440909843164
+2024-01-15T10:22:00.0,149.50319672306642,149.5231967230664
+2024-01-15T10:22:30.0,149.4702091766481,149.49020917664808
+2024-01-15T10:23:00.0,149.5793275626496,149.5993275626496
+2024-01-15T10:23:30.0,149.56187606141123,149.5818760614112
+2024-01-15T10:24:00.0,149.55342861229707,149.57342861229705
+2024-01-15T10:24:30.0,149.54602334422745,149.56602334422743
+2024-01-15T10:25:00.0,149.4988342276766,149.5188342276766
+2024-01-15T10:25:30.0,149.44438915130073,149.4643891513007
+2024-01-15T10:26:00.0,149.43255897307014,149.45255897307013
+2024-01-15T10:26:30.0,149.41852230907818,149.43852230907817
+2024-01-15T10:27:00.0,149.44075928901222,149.4607592890122
+2024-01-15T10:27:30.0,149.4025378813787,149.42253788137867
+2024-01-15T10:28:00.0,149.40007723652909,149.42007723652907
+2024-01-15T10:28:30.0,149.46094415062095,149.48094415062093
+2024-01-15T10:29:00.0,149.48091374859595,149.50091374859593
+2024-01-15T10:29:30.0,149.47811156238495,149.49811156238493
+2024-01-15T10:30:00.0,149.56359388986004,149.58359388986003
+
+</script><script type="text/plain" id="tob_data2" data-format="csv_embedded" data-src="">
+time,bid,ask
+2024-01-15T14:00:00.0,74.96028593834419,74.97528593834417
+2024-01-15T14:00:20.0,74.9533698611663,74.96836986116628
+2024-01-15T14:00:40.0,74.95257470092848,74.96757470092847
+2024-01-15T14:01:00.0,74.93653314522729,74.95153314522727
+2024-01-15T14:01:20.0,74.92129016603052,74.9362901660305
+2024-01-15T14:01:40.0,74.92466252674413,74.93966252674412
+2024-01-15T14:02:00.0,74.94808459807507,74.96308459807506
+2024-01-15T14:02:20.0,74.96199058272006,74.97699058272005
+2024-01-15T14:02:40.0,75.03905490096975,75.05405490096973
+2024-01-15T14:03:00.0,75.04210351476152,75.05710351476151
+2024-01-15T14:03:20.0,74.99774161059487,75.01274161059486
+2024-01-15T14:03:40.0,75.01282282949731,75.0278228294973
+2024-01-15T14:04:00.0,75.04498778755887,75.05998778755885
+2024-01-15T14:04:20.0,75.02120393906391,75.0362039390639
+2024-01-15T14:04:40.0,75.00742019139696,75.02242019139695
+2024-01-15T14:05:00.0,75.0006747140805,75.01567471408049
+2024-01-15T14:05:20.0,74.97758908307908,74.99258908307907
+2024-01-15T14:05:40.0,74.96533288678181,74.9803328867818
+2024-01-15T14:06:00.0,74.94740905903838,74.96240905903836
+2024-01-15T14:06:20.0,74.96264501151602,74.977645011516
+2024-01-15T14:06:40.0,74.96658965566026,74.98158965566024
+2024-01-15T14:07:00.0,74.94908273937682,74.9640827393768
+2024-01-15T14:07:20.0,74.96127025403275,74.97627025403274
+2024-01-15T14:07:40.0,75.00867673950006,75.02367673950005
+2024-01-15T14:08:00.0,75.03917396678068,75.05417396678067
+2024-01-15T14:08:20.0,75.03935875997952,75.05435875997951
+2024-01-15T14:08:40.0,75.00876288650146,75.02376288650144
+2024-01-15T14:09:00.0,75.05343004413571,75.0684300441357
+2024-01-15T14:09:20.0,75.06149485293666,75.07649485293665
+2024-01-15T14:09:40.0,75.0096923693606,75.02469236936058
+2024-01-15T14:10:00.0,75.03500000608915,75.05000000608914
+2024-01-15T14:10:20.0,75.00180230503386,75.01680230503385
+2024-01-15T14:10:40.0,75.05032497260906,75.06532497260905
+2024-01-15T14:11:00.0,75.04844183152558,75.06344183152557
+2024-01-15T14:11:20.0,75.04914077970999,75.06414077970997
+2024-01-15T14:11:40.0,75.02701656743008,75.04201656743007
+2024-01-15T14:12:00.0,74.98141914411984,74.99641914411983
+2024-01-15T14:12:20.0,74.93451831889004,74.94951831889003
+2024-01-15T14:12:40.0,74.96372663195659,74.97872663195658
+2024-01-15T14:13:00.0,74.97921433895748,74.99421433895746
+2024-01-15T14:13:20.0,75.01144269767815,75.02644269767814
+2024-01-15T14:13:40.0,75.03294503202862,75.04794503202861
+2024-01-15T14:14:00.0,75.02899068278215,75.04399068278214
+2024-01-15T14:14:20.0,75.04720274361738,75.06220274361736
+2024-01-15T14:14:40.0,75.04479820667383,75.05979820667382
+2024-01-15T14:15:00.0,75.02904379260183,75.04404379260181
+2024-01-15T14:15:20.0,75.04580027318966,75.06080027318964
+2024-01-15T14:15:40.0,75.08536518050717,75.10036518050715
+2024-01-15T14:16:00.0,75.0707939285989,75.08579392859889
+2024-01-15T14:16:20.0,75.06297717543315,75.07797717543313
+2024-01-15T14:16:40.0,75.0991805527839,75.11418055278389
+2024-01-15T14:17:00.0,75.1246926333224,75.13969263332238
+2024-01-15T14:17:20.0,75.19314291430696,75.20814291430695
+2024-01-15T14:17:40.0,75.19510432713199,75.21010432713197
+2024-01-15T14:18:00.0,75.18609781569207,75.20109781569205
+2024-01-15T14:18:20.0,75.18024949934,75.19524949933998
+2024-01-15T14:18:40.0,75.1894887574383,75.20448875743828
+2024-01-15T14:19:00.0,75.16581718359234,75.18081718359232
+2024-01-15T14:19:20.0,75.17389894171303,75.18889894171302
+2024-01-15T14:19:40.0,75.19660136826029,75.21160136826028
+2024-01-15T14:20:00.0,75.23464561693099,75.24964561693098
+2024-01-15T14:20:20.0,75.2180838594066,75.23308385940659
+2024-01-15T14:20:40.0,75.23442959785416,75.24942959785415
+2024-01-15T14:21:00.0,75.27237828474722,75.2873782847472
+2024-01-15T14:21:20.0,75.27911257683915,75.29411257683914
+2024-01-15T14:21:40.0,75.29446425449282,75.30946425449281
+2024-01-15T14:22:00.0,75.28583095806405,75.30083095806404
+2024-01-15T14:22:20.0,75.30395657912106,75.31895657912105
+2024-01-15T14:22:40.0,75.32950992262171,75.3445099226217
+2024-01-15T14:23:00.0,75.41930240071194,75.43430240071193
+2024-01-15T14:23:20.0,75.44229017208579,75.45729017208578
+2024-01-15T14:23:40.0,75.41966941278932,75.4346694127893
+2024-01-15T14:24:00.0,75.34008540497304,75.35508540497302
+2024-01-15T14:24:20.0,75.32974943423396,75.34474943423395
+2024-01-15T14:24:40.0,75.33237432820572,75.3473743282057
+2024-01-15T14:25:00.0,75.34510515944757,75.36010515944756
+2024-01-15T14:25:20.0,75.31855451274086,75.33355451274085
+2024-01-15T14:25:40.0,75.33312145483615,75.34812145483613
+2024-01-15T14:26:00.0,75.28958514748211,75.3045851474821
+2024-01-15T14:26:20.0,75.28007404579631,75.2950740457963
+2024-01-15T14:26:40.0,75.27014039009747,75.28514039009745
+2024-01-15T14:27:00.0,75.25924884718293,75.27424884718292
+2024-01-15T14:27:20.0,75.27659543195936,75.29159543195935
+2024-01-15T14:27:40.0,75.25299948225198,75.26799948225197
+2024-01-15T14:28:00.0,75.26757188111284,75.28257188111283
+2024-01-15T14:28:20.0,75.22951934577215,75.24451934577213
+2024-01-15T14:28:40.0,75.23288419062679,75.24788419062678
+2024-01-15T14:29:00.0,75.23699644615715,75.25199644615714
+2024-01-15T14:29:20.0,75.2149181005303,75.22991810053028
+2024-01-15T14:29:40.0,75.2422118403777,75.25721184037769
+2024-01-15T14:30:00.0,75.31461117187072,75.32961117187071
+2024-01-15T14:30:20.0,75.23621005106841,75.2512100510684
+2024-01-15T14:30:40.0,75.1680470467012,75.18304704670119
+2024-01-15T14:31:00.0,75.21016291979255,75.22516291979254
+2024-01-15T14:31:20.0,75.20821936656377,75.22321936656375
+2024-01-15T14:31:40.0,75.21534704434167,75.23034704434166
+2024-01-15T14:32:00.0,75.2082771633584,75.22327716335839
+2024-01-15T14:32:20.0,75.21963882730202,75.234638827302
+2024-01-15T14:32:40.0,75.18490881954769,75.19990881954767
+2024-01-15T14:33:00.0,75.1727814013515,75.18778140135149
+2024-01-15T14:33:20.0,75.15083246252547,75.16583246252546
+2024-01-15T14:33:40.0,75.08952806852642,75.1045280685264
+2024-01-15T14:34:00.0,75.15587268139241,75.1708726813924
+2024-01-15T14:34:20.0,75.1232307632933,75.13823076329328
+2024-01-15T14:34:40.0,75.12963652778934,75.14463652778933
+2024-01-15T14:35:00.0,75.13438773091266,75.14938773091265
+2024-01-15T14:35:20.0,75.10668534800428,75.12168534800426
+2024-01-15T14:35:40.0,75.12121985336677,75.13621985336675
+2024-01-15T14:36:00.0,75.14118890362637,75.15618890362636
+2024-01-15T14:36:20.0,75.15891142643632,75.1739114264363
+2024-01-15T14:36:40.0,75.12658685675737,75.14158685675736
+2024-01-15T14:37:00.0,75.1265685471018,75.14156854710178
+2024-01-15T14:37:20.0,75.13418586358696,75.14918586358695
+2024-01-15T14:37:40.0,75.12818124244708,75.14318124244707
+2024-01-15T14:38:00.0,75.1157834553713,75.13078345537129
+2024-01-15T14:38:20.0,75.15298866720156,75.16798866720154
+2024-01-15T14:38:40.0,75.18028371604348,75.19528371604346
+2024-01-15T14:39:00.0,75.15426207623126,75.16926207623125
+2024-01-15T14:39:20.0,75.14658698415747,75.16158698415745
+2024-01-15T14:39:40.0,75.10285476219936,75.11785476219934
+2024-01-15T14:40:00.0,75.0505343341733,75.0655343341733
+2024-01-15T14:40:20.0,75.0343142427746,75.04931424277459
+2024-01-15T14:40:40.0,75.01079597733421,75.0257959773342
+2024-01-15T14:41:00.0,75.0308759720977,75.04587597209769
+2024-01-15T14:41:20.0,75.05584824038588,75.07084824038587
+2024-01-15T14:41:40.0,75.0376709929194,75.05267099291939
+2024-01-15T14:42:00.0,75.0472896323401,75.06228963234008
+2024-01-15T14:42:20.0,75.02028963471838,75.03528963471837
+2024-01-15T14:42:40.0,75.02017147011912,75.03517147011911
+2024-01-15T14:43:00.0,75.00465210679342,75.0196521067934
+2024-01-15T14:43:20.0,74.97375922274172,74.9887592227417
+2024-01-15T14:43:40.0,74.97211473778322,74.9871147377832
+2024-01-15T14:44:00.0,75.00132066316746,75.01632066316745
+2024-01-15T14:44:20.0,75.02369209647671,75.0386920964767
+2024-01-15T14:44:40.0,75.05223900060629,75.06723900060628
+2024-01-15T14:45:00.0,75.03387131464974,75.04887131464973
+2024-01-15T14:45:20.0,75.0372489055948,75.05224890559478
+2024-01-15T14:45:40.0,74.9833205087137,74.99832050871369
+2024-01-15T14:46:00.0,74.97605048283823,74.99105048283822
+2024-01-15T14:46:20.0,74.91684022270188,74.93184022270187
+2024-01-15T14:46:40.0,74.93872049007736,74.95372049007734
+2024-01-15T14:47:00.0,74.98280479430507,74.99780479430505
+2024-01-15T14:47:20.0,74.92985654731956,74.94485654731955
+2024-01-15T14:47:40.0,74.88170653035554,74.89670653035553
+2024-01-15T14:48:00.0,74.82998042636808,74.84498042636807
+2024-01-15T14:48:20.0,74.84853328756809,74.86353328756807
+2024-01-15T14:48:40.0,74.82959602284971,74.8445960228497
+2024-01-15T14:49:00.0,74.85314444185853,74.86814444185852
+2024-01-15T14:49:20.0,74.88505946627951,74.9000594662795
+2024-01-15T14:49:40.0,74.90685731005262,74.9218573100526
+2024-01-15T14:50:00.0,74.97786757988194,74.99286757988193
+2024-01-15T14:50:20.0,74.96993892416273,74.98493892416272
+2024-01-15T14:50:40.0,74.90893770759244,74.92393770759243
+2024-01-15T14:51:00.0,74.87128347368082,74.8862834736808
+2024-01-15T14:51:20.0,74.90881289733274,74.92381289733272
+2024-01-15T14:51:40.0,74.88428816390702,74.899288163907
+2024-01-15T14:52:00.0,74.85074044078308,74.86574044078307
+2024-01-15T14:52:20.0,74.82631811618843,74.84131811618842
+2024-01-15T14:52:40.0,74.82416264693131,74.8391626469313
+2024-01-15T14:53:00.0,74.79004801840925,74.80504801840924
+2024-01-15T14:53:20.0,74.80609071455766,74.82109071455764
+2024-01-15T14:53:40.0,74.78979223141397,74.80479223141396
+2024-01-15T14:54:00.0,74.80758792457836,74.82258792457834
+2024-01-15T14:54:20.0,74.81461497343389,74.82961497343388
+2024-01-15T14:54:40.0,74.78399320722134,74.79899320722133
+2024-01-15T14:55:00.0,74.7906278983489,74.80562789834889
+2024-01-15T14:55:20.0,74.7367734700207,74.75177347002068
+2024-01-15T14:55:40.0,74.74266168356718,74.75766168356716
+2024-01-15T14:56:00.0,74.77701248740547,74.79201248740546
+2024-01-15T14:56:20.0,74.76925918469078,74.78425918469077
+2024-01-15T14:56:40.0,74.78004285984166,74.79504285984164
+2024-01-15T14:57:00.0,74.82952753141294,74.84452753141292
+2024-01-15T14:57:20.0,74.81720068456984,74.83220068456983
+2024-01-15T14:57:40.0,74.821012434196,74.836012434196
+2024-01-15T14:58:00.0,74.82433493014612,74.83933493014611
+2024-01-15T14:58:20.0,74.78539455148965,74.80039455148963
+2024-01-15T14:58:40.0,74.80271567063429,74.81771567063427
+2024-01-15T14:59:00.0,74.80847342804424,74.82347342804422
+2024-01-15T14:59:20.0,74.77965645544346,74.79465645544344
+2024-01-15T14:59:40.0,74.71776702006461,74.7327670200646
+2024-01-15T15:00:00.0,74.72776915408642,74.7427691540864
+
+</script><script type="text/plain" id="volume_data2" data-format="csv_embedded" data-src="">
+time_from,time_to,volume
+2024-01-15T14:00:00.0,2024-01-15T14:03:00.0,58374
+2024-01-15T14:03:00.0,2024-01-15T14:06:00.0,115712
+2024-01-15T14:06:00.0,2024-01-15T14:09:00.0,109074
+2024-01-15T14:09:00.0,2024-01-15T14:12:00.0,52326
+2024-01-15T14:12:00.0,2024-01-15T14:15:00.0,65305
+2024-01-15T14:15:00.0,2024-01-15T14:18:00.0,124673
+2024-01-15T14:18:00.0,2024-01-15T14:21:00.0,92001
+2024-01-15T14:21:00.0,2024-01-15T14:24:00.0,66567
+2024-01-15T14:24:00.0,2024-01-15T14:27:00.0,138770
+2024-01-15T14:27:00.0,2024-01-15T14:30:00.0,111410
+2024-01-15T14:30:00.0,2024-01-15T14:33:00.0,113075
+2024-01-15T14:33:00.0,2024-01-15T14:36:00.0,87799
+2024-01-15T14:36:00.0,2024-01-15T14:39:00.0,133360
+2024-01-15T14:39:00.0,2024-01-15T14:42:00.0,45133
+2024-01-15T14:42:00.0,2024-01-15T14:45:00.0,125440
+2024-01-15T14:45:00.0,2024-01-15T14:48:00.0,34283
+2024-01-15T14:48:00.0,2024-01-15T14:51:00.0,75710
+2024-01-15T14:51:00.0,2024-01-15T14:54:00.0,104329
+2024-01-15T14:54:00.0,2024-01-15T14:57:00.0,126452
+2024-01-15T14:57:00.0,2024-01-15T15:00:00.0,107197
+
+</script><script type="text/plain" id="tob_data3" data-format="csv_embedded" data-src="">
+time,bid,ask
+2024-01-16T10:00:00.0,199.9709364443461,199.99593644434609
+2024-01-16T10:00:15.0,199.93814328829495,199.96314328829493
+2024-01-16T10:00:30.0,200.02099086963054,200.04599086963051
+2024-01-16T10:00:45.0,200.14283756974737,200.16783756974735
+2024-01-16T10:01:00.0,200.0271578538065,200.05215785380648
+2024-01-16T10:01:15.0,200.0913908045173,200.11639080451727
+2024-01-16T10:01:30.0,200.03403595803974,200.05903595803971
+2024-01-16T10:01:45.0,200.0682756716121,200.09327567161208
+2024-01-16T10:02:00.0,200.1290969007741,200.15409690077408
+2024-01-16T10:02:15.0,200.1895740246562,200.21457402465617
+2024-01-16T10:02:30.0,200.11363278244139,200.13863278244136
+2024-01-16T10:02:45.0,200.070580918924,200.095580918924
+2024-01-16T10:03:00.0,200.06022107103567,200.08522107103565
+2024-01-16T10:03:15.0,200.24563462702014,200.27063462702012
+2024-01-16T10:03:30.0,200.07131160993475,200.09631160993473
+2024-01-16T10:03:45.0,200.02914218086093,200.0541421808609
+2024-01-16T10:04:00.0,199.92810929272343,199.9531092927234
+2024-01-16T10:04:15.0,200.01602548854396,200.04102548854394
+2024-01-16T10:04:30.0,199.97588656847037,200.00088656847035
+2024-01-16T10:04:45.0,200.00584211123518,200.03084211123516
+2024-01-16T10:05:00.0,199.96167865880506,199.98667865880503
+2024-01-16T10:05:15.0,200.0427169580096,200.06771695800958
+2024-01-16T10:05:30.0,200.02304480294086,200.04804480294084
+2024-01-16T10:05:45.0,199.93961425086945,199.96461425086943
+2024-01-16T10:06:00.0,199.95830425212546,199.98330425212544
+2024-01-16T10:06:15.0,199.9691471732455,199.99414717324547
+2024-01-16T10:06:30.0,199.92180474701973,199.9468047470197
+2024-01-16T10:06:45.0,199.91107311077917,199.93607311077915
+2024-01-16T10:07:00.0,200.0456591607023,200.07065916070226
+2024-01-16T10:07:15.0,200.14531197840267,200.17031197840265
+2024-01-16T10:07:30.0,200.1903948695142,200.21539486951417
+2024-01-16T10:07:45.0,200.24701448644672,200.2720144864467
+2024-01-16T10:08:00.0,200.33384854922892,200.3588485492289
+2024-01-16T10:08:15.0,200.3196435898287,200.34464358982868
+2024-01-16T10:08:30.0,200.30309915481166,200.32809915481164
+2024-01-16T10:08:45.0,200.3794807693913,200.40448076939128
+2024-01-16T10:09:00.0,200.35810311987598,200.38310311987595
+2024-01-16T10:09:15.0,200.38269872888134,200.40769872888131
+2024-01-16T10:09:30.0,200.51369457028272,200.5386945702827
+2024-01-16T10:09:45.0,200.42120714045038,200.44620714045035
+2024-01-16T10:10:00.0,200.45560447362786,200.48060447362784
+2024-01-16T10:10:15.0,200.53295693196748,200.55795693196745
+2024-01-16T10:10:30.0,200.4944531532708,200.51945315327077
+2024-01-16T10:10:45.0,200.53024820503535,200.55524820503533
+2024-01-16T10:11:00.0,200.54825534530474,200.57325534530472
+2024-01-16T10:11:15.0,200.4762408198236,200.50124081982358
+2024-01-16T10:11:30.0,200.59096730428004,200.61596730428002
+2024-01-16T10:11:45.0,200.67968432420506,200.70468432420503
+2024-01-16T10:12:00.0,200.6862418158409,200.71124181584088
+2024-01-16T10:12:15.0,200.7677647073748,200.79276470737477
+2024-01-16T10:12:30.0,200.90964160730041,200.9346416073004
+2024-01-16T10:12:45.0,200.97182525308347,200.99682525308344
+2024-01-16T10:13:00.0,201.15431483522238,201.17931483522236
+2024-01-16T10:13:15.0,201.17238257291305,201.19738257291303
+2024-01-16T10:13:30.0,201.20399765297552,201.2289976529755
+2024-01-16T10:13:45.0,201.23482503463646,201.25982503463644
+2024-01-16T10:14:00.0,201.17969139298188,201.20469139298186
+2024-01-16T10:14:15.0,201.29443646050618,201.31943646050615
+2024-01-16T10:14:30.0,201.2303201884327,201.25532018843268
+2024-01-16T10:14:45.0,201.38800626156964,201.41300626156962
+2024-01-16T10:15:00.0,201.38018450163332,201.4051845016333
+2024-01-16T10:15:15.0,201.3167986317911,201.34179863179108
+2024-01-16T10:15:30.0,201.44391718009493,201.4689171800949
+2024-01-16T10:15:45.0,201.65070725147288,201.67570725147286
+2024-01-16T10:16:00.0,201.67066679150312,201.6956667915031
+2024-01-16T10:16:15.0,201.68829388152452,201.7132938815245
+2024-01-16T10:16:30.0,201.63451939403575,201.65951939403573
+2024-01-16T10:16:45.0,201.713218741084,201.73821874108398
+2024-01-16T10:17:00.0,201.68429716896094,201.70929716896092
+2024-01-16T10:17:15.0,201.78642177223455,201.81142177223452
+2024-01-16T10:17:30.0,201.69470690487498,201.71970690487495
+2024-01-16T10:17:45.0,201.74251635554626,201.76751635554623
+2024-01-16T10:18:00.0,201.70879887335798,201.73379887335796
+2024-01-16T10:18:15.0,201.70182160096368,201.72682160096366
+2024-01-16T10:18:30.0,201.65739792334915,201.68239792334913
+2024-01-16T10:18:45.0,201.63284045515383,201.6578404551538
+2024-01-16T10:19:00.0,201.57689274040598,201.60189274040596
+2024-01-16T10:19:15.0,201.62436214609096,201.64936214609094
+2024-01-16T10:19:30.0,201.73611724075792,201.7611172407579
+2024-01-16T10:19:45.0,201.65442447193655,201.67942447193653
+2024-01-16T10:20:00.0,201.59388352196467,201.61888352196465
+2024-01-16T10:20:15.0,201.6303243587592,201.65532435875917
+2024-01-16T10:20:30.0,201.72939123360052,201.7543912336005
+2024-01-16T10:20:45.0,201.72037193700749,201.74537193700746
+2024-01-16T10:21:00.0,201.84591731153745,201.87091731153743
+2024-01-16T10:21:15.0,201.986812153411,202.01181215341097
+2024-01-16T10:21:30.0,202.0094618441471,202.03446184414707
+2024-01-16T10:21:45.0,202.0141092605522,202.03910926055218
+2024-01-16T10:22:00.0,202.06081530328223,202.0858153032822
+2024-01-16T10:22:15.0,201.9753330731959,202.0003330731959
+2024-01-16T10:22:30.0,202.03937900388024,202.06437900388022
+2024-01-16T10:22:45.0,202.0652325888696,202.09023258886958
+2024-01-16T10:23:00.0,202.18122462919038,202.20622462919036
+2024-01-16T10:23:15.0,202.2771894756331,202.30218947563307
+2024-01-16T10:23:30.0,202.37318472902774,202.39818472902772
+2024-01-16T10:23:45.0,202.49171495472157,202.51671495472155
+2024-01-16T10:24:00.0,202.6527546922997,202.6777546922997
+2024-01-16T10:24:15.0,202.79511809204257,202.82011809204255
+2024-01-16T10:24:30.0,202.8198605413141,202.8448605413141
+2024-01-16T10:24:45.0,202.68182701049219,202.70682701049216
+2024-01-16T10:25:00.0,202.73587183241654,202.7608718324165
+2024-01-16T10:25:15.0,202.65644410432463,202.6814441043246
+2024-01-16T10:25:30.0,202.7796484356276,202.80464843562757
+2024-01-16T10:25:45.0,202.71928158570773,202.7442815857077
+2024-01-16T10:26:00.0,202.6633342272396,202.68833422723958
+2024-01-16T10:26:15.0,202.73968940043028,202.76468940043026
+2024-01-16T10:26:30.0,202.6776630060846,202.70266300608458
+2024-01-16T10:26:45.0,202.70953545922555,202.73453545922553
+2024-01-16T10:27:00.0,202.74802970216038,202.77302970216036
+2024-01-16T10:27:15.0,202.62935771424074,202.65435771424072
+2024-01-16T10:27:30.0,202.64883593002435,202.67383593002432
+2024-01-16T10:27:45.0,202.52315150708444,202.5481515070844
+2024-01-16T10:28:00.0,202.5054152975687,202.53041529756868
+2024-01-16T10:28:15.0,202.5756680405738,202.60066804057377
+2024-01-16T10:28:30.0,202.61219722237792,202.6371972223779
+2024-01-16T10:28:45.0,202.543386924332,202.56838692433197
+2024-01-16T10:29:00.0,202.60167569561918,202.62667569561916
+2024-01-16T10:29:15.0,202.52104565412205,202.54604565412203
+2024-01-16T10:29:30.0,202.5034936399676,202.52849363996756
+2024-01-16T10:29:45.0,202.57660505397976,202.60160505397974
+2024-01-16T10:30:00.0,202.52120860562755,202.54620860562753
+2024-01-16T10:30:15.0,202.36690904179665,202.39190904179662
+2024-01-16T10:30:30.0,202.3741216846172,202.39912168461717
+2024-01-16T10:30:45.0,202.34528335594803,202.370283355948
+2024-01-16T10:31:00.0,202.32258232443812,202.3475823244381
+2024-01-16T10:31:15.0,202.30206137769466,202.32706137769463
+2024-01-16T10:31:30.0,202.38553987869153,202.4105398786915
+2024-01-16T10:31:45.0,202.38656321924972,202.4115632192497
+2024-01-16T10:32:00.0,202.35555065121483,202.3805506512148
+2024-01-16T10:32:15.0,202.23142167250958,202.25642167250956
+2024-01-16T10:32:30.0,202.27354294862667,202.29854294862665
+2024-01-16T10:32:45.0,202.20940405297387,202.23440405297384
+2024-01-16T10:33:00.0,202.16455671509488,202.18955671509485
+2024-01-16T10:33:15.0,202.113501834224,202.13850183422397
+2024-01-16T10:33:30.0,202.03255665454586,202.05755665454583
+2024-01-16T10:33:45.0,202.08506740613922,202.1100674061392
+2024-01-16T10:34:00.0,202.07113959222374,202.09613959222372
+2024-01-16T10:34:15.0,202.1003750416409,202.12537504164086
+2024-01-16T10:34:30.0,202.04661991069543,202.0716199106954
+2024-01-16T10:34:45.0,202.05238628613623,202.0773862861362
+2024-01-16T10:35:00.0,201.98418891404535,202.00918891404532
+2024-01-16T10:35:15.0,201.9538398449173,201.97883984491727
+2024-01-16T10:35:30.0,201.9637787002737,201.98877870027368
+2024-01-16T10:35:45.0,202.02144976369738,202.04644976369735
+2024-01-16T10:36:00.0,201.91963361504264,201.94463361504262
+2024-01-16T10:36:15.0,201.9778440321381,202.00284403213809
+2024-01-16T10:36:30.0,201.97572489737038,202.00072489737036
+2024-01-16T10:36:45.0,202.05120457711374,202.0762045771137
+2024-01-16T10:37:00.0,202.14344841181827,202.16844841181825
+2024-01-16T10:37:15.0,202.18338107829734,202.20838107829732
+2024-01-16T10:37:30.0,202.13973889360852,202.1647388936085
+2024-01-16T10:37:45.0,202.13334618076843,202.1583461807684
+2024-01-16T10:38:00.0,201.9167082019552,201.94170820195518
+2024-01-16T10:38:15.0,201.88486099664527,201.90986099664525
+2024-01-16T10:38:30.0,201.9147616575819,201.93976165758187
+2024-01-16T10:38:45.0,202.03542512779237,202.06042512779234
+2024-01-16T10:39:00.0,201.98748042088974,202.01248042088972
+2024-01-16T10:39:15.0,202.11159759933415,202.13659759933412
+2024-01-16T10:39:30.0,202.25760190478803,202.282601904788
+2024-01-16T10:39:45.0,202.27237759192994,202.29737759192992
+2024-01-16T10:40:00.0,202.26502146712573,202.2900214671257
+2024-01-16T10:40:15.0,202.43613362106137,202.46113362106135
+2024-01-16T10:40:30.0,202.38777249014728,202.41277249014726
+2024-01-16T10:40:45.0,202.37636730552634,202.40136730552632
+2024-01-16T10:41:00.0,202.36296187212093,202.3879618721209
+2024-01-16T10:41:15.0,202.33708318242176,202.36208318242174
+2024-01-16T10:41:30.0,202.2208434474799,202.24584344747987
+2024-01-16T10:41:45.0,202.1351737859703,202.16017378597027
+2024-01-16T10:42:00.0,202.17710499603655,202.20210499603652
+2024-01-16T10:42:15.0,202.1474113730675,202.1724113730675
+2024-01-16T10:42:30.0,202.12432242710136,202.14932242710134
+2024-01-16T10:42:45.0,202.1787011194401,202.20370111944007
+2024-01-16T10:43:00.0,202.11083783862762,202.1358378386276
+2024-01-16T10:43:15.0,202.00113741130562,202.0261374113056
+2024-01-16T10:43:30.0,202.19212449318283,202.2171244931828
+2024-01-16T10:43:45.0,202.25711401105846,202.28211401105844
+2024-01-16T10:44:00.0,202.11595172715374,202.14095172715372
+2024-01-16T10:44:15.0,202.11392145745208,202.13892145745206
+2024-01-16T10:44:30.0,202.15317586800654,202.17817586800652
+2024-01-16T10:44:45.0,202.10522183460537,202.13022183460535
+2024-01-16T10:45:00.0,202.18545050524992,202.2104505052499
+2024-01-16T10:45:15.0,202.1575142006261,202.1825142006261
+2024-01-16T10:45:30.0,202.06291428284376,202.08791428284374
+2024-01-16T10:45:45.0,201.90473563057427,201.92973563057424
+2024-01-16T10:46:00.0,201.94148486376312,201.9664848637631
+2024-01-16T10:46:15.0,202.00058956455524,202.02558956455522
+2024-01-16T10:46:30.0,202.11160236660479,202.13660236660476
+2024-01-16T10:46:45.0,202.02497644680852,202.0499764468085
+2024-01-16T10:47:00.0,202.0446112197591,202.06961121975908
+2024-01-16T10:47:15.0,202.07052820342327,202.09552820342324
+2024-01-16T10:47:30.0,202.13694176855836,202.16194176855834
+2024-01-16T10:47:45.0,202.2106890288797,202.23568902887968
+2024-01-16T10:48:00.0,202.2475162634086,202.2725162634086
+2024-01-16T10:48:15.0,202.12303094493873,202.1480309449387
+2024-01-16T10:48:30.0,202.20083184209372,202.2258318420937
+2024-01-16T10:48:45.0,202.23535108110693,202.2603510811069
+2024-01-16T10:49:00.0,202.27060605265257,202.29560605265254
+2024-01-16T10:49:15.0,202.234708318567,202.25970831856696
+2024-01-16T10:49:30.0,202.2249993849399,202.24999938493988
+2024-01-16T10:49:45.0,202.19397133345424,202.21897133345422
+2024-01-16T10:50:00.0,202.24758239334452,202.2725823933445
+2024-01-16T10:50:15.0,202.2272839157894,202.25228391578938
+2024-01-16T10:50:30.0,202.1356345527154,202.16063455271538
+2024-01-16T10:50:45.0,202.14399574297917,202.16899574297915
+2024-01-16T10:51:00.0,202.13701692594208,202.16201692594205
+2024-01-16T10:51:15.0,202.06328249175948,202.08828249175946
+2024-01-16T10:51:30.0,202.0541876855879,202.07918768558787
+2024-01-16T10:51:45.0,202.00388592852116,202.02888592852113
+2024-01-16T10:52:00.0,202.05293445492657,202.07793445492655
+2024-01-16T10:52:15.0,202.20146162266616,202.22646162266614
+2024-01-16T10:52:30.0,202.16699470665682,202.1919947066568
+2024-01-16T10:52:45.0,202.17202872412676,202.19702872412674
+2024-01-16T10:53:00.0,202.1589227183328,202.18392271833278
+2024-01-16T10:53:15.0,202.14094436561322,202.1659443656132
+2024-01-16T10:53:30.0,202.16980534867454,202.19480534867452
+2024-01-16T10:53:45.0,202.27932892875035,202.30432892875032
+2024-01-16T10:54:00.0,202.1748454578,202.19984545779997
+2024-01-16T10:54:15.0,202.2130354152371,202.23803541523708
+2024-01-16T10:54:30.0,202.29408583845353,202.3190858384535
+2024-01-16T10:54:45.0,202.20881389842248,202.23381389842245
+2024-01-16T10:55:00.0,202.25590088041977,202.28090088041975
+2024-01-16T10:55:15.0,202.25181535332212,202.2768153533221
+2024-01-16T10:55:30.0,202.23598147670413,202.2609814767041
+2024-01-16T10:55:45.0,202.1904733444977,202.21547334449767
+2024-01-16T10:56:00.0,202.20675380810945,202.23175380810943
+2024-01-16T10:56:15.0,202.1502245632442,202.17522456324417
+2024-01-16T10:56:30.0,202.03665558896583,202.0616555889658
+2024-01-16T10:56:45.0,202.09310054394993,202.1181005439499
+2024-01-16T10:57:00.0,202.07961760041195,202.10461760041193
+2024-01-16T10:57:15.0,202.2532120756997,202.27821207569968
+2024-01-16T10:57:30.0,202.23035645680818,202.25535645680816
+2024-01-16T10:57:45.0,202.12758206290886,202.15258206290883
+2024-01-16T10:58:00.0,202.15413843330904,202.17913843330902
+2024-01-16T10:58:15.0,202.07045936517414,202.09545936517412
+2024-01-16T10:58:30.0,201.99557829812835,202.02057829812833
+2024-01-16T10:58:45.0,201.96201637890823,201.9870163789082
+2024-01-16T10:59:00.0,202.00983959363492,202.0348395936349
+2024-01-16T10:59:15.0,202.02579751965905,202.05079751965903
+2024-01-16T10:59:30.0,202.01369398030627,202.03869398030625
+2024-01-16T10:59:45.0,201.99476614772522,202.0197661477252
+2024-01-16T11:00:00.0,202.03019425424642,202.0551942542464
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>Execution Markout Examples</h1>
+<p></p>
+
+<div style="padding: 20px;">
+    <h2>Example 1: Multi-Venue Buy Execution</h2>
+    <p>Analyzing a large buy order (10,000 shares) executed across multiple venues. The implementation shortfall shows cost vs arrival price. VWAP shortfall shows performance vs execution VWAP. Spread crossing percentage indicates how aggressive fills were (0%=bid, 100%=ask). Click fills to exclude from analysis. Hover over table rows to highlight corresponding chart points.</p>
+
+    <div style="margin: 20px 0;">
+        <label for="execution_select_example1_exec">Execution: </label>
+        <select id="execution_select_example1_exec" onchange="updateChart_example1_exec()">
+                    <option value="Execution_1" selected>Execution_1</option>
+        </select>
+
+        <label for="benchmark_select_example1_exec" style="margin-left: 20px;">Benchmark: </label>
+        <select id="benchmark_select_example1_exec" onchange="updateChart_example1_exec()">
+        <option value="arrival" selected>Arrival</option>
+        <option value="first">First Fill Mid</option>
+        </select>
+
+        <label style="margin-left: 20px;">
+            <input type="checkbox" id="show_volume_checkbox_example1_exec" checked onchange="updateChart_example1_exec()">
+            Show Volume
+        </label>
+    </div>
+
+    <div id="example1_exec" style="width: 100%; height: 600px;"></div>
+
+    <div style="display: flex; margin-top: 20px;">
+        <div id="fills_table_example1_exec" style="flex: 1; margin-right: 20px;"></div>
+        <div id="summary_table_example1_exec" style="flex: 1;"></div>
+    </div>
+</div>
+<br>
+<hr>
+<br>
+<div style="padding: 20px;">
+    <h2>Example 2: Algorithmic Sell Execution (No Arrival Price)</h2>
+    <p>Selling 15,000 shares using multiple algorithmic strategies. Since no arrival price is provided, the benchmark defaults to the mid price at the first fill. This is common when analyzing post-trade execution quality. The spread crossing shows how close to the bid (neartouch for sells) each fill was.</p>
+
+    <div style="margin: 20px 0;">
+        <label for="execution_select_example2_exec">Execution: </label>
+        <select id="execution_select_example2_exec" onchange="updateChart_example2_exec()">
+                    <option value="Execution_2" selected>Execution_2</option>
+        </select>
+
+        <label for="benchmark_select_example2_exec" style="margin-left: 20px;">Benchmark: </label>
+        <select id="benchmark_select_example2_exec" onchange="updateChart_example2_exec()">
+        <option value="first" selected>First Fill Mid</option>
+        </select>
+
+        <label style="margin-left: 20px;">
+            <input type="checkbox" id="show_volume_checkbox_example2_exec" checked onchange="updateChart_example2_exec()">
+            Show Volume
+        </label>
+    </div>
+
+    <div id="example2_exec" style="width: 100%; height: 600px;"></div>
+
+    <div style="display: flex; margin-top: 20px;">
+        <div id="fills_table_example2_exec" style="flex: 1; margin-right: 20px;"></div>
+        <div id="summary_table_example2_exec" style="flex: 1;"></div>
+    </div>
+</div>
+<br>
+<hr>
+<br>
+<div style="padding: 20px;">
+    <h2>Example 3: Comparing Aggressive vs Patient Execution</h2>
+    <p>Compare two different execution strategies for buying the same stock. The aggressive execution (high urgency) completes faster but may have higher implementation shortfall. The patient execution takes longer but aims for better prices. Use the execution selector to switch between them and compare their performance metrics.</p>
+
+    <div style="margin: 20px 0;">
+        <label for="execution_select_example3_exec">Execution: </label>
+        <select id="execution_select_example3_exec" onchange="updateChart_example3_exec()">
+                    <option value="Aggressive_Buy" selected>Aggressive_Buy</option>
+                    <option value="Patient_Buy">Patient_Buy</option>
+        </select>
+
+        <label for="benchmark_select_example3_exec" style="margin-left: 20px;">Benchmark: </label>
+        <select id="benchmark_select_example3_exec" onchange="updateChart_example3_exec()">
+        <option value="arrival" selected>Arrival</option>
+        <option value="first">First Fill Mid</option>
+        </select>
+
+        <label style="margin-left: 20px;">
+            <input type="checkbox" id="show_volume_checkbox_example3_exec" checked onchange="updateChart_example3_exec()">
+            Show Volume
+        </label>
+    </div>
+
+    <div id="example3_exec" style="width: 100%; height: 600px;"></div>
+
+    <div style="display: flex; margin-top: 20px;">
+        <div id="fills_table_example3_exec" style="flex: 1; margin-right: 20px;"></div>
+        <div id="summary_table_example3_exec" style="flex: 1;"></div>
+    </div>
+</div>
+
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
+</body>
+</html>

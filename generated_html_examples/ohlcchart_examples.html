@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSPlots.jl</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    
+
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    resolve(data);
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const SYMBOL_COL = 'symbol';
+    const OPEN_COL = 'open';
+    const HIGH_COL = 'high';
+    const LOW_COL = 'low';
+    const CLOSE_COL = 'close';
+    const VOLUME_COL = 'volume';
+    const HAS_VOLUME = true;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example1_ohlc = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example1_ohlc');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example1_ohlc');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example1_ohlc');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example1_ohlc');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example1_ohlc');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example1_ohlc');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example1_ohlc' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example1_ohlc',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: OHLC on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: OHLC only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example1_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example1_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('stock_data_1').then(function(data) {
+        allData = data;
+        window.updateChart_example1_ohlc();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example1_ohlc');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example1_ohlc:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const SYMBOL_COL = 'symbol';
+    const OPEN_COL = 'open';
+    const HIGH_COL = 'high';
+    const LOW_COL = 'low';
+    const CLOSE_COL = 'close';
+    const VOLUME_COL = 'volume';
+    const HAS_VOLUME = true;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example2_ohlc = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example2_ohlc');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example2_ohlc');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example2_ohlc');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example2_ohlc');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example2_ohlc');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example2_ohlc');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example2_ohlc' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example2_ohlc',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: OHLC on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: OHLC only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example2_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example2_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('stock_data_2').then(function(data) {
+        allData = data;
+        window.updateChart_example2_ohlc();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example2_ohlc');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example2_ohlc:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'quarter';
+    const TIME_TO_COL = 'quarter_end';
+    const SYMBOL_COL = 'company';
+    const OPEN_COL = 'open_price';
+    const HIGH_COL = 'high_price';
+    const LOW_COL = 'low_price';
+    const CLOSE_COL = 'close_price';
+    const VOLUME_COL = '';
+    const HAS_VOLUME = false;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example3_ohlc = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example3_ohlc');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example3_ohlc');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example3_ohlc');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example3_ohlc');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'ohlc';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example3_ohlc');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Faceted';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example3_ohlc');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example3_ohlc' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example3_ohlc',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: OHLC on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: OHLC only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example3_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare OHLC data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // OHLC trace
+            const ohlcTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(ohlcTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example3_ohlc', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('company_data').then(function(data) {
+        allData = data;
+        window.updateChart_example3_ohlc();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example3_ohlc');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example3_ohlc:', error);
+    });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="company_data" data-format="csv_embedded" data-src="">
+quarter,quarter_end,company,open_price,high_price,low_price,close_price
+1,1,CompanyA,99.02988794178027,100.54017788251386,98.02253069811968,99.08270997034634
+2,2,CompanyA,101.3180175532591,103.40596001277561,99.48075117557698,101.84321262835087
+3,3,CompanyA,102.4665414924992,105.71020909950332,99.685928976846,101.62045888713013
+4,4,CompanyA,98.69934285669386,102.42875143576455,95.74509470988394,99.2722681566216
+5,5,CompanyA,98.78395167845949,99.19506773804089,95.50947060122792,97.983164952233
+6,6,CompanyA,95.74967167264161,96.27045674114417,93.0066729197623,95.16410308739445
+7,7,CompanyA,98.32884431684397,101.65306912273232,94.634700985123,98.11098710688023
+8,8,CompanyA,96.40113317660969,96.79675063323981,94.9742841505445,95.57379401449009
+9,9,CompanyA,99.96073239268235,101.85492208215183,97.60140608542333,100.16810471648259
+10,10,CompanyA,99.7719210574821,100.97525999526776,97.9288766780842,100.97525999526776
+11,11,CompanyA,97.63538843519834,97.88827128082079,94.63763688499972,96.9260041024811
+12,12,CompanyA,98.42284717430034,100.97790274204766,94.79501887424063,99.12877931511959
+1,1,CompanyB,91.95296469932204,92.63348280840897,90.68773399168882,92.3199539755236
+2,2,CompanyB,94.55697795949547,96.78733928611062,92.56674043482617,95.90312699079604
+3,3,CompanyB,94.04237761825408,96.02695552791342,91.85369052479822,94.58696179449872
+4,4,CompanyB,97.60111491028934,98.70975458714652,97.15968206701541,98.70975458714652
+5,5,CompanyB,101.26238792853519,102.29755132738131,99.90115384229453,99.90115384229453
+6,6,CompanyB,95.03472517714715,98.16393723029466,94.54846445041457,94.93232251855946
+7,7,CompanyB,93.92659438305694,94.97148095344491,91.39044800555342,94.31777809852211
+8,8,CompanyB,93.0226153121516,96.24238222101745,89.24898199149513,93.34678675404564
+9,9,CompanyB,93.14345381283786,95.70154369098061,89.36741525663255,92.24058365392106
+10,10,CompanyB,93.3102908441769,94.29353162764848,90.85317179119208,92.74463640495698
+11,11,CompanyB,90.04718501896855,93.75333375408943,88.50653980307054,88.50653980307054
+12,12,CompanyB,88.68042032617264,90.88134960729825,85.9669438615491,89.4282811979707
+
+</script><script type="text/plain" id="stock_data_1" data-format="csv_embedded" data-src="">
+time_from,time_to,symbol,open,high,low,close,volume
+2024-01-01,2024-01-01,AAPL,149.47268938929645,150.86303248996245,145.36670073207898,149.96369352456716,2258572
+2024-01-02,2024-01-02,AAPL,149.8664680832998,155.34469315198365,146.59357626088553,149.47562066103282,3156476
+2024-01-03,2024-01-03,AAPL,150.98967758441032,152.70679880373768,147.38348767302276,149.61580940045758,3556921
+2024-01-04,2024-01-04,AAPL,149.84598222470746,152.88557947008377,146.17891652609717,151.0861052735436,2450666
+2024-01-05,2024-01-05,AAPL,149.70074778824696,152.8251031716604,147.61390000217514,147.61390000217514,3728173
+2024-01-06,2024-01-06,AAPL,150.12582328874433,156.27584845064655,148.71688433884526,151.14072829123606,2045802
+2024-01-07,2024-01-07,AAPL,151.48277070190295,157.350350714235,146.99198527628292,150.86485520258248,2724197
+2024-01-08,2024-01-08,AAPL,152.28336017352268,152.5545491100691,146.75001799625252,151.99408822698885,3226770
+2024-01-09,2024-01-09,AAPL,151.71544546752628,155.08152336378936,145.8174989646995,153.2364197502272,4785139
+2024-01-10,2024-01-10,AAPL,152.9698846662547,153.77148741927064,147.60925590948693,152.26543327460428,3737637
+2024-01-11,2024-01-11,AAPL,152.87371335148984,154.98146082895798,150.1839159940522,154.0402761776612,1604378
+2024-01-12,2024-01-12,AAPL,153.71613121889246,156.99383775588373,148.68299811119834,150.8333721810093,2936871
+2024-01-13,2024-01-13,AAPL,153.37309835191002,158.01220803457468,149.24875695702542,153.42299298198887,1948547
+2024-01-14,2024-01-14,AAPL,154.28781109755522,156.83496299079815,150.38308826428525,153.36456224644388,2986438
+2024-01-15,2024-01-15,AAPL,154.17067214448082,155.87968834396042,149.3748488688479,155.02422196706905,4189784
+2024-01-16,2024-01-16,AAPL,155.37822215075164,157.93690446928662,151.40485830520265,152.94692771630085,2536011
+2024-01-17,2024-01-17,AAPL,155.11406319720888,156.66076058160945,150.97139769707454,153.4906830427371,3285543
+2024-01-18,2024-01-18,AAPL,154.83264109078553,158.36644038250532,150.995787026288,150.995787026288,4491248
+2024-01-19,2024-01-19,AAPL,153.7376929926624,157.1445742101151,150.49650160155826,150.49650160155826,2731758
+2024-01-20,2024-01-20,AAPL,153.48372059307778,161.28150029204582,152.06434747087468,152.06434747087468,3910335
+2024-01-21,2024-01-21,AAPL,152.14955553737667,162.51221987756156,151.3717825648999,151.3717825648999,3153418
+2024-01-22,2024-01-22,AAPL,151.92736888222169,157.04504234917346,151.33647241283302,151.33647241283302,4016855
+2024-01-23,2024-01-23,AAPL,152.3486696928146,159.44325079454012,152.3486696928146,153.9782485210214,1335204
+2024-01-24,2024-01-24,AAPL,152.56124895983567,160.18432415565798,152.56124895983567,152.77859493290242,4784022
+2024-01-25,2024-01-25,AAPL,151.49585141013304,160.6800790024252,151.49585141013304,152.64784162284792,3373089
+2024-01-26,2024-01-26,AAPL,151.23154696506427,160.3270390399347,151.23154696506427,151.272587872531,2984784
+2024-01-27,2024-01-27,AAPL,153.10089897380348,159.99465684083535,153.10089897380348,155.06928590079977,3485956
+2024-01-28,2024-01-28,AAPL,153.225310754044,160.52440515472318,149.91974502846895,151.73823604611647,3830243
+2024-01-29,2024-01-29,AAPL,152.61140614483946,157.2938053939228,151.66719574293256,151.66719574293256,1282021
+2024-01-30,2024-01-30,AAPL,153.31208843633854,157.58577074215853,150.65092431053316,150.65092431053316,4619965
+2024-01-31,2024-01-31,AAPL,153.3182042338763,156.31366259818756,150.4387518991602,150.4387518991602,3738277
+2024-02-01,2024-02-01,AAPL,153.63412418517666,157.98275174767545,151.27116306777353,151.88733432873772,2055768
+2024-02-02,2024-02-02,AAPL,152.3513278140502,156.56076455710758,149.0713978097057,153.5207266781545,1076559
+2024-02-03,2024-02-03,AAPL,153.96279004198618,155.06008632657193,148.66349705842853,155.06008632657193,3817918
+2024-02-04,2024-02-04,AAPL,154.6506823480057,155.13812898547266,147.4964557504281,154.07384798620262,2556176
+2024-02-05,2024-02-05,AAPL,154.23146382318026,157.73628498166568,149.41774249262775,152.98312592774917,3563084
+2024-02-06,2024-02-06,AAPL,155.5392135151636,157.27570435441635,148.97838129258977,156.1276946416742,4832435
+2024-02-07,2024-02-07,AAPL,156.59799916732652,159.20701877822935,148.21974151636687,155.1900142862909,3932709
+2024-02-08,2024-02-08,AAPL,155.0871546288054,159.19020338206505,150.8970602705842,154.91835019154203,3325511
+2024-02-09,2024-02-09,AAPL,155.40675739713967,158.64086869525826,146.98371989055562,153.30769619333054,1105216
+2024-02-10,2024-02-10,AAPL,155.89559215864992,159.74436584142305,147.66305686510432,154.8782810611258,1024116
+2024-02-11,2024-02-11,AAPL,154.51362803698282,158.46342946891917,146.40612856988093,149.71891620968162,4936671
+2024-02-12,2024-02-12,AAPL,153.81582008806998,160.79837532639223,147.91918886135898,150.32388949356977,2035774
+2024-02-13,2024-02-13,AAPL,154.95410497481873,162.8523826291765,148.4083607922419,150.32281947182722,4230526
+2024-02-14,2024-02-14,AAPL,154.95988807642533,159.34561288620733,147.57398251194124,153.62575917067002,2807931
+2024-02-15,2024-02-15,AAPL,155.60883643708374,157.64781851016076,144.75634521671668,150.4721040578014,1839548
+2024-02-16,2024-02-16,AAPL,155.7979848836134,158.86067499666106,145.45299255935305,150.62423212077456,2689570
+2024-02-17,2024-02-17,AAPL,154.15528456328073,159.99093810258188,145.06848512814156,151.80617803998666,4074797
+2024-02-18,2024-02-18,AAPL,153.1974599949021,161.26316610554548,147.15763950410647,151.16330297372215,1099022
+2024-02-19,2024-02-19,AAPL,152.3970368107727,160.81911639083944,149.4553619868736,151.61253236949057,4112690
+2024-02-20,2024-02-20,AAPL,150.78762461959343,163.10747958038155,145.36884228842584,150.39942149049287,1467123
+2024-02-21,2024-02-21,AAPL,149.57428972291703,163.57569862685403,144.29843022470777,150.91112536723844,1221872
+2024-02-22,2024-02-22,AAPL,149.2076834019244,160.35719492093847,145.14804048551846,151.6997826292483,1796343
+2024-02-23,2024-02-23,AAPL,148.4239523697845,160.56097883097445,144.7383794333369,151.89147178253563,1031933
+2024-02-24,2024-02-24,AAPL,146.75198826264395,158.8531701982256,146.75198826264395,152.6108284701926,2637093
+2024-02-25,2024-02-25,AAPL,146.90993350552662,156.07986838261166,146.90993350552662,150.55929500699474,1659869
+2024-02-26,2024-02-26,AAPL,147.88326367818968,159.16208740495355,146.39584963386724,153.6128416792291,2639948
+2024-02-27,2024-02-27,AAPL,147.38804055438086,156.1463963052883,147.38804055438086,154.00110899210145,2086169
+2024-02-28,2024-02-28,AAPL,145.6890179276921,157.21433456828913,145.6890179276921,153.7596288966964,1189408
+2024-02-29,2024-02-29,AAPL,146.18111768920673,158.1847540754833,146.18111768920673,152.8944249273931,4990034
+2024-03-01,2024-03-01,AAPL,145.94808055576718,158.01194870646015,145.94808055576718,152.59141623465035,1206737
+2024-03-02,2024-03-02,AAPL,147.11484412065687,158.29356089100676,147.11484412065687,150.03004371411095,4219248
+2024-03-03,2024-03-03,AAPL,147.3998771546514,157.2553589384878,144.92686153337658,148.76079292866012,4613529
+2024-03-04,2024-03-04,AAPL,147.38325214541206,157.28127228254777,147.38325214541206,148.52357826176666,2635736
+2024-03-05,2024-03-05,AAPL,147.96630419741462,158.68462675625224,146.0872149854939,152.03407655722384,3573526
+2024-03-06,2024-03-06,AAPL,147.90069179552827,158.49601247950974,145.13226012622187,149.97165140777614,2388949
+2024-03-07,2024-03-07,AAPL,147.82963870100244,158.33429235083477,146.7286770625299,150.26216680924287,1760254
+2024-03-08,2024-03-08,AAPL,146.58834023329908,159.090458487111,146.58834023329908,147.81885028760732,3233406
+2024-03-09,2024-03-09,AAPL,147.66031760061148,159.00508172647497,143.39591920635647,146.846654404398,1853060
+2024-03-10,2024-03-10,AAPL,149.3762450743036,154.55583674311964,146.75418703749168,147.67095576946886,4952199
+2024-03-11,2024-03-11,AAPL,149.01591792450657,156.20792619435682,143.6280695379821,146.8680877760156,3307240
+2024-03-12,2024-03-12,AAPL,149.13956730111195,154.26023941978335,142.40531539062255,149.06795855853093,3136038
+2024-03-13,2024-03-13,AAPL,149.2206005914908,155.58359712743683,142.93284563097023,147.96931202377067,1587578
+2024-03-14,2024-03-14,AAPL,147.18595261748808,156.1469484169274,146.71653997854077,150.54077996777056,4166355
+2024-03-15,2024-03-15,AAPL,148.20567211396676,155.89585116588668,142.82437840659222,148.4541210643959,1501440
+2024-03-16,2024-03-16,AAPL,148.2194975600843,158.36775696393912,142.7302642754555,149.8576370772623,4923141
+2024-03-17,2024-03-17,AAPL,147.81056963558564,159.20594461766188,143.95741687159196,149.1097135001047,3511739
+2024-03-18,2024-03-18,AAPL,148.59059873838868,158.51768586862806,148.59059873838868,152.1339914305909,2493116
+2024-03-19,2024-03-19,AAPL,147.11690567560115,158.15722464105357,146.38812843741098,152.0060516923106,3174701
+2024-03-20,2024-03-20,AAPL,145.81364676491293,158.23219772301474,145.81364676491293,153.244097974841,3745244
+2024-03-21,2024-03-21,AAPL,143.7854878552761,155.22767751695704,143.7854878552761,153.67758590635282,4869414
+2024-03-22,2024-03-22,AAPL,144.29946419726258,158.83054940277674,144.29946419726258,150.83510307893084,2239236
+2024-03-23,2024-03-23,AAPL,143.5165593921825,157.80102374358182,143.5165593921825,152.85760555582098,2445355
+2024-03-24,2024-03-24,AAPL,142.99107773244702,156.89792543428916,142.99107773244702,154.8792008057295,2830068
+2024-03-25,2024-03-25,AAPL,144.6470317525154,162.2815056622855,144.6470317525154,154.23739817412445,3491871
+2024-03-26,2024-03-26,AAPL,145.0690228346947,160.37729524134437,145.0690228346947,154.72394863380617,4488317
+2024-03-27,2024-03-27,AAPL,144.18845088874824,155.96831753358134,144.18845088874824,154.20771848416035,3939881
+2024-03-28,2024-03-28,AAPL,142.69101313710192,154.73713626542667,142.69101313710192,153.27290292008692,2177868
+2024-03-29,2024-03-29,AAPL,141.61327714335107,152.68804582032666,141.61327714335107,152.68804582032666,4100263
+2024-03-30,2024-03-30,AAPL,141.93107452324182,154.32669474999108,141.93107452324182,154.32669474999108,2525802
+2024-03-31,2024-03-31,AAPL,141.61280537611063,153.6141639150455,141.61280537611063,153.6141639150455,1302705
+
+</script><script type="text/plain" id="stock_data_2" data-format="csv_embedded" data-src="">
+time_from,time_to,symbol,open,high,low,close,volume
+2024-01-01,2024-01-01,AAPL,150.57473505066866,152.20122566713206,148.79878078805692,150.61743429600148,3309703
+2024-01-02,2024-01-02,AAPL,154.93944783899406,159.61786822255843,153.08351758052248,153.08351758052248,1948363
+2024-01-03,2024-01-03,AAPL,156.05552685282842,159.74123591758544,152.37402440786724,155.94667257606235,3097162
+2024-01-04,2024-01-04,AAPL,155.67579384830987,159.63666505273284,152.62690169740895,157.13553200149212,2624537
+2024-01-05,2024-01-05,AAPL,155.1032676891701,159.49757772261015,154.6812440195646,155.93923424532036,4751646
+2024-01-06,2024-01-06,AAPL,158.0583889700927,161.47635188453546,156.0889911609767,159.46321662774884,3476080
+2024-01-07,2024-01-07,AAPL,159.65154400168026,160.35467391906232,155.79985817955583,160.15960698083427,4269042
+2024-01-08,2024-01-08,AAPL,159.85226111395306,161.340981780298,154.90411530585183,159.49351303552515,3960795
+2024-01-09,2024-01-09,AAPL,157.6893605483031,158.89723649023568,155.19838415062708,158.89723649023568,4882072
+2024-01-10,2024-01-10,AAPL,154.77997664319918,155.02254435937937,150.74712496101756,154.5722581746414,3841352
+2024-01-11,2024-01-11,AAPL,151.60342166660772,155.37795092718207,149.39592926262281,152.71159074968423,3720658
+2024-01-12,2024-01-12,AAPL,145.7677474739513,146.16530680582844,142.35681453769132,145.62178377635175,1226500
+2024-01-13,2024-01-13,AAPL,147.20290661382754,147.70946872035637,146.7727612914388,147.70946872035637,1847065
+2024-01-14,2024-01-14,AAPL,147.0814076723145,148.02714166479714,144.36863906175967,147.07153618434612,4144742
+2024-01-15,2024-01-15,AAPL,144.713768310225,148.49088901641414,141.6958563681782,144.69197791589835,3368080
+2024-01-16,2024-01-16,AAPL,145.1539290340872,145.99347743447987,140.6185966280168,145.8591623697957,2419037
+2024-01-17,2024-01-17,AAPL,144.87867715686943,147.19424237717917,144.24639322145964,144.45333030538177,3641547
+2024-01-18,2024-01-18,AAPL,145.51195493858643,148.99454710433957,142.47430768532507,145.53853642307365,2741690
+2024-01-19,2024-01-19,AAPL,146.9722094872482,147.57516211540604,142.22874023508246,146.24932700423966,2129557
+2024-01-20,2024-01-20,AAPL,145.37496537804773,150.1808580361934,142.29843483873526,145.29029875608566,4453663
+2024-01-21,2024-01-21,AAPL,146.50958966441823,146.79418902944488,142.1349027813985,145.62552291390105,1715624
+2024-01-22,2024-01-22,AAPL,142.77771093768578,144.44366992269798,140.80862293425122,144.44366992269798,1244265
+2024-01-23,2024-01-23,AAPL,139.541225052276,140.9576664427744,135.49387773868227,138.39560958365675,2641198
+2024-01-24,2024-01-24,AAPL,137.72198758130347,137.86114266682583,137.22096028001127,137.22096028001127,3083520
+2024-01-25,2024-01-25,AAPL,136.64058636655167,137.9934857725805,135.72945926562141,137.9934857725805,4196730
+2024-01-26,2024-01-26,AAPL,139.10121202610443,141.21865374399053,137.61337476331954,139.41039946883234,1955808
+2024-01-27,2024-01-27,AAPL,138.7701790665698,141.258218856177,136.7518655614361,140.05531202747756,2260848
+2024-01-28,2024-01-28,AAPL,133.4434847191002,134.02439211846865,129.34356702626263,132.98186383509773,3292755
+2024-01-29,2024-01-29,AAPL,135.14620541081388,136.30255667790442,133.08154525826626,133.08154525826626,1334738
+2024-01-30,2024-01-30,AAPL,138.81694751862523,141.28567180625987,138.3774043527482,138.5794729008971,2132671
+2024-01-31,2024-01-31,AAPL,138.35243207559088,139.39451133947583,138.031829004335,138.031829004335,1865862
+2024-02-01,2024-02-01,AAPL,136.63236859929015,137.77067632638725,134.4284378335925,136.59579839447431,1850222
+2024-02-02,2024-02-02,AAPL,138.91914780702075,141.466363723939,135.881906968962,140.81156201132677,1075173
+2024-02-03,2024-02-03,AAPL,138.3134642568235,140.99000447512233,137.30444487822328,137.30444487822328,1304049
+2024-02-04,2024-02-04,AAPL,136.59272179610613,139.3557281976733,133.7727356433232,136.48073792601446,2668737
+2024-02-05,2024-02-05,AAPL,141.5078370137225,145.69728859432158,137.54733735250122,139.55971426069772,4982171
+2024-02-06,2024-02-06,AAPL,140.4557831122256,145.01934367339982,138.9737827339202,138.9737827339202,1626182
+2024-02-07,2024-02-07,AAPL,142.5881283671648,146.52902606651426,139.70381939895177,141.1844241321028,1762567
+2024-02-08,2024-02-08,AAPL,141.72541446613485,143.68121182772117,139.4432880965093,141.10659763088455,3381820
+2024-02-09,2024-02-09,AAPL,142.1870370437628,143.75081631252914,138.75823159618508,143.75081631252914,2255144
+2024-02-10,2024-02-10,AAPL,139.33436650662824,143.5946436100044,135.93500799995175,139.92653114608592,2109051
+2024-02-11,2024-02-11,AAPL,142.90782340893634,147.27451429440538,139.3536268109975,144.24485423344993,1468915
+2024-02-12,2024-02-12,AAPL,142.30841586451174,143.92723282397213,139.78672031504948,142.333436772205,1905071
+2024-02-13,2024-02-13,AAPL,139.24708364349243,141.85953410425586,138.3010794470405,139.06410629222654,4684056
+2024-02-14,2024-02-14,AAPL,143.09201443857418,146.63704402467724,140.12827299911845,144.45529376745043,2521540
+2024-02-15,2024-02-15,AAPL,144.91352585679982,147.16768670358613,142.48422283345965,144.93985449085537,4481495
+2024-02-16,2024-02-16,AAPL,145.06424692590846,145.197727697746,140.9985410538734,144.52212326597527,3585355
+2024-02-17,2024-02-17,AAPL,148.42095526392416,148.53666849645515,144.7336767696839,147.49395503559109,2356297
+2024-02-18,2024-02-18,AAPL,147.0325014947367,149.01852940216602,144.0419535795105,149.01852940216602,4526219
+2024-02-19,2024-02-19,AAPL,148.51383909503863,150.5668597476799,144.12965431132008,148.22703690029036,2080971
+2024-02-20,2024-02-20,AAPL,144.0933082150091,147.8231404510201,142.92465118638808,143.19092695133742,1723520
+2024-02-21,2024-02-21,AAPL,146.8138074261676,149.57853381665464,141.8812364472489,149.31956305702553,1930072
+2024-02-22,2024-02-22,AAPL,147.66632463791632,150.4333110896404,145.0465212467403,149.7113569877715,1946098
+2024-02-23,2024-02-23,AAPL,147.4417151723053,147.98423158086797,144.6997335938202,147.98423158086797,3909205
+2024-02-24,2024-02-24,AAPL,145.96338144214957,146.383190642346,144.30535523637445,144.80694686323272,2762464
+2024-02-25,2024-02-25,AAPL,145.96161123526898,147.3631556674503,144.53750246293757,144.53750246293757,2948458
+2024-02-26,2024-02-26,AAPL,144.27281838910298,146.19425996730197,140.28738704484184,142.69030800249703,4045225
+2024-02-27,2024-02-27,AAPL,149.98593580367623,150.6707946793703,148.39977714097424,148.39977714097424,2126861
+2024-02-28,2024-02-28,AAPL,149.2075634972399,151.37142994053173,145.66821299092555,151.37142994053173,4105005
+2024-02-29,2024-02-29,AAPL,150.12433417963476,154.0566902587171,146.15906144392932,150.95403707578137,4207464
+2024-01-01,2024-01-01,GOOGL,2797.1855849918875,2801.412740266445,2792.218114527575,2796.2620084449945,4972871
+2024-01-02,2024-01-02,GOOGL,2795.7717195375403,2799.199548161032,2791.378614223347,2796.773509779038,2290985
+2024-01-03,2024-01-03,GOOGL,2795.0208027305844,2799.2656236451235,2790.285019347681,2795.2142911948285,3433384
+2024-01-04,2024-01-04,GOOGL,2793.760881146342,2796.9996620787674,2788.973263777088,2793.025202076748,3332001
+2024-01-05,2024-01-05,GOOGL,2792.867390365865,2793.601760649428,2788.4279594675254,2793.3485118365807,2179698
+2024-01-06,2024-01-06,GOOGL,2791.176381669201,2792.274113749298,2788.7379394575355,2792.274113749298,2761826
+2024-01-07,2024-01-07,GOOGL,2792.437725038475,2793.932225450001,2790.555992145629,2792.5756068181067,3418625
+2024-01-08,2024-01-08,GOOGL,2791.356381596041,2795.705844532333,2789.5571212434925,2791.973281126886,3871731
+2024-01-09,2024-01-09,GOOGL,2788.682033111049,2791.416242973811,2785.0562492566232,2787.2862522130304,1504837
+2024-01-10,2024-01-10,GOOGL,2788.342115345481,2791.715905731392,2784.332472259845,2787.6891706102747,2681685
+2024-01-11,2024-01-11,GOOGL,2788.8573688240904,2789.5642467776624,2786.120939972997,2787.036021221029,2924102
+2024-01-12,2024-01-12,GOOGL,2790.8020303082944,2792.731597643272,2789.541407779725,2791.1484155381872,2116832
+2024-01-13,2024-01-13,GOOGL,2791.5329652222663,2795.558619605945,2788.1102763319345,2790.919321526636,2757785
+2024-01-14,2024-01-14,GOOGL,2791.061415825785,2794.579557163128,2789.990265674214,2791.58373646146,1491349
+2024-01-15,2024-01-15,GOOGL,2792.3491376647844,2795.9976748021163,2789.764555555129,2791.904952921972,4940328
+2024-01-16,2024-01-16,GOOGL,2792.8480045445503,2792.8915347558636,2789.8863109327817,2792.6546489220004,1346350
+2024-01-17,2024-01-17,GOOGL,2795.2431272262925,2796.862950578575,2791.3980541015258,2792.9332958666682,3522806
+2024-01-18,2024-01-18,GOOGL,2796.1519706501053,2797.420500428362,2795.456677250065,2795.874446536031,3098759
+2024-01-19,2024-01-19,GOOGL,2792.1327695875552,2795.7652261959834,2791.343646376166,2792.677494755985,4039648
+2024-01-20,2024-01-20,GOOGL,2796.996069457659,2798.0420536813426,2793.8557470352166,2796.634395704607,2117355
+2024-01-21,2024-01-21,GOOGL,2791.5876369570815,2794.589535511616,2787.2129120217714,2790.630575782688,1903225
+2024-01-22,2024-01-22,GOOGL,2791.0923752131557,2793.724776315696,2789.1697465426023,2789.800935178402,2444899
+2024-01-23,2024-01-23,GOOGL,2791.4757608727523,2791.862881261346,2787.8189717616883,2791.612628297984,1620064
+2024-01-24,2024-01-24,GOOGL,2787.6547633454925,2790.6540341365926,2785.54058430815,2785.54058430815,3955760
+2024-01-25,2024-01-25,GOOGL,2788.9803219996024,2790.4024300819556,2787.5908982947503,2789.5342666293413,1934942
+2024-01-26,2024-01-26,GOOGL,2787.5282458324964,2790.4683186368547,2782.872747379295,2787.9165915222666,1076354
+2024-01-27,2024-01-27,GOOGL,2785.090999620319,2787.297925052974,2780.831005116934,2784.8839117175376,4195370
+2024-01-28,2024-01-28,GOOGL,2783.6035659873446,2785.493221657165,2779.3318031021245,2781.5846894221963,3227570
+2024-01-29,2024-01-29,GOOGL,2785.0395886542638,2786.990248494787,2782.218149889709,2785.749247081382,1060441
+2024-01-30,2024-01-30,GOOGL,2787.633768246953,2788.3905130721773,2784.3257148039556,2787.5918208605217,3703940
+2024-01-31,2024-01-31,GOOGL,2786.8924958093535,2791.7747331845135,2785.1757009708695,2786.7088273699524,2015525
+2024-02-01,2024-02-01,GOOGL,2787.744380027244,2792.18556954279,2785.2068861772386,2786.7376643608964,4068839
+2024-02-02,2024-02-02,GOOGL,2787.6109140480444,2789.3282591585553,2786.6877524664146,2787.29829626906,4930873
+2024-02-03,2024-02-03,GOOGL,2788.2540107265622,2790.093014439891,2786.303321803869,2788.444762009359,1278105
+2024-02-04,2024-02-04,GOOGL,2787.0172844544136,2788.9442800652723,2782.2544450223813,2785.8194052107133,4712372
+2024-02-05,2024-02-05,GOOGL,2786.2216103419787,2789.5059463873467,2784.43082477212,2786.5049295550652,2572487
+2024-02-06,2024-02-06,GOOGL,2786.4246289781468,2787.006196739866,2786.2179945970834,2786.9613615597445,2772035
+2024-02-07,2024-02-07,GOOGL,2790.5802465173356,2791.1549690437973,2789.232559712739,2791.1549690437973,3151268
+2024-02-08,2024-02-08,GOOGL,2789.345937246538,2792.5677415922364,2786.282058830799,2788.863376930547,3846862
+2024-02-09,2024-02-09,GOOGL,2788.985787445823,2792.560831981624,2785.5977515623435,2788.7713547241988,2642073
+2024-02-10,2024-02-10,GOOGL,2788.525530212839,2792.1512002724457,2784.9294122619362,2790.202578311512,1070008
+2024-02-11,2024-02-11,GOOGL,2790.4754589806194,2791.008386739162,2790.194394582211,2790.6403485013334,2646104
+2024-02-12,2024-02-12,GOOGL,2789.6497536225856,2793.886292704569,2785.318356179812,2789.813011913018,1075420
+2024-02-13,2024-02-13,GOOGL,2788.8240445496303,2793.692776885747,2785.7768460871307,2787.8525506348005,3595667
+2024-02-14,2024-02-14,GOOGL,2784.2444355098455,2786.743707399017,2782.7444808859814,2783.4591550050845,3766409
+2024-02-15,2024-02-15,GOOGL,2784.4530600063563,2785.736797948396,2782.061927992896,2785.736797948396,2188112
+2024-02-16,2024-02-16,GOOGL,2785.9278735721437,2786.9694357332487,2785.8355923255276,2785.8355923255276,2655691
+2024-02-17,2024-02-17,GOOGL,2783.5538543334583,2784.9705505998672,2783.1539909384137,2784.9705505998672,4569430
+2024-02-18,2024-02-18,GOOGL,2779.9777855594507,2784.7574173703288,2776.164555894722,2779.950272528413,2625307
+2024-02-19,2024-02-19,GOOGL,2784.2952046367614,2786.6418396005056,2781.4826826944245,2783.4858274223952,1135682
+2024-02-20,2024-02-20,GOOGL,2782.009630661528,2784.51505544725,2780.280099153023,2781.3742408530625,3831687
+2024-02-21,2024-02-21,GOOGL,2785.5204278281713,2787.5670023323405,2784.901446777798,2786.3802437071136,2684555
+2024-02-22,2024-02-22,GOOGL,2787.434599091161,2790.1564206392154,2782.5097841021693,2787.1949328060127,4163439
+2024-02-23,2024-02-23,GOOGL,2789.65921481997,2793.6929398518673,2787.2795181321076,2787.3325788172956,2027508
+2024-02-24,2024-02-24,GOOGL,2792.235560928806,2795.9656471125177,2787.238058634074,2791.731414582569,1059065
+2024-02-25,2024-02-25,GOOGL,2790.655186031743,2792.3211713472074,2788.9751890696143,2790.8036867647306,2316791
+2024-02-26,2024-02-26,GOOGL,2794.2111928944073,2795.4905981685533,2789.254016364853,2794.2099325290355,2150465
+2024-02-27,2024-02-27,GOOGL,2794.1240315974387,2796.2886234075554,2793.0853595024746,2793.452054484864,4286144
+2024-02-28,2024-02-28,GOOGL,2799.852663001415,2800.8410707852254,2796.67551349968,2800.8410707852254,3433203
+2024-02-29,2024-02-29,GOOGL,2803.7086734642317,2806.589761142724,2800.0177308885195,2804.199186776769,2230975
+2024-01-01,2024-01-01,MSFT,383.3403868597352,385.52008877219924,380.68347696701204,383.1667014386995,4886715
+2024-01-02,2024-01-02,MSFT,381.1932384412407,384.4954651088847,376.7912129715352,380.87273746030763,2673378
+2024-01-03,2024-01-03,MSFT,380.5358862844415,383.9081035066116,376.86355752807407,381.04079379087227,4690398
+2024-01-04,2024-01-04,MSFT,379.08684020700355,379.3569195401153,376.1344485816956,377.8676277523261,2590872
+2024-01-05,2024-01-05,MSFT,377.0962169033476,379.95563254121646,374.60575444241965,377.8767429957614,4647102
+2024-01-06,2024-01-06,MSFT,379.1172388788486,381.1196044943871,376.2575543130407,379.32144237429037,4504948
+2024-01-07,2024-01-07,MSFT,378.40686024272895,382.9781342072082,377.97717019317224,378.29720660451204,4827134
+2024-01-08,2024-01-08,MSFT,375.4570219369394,376.7407055972496,372.6442549910211,376.7407055972496,3845194
+2024-01-09,2024-01-09,MSFT,377.7120624123043,378.35041349121366,377.27869899618196,377.27869899618196,2438182
+2024-01-10,2024-01-10,MSFT,377.35967542207806,381.67996155510264,376.3155667397128,378.0549817678498,2627464
+2024-01-11,2024-01-11,MSFT,374.70804287087674,376.87069721135447,374.5009062848262,374.5009062848262,1058957
+2024-01-12,2024-01-12,MSFT,372.84388907227583,374.11049603458133,371.2788866519016,371.2788866519016,3034539
+2024-01-13,2024-01-13,MSFT,375.05941708559845,379.4829448123406,372.31833738568866,373.7210265793792,2984011
+2024-01-14,2024-01-14,MSFT,372.7046052410039,372.98208624273923,371.1287583589898,371.1287583589898,4821465
+2024-01-15,2024-01-15,MSFT,370.00318955082935,374.41678539500805,367.5754657839145,369.3500202444185,3815243
+2024-01-16,2024-01-16,MSFT,372.1308275675077,373.1294791053781,371.69343558776217,372.1789544671965,2561621
+2024-01-17,2024-01-17,MSFT,371.67791118563883,374.1820323688135,368.56435426530055,371.62248921755764,1186179
+2024-01-18,2024-01-18,MSFT,374.7615883595708,375.57553392635845,373.01061950459933,373.5025653019447,1959849
+2024-01-19,2024-01-19,MSFT,374.46750953147574,376.88773192111347,371.229412208704,376.88773192111347,3397568
+2024-01-20,2024-01-20,MSFT,373.9967396009596,378.33223260977655,372.8873523221243,372.8873523221243,1143794
+2024-01-21,2024-01-21,MSFT,375.5374661860671,377.87119356544525,375.2164461745843,376.95025821754245,4351670
+2024-01-22,2024-01-22,MSFT,374.699190673624,377.90555193653694,373.0689604975087,374.0678534977978,4917384
+2024-01-23,2024-01-23,MSFT,374.3368471835067,377.4836181957601,372.6489404610499,373.6728171642118,2868547
+2024-01-24,2024-01-24,MSFT,371.2668841111767,374.5443633942872,367.6446779013167,369.1915342051214,1979022
+2024-01-25,2024-01-25,MSFT,369.1815455993758,373.77413469167215,367.85473947732737,368.0450284134152,3491016
+2024-01-26,2024-01-26,MSFT,371.3170795835116,372.5393507534265,368.91648666582853,369.5703793759677,4826726
+2024-01-27,2024-01-27,MSFT,370.8434885962221,372.28447380859217,369.591326678349,371.3492296676879,2742143
+2024-01-28,2024-01-28,MSFT,372.9636212900495,377.04616768489035,372.1367121357125,373.2374071477057,3914706
+2024-01-29,2024-01-29,MSFT,373.9448005831511,377.1030791911936,371.77037612078647,371.77037612078647,3089184
+2024-01-30,2024-01-30,MSFT,372.9244359196838,376.4866900351651,368.2883791097638,373.75083386426985,4169426
+2024-01-31,2024-01-31,MSFT,370.9521374768082,372.33432246300055,368.5003850808164,370.83887662452236,3932320
+2024-02-01,2024-02-01,MSFT,373.7925824958586,378.35478392719193,370.49020505365075,371.93807737854524,2865224
+2024-02-02,2024-02-02,MSFT,370.99366046821484,373.8688327441383,368.1848335697482,371.6257897730105,1310289
+2024-02-03,2024-02-03,MSFT,369.2299340169501,371.01105148220466,367.415195138096,369.75065673378646,1296924
+2024-02-04,2024-02-04,MSFT,369.2389424168197,370.67018247061776,366.30839838338045,367.354329361891,4494315
+2024-02-05,2024-02-05,MSFT,367.0688726840625,371.0792455224352,363.33361184127716,368.52838229438936,2141545
+2024-02-06,2024-02-06,MSFT,369.04390179651756,369.6138935784026,365.87285986304107,369.6138935784026,2383472
+2024-02-07,2024-02-07,MSFT,370.1769326374548,373.90425453073277,365.7020025439823,370.15715245133146,3744213
+2024-02-08,2024-02-08,MSFT,371.60042273785666,371.8637306228972,368.4043379999421,370.9976317763735,4773866
+2024-02-09,2024-02-09,MSFT,373.8613196751483,375.7681346581903,372.9788949577074,373.3818260827549,4059316
+2024-02-10,2024-02-10,MSFT,371.3388547467929,373.8878288705862,367.09264965413035,371.17651000065985,4010511
+2024-02-11,2024-02-11,MSFT,371.04798367067986,371.1130378110748,367.2434214097835,369.71961278020507,3956517
+2024-02-12,2024-02-12,MSFT,370.0197700857113,372.3161640500294,365.7151339935252,370.0351011099383,2274209
+2024-02-13,2024-02-13,MSFT,369.47517885012815,372.10841049640106,366.58899313983807,368.837029985658,3618823
+2024-02-14,2024-02-14,MSFT,373.2430481438725,376.905291656003,371.84600617562137,375.22367067086134,4906450
+2024-02-15,2024-02-15,MSFT,373.05506929145383,373.39999642274404,371.315638071815,373.0451386921086,1104008
+2024-02-16,2024-02-16,MSFT,374.03675427578975,375.6339054573327,371.00321057958547,374.101509238535,3012711
+2024-02-17,2024-02-17,MSFT,374.14483115297685,376.42825058237423,373.108028261916,375.68814048956597,4007662
+2024-02-18,2024-02-18,MSFT,376.14421241368797,379.75323847891303,372.904702062413,376.53180363806536,2358238
+2024-02-19,2024-02-19,MSFT,372.41135309781976,376.4884056352985,369.55483139112056,370.84734253295795,1234562
+2024-02-20,2024-02-20,MSFT,374.33408608592276,377.80685259599824,371.96942414394334,373.9337989868847,1456607
+2024-02-21,2024-02-21,MSFT,374.7588377370521,378.80867895776396,373.07987705889224,374.98652583902674,3227963
+2024-02-22,2024-02-22,MSFT,377.74916352520347,378.59709840447334,374.5388666740733,376.8895561179132,3168888
+2024-02-23,2024-02-23,MSFT,377.3527171986863,379.07106911386785,374.32229929511055,376.755979383415,2917969
+2024-02-24,2024-02-24,MSFT,376.6376855749579,381.1562212718869,373.6867706060527,377.0159830668171,3239104
+2024-02-25,2024-02-25,MSFT,372.96619822454056,375.7190168832621,370.81305252279225,372.8519648999994,2693517
+2024-02-26,2024-02-26,MSFT,367.2313319100674,371.3247196359543,366.59471707744626,366.6210367278621,3751499
+2024-02-27,2024-02-27,MSFT,366.1744538545864,369.32718392678623,362.89458141938616,366.0355486816672,4299374
+2024-02-28,2024-02-28,MSFT,363.4571786229271,365.9523223801711,359.59889884939224,364.36604282017805,3606426
+2024-02-29,2024-02-29,MSFT,363.64891465968293,365.76653168578446,358.9089303289695,364.64479136990536,3632407
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>OHLC Chart Examples</h1>
+<p></p>
+
+<h2>Example 1: Single Stock with Volume (AAPL)</h2>
+<p>Daily stock prices with volume bars. Use time sliders to zoom, toggle renormalization and volume display.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example1_ohlc">Chart Type: </label>
+                <select id="chart_type_select_example1_ohlc" onchange="updateChart_example1_ohlc()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example1_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example1_ohlc">Display Mode: </label>
+                <select id="display_mode_select_example1_ohlc" onchange="updateChart_example1_ohlc()">
+                <option value="Overlay" selected>Overlay</option>
+                <option value="Faceted">Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example1_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example1_ohlc" onchange="updateChart_example1_ohlc()">
+            <label for="renormalize_checkbox_example1_ohlc">Renormalize (first bar open = 1)</label>
+        </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="show_volume_checkbox_example1_ohlc" checked onchange="updateChart_example1_ohlc()">
+        <label for="show_volume_checkbox_example1_ohlc">Show Volume</label>
+    </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="log_volume_checkbox_example1_ohlc" onchange="updateChart_example1_ohlc()">
+        <label for="log_volume_checkbox_example1_ohlc">Log Volume</label>
+    </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example1_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example1_ohlc_aspect_ratio_label">0.6</span>
+    <input type="range" id="example1_ohlc_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example1_ohlc"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_1</p><br>
+<hr>
+<br>
+<h2>Example 2: Multiple Stocks Comparison</h2>
+<p>Compare stocks with vastly different prices. Enable renormalization to see relative performance (first bar open = 1). Switch between Overlay and Faceted display modes.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example2_ohlc">Chart Type: </label>
+                <select id="chart_type_select_example2_ohlc" onchange="updateChart_example2_ohlc()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example2_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example2_ohlc">Display Mode: </label>
+                <select id="display_mode_select_example2_ohlc" onchange="updateChart_example2_ohlc()">
+                <option value="Overlay" selected>Overlay</option>
+                <option value="Faceted">Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example2_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example2_ohlc" onchange="updateChart_example2_ohlc()">
+            <label for="renormalize_checkbox_example2_ohlc">Renormalize (first bar open = 1)</label>
+        </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="show_volume_checkbox_example2_ohlc" checked onchange="updateChart_example2_ohlc()">
+        <label for="show_volume_checkbox_example2_ohlc">Show Volume</label>
+    </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="log_volume_checkbox_example2_ohlc" onchange="updateChart_example2_ohlc()">
+        <label for="log_volume_checkbox_example2_ohlc">Log Volume</label>
+    </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example2_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example2_ohlc_aspect_ratio_label">0.6</span>
+    <input type="range" id="example2_ohlc_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example2_ohlc"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_2</p><br>
+<hr>
+<br>
+<h2>Example 3: Quarterly Data Without Volume</h2>
+<p>Quarterly company performance using integer time periods. No volume data. Using OHLC bar style instead of candlesticks. Faceted display shows each company separately.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example3_ohlc">Chart Type: </label>
+                <select id="chart_type_select_example3_ohlc" onchange="updateChart_example3_ohlc()">
+                <option value="candlestick">candlestick</option>
+                <option value="ohlc" selected>ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example3_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example3_ohlc">Display Mode: </label>
+                <select id="display_mode_select_example3_ohlc" onchange="updateChart_example3_ohlc()">
+                <option value="Overlay">Overlay</option>
+                <option value="Faceted" selected>Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example3_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example3_ohlc" onchange="updateChart_example3_ohlc()">
+            <label for="renormalize_checkbox_example3_ohlc">Renormalize (first bar open = 1)</label>
+        </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example3_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example3_ohlc_aspect_ratio_label">0.6</span>
+    <input type="range" id="example3_ohlc_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example3_ohlc"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company_data</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
+</body>
+</html>

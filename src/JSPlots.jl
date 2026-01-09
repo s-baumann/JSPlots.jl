@@ -406,6 +406,15 @@ module JSPlots
     include("LinkList.jl")
     export LinkList
 
+    include("ohlcchart.jl")
+    export OHLCChart
+
+    include("bumpchart.jl")
+    export BumpChart
+
+    include("executionplot.jl")
+    export ExecutionPlot
+
     include("Pages.jl")
     export JSPlotPage, Pages, sanitize_filename
 
