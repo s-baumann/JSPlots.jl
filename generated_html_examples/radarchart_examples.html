@@ -706,12 +706,13 @@ $(function(){
     let radarData_phones_radar = null;
     let selectedVariables_phones_radar = ["Battery","Camera","Performance","Display","Price_Value","Build_Quality"];
     let selectedLabels_phones_radar = [];
+    let selectedScenario_phones_radar = null;
 
     const VALUE_COLS = ["Battery","Camera","Performance","Display","Price_Value","Build_Quality"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {};
-    const FACET_X = null;
-    const FACET_Y = null;
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = null;
     const COLOR_COL = null;
     const DEFAULT_COLOR = "#2563eb";
     const MAX_VALUE = 100.0;
@@ -737,6 +738,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_phones_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_phones_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_phones_radar');
@@ -757,7 +777,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_phones_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_phones_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_phones_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -775,37 +801,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_phones_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_phones_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_phones_radar();
     }
 
     window.updateRadarChart_phones_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_phones_radar');
+            if (scenarioSelect) {
+                selectedScenario_phones_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_phones_radar');
@@ -832,36 +839,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_phones_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_phones_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_phones_radar(selectedVariables_phones_radar, selectedLabels_phones_radar, facetXVal, facetYVal);
+        renderRadarChart_phones_radar(selectedVariables_phones_radar, selectedLabels_phones_radar, selectedScenario_phones_radar);
     }
 
-    function renderRadarChart_phones_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_phones_radar(variables, labels, scenario) {
         const data = radarData_phones_radar;
         const container = document.getElementById('radar_phones_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -869,22 +861,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -900,15 +897,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -925,7 +934,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -942,7 +951,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_phones_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_phones_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -951,14 +960,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_phones_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_phones_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -976,15 +991,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -1013,27 +1025,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -1042,17 +1041,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -1084,7 +1085,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -1131,15 +1132,16 @@ $(function(){
     let radarData_foods_radar = null;
     let selectedVariables_foods_radar = ["Vitamin_C","Fiber","Antioxidants","Sweetness","Aroma","Acidity","Juiciness","Firmness","Smoothness","Affordability","Price","Yield","CO2e","Water_use","Pesticides","Biodiversity"];
     let selectedLabels_foods_radar = [];
+    let selectedScenario_foods_radar = null;
 
     const VALUE_COLS = ["Vitamin_C","Fiber","Antioxidants","Sweetness","Aroma","Acidity","Juiciness","Firmness","Smoothness","Affordability","Price","Yield","CO2e","Water_use","Pesticides","Biodiversity"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {"Acidity":"Sensory","Sweetness":"Sensory","Firmness":"Sensory","Juiciness":"Sensory","Yield":"Economics","Water_use":"Sustainability","Pesticides":"Sustainability","Affordability":"Economics","Antioxidants":"Nutrition","Smoothness":"Sensory","Aroma":"Sensory","Biodiversity":"Sustainability","CO2e":"Sustainability","Price":"Economics","Vitamin_C":"Nutrition","Fiber":"Nutrition"};
-    const FACET_X = null;
-    const FACET_Y = null;
+    const VARIABLE_LIMITS = {"Antioxidants":10.0,"Vitamin_C":20.0,"Fiber":10.0};
+    const SCENARIO_COL = null;
     const COLOR_COL = "category";
     const DEFAULT_COLOR = "#1f77b4";
-    const MAX_VALUE = 100.0;
+    const MAX_VALUE = null;
     const MAX_VARIABLES = null;
     const SHOW_LEGEND = true;
     const SHOW_GRID_LABELS = true;
@@ -1162,6 +1164,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_foods_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_foods_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_foods_radar');
@@ -1182,7 +1203,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_foods_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_foods_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_foods_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -1200,37 +1227,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_foods_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_foods_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_foods_radar();
     }
 
     window.updateRadarChart_foods_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_foods_radar');
+            if (scenarioSelect) {
+                selectedScenario_foods_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_foods_radar');
@@ -1257,36 +1265,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_foods_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_foods_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_foods_radar(selectedVariables_foods_radar, selectedLabels_foods_radar, facetXVal, facetYVal);
+        renderRadarChart_foods_radar(selectedVariables_foods_radar, selectedLabels_foods_radar, selectedScenario_foods_radar);
     }
 
-    function renderRadarChart_foods_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_foods_radar(variables, labels, scenario) {
         const data = radarData_foods_radar;
         const container = document.getElementById('radar_foods_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -1294,22 +1287,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -1325,15 +1323,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -1350,7 +1360,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -1367,7 +1377,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_foods_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_foods_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -1376,14 +1386,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_foods_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_foods_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -1401,15 +1417,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -1438,27 +1451,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -1467,17 +1467,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -1509,7 +1511,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -1556,12 +1558,13 @@ $(function(){
     let radarData_skills_radar = null;
     let selectedVariables_skills_radar = ["Programming","System_Design","Data_Analysis","Communication","Presentation","Negotiation","Leadership","Project_Management","Team_Building","Product_Knowledge","Market_Knowledge","Technical_Writing"];
     let selectedLabels_skills_radar = [];
+    let selectedScenario_skills_radar = null;
 
     const VALUE_COLS = ["Programming","System_Design","Data_Analysis","Communication","Presentation","Negotiation","Leadership","Project_Management","Team_Building","Product_Knowledge","Market_Knowledge","Technical_Writing"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {};
-    const FACET_X = null;
-    const FACET_Y = null;
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = null;
     const COLOR_COL = "department";
     const DEFAULT_COLOR = "#1f77b4";
     const MAX_VALUE = 100.0;
@@ -1587,6 +1590,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_skills_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_skills_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_skills_radar');
@@ -1607,7 +1629,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_skills_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_skills_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_skills_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -1625,37 +1653,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_skills_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_skills_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_skills_radar();
     }
 
     window.updateRadarChart_skills_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_skills_radar');
+            if (scenarioSelect) {
+                selectedScenario_skills_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_skills_radar');
@@ -1682,36 +1691,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_skills_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_skills_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_skills_radar(selectedVariables_skills_radar, selectedLabels_skills_radar, facetXVal, facetYVal);
+        renderRadarChart_skills_radar(selectedVariables_skills_radar, selectedLabels_skills_radar, selectedScenario_skills_radar);
     }
 
-    function renderRadarChart_skills_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_skills_radar(variables, labels, scenario) {
         const data = radarData_skills_radar;
         const container = document.getElementById('radar_skills_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -1719,22 +1713,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -1750,15 +1749,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -1775,7 +1786,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -1792,7 +1803,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_skills_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_skills_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -1801,14 +1812,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_skills_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_skills_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -1826,15 +1843,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -1863,27 +1877,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -1892,17 +1893,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -1934,7 +1937,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -1981,12 +1984,13 @@ $(function(){
     let radarData_universities_radar = null;
     let selectedVariables_universities_radar = ["Academic_Reputation","Research_Output","Faculty_Quality","Industry_Connections","International_Outlook","Student_Satisfaction"];
     let selectedLabels_universities_radar = [];
+    let selectedScenario_universities_radar = null;
 
     const VALUE_COLS = ["Academic_Reputation","Research_Output","Faculty_Quality","Industry_Connections","International_Outlook","Student_Satisfaction"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {};
-    const FACET_X = "region";
-    const FACET_Y = "type";
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = "scenario";
     const COLOR_COL = "region";
     const DEFAULT_COLOR = "#1f77b4";
     const MAX_VALUE = 100.0;
@@ -2012,6 +2016,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_universities_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_universities_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_universities_radar');
@@ -2032,7 +2055,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_universities_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_universities_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_universities_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -2050,37 +2079,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_universities_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_universities_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_universities_radar();
     }
 
     window.updateRadarChart_universities_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_universities_radar');
+            if (scenarioSelect) {
+                selectedScenario_universities_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_universities_radar');
@@ -2107,36 +2117,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_universities_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_universities_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_universities_radar(selectedVariables_universities_radar, selectedLabels_universities_radar, facetXVal, facetYVal);
+        renderRadarChart_universities_radar(selectedVariables_universities_radar, selectedLabels_universities_radar, selectedScenario_universities_radar);
     }
 
-    function renderRadarChart_universities_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_universities_radar(variables, labels, scenario) {
         const data = radarData_universities_radar;
         const container = document.getElementById('radar_universities_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -2144,22 +2139,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -2175,15 +2175,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -2200,7 +2212,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -2217,7 +2229,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_universities_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_universities_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -2226,14 +2238,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_universities_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_universities_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -2251,15 +2269,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -2288,27 +2303,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -2317,17 +2319,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -2359,7 +2363,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -2406,12 +2410,13 @@ $(function(){
     let radarData_investments_radar = null;
     let selectedVariables_investments_radar = ["Expected_Return","Risk_Adjusted_Return","Liquidity","Diversification","Tax_Efficiency","Inflation_Protection"];
     let selectedLabels_investments_radar = [];
+    let selectedScenario_investments_radar = null;
 
     const VALUE_COLS = ["Expected_Return","Risk_Adjusted_Return","Liquidity","Diversification","Tax_Efficiency","Inflation_Protection"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {};
-    const FACET_X = null;
-    const FACET_Y = null;
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = null;
     const COLOR_COL = "asset_class";
     const DEFAULT_COLOR = "#1f77b4";
     const MAX_VALUE = 10.0;
@@ -2437,6 +2442,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_investments_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_investments_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_investments_radar');
@@ -2457,7 +2481,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_investments_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_investments_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_investments_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -2475,37 +2505,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_investments_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_investments_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_investments_radar();
     }
 
     window.updateRadarChart_investments_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_investments_radar');
+            if (scenarioSelect) {
+                selectedScenario_investments_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_investments_radar');
@@ -2532,36 +2543,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_investments_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_investments_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_investments_radar(selectedVariables_investments_radar, selectedLabels_investments_radar, facetXVal, facetYVal);
+        renderRadarChart_investments_radar(selectedVariables_investments_radar, selectedLabels_investments_radar, selectedScenario_investments_radar);
     }
 
-    function renderRadarChart_investments_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_investments_radar(variables, labels, scenario) {
         const data = radarData_investments_radar;
         const container = document.getElementById('radar_investments_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -2569,22 +2565,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -2600,15 +2601,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -2625,7 +2638,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -2642,7 +2655,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_investments_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_investments_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -2651,14 +2664,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_investments_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_investments_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -2676,15 +2695,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -2713,27 +2729,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -2742,17 +2745,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -2784,7 +2789,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -2851,17 +2856,27 @@ Google Pixel 8 Pro,80.0,92.0,90.0,90.0,85.0,88.0
 OnePlus 12,90.0,88.0,94.0,95.0,90.0,90.0
 
 </script><script type="text/plain" id="universities_data" data-format="csv_embedded" data-src="">
-label,region,type,Academic_Reputation,Research_Output,Faculty_Quality,Industry_Connections,International_Outlook,Student_Satisfaction
-MIT,North America,Private,100.0,99.0,98.0,95.0,88.0,92.0
-Stanford,North America,Private,98.0,98.0,99.0,100.0,90.0,94.0
-Harvard,North America,Private,99.0,97.0,98.0,92.0,85.0,90.0
-Berkeley,North America,Public,96.0,95.0,94.0,90.0,82.0,88.0
-Caltech,North America,Private,97.0,96.0,99.0,94.0,87.0,91.0
-Oxford,Europe,Public,98.0,96.0,97.0,88.0,95.0,93.0
-Cambridge,Europe,Public,97.0,95.0,96.0,85.0,94.0,92.0
-ETH Zurich,Europe,Public,95.0,94.0,95.0,92.0,98.0,90.0
-Tokyo,Asia,Public,93.0,91.0,90.0,85.0,75.0,85.0
-NUS,Asia,Public,92.0,88.0,87.0,90.0,100.0,87.0
+label,region,scenario,Academic_Reputation,Research_Output,Faculty_Quality,Industry_Connections,International_Outlook,Student_Satisfaction
+MIT,North America,Overall Rankings,94.0,96.0,94.0,86.0,89.0,95.0
+Stanford,North America,Overall Rankings,96.0,93.0,98.0,95.0,82.0,88.0
+Harvard,North America,Overall Rankings,90.0,93.0,93.0,93.0,80.0,93.0
+Berkeley,North America,Overall Rankings,94.0,93.0,93.0,81.0,79.0,88.0
+Caltech,North America,Overall Rankings,91.0,94.0,94.0,89.0,82.0,90.0
+Oxford,Europe,Overall Rankings,94.0,92.0,89.0,82.0,85.0,92.0
+Cambridge,Europe,Overall Rankings,89.0,92.0,94.0,90.0,80.0,85.0
+ETH Zurich,Europe,Overall Rankings,90.0,90.0,91.0,80.0,77.0,83.0
+Tokyo,Asia,Overall Rankings,88.0,85.0,82.0,85.0,95.0,81.0
+NUS,Asia,Overall Rankings,87.0,87.0,86.0,76.0,95.0,83.0
+MIT,North America,Research Focus,98.0,101.0,98.0,88.0,88.0,98.0
+Stanford,North America,Research Focus,96.0,94.0,95.0,82.0,89.0,88.0
+Harvard,North America,Research Focus,85.0,87.0,89.0,80.0,82.0,82.0
+Berkeley,North America,Research Focus,94.0,93.0,95.0,86.0,87.0,83.0
+Caltech,North America,Research Focus,98.0,99.0,96.0,91.0,87.0,88.0
+Oxford,Europe,Research Focus,94.0,94.0,91.0,80.0,87.0,92.0
+Cambridge,Europe,Research Focus,92.0,92.0,92.0,78.0,87.0,85.0
+ETH Zurich,Europe,Research Focus,94.0,94.0,95.0,83.0,87.0,90.0
+Tokyo,Asia,Research Focus,85.0,89.0,85.0,76.0,95.0,85.0
+NUS,Asia,Research Focus,88.0,91.0,88.0,77.0,95.0,83.0
 
 </script><script type="text/plain" id="foods_data" data-format="csv_embedded" data-src="">
 label,category,Vitamin_C,Fiber,Antioxidants,Sweetness,Aroma,Acidity,Juiciness,Firmness,Smoothness,Affordability,Price,Yield,CO2e,Water_use,Pesticides,Biodiversity
@@ -2970,7 +2985,7 @@ Each axis represents a different variable, and values are plotted as a polygon.<
 <br>
 <div class="chart-container" id="container_foods_radar">
     <h3>Food Nutritional and Sustainability Profile</h3>
-    <p>Axes are grouped by category: Nutrition, Sensory, Economics, and Sustainability. Higher values are better.</p>
+    <p>Axes are grouped by category: Nutrition (blue labels), Sensory, Economics, and Sustainability. Variable limits are set to prevent outliers from dominating the scale (e.g., Vitamin C capped at 20). Higher values are better.</p>
     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
         <div style="flex: 0 0 auto; min-width: 200px;">
 
@@ -3044,15 +3059,15 @@ Each axis represents a different variable, and values are plotted as a polygon.<
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 4: University Rankings with Faceting</h2>
-<p>Compare universities across different metrics with faceting by region and type.</p>
+        <h2>Example 4: University Rankings with Scenarios</h2>
+<p>Compare universities across different ranking systems using scenario selection.</p>
 <p><strong>Features demonstrated:</strong></p>
 <ul>
-    <li>Faceting by region (geographic location)</li>
-    <li>Faceting by type (public/private)</li>
+    <li>Scenario selector to switch between different ranking methodologies</li>
     <li>Multiple universities displayed simultaneously</li>
+    <li>Color-coded by region</li>
 </ul>
-<p><strong>Try this:</strong> Use the facet selectors to filter universities by region and type.</p>
+<p><strong>Try this:</strong> Switch between "Overall Rankings" and "Research Focus" scenarios to see how university scores change based on different criteria.</p>
 
     </div>
 <br>
@@ -3060,9 +3075,16 @@ Each axis represents a different variable, and values are plotted as a polygon.<
 <br>
 <div class="chart-container" id="container_universities_radar">
     <h3>University Rankings Comparison</h3>
-    <p>Compare top universities across key metrics. Use facet selectors to filter by region and type.</p>
+    <p>Compare top universities across key metrics with two ranking methodologies. Switch scenarios to see how different ranking systems affect scores. 'Overall Rankings' provides a balanced view, while 'Research Focus' emphasizes research output and faculty quality.</p>
     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
         <div style="flex: 0 0 auto; min-width: 200px;">
+
+<div style="margin-bottom: 15px;">
+    <label for="scenario_select_universities_radar"><strong>Scenario:</strong></label>
+    <select id="scenario_select_universities_radar" onchange="updateRadarChart_universities_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+</div>
 
 <div style="margin-bottom: 15px;">
     <label for="label_select_universities_radar"><strong>Select items to display:</strong></label>
@@ -3072,22 +3094,6 @@ Each axis represents a different variable, and values are plotted as a polygon.<
     <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
         Hold Ctrl (Cmd on Mac) to select multiple
     </div>
-</div>
-
-<div style="margin-bottom: 10px;">
-    <label for="facet_x_universities_radar"><strong>Facet X:</strong></label>
-    <select id="facet_x_universities_radar" onchange="updateRadarChart_universities_radar()">
-        <option value="">All</option>
-        <!-- Options will be populated dynamically -->
-    </select>
-</div>
-
-<div style="margin-bottom: 10px;">
-    <label for="facet_y_universities_radar"><strong>Facet Y:</strong></label>
-    <select id="facet_y_universities_radar" onchange="updateRadarChart_universities_radar()">
-        <option value="">All</option>
-        <!-- Options will be populated dynamically -->
-    </select>
 </div>
 
         </div>
@@ -3154,9 +3160,10 @@ Each axis represents a different variable, and values are plotted as a polygon.<
 <h3>Key Features</h3>
 <ul>
     <li><strong>Grouped axes:</strong> Group related metrics together with labels</li>
+    <li><strong>Variable limits:</strong> Set maximum values per variable to prevent outliers from dominating</li>
+    <li><strong>Scenarios:</strong> Switch between different data scenarios</li>
     <li><strong>Variable selector:</strong> Choose which axes to display</li>
     <li><strong>Item selector:</strong> Choose which items to compare</li>
-    <li><strong>Faceting:</strong> Filter by categorical variables</li>
     <li><strong>Color coding:</strong> Color items by category</li>
     <li><strong>Flexible scaling:</strong> Auto-scale or specify maximum value</li>
 </ul>

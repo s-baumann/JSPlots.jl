@@ -1212,12 +1212,13 @@ $(function(){
     let radarData_product_radar = null;
     let selectedVariables_product_radar = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
     let selectedLabels_product_radar = [];
+    let selectedScenario_product_radar = null;
 
     const VALUE_COLS = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
     const LABEL_COL = "label";
     const GROUP_MAPPING = {"Scalability":"Technical Performance","Adoption":"Market Position","ROI":"Business Value","Uptime":"Performance","Reliability":"Technical Performance","Support":"Business Value","API_Quality":"Technical Performance","Design":"User Experience","Documentation":"Business Value","Mobile":"User Experience","Growth":"Market Position","Integration":"Technical Performance","Training":"Business Value","Satisfaction":"Market Position","Customization":"User Experience","Ease_of_Use":"User Experience","Speed":"Performance","Efficiency":"Performance"};
-    const FACET_X = "category";
-    const FACET_Y = "tier";
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = "scenario";
     const COLOR_COL = "category";
     const DEFAULT_COLOR = "#1f77b4";
     const MAX_VALUE = 100.0;
@@ -1243,6 +1244,25 @@ $(function(){
             return;
         }
 
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_product_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_product_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
         // Populate variable selector
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_product_radar');
@@ -1263,7 +1283,13 @@ $(function(){
         // Populate label selector
         const labelSelect = document.getElementById('label_select_product_radar');
         if (labelSelect) {
-            const uniqueLabels = [...new Set(data.map(d => d[LABEL_COL]))].filter(l => l);
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_product_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_product_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
             labelSelect.innerHTML = '';
             uniqueLabels.forEach(function(label) {
                 const option = document.createElement('option');
@@ -1281,37 +1307,18 @@ $(function(){
             });
         }
 
-        // Populate facet selectors
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_product_radar');
-            if (facetXSelect) {
-                const uniqueX = [...new Set(data.map(d => d[FACET_X]).filter(v => v))];
-                uniqueX.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetXSelect.appendChild(option);
-                });
-            }
-        }
-
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_product_radar');
-            if (facetYSelect) {
-                const uniqueY = [...new Set(data.map(d => d[FACET_Y]).filter(v => v))];
-                uniqueY.forEach(function(val) {
-                    const option = document.createElement('option');
-                    option.value = val;
-                    option.text = val;
-                    facetYSelect.appendChild(option);
-                });
-            }
-        }
-
         updateRadarChart_product_radar();
     }
 
     window.updateRadarChart_product_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_product_radar');
+            if (scenarioSelect) {
+                selectedScenario_product_radar = scenarioSelect.value;
+            }
+        }
+
         // Get selected variables
         if (VARIABLE_SELECTOR) {
             const varSelect = document.getElementById('var_select_product_radar');
@@ -1338,36 +1345,21 @@ $(function(){
             }
         }
 
-        // Get facet values
-        let facetXVal = null;
-        let facetYVal = null;
-        if (FACET_X) {
-            const facetXSelect = document.getElementById('facet_x_product_radar');
-            if (facetXSelect) facetXVal = facetXSelect.value;
-        }
-        if (FACET_Y) {
-            const facetYSelect = document.getElementById('facet_y_product_radar');
-            if (facetYSelect) facetYVal = facetYSelect.value;
-        }
-
-        renderRadarChart_product_radar(selectedVariables_product_radar, selectedLabels_product_radar, facetXVal, facetYVal);
+        renderRadarChart_product_radar(selectedVariables_product_radar, selectedLabels_product_radar, selectedScenario_product_radar);
     }
 
-    function renderRadarChart_product_radar(variables, labels, facetX, facetY) {
+    function renderRadarChart_product_radar(variables, labels, scenario) {
         const data = radarData_product_radar;
         const container = document.getElementById('radar_product_radar');
         if (!container) return;
 
         container.innerHTML = '';
 
-        // Filter data
+        // Filter data by labels and scenario
         let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
 
-        if (facetX && facetX !== '') {
-            filteredData = filteredData.filter(d => d[FACET_X] === facetX);
-        }
-        if (facetY && facetY !== '') {
-            filteredData = filteredData.filter(d => d[FACET_Y] === facetY);
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
         }
 
         if (filteredData.length === 0) {
@@ -1375,22 +1367,27 @@ $(function(){
             return;
         }
 
-        // Calculate max value if not specified
-        let maxVal = MAX_VALUE;
-        if (!maxVal) {
-            maxVal = 0;
-            filteredData.forEach(function(d) {
-                variables.forEach(function(v) {
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
                     const val = parseFloat(d[v]);
                     if (!isNaN(val) && val > maxVal) {
                         maxVal = val;
                     }
                 });
-            });
-            maxVal = Math.ceil(maxVal * 1.1); // Add 10% margin
-        }
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
 
-        // Group variables
+        // Group variables by group_mapping
         const groupedVars = {};
         const ungroupedVars = [];
 
@@ -1406,15 +1403,27 @@ $(function(){
             }
         });
 
-        // Create ordered list of axes
+        // Create ordered list of axes with groups
         const axes = [];
-        Object.keys(groupedVars).sort().forEach(function(group) {
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
             groupedVars[group].forEach(function(v) {
-                axes.push({ name: v, group: group });
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
             });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
         });
+
         ungroupedVars.forEach(function(v) {
-            axes.push({ name: v, group: null });
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
         });
 
         // Create color mapping
@@ -1431,7 +1440,7 @@ $(function(){
         // Calculate layout
         const numCharts = filteredData.length;
         const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
-        const chartSize = Math.min(400, Math.max(300, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
 
         // Create SVG container
         const svg = d3.select(container)
@@ -1448,7 +1457,7 @@ $(function(){
 
             const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
 
-            drawSingleRadar_product_radar(svg, d, axes, maxVal, x, y, chartSize, color);
+            drawSingleRadar_product_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
         });
 
         // Add legend
@@ -1457,14 +1466,20 @@ $(function(){
         }
     }
 
-    function drawSingleRadar_product_radar(svg, dataPoint, axes, maxVal, offsetX, offsetY, size, color) {
-        const margin = 50;
+    function drawSingleRadar_product_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
         const radius = (size - 2 * margin) / 2;
         const centerX = offsetX + size / 2;
         const centerY = offsetY + size / 2;
 
         const g = svg.append('g')
             .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
 
         // Draw grid circles
         const levels = 5;
@@ -1482,15 +1497,12 @@ $(function(){
                     .attr('y', -r)
                     .attr('font-size', '10px')
                     .attr('fill', '#666')
-                    .text(maxVal.toFixed(1));
+                    .text(gridMax.toFixed(1));
             }
         }
 
-        // Draw axes and track groups
+        // Draw axes
         const angleSlice = Math.PI * 2 / axes.length;
-        let currentGroup = null;
-        let groupStartAngle = 0;
-        const groupRanges = [];
 
         axes.forEach(function(axis, i) {
             const angle = angleSlice * i - Math.PI / 2;
@@ -1519,27 +1531,14 @@ $(function(){
                 .attr('font-size', '10px')
                 .attr('fill', '#333')
                 .text(axis.name.replace(/_/g, ' '));
-
-            // Track group changes
-            if (axis.group && axis.group !== currentGroup) {
-                if (currentGroup !== null) {
-                    groupRanges.push({ group: currentGroup, start: groupStartAngle, end: angle });
-                }
-                currentGroup = axis.group;
-                groupStartAngle = angle;
-            }
         });
 
-        // Add final group
-        if (currentGroup !== null) {
-            const finalAngle = angleSlice * axes.length - Math.PI / 2;
-            groupRanges.push({ group: currentGroup, start: groupStartAngle, end: finalAngle });
-        }
-
-        // Draw group labels
-        groupRanges.forEach(function(range) {
-            const midAngle = (range.start + range.end) / 2;
-            const labelRadius = radius + 35;
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
             const x = labelRadius * Math.cos(midAngle);
             const y = labelRadius * Math.sin(midAngle);
 
@@ -1548,17 +1547,19 @@ $(function(){
                 .attr('y', y)
                 .attr('text-anchor', 'middle')
                 .attr('dominant-baseline', 'middle')
-                .attr('font-size', '11px')
+                .attr('font-size', '12px')
                 .attr('font-weight', 'bold')
-                .attr('fill', '#666')
-                .text(range.group);
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
         });
 
         // Draw data polygon
         const points = [];
         axes.forEach(function(axis, i) {
             const value = parseFloat(dataPoint[axis.name]) || 0;
-            const normalizedValue = Math.min(Math.max(value / maxVal, 0), 1);
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
             const angle = angleSlice * i - Math.PI / 2;
             const r = radius * normalizedValue;
             const x = r * Math.cos(angle);
@@ -1590,7 +1591,7 @@ $(function(){
         // Add title
         g.append('text')
             .attr('x', 0)
-            .attr('y', -radius - 40)
+            .attr('y', -radius - 45)
             .attr('text-anchor', 'middle')
             .attr('font-size', '12px')
             .attr('font-weight', 'bold')
@@ -1822,9 +1823,16 @@ $(function(){
 <br>
 <div class="chart-container" id="container_product_radar">
     <h3>Product Performance RadarChart</h3>
-    <p>RadarChart (spider chart) displaying multi-dimensional product analysis across 18 metrics grouped into 5 categories: Technical Performance, User Experience, Performance, Business Value, and Market Position. <strong>Interactive Features:</strong> (1) <strong>Variable Selector:</strong> Choose which metrics to display (minimum 3, recommended 6-8 for clarity). (2) <strong>Item Selector:</strong> Select which products to compare. (3) <strong>Faceting:</strong> Filter by product category (Infrastructure/Data & AI/Security/Productivity) and tier (Enterprise/Professional/Starter). (4) <strong>Grouped Axes:</strong> Related metrics are grouped together with category labels. (5) <strong>Color Coding:</strong> Products colored by category for easy identification. All scores normalized to 0-100 scale where higher is better. <strong>Tip:</strong> Start by selecting 6-8 metrics from different groups and 2-3 products to compare their strengths and weaknesses. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html" style="color: blue; font-weight: bold;">See here for RadarChart examples</a></p>
+    <p>RadarChart (spider chart) displaying many dimensions in a geometric way. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html" style="color: blue; font-weight: bold;">See here for RadarChart examples</a></p>
     <div style="display: flex; gap: 20px; flex-wrap: wrap;">
         <div style="flex: 0 0 auto; min-width: 200px;">
+
+<div style="margin-bottom: 15px;">
+    <label for="scenario_select_product_radar"><strong>Scenario:</strong></label>
+    <select id="scenario_select_product_radar" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+</div>
 
 <div style="margin-bottom: 15px;">
     <label for="var_select_product_radar"><strong>Select variables:</strong></label>
@@ -1846,22 +1854,6 @@ $(function(){
     </div>
 </div>
 
-<div style="margin-bottom: 10px;">
-    <label for="facet_x_product_radar"><strong>Facet X:</strong></label>
-    <select id="facet_x_product_radar" onchange="updateRadarChart_product_radar()">
-        <option value="">All</option>
-        <!-- Options will be populated dynamically -->
-    </select>
-</div>
-
-<div style="margin-bottom: 10px;">
-    <label for="facet_y_product_radar"><strong>Facet Y:</strong></label>
-    <select id="facet_y_product_radar" onchange="updateRadarChart_product_radar()">
-        <option value="">All</option>
-        <!-- Options will be populated dynamically -->
-    </select>
-</div>
-
         </div>
         <div style="flex: 1 1 auto; min-width: 400px;">
             <div id="radar_product_radar" style="width: 100%;"></div>
@@ -1870,6 +1862,6 @@ $(function(){
 </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: radar_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.5.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

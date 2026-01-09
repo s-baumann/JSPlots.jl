@@ -10,11 +10,12 @@ header = TextBlock("""
 <h1>CorrPlot (Correlation Plot with Dendrogram) Examples</h1>
 <p>This page demonstrates the interactive CorrPlot chart type in JSPlots.</p>
 <ul>
-    <li><strong>Hierarchical clustering:</strong> Dendrogram shows similarity grouping of variables</li>
+    <li><strong>Browser-based hierarchical clustering:</strong> Dendrogram computed dynamically in your browser</li>
     <li><strong>Dual correlation display:</strong> Pearson (upper right) and Spearman (lower left) correlations in one matrix</li>
-    <li><strong>Julia-computed correlations:</strong> Use compute_correlations() convenience function</li>
-    <li><strong>Flexible clustering:</strong> Use cluster_from_correlation() with different linkage methods</li>
+    <li><strong>Julia-computed correlations:</strong> Use compute_correlations() and prepare_corrplot_data() convenience functions</li>
+    <li><strong>Flexible clustering:</strong> Choose linkage method (Ward, Average, Single, Complete) in browser</li>
     <li><strong>Automatic ordering:</strong> Variables reordered by clustering for clearer patterns</li>
+    <li><strong>Works with subsets:</strong> Dendrogram updates dynamically when you select a subset of variables</li>
 </ul>
 """)
 
@@ -89,14 +90,13 @@ financial_vars = [:revenue, :profit, :profit_margin, :roa, :roe,
                   :asset_turnover, :inventory_turnover]
 cors1 = compute_correlations(df_financial, financial_vars)
 
-# Perform hierarchical clustering
-hc1 = cluster_from_correlation(cors1.pearson, linkage=:ward)
+# Prepare correlation data for CorrPlot
+corr_data1 = prepare_corrplot_data(cors1.pearson, cors1.spearman, string.(financial_vars))
 
 # Create correlation plot
-corrplot1 = CorrPlot(:financial_corr, cors1.pearson, cors1.spearman, hc1,
-                     string.(financial_vars), :financial_corr_data;
+corrplot1 = CorrPlot(:financial_corr, corr_data1, :financial_corr_data;
     title = "Financial Metrics Correlation Analysis",
-    notes = "This correlation plot shows relationships between financial metrics. The dendrogram groups similar metrics based on correlation patterns. Variables are automatically reordered by clustering to reveal correlation blocks. Top-right triangle shows Pearson correlations (linear relationships), while bottom-left shows Spearman correlations (rank-based, captures non-linear monotonic relationships)."
+    notes = "This correlation plot shows relationships between financial metrics. The dendrogram groups similar metrics based on correlation patterns using hierarchical clustering performed in your browser. Variables are automatically reordered by clustering to reveal correlation blocks. Top-right triangle shows Pearson correlations (linear relationships), while bottom-left shows Spearman correlations (rank-based, captures non-linear monotonic relationships). <strong>Try this:</strong> Change the clustering linkage method (Ward/Average/Single/Complete) to see different groupings, or select a subset of variables to see how the dendrogram updates dynamically."
 )
 
 # =============================================================================
@@ -171,14 +171,13 @@ sales_vars = [:leads, :conversion_rate, :units_sold, :avg_deal_size, :revenue,
               :cac, :inventory_level, :days_to_close]
 cors2 = compute_correlations(df_sales, sales_vars)
 
-# Perform hierarchical clustering with average linkage
-hc2 = cluster_from_correlation(cors2.pearson, linkage=:average)
+# Prepare correlation data for CorrPlot
+corr_data2 = prepare_corrplot_data(cors2.pearson, cors2.spearman, string.(sales_vars))
 
 # Create correlation plot
-corrplot2 = CorrPlot(:sales_corr, cors2.pearson, cors2.spearman, hc2,
-                     string.(sales_vars), :sales_corr_data;
-    title = "Sales Performance Metrics Correlation (Average Linkage)",
-    notes = "Explore how different sales and operational metrics relate to each other. This example uses average linkage clustering (compare to Ward linkage in Example 1). The dendrogram reveals which metrics cluster together. For example, you might see that customer satisfaction groups with response time, while revenue metrics cluster separately."
+corrplot2 = CorrPlot(:sales_corr, corr_data2, :sales_corr_data;
+    title = "Sales Performance Metrics Correlation",
+    notes = "Explore how different sales and operational metrics relate to each other. The dendrogram reveals which metrics cluster together using hierarchical clustering performed in your browser. For example, you might see that customer satisfaction groups with response time, while revenue metrics cluster separately. <strong>Try this:</strong> Change the clustering linkage method to Average or Single to see how it compares to Ward linkage."
 )
 
 # =============================================================================
@@ -251,14 +250,13 @@ science_vars = [:density, :viscosity, :surface_tension, :heat_capacity,
                 :absorbance_260, :fluorescence]
 cors3 = compute_correlations(df_science, science_vars)
 
-# Perform hierarchical clustering with single linkage
-hc3 = cluster_from_correlation(cors3.pearson, linkage=:single)
+# Prepare correlation data for CorrPlot
+corr_data3 = prepare_corrplot_data(cors3.pearson, cors3.spearman, string.(science_vars))
 
 # Create correlation plot
-corrplot3 = CorrPlot(:science_corr, cors3.pearson, cors3.spearman, hc3,
-                     string.(science_vars), :science_corr_data;
-    title = "Scientific Measurements Correlation (Single Linkage)",
-    notes = "This correlation plot reveals clusters of related physical, thermal, chemical, and spectroscopic properties. Single linkage clustering creates elongated clusters by merging based on nearest neighbors. Notice how the dendrogram groups density-related properties together, thermal properties in another cluster, and spectroscopic measurements in a third cluster. The dual correlation display (Pearson vs Spearman) helps identify non-linear relationships."
+corrplot3 = CorrPlot(:science_corr, corr_data3, :science_corr_data;
+    title = "Scientific Measurements Correlation",
+    notes = "This correlation plot reveals clusters of related physical, thermal, chemical, and spectroscopic properties. The hierarchical clustering groups density-related properties together, thermal properties in another cluster, and spectroscopic measurements in a third cluster. The dual correlation display (Pearson vs Spearman) helps identify non-linear relationships. <strong>Try this:</strong> Switch to Single linkage to see elongated clusters formed by merging based on nearest neighbors, or try Complete linkage for more compact clusters."
 )
 
 # =============================================================================
@@ -334,14 +332,13 @@ patient_vars = [:systolic_bp, :diastolic_bp, :heart_rate, :glucose, :hba1c,
                 :cholesterol_total, :ldl, :hdl, :triglycerides, :bmi, :cardiovascular_risk]
 cors4 = compute_correlations(df_patients, patient_vars)
 
-# Perform hierarchical clustering with complete linkage
-hc4 = cluster_from_correlation(cors4.pearson, linkage=:complete)
+# Prepare correlation data for CorrPlot
+corr_data4 = prepare_corrplot_data(cors4.pearson, cors4.spearman, string.(patient_vars))
 
 # Create correlation plot
-corrplot4 = CorrPlot(:patient_corr, cors4.pearson, cors4.spearman, hc4,
-                     string.(patient_vars), :patient_corr_data;
-    title = "Patient Health Metrics Correlation (Complete Linkage)",
-    notes = "This correlation analysis helps identify relationships between vital signs, lab results, and cardiovascular risk. Complete linkage clustering (farthest neighbor) tends to create compact, well-separated clusters. The dendrogram reveals natural groupings: blood pressure metrics cluster together, lipid panel values form another group, and glucose-related metrics cluster separately. Compare Pearson (upper right) vs Spearman (lower left) correlations to see if relationships are linear or non-linear."
+corrplot4 = CorrPlot(:patient_corr, corr_data4, :patient_corr_data;
+    title = "Patient Health Metrics Correlation",
+    notes = "This correlation analysis helps identify relationships between vital signs, lab results, and cardiovascular risk. The hierarchical clustering reveals natural groupings: blood pressure metrics cluster together, lipid panel values form another group, and glucose-related metrics cluster separately. Compare Pearson (upper right) vs Spearman (lower left) correlations to see if relationships are linear or non-linear. <strong>Try this:</strong> Switch to Complete linkage clustering (farthest neighbor) to see compact, well-separated clusters."
 )
 
 # =============================================================================
@@ -415,28 +412,24 @@ df_asia = generate_regional_data(rng, n_months, 0.5)      # Weaker correlation
 # Create scenarios for each region
 indicator_syms = Symbol.(indicators)
 
-# North America scenario
+# Compute correlations for each region
 cors_na = compute_correlations(df_northam, indicator_syms)
-hc_na = cluster_from_correlation(cors_na.pearson, linkage=:ward)
-scenario_na = CorrelationScenario("North America",
-    cors_na.pearson, cors_na.spearman, hc_na, indicators)
+corr_data_na = prepare_corrplot_data(cors_na.pearson, cors_na.spearman, indicators, scenario="North America")
 
-# Europe scenario
 cors_eu = compute_correlations(df_europe, indicator_syms)
-hc_eu = cluster_from_correlation(cors_eu.pearson, linkage=:ward)
-scenario_eu = CorrelationScenario("Europe",
-    cors_eu.pearson, cors_eu.spearman, hc_eu, indicators)
+corr_data_eu = prepare_corrplot_data(cors_eu.pearson, cors_eu.spearman, indicators, scenario="Europe")
 
-# Asia-Pacific scenario
 cors_ap = compute_correlations(df_asia, indicator_syms)
-hc_ap = cluster_from_correlation(cors_ap.pearson, linkage=:ward)
-scenario_ap = CorrelationScenario("Asia-Pacific",
-    cors_ap.pearson, cors_ap.spearman, hc_ap, indicators)
+corr_data_ap = prepare_corrplot_data(cors_ap.pearson, cors_ap.spearman, indicators, scenario="Asia-Pacific")
 
-# Create advanced CorrPlot
-corrplot6 = CorrPlot(:econ_advanced, [scenario_na, scenario_eu, scenario_ap], :econ_adv_data;
+# Combine all scenarios
+econ_corr_data = vcat(corr_data_na, corr_data_eu, corr_data_ap)
+
+# Create advanced CorrPlot with scenarios
+corrplot6 = CorrPlot(:econ_advanced, econ_corr_data, :econ_adv_data;
     title = "Economic Indicators - Regional Comparison",
-    notes = "Compare how economic indicators correlate across North America, Europe, and Asia-Pacific. Switch between regions to see different correlation patterns. Select specific indicators to focus your analysis. Notice how GDP Growth correlates differently with other indicators in each region, reflecting different economic structures and policies.",
+    notes = "Compare how economic indicators correlate across North America, Europe, and Asia-Pacific. Switch between regions using the scenario selector to see different correlation patterns. The dendrogram updates automatically showing how indicators cluster in each region. Select specific indicators to focus your analysis. Notice how GDP Growth correlates differently with other indicators in each region, reflecting different economic structures and policies. <strong>Try this:</strong> Change the linkage method to see how clustering patterns differ.",
+    scenario_col = :scenario,
     default_scenario = "North America",
     default_variables = ["GDP_Growth", "Unemployment", "Inflation", "Interest_Rate"],
     allow_manual_order = true
@@ -523,33 +516,29 @@ df_summer = generate_seasonal_climate(rng, "Summer", n_observations)
 df_fall = generate_seasonal_climate(rng, "Fall", n_observations)
 df_winter = generate_seasonal_climate(rng, "Winter", n_observations)
 
-# Create scenarios for each season
+# Compute correlations for each season
 climate_syms = Symbol.(climate_vars)
 
 cors_spring = compute_correlations(df_spring, climate_syms)
-hc_spring = cluster_from_correlation(cors_spring.pearson, linkage=:ward)
-scenario_spring = CorrelationScenario("Spring",
-    cors_spring.pearson, cors_spring.spearman, hc_spring, climate_vars)
+corr_data_spring = prepare_corrplot_data(cors_spring.pearson, cors_spring.spearman, climate_vars, scenario="Spring")
 
 cors_summer = compute_correlations(df_summer, climate_syms)
-hc_summer = cluster_from_correlation(cors_summer.pearson, linkage=:ward)
-scenario_summer = CorrelationScenario("Summer",
-    cors_summer.pearson, cors_summer.spearman, hc_summer, climate_vars)
+corr_data_summer = prepare_corrplot_data(cors_summer.pearson, cors_summer.spearman, climate_vars, scenario="Summer")
 
 cors_fall = compute_correlations(df_fall, climate_syms)
-hc_fall = cluster_from_correlation(cors_fall.pearson, linkage=:ward)
-scenario_fall = CorrelationScenario("Fall",
-    cors_fall.pearson, cors_fall.spearman, hc_fall, climate_vars)
+corr_data_fall = prepare_corrplot_data(cors_fall.pearson, cors_fall.spearman, climate_vars, scenario="Fall")
 
 cors_winter = compute_correlations(df_winter, climate_syms)
-hc_winter = cluster_from_correlation(cors_winter.pearson, linkage=:ward)
-scenario_winter = CorrelationScenario("Winter",
-    cors_winter.pearson, cors_winter.spearman, hc_winter, climate_vars)
+corr_data_winter = prepare_corrplot_data(cors_winter.pearson, cors_winter.spearman, climate_vars, scenario="Winter")
 
-# Create advanced CorrPlot
-corrplot7 = CorrPlot(:climate_advanced, [scenario_spring, scenario_summer, scenario_fall, scenario_winter], :climate_adv_data;
+# Combine all seasons
+climate_corr_data = vcat(corr_data_spring, corr_data_summer, corr_data_fall, corr_data_winter)
+
+# Create advanced CorrPlot with seasonal scenarios
+corrplot7 = CorrPlot(:climate_advanced, climate_corr_data, :climate_adv_data;
     title = "Climate Variable Correlations - Seasonal Analysis",
-    notes = "Explore how climate variable correlations change across seasons. Switch between Spring, Summer, Fall, and Winter to see seasonal patterns. Notice how Temperature-Humidity correlations flip between seasons (negative in Spring/Fall, positive in Summer/Winter). Use variable selection to focus on specific climate factors. Try manual ordering to group related variables by type (temperature-related, precipitation-related, etc.).",
+    notes = "Explore how climate variable correlations change across seasons. Switch between Spring, Summer, Fall, and Winter using the scenario selector to see seasonal patterns. The dendrogram updates dynamically showing how variables cluster in each season. Notice how Temperature-Humidity correlations flip between seasons (negative in Spring/Fall, positive in Summer/Winter). Use variable selection to focus on specific climate factors. Try manual ordering to group related variables by type (temperature-related, precipitation-related, etc.).",
+    scenario_col = :scenario,
     default_scenario = "Summer",
     default_variables = ["Temperature", "Humidity", "Solar_Radiation", "UV_Index"],
     allow_manual_order = true
@@ -563,15 +552,17 @@ summary = TextBlock("""
 <h2>Summary</h2>
 <p>The CorrPlot chart type provides:</p>
 <ul>
-    <li><strong>Hierarchical clustering:</strong> Dendrogram shows which variables are most similar based on correlation patterns</li>
+    <li><strong>Browser-based hierarchical clustering:</strong> Dendrogram computed dynamically in your browser, updates instantly when you change variables or linkage method</li>
     <li><strong>Dual correlation display:</strong>
         <ul>
             <li>Top-right triangle: Pearson correlation (measures linear relationships)</li>
             <li>Bottom-left triangle: Spearman correlation (measures monotonic relationships, robust to outliers)</li>
         </ul>
     </li>
-    <li><strong>Julia-computed correlations:</strong> Use compute_correlations() for both Pearson and Spearman</li>
-    <li><strong>Flexible clustering:</strong> Use cluster_from_correlation() with different linkage methods (:ward, :average, :single, :complete)</li>
+    <li><strong>Julia-computed correlations:</strong> Use compute_correlations() for both Pearson and Spearman, then prepare_corrplot_data() to format for CorrPlot</li>
+    <li><strong>Flexible clustering:</strong> Choose linkage method in browser (Ward, Average, Single, Complete) and see dendrogram update instantly</li>
+    <li><strong>Works with subsets:</strong> Select any subset of variables and dendrogram reclusters automatically</li>
+    <li><strong>Multiple scenarios:</strong> Compare correlations across different conditions (regions, seasons, etc.) using the scenario selector</li>
     <li><strong>Automatic ordering:</strong> Variables reordered by clustering results for clearer visualization of correlation blocks</li>
 </ul>
 
@@ -581,37 +572,47 @@ summary = TextBlock("""
 vars = [:var1, :var2, :var3, :var4]
 cors = compute_correlations(df, vars)
 
-# 2. Perform hierarchical clustering
-hc = cluster_from_correlation(cors.pearson, linkage=:ward)
+# 2. Prepare correlation data for CorrPlot
+corr_data = prepare_corrplot_data(cors.pearson, cors.spearman, string.(vars))
 
-# 3. Create correlation plot
-corrplot = CorrPlot(:my_corr, cors.pearson, cors.spearman, hc,
-                    string.(vars);
+# 3. Create correlation plot (clustering happens in browser!)
+corrplot = CorrPlot(:my_corr, corr_data, :my_data;
                     title="My Correlation Analysis",
                     notes="Description...")
 </code></pre>
 
 <h3>Advanced Workflow with Multiple Scenarios (Examples 5-7)</h3>
 <pre><code>
-# 1. Create multiple correlation scenarios
-scenario1 = CorrelationScenario("Short-term", pearson1, spearman1, hc1, labels1)
-scenario2 = CorrelationScenario("Long-term", pearson2, spearman2, hc2, labels2)
-scenario3 = CorrelationScenario("Volatility", pearson3, spearman3, hc3, labels3)
+# 1. Compute correlations for each scenario
+cors1 = compute_correlations(df1, vars)
+corr_data1 = prepare_corrplot_data(cors1.pearson, cors1.spearman, labels, scenario="Short-term")
 
-# 2. Create advanced CorrPlot with interactive features
-corrplot = CorrPlot(:advanced, [scenario1, scenario2, scenario3];
+cors2 = compute_correlations(df2, vars)
+corr_data2 = prepare_corrplot_data(cors2.pearson, cors2.spearman, labels, scenario="Long-term")
+
+cors3 = compute_correlations(df3, vars)
+corr_data3 = prepare_corrplot_data(cors3.pearson, cors3.spearman, labels, scenario="Volatility")
+
+# 2. Combine scenarios
+all_corr_data = vcat(corr_data1, corr_data2, corr_data3)
+
+# 3. Create CorrPlot with scenario selector
+corrplot = CorrPlot(:advanced, all_corr_data, :adv_data;
+                    scenario_col=:scenario,
                     title="Advanced Analysis",
                     default_scenario="Short-term",
                     default_variables=["var1", "var2", "var3"],
                     allow_manual_order=true)
 </code></pre>
 
-<h3>Advanced Features (Examples 5-7)</h3>
+<h3>Interactive Features</h3>
 <ul>
-    <li><strong>Multiple Scenarios:</strong> Switch between different correlation analyses using dropdown</li>
+    <li><strong>Dynamic Clustering:</strong> Hierarchical clustering computed in browser - works with any subset of variables</li>
+    <li><strong>Linkage Method Selector:</strong> Choose Ward, Average, Single, or Complete linkage and see dendrogram update instantly</li>
+    <li><strong>Multiple Scenarios:</strong> Switch between different correlation analyses using dropdown (Examples 5-7)</li>
     <li><strong>Variable Selection:</strong> Multi-select box to choose which variables to display</li>
-    <li><strong>Manual Ordering:</strong> Toggle "Order by Dendrogram" off to enable drag-drop reordering</li>
-    <li><strong>Interactive Exploration:</strong> Compare different correlation contexts (time horizons, regions, seasons, etc.)</li>
+    <li><strong>Manual Ordering:</strong> Toggle to "Order manually" to enable drag-drop reordering</li>
+    <li><strong>Alphabetical Ordering:</strong> Sort variables alphabetically if preferred</li>
 </ul>
 
 <h3>Linkage Methods</h3>
@@ -654,13 +655,8 @@ if !isdir(output_dir)
     mkpath(output_dir)
 end
 
-# Prepare correlation data for all corrplots
-corr_data1 = JSPlots.prepare_corrplot_data(cors1.pearson, cors1.spearman, hc1, string.(financial_vars))
-corr_data2 = JSPlots.prepare_corrplot_data(cors2.pearson, cors2.spearman, hc2, string.(sales_vars))
-corr_data3 = JSPlots.prepare_corrplot_data(cors3.pearson, cors3.spearman, hc3, string.(science_vars))
-corr_data4 = JSPlots.prepare_corrplot_data(cors4.pearson, cors4.spearman, hc4, string.(patient_vars))
-corr_data6 = JSPlots.prepare_corrplot_advanced_data([scenario_na, scenario_eu, scenario_ap])
-corr_data7 = JSPlots.prepare_corrplot_advanced_data([scenario_spring, scenario_summer, scenario_fall, scenario_winter])
+# Correlation data was already prepared in each example above
+# corr_data1, corr_data2, corr_data3, corr_data4, econ_corr_data (corr_data6), climate_corr_data (corr_data7)
 
 # Create data dictionary with all correlation data
 data_dict = Dict{Symbol, DataFrame}(
@@ -668,8 +664,8 @@ data_dict = Dict{Symbol, DataFrame}(
     :sales_corr_data => corr_data2,
     :science_corr_data => corr_data3,
     :patient_corr_data => corr_data4,
-    :econ_adv_data => corr_data6,
-    :climate_adv_data => corr_data7
+    :econ_adv_data => econ_corr_data,
+    :climate_adv_data => climate_corr_data
 )
 
 # Create embedded format

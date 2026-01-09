@@ -207,22 +207,17 @@ vol_edges = create_graph_data_from_correlation(stock_names, corr_volatility; att
 vol_edges[!, :scenario] .= "Volatility Correlations"
 append!(graph_data1, vol_edges)
 
-# Create GraphScenarios
-scenario_short = GraphScenario("Short-term (60 days)", true, stock_names)
-scenario_long = GraphScenario("Long-term (250 days)", true, stock_names)
-scenario_vol = GraphScenario("Volatility Correlations", true, stock_names)
-
-# Calculate smart cutoff for the default scenario
-smart_cutoff_stocks = calculate_smart_cutoff(graph_data1, "Short-term (60 days)", true, 0.15)
+# Add correlation_method column for Graph (required)
+graph_data1[!, :correlation_method] .= "pearson"
 
 # Create graph with multiple scenarios
-graph1 = Graph(:stock_network, [scenario_short, scenario_long, scenario_vol], :stock_graph_data;
+graph1 = Graph(:stock_network, graph_data1, :stock_graph_data;
     title = "Stock Correlation Network - Multiple Scenarios",
-    cutoff = smart_cutoff_stocks,
+    cutoff = 0.5,
     color_cols = [:sector],
-    default_color_col = :sector,
     show_edge_labels = false,
     layout = :cose,
+    scenario_col = :scenario,
     default_scenario = "Short-term (60 days)"
 )
 
@@ -362,20 +357,14 @@ for i in 1:n_cities
     end
 end
 
-# Calculate smart cutoff using Pearson correlations only
-pearson_data2 = filter(r -> r.correlation_method == "pearson", graph_data2)
-smart_cutoff_cities = calculate_smart_cutoff(pearson_data2, "Economic Indicators", true, 0.15)
-
-# Create GraphScenario
-scenario2 = GraphScenario("Economic Indicators", true, city_names)
-
-graph2 = Graph(:city_network, [scenario2], :city_graph_data;
+graph2 = Graph(:city_network, graph_data2, :city_graph_data;
     title = "City Economic Similarity Network",
-    cutoff = smart_cutoff_cities,
+    cutoff = 0.5,
     color_cols = [:region],
-    default_color_col = :region,
     show_edge_labels = false,
-    layout = :circle
+    layout = :circle,
+    scenario_col = :scenario,
+    default_scenario = "Economic Indicators"
 )
 
 # =============================================================================
@@ -457,19 +446,18 @@ person_attrs = DataFrame(
 graph_data3 = create_graph_data_from_correlation(person_names, similarity_matrix;
                                                  attributes = person_attrs)
 
-# Add scenario column
+# Add required columns
 graph_data3[!, :scenario] .= "Social Connections"
+graph_data3[!, :correlation_method] .= "similarity"
 
-# Create GraphScenario
-scenario3 = GraphScenario("Social Connections", true, person_names)
-
-graph3 = Graph(:social_network, [scenario3], :social_graph_data;
+graph3 = Graph(:social_network, graph_data3, :social_graph_data;
     title = "Social Network - Connection Patterns",
     cutoff = 0.5,
     color_cols = [:Department, :Team, :Location],
-    default_color_col = :Department,
     show_edge_labels = true,
-    layout = :concentric
+    layout = :concentric,
+    scenario_col = :scenario,
+    default_scenario = "Social Connections"
 )
 
 # =============================================================================
@@ -544,19 +532,18 @@ researcher_attrs = DataFrame(
 graph_data4 = create_graph_data_from_correlation(researcher_names, collab_matrix;
                                                  attributes = researcher_attrs)
 
-# Add scenario column
+# Add required columns
 graph_data4[!, :scenario] .= "Research Collaborations"
+graph_data4[!, :correlation_method] .= "collaboration"
 
-# Create GraphScenario
-scenario4 = GraphScenario("Research Collaborations", true, researcher_names)
-
-graph4 = Graph(:research_network, [scenario4], :research_graph_data;
+graph4 = Graph(:research_network, graph_data4, :research_graph_data;
     title = "Research Collaboration Network",
     cutoff = 0.4,
     color_cols = [:Institution, :Field],
-    default_color_col = :Institution,
     show_edge_labels = false,
-    layout = :breadthfirst
+    layout = :breadthfirst,
+    scenario_col = :scenario,
+    default_scenario = "Research Collaborations"
 )
 
 # =============================================================================
@@ -615,19 +602,18 @@ product_attrs = DataFrame(
 graph_data5 = create_graph_data_from_correlation(product_names, cooccur_matrix;
                                                  attributes = product_attrs)
 
-# Add scenario column
+# Add required columns
 graph_data5[!, :scenario] .= "Product Co-occurrence"
+graph_data5[!, :correlation_method] .= "cooccurrence"
 
-# Create GraphScenario
-scenario5 = GraphScenario("Product Co-occurrence", true, product_names)
-
-graph5 = Graph(:product_network, [scenario5], :product_graph_data;
+graph5 = Graph(:product_network, graph_data5, :product_graph_data;
     title = "Product Purchase Co-occurrence Network",
     cutoff = 0.25,
     color_cols = [:Category],
-    default_color_col = :Category,
     show_edge_labels = false,
-    layout = :grid
+    layout = :grid,
+    scenario_col = :scenario,
+    default_scenario = "Product Co-occurrence"
 )
 
 # =============================================================================

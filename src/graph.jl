@@ -1,85 +1,13 @@
 # Graph visualization with network layout
 
-# Struct for Graph scenarios (similar to CorrelationScenario)
-struct GraphScenario
-    name::String
-    is_correlation::Bool
-    node_labels::Vector{String}
-end
-
 """
-    calculate_smart_cutoff(data::DataFrame, scenario_name::String, is_correlation::Bool,
-                          target_edge_percentage::Float64 = 0.15)
+    Graph(chart_title::Symbol, corr_df::DataFrame, data_label::Symbol; kwargs...)
 
-Calculate a smart cutoff value that displays approximately the target percentage of edges.
-
-# Arguments
-- `data::DataFrame`: Graph edge data with node1, node2, strength, scenario columns
-- `scenario_name::String`: Name of the scenario to calculate cutoff for
-- `is_correlation::Bool`: Whether higher values mean stronger connections (true for correlation, false for distance)
-- `target_edge_percentage::Float64`: Target percentage of edges to display (default: 0.15 = 15%)
-
-# Returns
-- `Float64`: Cutoff value that will display approximately target_edge_percentage of edges
-
-# Details
-For correlation data (is_correlation=true), higher values mean stronger connections, so we want
-cutoff where values >= cutoff represent the top target_edge_percentage.
-
-For distance data (is_correlation=false), lower values mean stronger connections, so we want
-cutoff where values <= cutoff represent the top target_edge_percentage.
-"""
-function calculate_smart_cutoff(data::DataFrame, scenario_name::String, is_correlation::Bool,
-                                target_edge_percentage::Float64 = 0.15)
-    # Filter data for this scenario
-    scenario_data = filter(row -> row.scenario == scenario_name, data)
-
-    if nrow(scenario_data) == 0
-        @warn "No data found for scenario '$scenario_name', using default cutoff 0.5"
-        return 0.5
-    end
-
-    # Get all strength values
-    strengths = scenario_data.strength
-
-    # Calculate how many edges we want to show
-    target_count = max(1, round(Int, length(strengths) * target_edge_percentage))
-
-    if is_correlation
-        # For correlation: higher values = stronger connections
-        # Sort descending and take the threshold at target_count position
-        sorted_strengths = sort(abs.(strengths), rev=true)
-        cutoff = sorted_strengths[min(target_count, length(sorted_strengths))]
-    else
-        # For distance: lower values = stronger connections
-        # Sort ascending and take the threshold at target_count position
-        sorted_strengths = sort(abs.(strengths), rev=false)
-        cutoff = sorted_strengths[min(target_count, length(sorted_strengths))]
-    end
-
-    return cutoff
-end
-
-"""
-    GraphScenario(name::String, is_correlation::Bool, node_labels::Vector{String})
-
-Create a graph scenario with a specific distance/correlation matrix.
-
-# Arguments
-- `name::String`: Scenario name
-- `is_correlation::Bool`: Whether the strength values are correlations (true) or distances (false)
-- `node_labels::Vector{String}`: Labels for all nodes in this scenario
-"""
-GraphScenario
-
-"""
-    Graph(chart_title::Symbol, scenarios::Vector{GraphScenario}, data_label::Symbol; kwargs...)
-
-Create an interactive network graph visualization with multiple scenarios and variable selection.
+Create an interactive network graph visualization with variable selection.
 
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this chart
-- `scenarios::Vector{GraphScenario}`: Multiple graph scenarios to switch between
+- `corr_df::DataFrame`: Correlation/edge data
 - `data_label::Symbol`: Label for the graph data in external storage
 
 # Keyword Arguments
@@ -87,27 +15,19 @@ Create an interactive network graph visualization with multiple scenarios and va
 - `notes::String`: Descriptive text (default: `""`)
 - `cutoff::Float64`: Connection strength cutoff (default: `0.5`)
 - `color_cols::Union{Vector{Symbol}, Nothing}`: Columns for node coloring (default: `nothing`)
-- `default_color_col::Union{Symbol, Nothing}`: Default coloring column (default: first in color_cols)
 - `show_edge_labels::Bool`: Show edge strength labels by default (default: `false`)
 - `layout::Symbol`: Graph layout algorithm (default: `:cose`)
+- `scenario_col::Union{Symbol, Nothing}`: Column name for scenarios (default: `nothing`)
 - `default_scenario::Union{String, Nothing}`: Name of default scenario (default: first scenario)
 - `default_variables::Union{Vector{String}, Nothing}`: Default selected variables (default: all)
-
-# Smart Cutoff Calculation
-To avoid trivial graphs (all edges or no edges), use `calculate_smart_cutoff()` to find a cutoff
-that displays approximately 15% of edges:
-
-```julia
-cutoff = calculate_smart_cutoff(graph_data, "My Scenario", true, 0.15)
-graph = Graph(:my_graph, [scenario], :graph_data; cutoff=cutoff)
-```
 
 # Data Format
 The data should be a DataFrame with columns:
 - `node1`: First node in edge
 - `node2`: Second node in edge
 - `strength`: Connection strength
-- `scenario`: Scenario name (if multiple scenarios)
+- Optional: scenario column if specified via `scenario_col`
+- Optional: `correlation_method` column for filtering
 - Additional columns for node attributes (e.g., sector, country)
 
 # Interactive Features
@@ -120,40 +40,76 @@ The data should be a DataFrame with columns:
 - Adjust cutoff
 - Change layout (triggers recalculation)
 - Zoom and pan
+
+# Example
+```julia
+# Prepare correlation data
+vars = [:x1, :x2, :x3, :x4]
+cors = compute_correlations(df, vars)
+corr_df = prepare_corrplot_data(cors.pearson, cors.spearman, vars)
+
+# Create graph
+graph = Graph(:my_graph, corr_df, :graph_data;
+              cutoff=0.5,
+              color_cols=[:sector, :country],
+              title="Variable Network")
+
+page = JSPlotPage(Dict(:graph_data => corr_df), [graph])
+```
 """
 function Graph(chart_title::Symbol,
-               scenarios::Vector{GraphScenario},
+               corr_df::DataFrame,
                data_label::Symbol;
                title::String = "Network Graph",
                notes::String = "",
                cutoff::Float64 = 0.5,
                color_cols::Union{Vector{Symbol}, Nothing} = nothing,
-               default_color_col::Union{Symbol, Nothing} = nothing,
                show_edge_labels::Bool = false,
                layout::Symbol = :cose,
+               scenario_col::Union{Symbol, Nothing} = nothing,
                default_scenario::Union{String, Nothing} = nothing,
                default_variables::Union{Vector{String}, Nothing} = nothing)
 
-    # Validate scenarios
-    if isempty(scenarios)
-        error("At least one GraphScenario is required")
+    # Validate DataFrame structure
+    required_cols = [:node1, :node2, :strength]
+    df_col_names = Symbol.(names(corr_df))
+    for col in required_cols
+        if !(col in df_col_names)
+            error("DataFrame must have column: $col")
+        end
+    end
+
+    # Extract scenarios
+    scenarios = if !isnothing(scenario_col)
+        if !(scenario_col in df_col_names)
+            error("Scenario column $scenario_col not found in DataFrame")
+        end
+        unique(corr_df[!, scenario_col])
+    else
+        ["default"]
     end
 
     # Determine default scenario
-    default_scenario_name = isnothing(default_scenario) ? scenarios[1].name : default_scenario
-    default_idx = findfirst(s -> s.name == default_scenario_name, scenarios)
-    if isnothing(default_idx)
-        error("Default scenario '$default_scenario_name' not found in scenarios")
+    default_scenario_name = if isnothing(default_scenario)
+        scenarios[1]
+    else
+        if !(default_scenario in scenarios)
+            error("Default scenario '$default_scenario' not found in data")
+        end
+        default_scenario
     end
+
+    # Extract all variable names
+    all_vars = unique(vcat(corr_df.node1, corr_df.node2))
 
     # Determine default variables
     default_vars = if isnothing(default_variables)
-        scenarios[default_idx].node_labels
+        all_vars
     else
         # Validate default variables exist
         for var in default_variables
-            if !(var in scenarios[default_idx].node_labels)
-                error("Default variable '$var' not found in scenario '$(scenarios[default_idx].name)'")
+            if !(var in all_vars)
+                error("Default variable '$var' not found in data")
             end
         end
         default_variables
@@ -167,36 +123,36 @@ function Graph(chart_title::Symbol,
         error("Invalid layout: $layout. Must be one of: $valid_layouts")
     end
 
-    # Determine default color column
-    if !isnothing(color_cols) && !isempty(color_cols)
-        default_color = isnothing(default_color_col) ? color_cols[1] : default_color_col
+    # Determine default color column (first from color_cols if provided)
+    default_color = if !isnothing(color_cols) && !isempty(color_cols)
+        color_cols[1]
     else
-        default_color = nothing
+        nothing
     end
 
     # Build appearance HTML
     appearance_html = build_graph_appearance_html(
-        chart_title_str, title, notes, scenarios, cutoff, color_cols,
-        default_color, show_edge_labels, layout, valid_layouts
+        chart_title_str, title, notes, scenarios, scenario_col,
+        cutoff, color_cols, default_color, show_edge_labels, layout, valid_layouts
     )
 
     # Build functional HTML
     functional_html = build_graph_functional_html(
-        chart_title_str, data_label, scenarios, cutoff,
-        color_cols, default_color, show_edge_labels, layout,
-        default_idx, default_vars
+        chart_title_str, data_label, scenarios, scenario_col,
+        default_scenario_name, cutoff, color_cols, default_color,
+        show_edge_labels, layout, default_vars
     )
 
     return GraphChart(chart_title, data_label, functional_html, appearance_html)
 end
 
 function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
-                                     cutoff, color_cols, default_color,
+                                     scenario_col, cutoff, color_cols, default_color,
                                      show_edge_labels, layout, valid_layouts)
 
-    # Scenario selector (if multiple scenarios)
-    scenario_selector_html = if length(scenarios) > 1
-        options = join(["""<option value="$(s.name)">$(s.name)</option>"""
+    # Scenario selector (if scenarios exist)
+    scenario_selector_html = if !isnothing(scenario_col) && length(scenarios) > 1
+        options = join(["""<option value="$s">$s</option>"""
                        for s in scenarios], "\n                ")
         """
         <div style="margin-bottom: 10px;">
@@ -320,27 +276,31 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
 end
 
 function build_graph_functional_html(chart_title_str, data_label, scenarios,
-                                     cutoff, color_cols, default_color,
-                                     show_edge_labels, layout, default_idx, default_vars)
+                                     scenario_col, default_scenario_name, cutoff,
+                                     color_cols, default_color, show_edge_labels,
+                                     layout, default_vars)
 
+    has_scenarios = !isnothing(scenario_col) && length(scenarios) > 1
     has_colors = !isnothing(color_cols) && !isempty(color_cols)
     default_color_str = isnothing(default_color) ? "none" : string(default_color)
-    scenarios_json = JSON.json([Dict("name" => s.name, "is_correlation" => s.is_correlation,
-                                     "node_labels" => s.node_labels) for s in scenarios])
+    scenarios_json = JSON.json(scenarios)
     default_vars_json = JSON.json(default_vars)
 
     return """
     (function() {
         const scenarios = $scenarios_json;
-        let currentScenario = scenarios[$(default_idx - 1)];
+        const hasScenarios = $has_scenarios;
+        let currentScenario = "$default_scenario_name";
         let selectedVars = $default_vars_json;
         let graphData = null;
         let cy = null;
-        let nodePositions = {};  // Store node positions to keep them stable
+        let nodePositions = {};
+        let allVars = [];
 
         // Load graph data
         loadDataset('$(data_label)').then(function(data) {
             graphData = data;
+            allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
             // Check if data has correlation_method column and populate selector dynamically
             if (data.length > 0) {
@@ -362,7 +322,7 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
                             corrMethods.forEach((method, idx) => {
                                 const option = document.createElement('option');
                                 option.value = method;
-                                option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                                option.text = method.charAt(0).toUpperCase() + method.slice(1);
                                 if (idx === 0) {
                                     option.selected = true;
                                 }
@@ -376,7 +336,7 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
                 }
             }
 
-            populateVarSelector_$chart_title_str();  // Populate selector BEFORE initializing graph
+            populateVarSelector_$chart_title_str();
             initializeGraph_$chart_title_str();
         }).catch(function(error) {
             console.error('Failed to load graph data:', error);
@@ -385,7 +345,7 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
         function populateVarSelector_$chart_title_str() {
             const select = document.getElementById('var_select_$chart_title_str');
             select.innerHTML = '';
-            currentScenario.node_labels.forEach(v => {
+            allVars.forEach(v => {
                 const option = document.createElement('option');
                 option.value = v;
                 option.text = v;
@@ -499,13 +459,10 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
             if (!cy || !graphData) return;
 
             // Update scenario
-            const scenarioSelect = document.getElementById('scenario_select_$chart_title_str');
-            if (scenarioSelect) {
-                const scenarioName = scenarioSelect.value;
-                const newScenario = scenarios.find(s => s.name === scenarioName);
-                if (newScenario !== currentScenario) {
-                    currentScenario = newScenario;
-                    populateVarSelector_$chart_title_str();
+            if (hasScenarios) {
+                const scenarioSelect = document.getElementById('scenario_select_$chart_title_str');
+                if (scenarioSelect) {
+                    currentScenario = scenarioSelect.value;
                 }
             }
 
@@ -684,7 +641,7 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
 
             const scenarioData = graphData.filter(row => {
                 // Basic filters
-                const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+                const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
                 const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
                 // Correlation method filter (only if data has this column AND selector exists)
@@ -695,19 +652,14 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
 
             scenarioData.forEach((row, idx) => {
                 let strength = row.strength;
-                let distance = strength;
-
-                if (scenario.is_correlation) {
-                    distance = 1 - Math.abs(strength);
-                }
+                // For correlation data, convert to distance
+                let distance = 1 - Math.abs(strength);
 
                 if (distance <= cutoffValue) {
-                    const edgeWidth = scenario.is_correlation ?
-                        Math.abs(strength) * 5 + 1 :
-                        (1 - distance) * 5 + 1;
+                    const edgeWidth = Math.abs(strength) * 5 + 1;
 
                     const edgeData = {
-                        id: 'edge_' + scenario.name + '_' + idx,
+                        id: 'edge_' + scenario + '_' + idx,
                         source: row.node1,
                         target: row.node2,
                         strength: strength,
@@ -757,4 +709,4 @@ end
 dependencies(g::GraphChart) = [g.data_label]
 
 # Export
-export Graph, GraphScenario
+export Graph

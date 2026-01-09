@@ -703,16 +703,19 @@ function loadDataset(dataLabel) {
 $(function(){
 
 (function() {
-    const scenarios = [{"name":"Short-term (60 days)","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","WFC","JNJ","PFE","UNH","XOM","CVX","COP"]},{"name":"Long-term (250 days)","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","WFC","JNJ","PFE","UNH","XOM","CVX","COP"]},{"name":"Volatility Correlations","is_correlation":true,"node_labels":["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","WFC","JNJ","PFE","UNH","XOM","CVX","COP"]}];
-    let currentScenario = scenarios[0];
+    const scenarios = ["Short-term (60 days)","Long-term (250 days)","Volatility Correlations"];
+    const hasScenarios = true;
+    let currentScenario = "Short-term (60 days)";
     let selectedVars = ["AAPL","MSFT","GOOGL","AMZN","TSLA","JPM","BAC","GS","WFC","JNJ","PFE","UNH","XOM","CVX","COP"];
     let graphData = null;
     let cy = null;
-    let nodePositions = {};  // Store node positions to keep them stable
+    let nodePositions = {};
+    let allVars = [];
 
     // Load graph data
     loadDataset('stock_graph_data').then(function(data) {
         graphData = data;
+        allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
         // Check if data has correlation_method column and populate selector dynamically
         if (data.length > 0) {
@@ -734,7 +737,7 @@ $(function(){
                         corrMethods.forEach((method, idx) => {
                             const option = document.createElement('option');
                             option.value = method;
-                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1);
                             if (idx === 0) {
                                 option.selected = true;
                             }
@@ -748,7 +751,7 @@ $(function(){
             }
         }
 
-        populateVarSelector_stock_network();  // Populate selector BEFORE initializing graph
+        populateVarSelector_stock_network();
         initializeGraph_stock_network();
     }).catch(function(error) {
         console.error('Failed to load graph data:', error);
@@ -757,7 +760,7 @@ $(function(){
     function populateVarSelector_stock_network() {
         const select = document.getElementById('var_select_stock_network');
         select.innerHTML = '';
-        currentScenario.node_labels.forEach(v => {
+        allVars.forEach(v => {
             const option = document.createElement('option');
             option.value = v;
             option.text = v;
@@ -871,13 +874,10 @@ $(function(){
         if (!cy || !graphData) return;
 
         // Update scenario
-        const scenarioSelect = document.getElementById('scenario_select_stock_network');
-        if (scenarioSelect) {
-            const scenarioName = scenarioSelect.value;
-            const newScenario = scenarios.find(s => s.name === scenarioName);
-            if (newScenario !== currentScenario) {
-                currentScenario = newScenario;
-                populateVarSelector_stock_network();
+        if (hasScenarios) {
+            const scenarioSelect = document.getElementById('scenario_select_stock_network');
+            if (scenarioSelect) {
+                currentScenario = scenarioSelect.value;
             }
         }
 
@@ -1048,7 +1048,7 @@ $(function(){
 
         const scenarioData = graphData.filter(row => {
             // Basic filters
-            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
             const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
             // Correlation method filter (only if data has this column AND selector exists)
@@ -1059,19 +1059,14 @@ $(function(){
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
-            let distance = strength;
-
-            if (scenario.is_correlation) {
-                distance = 1 - Math.abs(strength);
-            }
+            // For correlation data, convert to distance
+            let distance = 1 - Math.abs(strength);
 
             if (distance <= cutoffValue) {
-                const edgeWidth = scenario.is_correlation ?
-                    Math.abs(strength) * 5 + 1 :
-                    (1 - distance) * 5 + 1;
+                const edgeWidth = Math.abs(strength) * 5 + 1;
 
                 const edgeData = {
-                    id: 'edge_' + scenario.name + '_' + idx,
+                    id: 'edge_' + scenario + '_' + idx,
                     source: row.node1,
                     target: row.node2,
                     strength: strength,
@@ -1107,16 +1102,19 @@ $(function(){
     }
 })();
 (function() {
-    const scenarios = [{"name":"Economic Indicators","is_correlation":true,"node_labels":["New York","Boston","Philadelphia","Washington DC","Chicago","Detroit","Minneapolis","Los Angeles","San Francisco","Seattle","Portland","Miami","Atlanta","Houston"]}];
-    let currentScenario = scenarios[0];
+    const scenarios = ["Economic Indicators"];
+    const hasScenarios = false;
+    let currentScenario = "Economic Indicators";
     let selectedVars = ["New York","Boston","Philadelphia","Washington DC","Chicago","Detroit","Minneapolis","Los Angeles","San Francisco","Seattle","Portland","Miami","Atlanta","Houston"];
     let graphData = null;
     let cy = null;
-    let nodePositions = {};  // Store node positions to keep them stable
+    let nodePositions = {};
+    let allVars = [];
 
     // Load graph data
     loadDataset('city_graph_data').then(function(data) {
         graphData = data;
+        allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
         // Check if data has correlation_method column and populate selector dynamically
         if (data.length > 0) {
@@ -1138,7 +1136,7 @@ $(function(){
                         corrMethods.forEach((method, idx) => {
                             const option = document.createElement('option');
                             option.value = method;
-                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1);
                             if (idx === 0) {
                                 option.selected = true;
                             }
@@ -1152,7 +1150,7 @@ $(function(){
             }
         }
 
-        populateVarSelector_city_network();  // Populate selector BEFORE initializing graph
+        populateVarSelector_city_network();
         initializeGraph_city_network();
     }).catch(function(error) {
         console.error('Failed to load graph data:', error);
@@ -1161,7 +1159,7 @@ $(function(){
     function populateVarSelector_city_network() {
         const select = document.getElementById('var_select_city_network');
         select.innerHTML = '';
-        currentScenario.node_labels.forEach(v => {
+        allVars.forEach(v => {
             const option = document.createElement('option');
             option.value = v;
             option.text = v;
@@ -1275,13 +1273,10 @@ $(function(){
         if (!cy || !graphData) return;
 
         // Update scenario
-        const scenarioSelect = document.getElementById('scenario_select_city_network');
-        if (scenarioSelect) {
-            const scenarioName = scenarioSelect.value;
-            const newScenario = scenarios.find(s => s.name === scenarioName);
-            if (newScenario !== currentScenario) {
-                currentScenario = newScenario;
-                populateVarSelector_city_network();
+        if (hasScenarios) {
+            const scenarioSelect = document.getElementById('scenario_select_city_network');
+            if (scenarioSelect) {
+                currentScenario = scenarioSelect.value;
             }
         }
 
@@ -1452,7 +1447,7 @@ $(function(){
 
         const scenarioData = graphData.filter(row => {
             // Basic filters
-            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
             const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
             // Correlation method filter (only if data has this column AND selector exists)
@@ -1463,19 +1458,14 @@ $(function(){
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
-            let distance = strength;
-
-            if (scenario.is_correlation) {
-                distance = 1 - Math.abs(strength);
-            }
+            // For correlation data, convert to distance
+            let distance = 1 - Math.abs(strength);
 
             if (distance <= cutoffValue) {
-                const edgeWidth = scenario.is_correlation ?
-                    Math.abs(strength) * 5 + 1 :
-                    (1 - distance) * 5 + 1;
+                const edgeWidth = Math.abs(strength) * 5 + 1;
 
                 const edgeData = {
-                    id: 'edge_' + scenario.name + '_' + idx,
+                    id: 'edge_' + scenario + '_' + idx,
                     source: row.node1,
                     target: row.node2,
                     strength: strength,
@@ -1511,16 +1501,19 @@ $(function(){
     }
 })();
 (function() {
-    const scenarios = [{"name":"Social Connections","is_correlation":true,"node_labels":["Alice","Bob","Carol","Dave","Eve","Frank","Grace","Henry","Iris","Jack","Kate","Leo"]}];
-    let currentScenario = scenarios[0];
+    const scenarios = ["Social Connections"];
+    const hasScenarios = false;
+    let currentScenario = "Social Connections";
     let selectedVars = ["Alice","Bob","Carol","Dave","Eve","Frank","Grace","Henry","Iris","Jack","Kate","Leo"];
     let graphData = null;
     let cy = null;
-    let nodePositions = {};  // Store node positions to keep them stable
+    let nodePositions = {};
+    let allVars = [];
 
     // Load graph data
     loadDataset('social_graph_data').then(function(data) {
         graphData = data;
+        allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
         // Check if data has correlation_method column and populate selector dynamically
         if (data.length > 0) {
@@ -1542,7 +1535,7 @@ $(function(){
                         corrMethods.forEach((method, idx) => {
                             const option = document.createElement('option');
                             option.value = method;
-                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1);
                             if (idx === 0) {
                                 option.selected = true;
                             }
@@ -1556,7 +1549,7 @@ $(function(){
             }
         }
 
-        populateVarSelector_social_network();  // Populate selector BEFORE initializing graph
+        populateVarSelector_social_network();
         initializeGraph_social_network();
     }).catch(function(error) {
         console.error('Failed to load graph data:', error);
@@ -1565,7 +1558,7 @@ $(function(){
     function populateVarSelector_social_network() {
         const select = document.getElementById('var_select_social_network');
         select.innerHTML = '';
-        currentScenario.node_labels.forEach(v => {
+        allVars.forEach(v => {
             const option = document.createElement('option');
             option.value = v;
             option.text = v;
@@ -1679,13 +1672,10 @@ $(function(){
         if (!cy || !graphData) return;
 
         // Update scenario
-        const scenarioSelect = document.getElementById('scenario_select_social_network');
-        if (scenarioSelect) {
-            const scenarioName = scenarioSelect.value;
-            const newScenario = scenarios.find(s => s.name === scenarioName);
-            if (newScenario !== currentScenario) {
-                currentScenario = newScenario;
-                populateVarSelector_social_network();
+        if (hasScenarios) {
+            const scenarioSelect = document.getElementById('scenario_select_social_network');
+            if (scenarioSelect) {
+                currentScenario = scenarioSelect.value;
             }
         }
 
@@ -1856,7 +1846,7 @@ $(function(){
 
         const scenarioData = graphData.filter(row => {
             // Basic filters
-            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
             const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
             // Correlation method filter (only if data has this column AND selector exists)
@@ -1867,19 +1857,14 @@ $(function(){
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
-            let distance = strength;
-
-            if (scenario.is_correlation) {
-                distance = 1 - Math.abs(strength);
-            }
+            // For correlation data, convert to distance
+            let distance = 1 - Math.abs(strength);
 
             if (distance <= cutoffValue) {
-                const edgeWidth = scenario.is_correlation ?
-                    Math.abs(strength) * 5 + 1 :
-                    (1 - distance) * 5 + 1;
+                const edgeWidth = Math.abs(strength) * 5 + 1;
 
                 const edgeData = {
-                    id: 'edge_' + scenario.name + '_' + idx,
+                    id: 'edge_' + scenario + '_' + idx,
                     source: row.node1,
                     target: row.node2,
                     strength: strength,
@@ -1915,16 +1900,19 @@ $(function(){
     }
 })();
 (function() {
-    const scenarios = [{"name":"Research Collaborations","is_correlation":true,"node_labels":["Dr. Smith","Dr. Johnson","Dr. Williams","Dr. Brown","Dr. Jones","Dr. Garcia","Dr. Miller","Dr. Davis","Dr. Rodriguez","Dr. Martinez","Dr. Hernandez","Dr. Lopez"]}];
-    let currentScenario = scenarios[0];
+    const scenarios = ["Research Collaborations"];
+    const hasScenarios = false;
+    let currentScenario = "Research Collaborations";
     let selectedVars = ["Dr. Smith","Dr. Johnson","Dr. Williams","Dr. Brown","Dr. Jones","Dr. Garcia","Dr. Miller","Dr. Davis","Dr. Rodriguez","Dr. Martinez","Dr. Hernandez","Dr. Lopez"];
     let graphData = null;
     let cy = null;
-    let nodePositions = {};  // Store node positions to keep them stable
+    let nodePositions = {};
+    let allVars = [];
 
     // Load graph data
     loadDataset('research_graph_data').then(function(data) {
         graphData = data;
+        allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
         // Check if data has correlation_method column and populate selector dynamically
         if (data.length > 0) {
@@ -1946,7 +1934,7 @@ $(function(){
                         corrMethods.forEach((method, idx) => {
                             const option = document.createElement('option');
                             option.value = method;
-                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1);
                             if (idx === 0) {
                                 option.selected = true;
                             }
@@ -1960,7 +1948,7 @@ $(function(){
             }
         }
 
-        populateVarSelector_research_network();  // Populate selector BEFORE initializing graph
+        populateVarSelector_research_network();
         initializeGraph_research_network();
     }).catch(function(error) {
         console.error('Failed to load graph data:', error);
@@ -1969,7 +1957,7 @@ $(function(){
     function populateVarSelector_research_network() {
         const select = document.getElementById('var_select_research_network');
         select.innerHTML = '';
-        currentScenario.node_labels.forEach(v => {
+        allVars.forEach(v => {
             const option = document.createElement('option');
             option.value = v;
             option.text = v;
@@ -2083,13 +2071,10 @@ $(function(){
         if (!cy || !graphData) return;
 
         // Update scenario
-        const scenarioSelect = document.getElementById('scenario_select_research_network');
-        if (scenarioSelect) {
-            const scenarioName = scenarioSelect.value;
-            const newScenario = scenarios.find(s => s.name === scenarioName);
-            if (newScenario !== currentScenario) {
-                currentScenario = newScenario;
-                populateVarSelector_research_network();
+        if (hasScenarios) {
+            const scenarioSelect = document.getElementById('scenario_select_research_network');
+            if (scenarioSelect) {
+                currentScenario = scenarioSelect.value;
             }
         }
 
@@ -2260,7 +2245,7 @@ $(function(){
 
         const scenarioData = graphData.filter(row => {
             // Basic filters
-            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
             const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
             // Correlation method filter (only if data has this column AND selector exists)
@@ -2271,19 +2256,14 @@ $(function(){
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
-            let distance = strength;
-
-            if (scenario.is_correlation) {
-                distance = 1 - Math.abs(strength);
-            }
+            // For correlation data, convert to distance
+            let distance = 1 - Math.abs(strength);
 
             if (distance <= cutoffValue) {
-                const edgeWidth = scenario.is_correlation ?
-                    Math.abs(strength) * 5 + 1 :
-                    (1 - distance) * 5 + 1;
+                const edgeWidth = Math.abs(strength) * 5 + 1;
 
                 const edgeData = {
-                    id: 'edge_' + scenario.name + '_' + idx,
+                    id: 'edge_' + scenario + '_' + idx,
                     source: row.node1,
                     target: row.node2,
                     strength: strength,
@@ -2319,16 +2299,19 @@ $(function(){
     }
 })();
 (function() {
-    const scenarios = [{"name":"Product Co-occurrence","is_correlation":true,"node_labels":["Laptop","Mouse","Keyboard","Monitor","Desk","Chair","Lamp","Notebook","Pen","Stapler","Coffee Mug","Water Bottle"]}];
-    let currentScenario = scenarios[0];
+    const scenarios = ["Product Co-occurrence"];
+    const hasScenarios = false;
+    let currentScenario = "Product Co-occurrence";
     let selectedVars = ["Laptop","Mouse","Keyboard","Monitor","Desk","Chair","Lamp","Notebook","Pen","Stapler","Coffee Mug","Water Bottle"];
     let graphData = null;
     let cy = null;
-    let nodePositions = {};  // Store node positions to keep them stable
+    let nodePositions = {};
+    let allVars = [];
 
     // Load graph data
     loadDataset('product_graph_data').then(function(data) {
         graphData = data;
+        allVars = [...new Set(data.map(d => d.node1).concat(data.map(d => d.node2)))].sort();
 
         // Check if data has correlation_method column and populate selector dynamically
         if (data.length > 0) {
@@ -2350,7 +2333,7 @@ $(function(){
                         corrMethods.forEach((method, idx) => {
                             const option = document.createElement('option');
                             option.value = method;
-                            option.text = method.charAt(0).toUpperCase() + method.slice(1); // Capitalize
+                            option.text = method.charAt(0).toUpperCase() + method.slice(1);
                             if (idx === 0) {
                                 option.selected = true;
                             }
@@ -2364,7 +2347,7 @@ $(function(){
             }
         }
 
-        populateVarSelector_product_network();  // Populate selector BEFORE initializing graph
+        populateVarSelector_product_network();
         initializeGraph_product_network();
     }).catch(function(error) {
         console.error('Failed to load graph data:', error);
@@ -2373,7 +2356,7 @@ $(function(){
     function populateVarSelector_product_network() {
         const select = document.getElementById('var_select_product_network');
         select.innerHTML = '';
-        currentScenario.node_labels.forEach(v => {
+        allVars.forEach(v => {
             const option = document.createElement('option');
             option.value = v;
             option.text = v;
@@ -2487,13 +2470,10 @@ $(function(){
         if (!cy || !graphData) return;
 
         // Update scenario
-        const scenarioSelect = document.getElementById('scenario_select_product_network');
-        if (scenarioSelect) {
-            const scenarioName = scenarioSelect.value;
-            const newScenario = scenarios.find(s => s.name === scenarioName);
-            if (newScenario !== currentScenario) {
-                currentScenario = newScenario;
-                populateVarSelector_product_network();
+        if (hasScenarios) {
+            const scenarioSelect = document.getElementById('scenario_select_product_network');
+            if (scenarioSelect) {
+                currentScenario = scenarioSelect.value;
             }
         }
 
@@ -2664,7 +2644,7 @@ $(function(){
 
         const scenarioData = graphData.filter(row => {
             // Basic filters
-            const scenarioMatch = !row.scenario || row.scenario === scenario.name;
+            const scenarioMatch = !hasScenarios || !row.scenario || row.scenario === scenario;
             const nodeMatch = varsToShow.includes(row.node1) && varsToShow.includes(row.node2);
 
             // Correlation method filter (only if data has this column AND selector exists)
@@ -2675,19 +2655,14 @@ $(function(){
 
         scenarioData.forEach((row, idx) => {
             let strength = row.strength;
-            let distance = strength;
-
-            if (scenario.is_correlation) {
-                distance = 1 - Math.abs(strength);
-            }
+            // For correlation data, convert to distance
+            let distance = 1 - Math.abs(strength);
 
             if (distance <= cutoffValue) {
-                const edgeWidth = scenario.is_correlation ?
-                    Math.abs(strength) * 5 + 1 :
-                    (1 - distance) * 5 + 1;
+                const edgeWidth = Math.abs(strength) * 5 + 1;
 
                 const edgeData = {
-                    id: 'edge_' + scenario.name + '_' + idx,
+                    id: 'edge_' + scenario + '_' + idx,
                     source: row.node1,
                     target: row.node2,
                     strength: strength,
@@ -2730,211 +2705,211 @@ $(function(){
 <!-- DATASETS -->
 
 <script type="text/plain" id="product_graph_data" data-format="csv_embedded" data-src="">
-node1,node2,strength,Category,scenario
-Laptop,Mouse,0.44408525276310384,Electronics,Product Co-occurrence
-Laptop,Keyboard,0.6970510841787173,Electronics,Product Co-occurrence
-Laptop,Monitor,0.5747292059851671,Electronics,Product Co-occurrence
-Laptop,Desk,0.34544861269145194,Electronics,Product Co-occurrence
-Laptop,Chair,0.23280778706202945,Electronics,Product Co-occurrence
-Laptop,Lamp,0.02632590648743376,Electronics,Product Co-occurrence
-Laptop,Notebook,0.2504791447497559,Electronics,Product Co-occurrence
-Laptop,Pen,0.28893254860928563,Electronics,Product Co-occurrence
-Laptop,Stapler,0.22857644748325648,Electronics,Product Co-occurrence
-Laptop,Coffee Mug,0.3799752992344971,Electronics,Product Co-occurrence
-Laptop,Water Bottle,0.14238427350532926,Electronics,Product Co-occurrence
-Mouse,Keyboard,0.4052262324807225,Electronics,Product Co-occurrence
-Mouse,Monitor,0.6585302864253315,Electronics,Product Co-occurrence
-Mouse,Desk,0.10138095742610638,Electronics,Product Co-occurrence
-Mouse,Chair,0.012485913060576427,Electronics,Product Co-occurrence
-Mouse,Lamp,0.21409669264543557,Electronics,Product Co-occurrence
-Mouse,Notebook,0.3024249051479915,Electronics,Product Co-occurrence
-Mouse,Pen,0.06413788164532903,Electronics,Product Co-occurrence
-Mouse,Stapler,0.14195896757130785,Electronics,Product Co-occurrence
-Mouse,Coffee Mug,0.3342446661630323,Electronics,Product Co-occurrence
-Mouse,Water Bottle,0.10617769241272833,Electronics,Product Co-occurrence
-Keyboard,Monitor,0.6213520410920228,Electronics,Product Co-occurrence
-Keyboard,Desk,0.21662975520388683,Electronics,Product Co-occurrence
-Keyboard,Chair,0.21510936127083957,Electronics,Product Co-occurrence
-Keyboard,Lamp,0.0749950921357347,Electronics,Product Co-occurrence
-Keyboard,Notebook,0.2880116916762163,Electronics,Product Co-occurrence
-Keyboard,Pen,0.27476156200934776,Electronics,Product Co-occurrence
-Keyboard,Stapler,0.2660276893106116,Electronics,Product Co-occurrence
-Keyboard,Coffee Mug,0.21303237138515208,Electronics,Product Co-occurrence
-Keyboard,Water Bottle,0.18998491111615445,Electronics,Product Co-occurrence
-Monitor,Desk,0.05643309353902266,Electronics,Product Co-occurrence
-Monitor,Chair,0.3434235034516242,Electronics,Product Co-occurrence
-Monitor,Lamp,0.29835667347411354,Electronics,Product Co-occurrence
-Monitor,Notebook,0.024471679979659645,Electronics,Product Co-occurrence
-Monitor,Pen,0.1824416818477116,Electronics,Product Co-occurrence
-Monitor,Stapler,0.3846625771350367,Electronics,Product Co-occurrence
-Monitor,Coffee Mug,0.23512436726618458,Electronics,Product Co-occurrence
-Monitor,Water Bottle,0.31006836648477826,Electronics,Product Co-occurrence
-Desk,Chair,0.7079447692849273,Furniture,Product Co-occurrence
-Desk,Lamp,0.40959425365723034,Furniture,Product Co-occurrence
-Desk,Notebook,0.21894908467167948,Furniture,Product Co-occurrence
-Desk,Pen,0.21401346834978485,Furniture,Product Co-occurrence
-Desk,Stapler,0.32200754888196914,Furniture,Product Co-occurrence
-Desk,Coffee Mug,0.003079186821128399,Furniture,Product Co-occurrence
-Desk,Water Bottle,0.03914314918509074,Furniture,Product Co-occurrence
-Chair,Lamp,0.6076773966978203,Furniture,Product Co-occurrence
-Chair,Notebook,0.07130725476302367,Furniture,Product Co-occurrence
-Chair,Pen,0.21693143671050585,Furniture,Product Co-occurrence
-Chair,Stapler,0.19700501944270654,Furniture,Product Co-occurrence
-Chair,Coffee Mug,0.2668617227044819,Furniture,Product Co-occurrence
-Chair,Water Bottle,0.2270227539886725,Furniture,Product Co-occurrence
-Lamp,Notebook,0.14617936179941113,Furniture,Product Co-occurrence
-Lamp,Pen,0.27146612123971,Furniture,Product Co-occurrence
-Lamp,Stapler,0.3017307426241437,Furniture,Product Co-occurrence
-Lamp,Coffee Mug,0.2091992942835943,Furniture,Product Co-occurrence
-Lamp,Water Bottle,0.3805814680700319,Furniture,Product Co-occurrence
-Notebook,Pen,0.5798362576187949,Stationery,Product Co-occurrence
-Notebook,Stapler,0.6358764081311749,Stationery,Product Co-occurrence
-Notebook,Coffee Mug,0.33396694302715,Stationery,Product Co-occurrence
-Notebook,Water Bottle,0.008395741157221437,Stationery,Product Co-occurrence
-Pen,Stapler,0.49324522763362216,Stationery,Product Co-occurrence
-Pen,Coffee Mug,0.06389201065981016,Stationery,Product Co-occurrence
-Pen,Water Bottle,0.35876038883007433,Stationery,Product Co-occurrence
-Stapler,Coffee Mug,0.16112197181066207,Stationery,Product Co-occurrence
-Stapler,Water Bottle,0.37898977725789174,Stationery,Product Co-occurrence
-Coffee Mug,Water Bottle,0.8024835911251148,Kitchen,Product Co-occurrence
+node1,node2,strength,Category,scenario,correlation_method
+Laptop,Mouse,0.44408525276310384,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Keyboard,0.6970510841787173,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Monitor,0.5747292059851671,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Desk,0.34544861269145194,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Chair,0.23280778706202945,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Lamp,0.02632590648743376,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Notebook,0.2504791447497559,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Pen,0.28893254860928563,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Stapler,0.22857644748325648,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Coffee Mug,0.3799752992344971,Electronics,Product Co-occurrence,cooccurrence
+Laptop,Water Bottle,0.14238427350532926,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Keyboard,0.4052262324807225,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Monitor,0.6585302864253315,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Desk,0.10138095742610638,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Chair,0.012485913060576427,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Lamp,0.21409669264543557,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Notebook,0.3024249051479915,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Pen,0.06413788164532903,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Stapler,0.14195896757130785,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Coffee Mug,0.3342446661630323,Electronics,Product Co-occurrence,cooccurrence
+Mouse,Water Bottle,0.10617769241272833,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Monitor,0.6213520410920228,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Desk,0.21662975520388683,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Chair,0.21510936127083957,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Lamp,0.0749950921357347,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Notebook,0.2880116916762163,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Pen,0.27476156200934776,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Stapler,0.2660276893106116,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Coffee Mug,0.21303237138515208,Electronics,Product Co-occurrence,cooccurrence
+Keyboard,Water Bottle,0.18998491111615445,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Desk,0.05643309353902266,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Chair,0.3434235034516242,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Lamp,0.29835667347411354,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Notebook,0.024471679979659645,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Pen,0.1824416818477116,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Stapler,0.3846625771350367,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Coffee Mug,0.23512436726618458,Electronics,Product Co-occurrence,cooccurrence
+Monitor,Water Bottle,0.31006836648477826,Electronics,Product Co-occurrence,cooccurrence
+Desk,Chair,0.7079447692849273,Furniture,Product Co-occurrence,cooccurrence
+Desk,Lamp,0.40959425365723034,Furniture,Product Co-occurrence,cooccurrence
+Desk,Notebook,0.21894908467167948,Furniture,Product Co-occurrence,cooccurrence
+Desk,Pen,0.21401346834978485,Furniture,Product Co-occurrence,cooccurrence
+Desk,Stapler,0.32200754888196914,Furniture,Product Co-occurrence,cooccurrence
+Desk,Coffee Mug,0.003079186821128399,Furniture,Product Co-occurrence,cooccurrence
+Desk,Water Bottle,0.03914314918509074,Furniture,Product Co-occurrence,cooccurrence
+Chair,Lamp,0.6076773966978203,Furniture,Product Co-occurrence,cooccurrence
+Chair,Notebook,0.07130725476302367,Furniture,Product Co-occurrence,cooccurrence
+Chair,Pen,0.21693143671050585,Furniture,Product Co-occurrence,cooccurrence
+Chair,Stapler,0.19700501944270654,Furniture,Product Co-occurrence,cooccurrence
+Chair,Coffee Mug,0.2668617227044819,Furniture,Product Co-occurrence,cooccurrence
+Chair,Water Bottle,0.2270227539886725,Furniture,Product Co-occurrence,cooccurrence
+Lamp,Notebook,0.14617936179941113,Furniture,Product Co-occurrence,cooccurrence
+Lamp,Pen,0.27146612123971,Furniture,Product Co-occurrence,cooccurrence
+Lamp,Stapler,0.3017307426241437,Furniture,Product Co-occurrence,cooccurrence
+Lamp,Coffee Mug,0.2091992942835943,Furniture,Product Co-occurrence,cooccurrence
+Lamp,Water Bottle,0.3805814680700319,Furniture,Product Co-occurrence,cooccurrence
+Notebook,Pen,0.5798362576187949,Stationery,Product Co-occurrence,cooccurrence
+Notebook,Stapler,0.6358764081311749,Stationery,Product Co-occurrence,cooccurrence
+Notebook,Coffee Mug,0.33396694302715,Stationery,Product Co-occurrence,cooccurrence
+Notebook,Water Bottle,0.008395741157221437,Stationery,Product Co-occurrence,cooccurrence
+Pen,Stapler,0.49324522763362216,Stationery,Product Co-occurrence,cooccurrence
+Pen,Coffee Mug,0.06389201065981016,Stationery,Product Co-occurrence,cooccurrence
+Pen,Water Bottle,0.35876038883007433,Stationery,Product Co-occurrence,cooccurrence
+Stapler,Coffee Mug,0.16112197181066207,Stationery,Product Co-occurrence,cooccurrence
+Stapler,Water Bottle,0.37898977725789174,Stationery,Product Co-occurrence,cooccurrence
+Coffee Mug,Water Bottle,0.8024835911251148,Kitchen,Product Co-occurrence,cooccurrence
 
 </script><script type="text/plain" id="research_graph_data" data-format="csv_embedded" data-src="">
-node1,node2,strength,Field,Institution,scenario
-Dr. Smith,Dr. Johnson,0.9188472226625497,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Williams,0.6073022841066384,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Brown,0.35210554464115545,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Jones,0.5323991956164662,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Garcia,0.2849277306081042,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Miller,0.20343634693100976,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Davis,0.5627595260884406,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Rodriguez,0.35065025636087177,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Martinez,0.3580859887976653,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Hernandez,0.6121239579343025,AI,MIT,Research Collaborations
-Dr. Smith,Dr. Lopez,0.24236713644087327,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Williams,0.6265010438734051,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Brown,0.28262110456019496,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Jones,0.5300179992749733,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Garcia,0.28574987585308825,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Miller,0.2849103497852102,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Davis,0.6180384216132324,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Rodriguez,0.30916581130572496,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Martinez,0.25198252505700924,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Hernandez,0.6284356043775511,AI,MIT,Research Collaborations
-Dr. Johnson,Dr. Lopez,0.3886859659231421,AI,MIT,Research Collaborations
-Dr. Williams,Dr. Brown,0.728345135655515,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Jones,0.6881437257575002,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Garcia,0.2543408921445865,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Miller,0.2473607917057785,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Davis,0.5693287628792973,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Rodriguez,0.38609468384941775,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Martinez,0.21894072319224545,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Hernandez,0.3996779501270262,AI,Stanford,Research Collaborations
-Dr. Williams,Dr. Lopez,0.770359356187548,AI,Stanford,Research Collaborations
-Dr. Brown,Dr. Jones,0.2536005443698308,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Garcia,0.3457107898987921,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Miller,0.5496698246087823,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Davis,0.2836235846550312,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Rodriguez,0.27564868748405447,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Martinez,0.3323167269946324,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Hernandez,0.37540323445254203,Robotics,Stanford,Research Collaborations
-Dr. Brown,Dr. Lopez,0.7811100882366475,Robotics,Stanford,Research Collaborations
-Dr. Jones,Dr. Garcia,0.7075363023691785,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Miller,0.39795523870216254,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Davis,0.6996736084632554,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Rodriguez,0.3782130883230806,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Martinez,0.3810856704604264,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Hernandez,0.3373946860673219,AI,Berkeley,Research Collaborations
-Dr. Jones,Dr. Lopez,0.31597075742571157,AI,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Miller,0.2418099571923633,Networks,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Davis,0.35000448728703637,Networks,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Rodriguez,0.28406927342405985,Networks,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Martinez,0.3005384782473855,Networks,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Hernandez,0.6371102902480537,Networks,Berkeley,Research Collaborations
-Dr. Garcia,Dr. Lopez,0.6492061089706262,Networks,Berkeley,Research Collaborations
-Dr. Miller,Dr. Davis,0.7361657053729229,Robotics,CMU,Research Collaborations
-Dr. Miller,Dr. Rodriguez,0.3249327723894832,Robotics,CMU,Research Collaborations
-Dr. Miller,Dr. Martinez,0.344495503945411,Robotics,CMU,Research Collaborations
-Dr. Miller,Dr. Hernandez,0.38416254700791774,Robotics,CMU,Research Collaborations
-Dr. Miller,Dr. Lopez,0.37299034946125414,Robotics,CMU,Research Collaborations
-Dr. Davis,Dr. Rodriguez,0.28792222980262566,AI,CMU,Research Collaborations
-Dr. Davis,Dr. Martinez,0.3202867583126001,AI,CMU,Research Collaborations
-Dr. Davis,Dr. Hernandez,0.30109080203584293,AI,CMU,Research Collaborations
-Dr. Davis,Dr. Lopez,0.29729948524118366,AI,CMU,Research Collaborations
-Dr. Rodriguez,Dr. Martinez,1.0,Physics,Caltech,Research Collaborations
-Dr. Rodriguez,Dr. Hernandez,0.20248529724251274,Physics,Caltech,Research Collaborations
-Dr. Rodriguez,Dr. Lopez,0.20110201647113463,Physics,Caltech,Research Collaborations
-Dr. Martinez,Dr. Hernandez,0.36801740205222344,Physics,Caltech,Research Collaborations
-Dr. Martinez,Dr. Lopez,0.3015423940303797,Physics,Caltech,Research Collaborations
-Dr. Hernandez,Dr. Lopez,0.5123180943659709,Networks,MIT,Research Collaborations
+node1,node2,strength,Field,Institution,scenario,correlation_method
+Dr. Smith,Dr. Johnson,0.9188472226625497,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Williams,0.6073022841066384,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Brown,0.35210554464115545,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Jones,0.5323991956164662,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Garcia,0.2849277306081042,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Miller,0.20343634693100976,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Davis,0.5627595260884406,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Rodriguez,0.35065025636087177,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Martinez,0.3580859887976653,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Hernandez,0.6121239579343025,AI,MIT,Research Collaborations,collaboration
+Dr. Smith,Dr. Lopez,0.24236713644087327,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Williams,0.6265010438734051,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Brown,0.28262110456019496,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Jones,0.5300179992749733,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Garcia,0.28574987585308825,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Miller,0.2849103497852102,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Davis,0.6180384216132324,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Rodriguez,0.30916581130572496,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Martinez,0.25198252505700924,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Hernandez,0.6284356043775511,AI,MIT,Research Collaborations,collaboration
+Dr. Johnson,Dr. Lopez,0.3886859659231421,AI,MIT,Research Collaborations,collaboration
+Dr. Williams,Dr. Brown,0.728345135655515,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Jones,0.6881437257575002,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Garcia,0.2543408921445865,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Miller,0.2473607917057785,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Davis,0.5693287628792973,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Rodriguez,0.38609468384941775,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Martinez,0.21894072319224545,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Hernandez,0.3996779501270262,AI,Stanford,Research Collaborations,collaboration
+Dr. Williams,Dr. Lopez,0.770359356187548,AI,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Jones,0.2536005443698308,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Garcia,0.3457107898987921,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Miller,0.5496698246087823,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Davis,0.2836235846550312,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Rodriguez,0.27564868748405447,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Martinez,0.3323167269946324,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Hernandez,0.37540323445254203,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Brown,Dr. Lopez,0.7811100882366475,Robotics,Stanford,Research Collaborations,collaboration
+Dr. Jones,Dr. Garcia,0.7075363023691785,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Miller,0.39795523870216254,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Davis,0.6996736084632554,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Rodriguez,0.3782130883230806,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Martinez,0.3810856704604264,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Hernandez,0.3373946860673219,AI,Berkeley,Research Collaborations,collaboration
+Dr. Jones,Dr. Lopez,0.31597075742571157,AI,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Miller,0.2418099571923633,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Davis,0.35000448728703637,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Rodriguez,0.28406927342405985,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Martinez,0.3005384782473855,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Hernandez,0.6371102902480537,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Garcia,Dr. Lopez,0.6492061089706262,Networks,Berkeley,Research Collaborations,collaboration
+Dr. Miller,Dr. Davis,0.7361657053729229,Robotics,CMU,Research Collaborations,collaboration
+Dr. Miller,Dr. Rodriguez,0.3249327723894832,Robotics,CMU,Research Collaborations,collaboration
+Dr. Miller,Dr. Martinez,0.344495503945411,Robotics,CMU,Research Collaborations,collaboration
+Dr. Miller,Dr. Hernandez,0.38416254700791774,Robotics,CMU,Research Collaborations,collaboration
+Dr. Miller,Dr. Lopez,0.37299034946125414,Robotics,CMU,Research Collaborations,collaboration
+Dr. Davis,Dr. Rodriguez,0.28792222980262566,AI,CMU,Research Collaborations,collaboration
+Dr. Davis,Dr. Martinez,0.3202867583126001,AI,CMU,Research Collaborations,collaboration
+Dr. Davis,Dr. Hernandez,0.30109080203584293,AI,CMU,Research Collaborations,collaboration
+Dr. Davis,Dr. Lopez,0.29729948524118366,AI,CMU,Research Collaborations,collaboration
+Dr. Rodriguez,Dr. Martinez,1.0,Physics,Caltech,Research Collaborations,collaboration
+Dr. Rodriguez,Dr. Hernandez,0.20248529724251274,Physics,Caltech,Research Collaborations,collaboration
+Dr. Rodriguez,Dr. Lopez,0.20110201647113463,Physics,Caltech,Research Collaborations,collaboration
+Dr. Martinez,Dr. Hernandez,0.36801740205222344,Physics,Caltech,Research Collaborations,collaboration
+Dr. Martinez,Dr. Lopez,0.3015423940303797,Physics,Caltech,Research Collaborations,collaboration
+Dr. Hernandez,Dr. Lopez,0.5123180943659709,Networks,MIT,Research Collaborations,collaboration
 
 </script><script type="text/plain" id="social_graph_data" data-format="csv_embedded" data-src="">
-node1,node2,strength,Location,Department,Team,scenario
-Alice,Bob,0.8043076626467411,NYC,Engineering,Backend,Social Connections
-Alice,Carol,0.710246983857075,NYC,Engineering,Backend,Social Connections
-Alice,Dave,0.7007175293423309,NYC,Engineering,Backend,Social Connections
-Alice,Eve,0.6628191697435933,NYC,Engineering,Backend,Social Connections
-Alice,Frank,0.5313972882697728,NYC,Engineering,Backend,Social Connections
-Alice,Grace,0.44498703892435826,NYC,Engineering,Backend,Social Connections
-Alice,Henry,0.529192118746733,NYC,Engineering,Backend,Social Connections
-Alice,Iris,0.677344928786093,NYC,Engineering,Backend,Social Connections
-Alice,Jack,0.45451353652742055,NYC,Engineering,Backend,Social Connections
-Alice,Kate,0.4485125152405903,NYC,Engineering,Backend,Social Connections
-Alice,Leo,0.7104019978656555,NYC,Engineering,Backend,Social Connections
-Bob,Carol,0.8080707960077728,NYC,Engineering,Backend,Social Connections
-Bob,Dave,0.7628818392547121,NYC,Engineering,Backend,Social Connections
-Bob,Eve,0.9332657926959228,NYC,Engineering,Backend,Social Connections
-Bob,Frank,0.6217637776599881,NYC,Engineering,Backend,Social Connections
-Bob,Grace,0.46786340043310004,NYC,Engineering,Backend,Social Connections
-Bob,Henry,0.4520626891650631,NYC,Engineering,Backend,Social Connections
-Bob,Iris,0.5938071556284459,NYC,Engineering,Backend,Social Connections
-Bob,Jack,0.37991185710144787,NYC,Engineering,Backend,Social Connections
-Bob,Kate,0.37594237833722083,NYC,Engineering,Backend,Social Connections
-Bob,Leo,0.6054853782853495,NYC,Engineering,Backend,Social Connections
-Carol,Dave,0.8082167281055511,NYC,Engineering,Frontend,Social Connections
-Carol,Eve,0.7163277660385035,NYC,Engineering,Frontend,Social Connections
-Carol,Frank,0.4565534507552784,NYC,Engineering,Frontend,Social Connections
-Carol,Grace,0.4913988754950612,NYC,Engineering,Frontend,Social Connections
-Carol,Henry,0.4283530193283457,NYC,Engineering,Frontend,Social Connections
-Carol,Iris,0.509034042022135,NYC,Engineering,Frontend,Social Connections
-Carol,Jack,0.47329412699093854,NYC,Engineering,Frontend,Social Connections
-Carol,Kate,0.43656153397816333,NYC,Engineering,Frontend,Social Connections
-Carol,Leo,0.5497460476095142,NYC,Engineering,Frontend,Social Connections
-Dave,Eve,0.7045553140076913,SF,Engineering,Frontend,Social Connections
-Dave,Frank,0.5211236009392141,SF,Engineering,Frontend,Social Connections
-Dave,Grace,0.542938302319336,SF,Engineering,Frontend,Social Connections
-Dave,Henry,0.35134998698213477,SF,Engineering,Frontend,Social Connections
-Dave,Iris,0.36717178391329913,SF,Engineering,Frontend,Social Connections
-Dave,Jack,0.6544614976467812,SF,Engineering,Frontend,Social Connections
-Dave,Kate,0.483884883203359,SF,Engineering,Frontend,Social Connections
-Dave,Leo,0.8857626371212243,SF,Engineering,Frontend,Social Connections
-Eve,Frank,0.3988414020019503,SF,Engineering,Backend,Social Connections
-Eve,Grace,0.5755119561217428,SF,Engineering,Backend,Social Connections
-Eve,Henry,0.4621895640039826,SF,Engineering,Backend,Social Connections
-Eve,Iris,0.5461423321179641,SF,Engineering,Backend,Social Connections
-Eve,Jack,0.46691373593164065,SF,Engineering,Backend,Social Connections
-Eve,Kate,0.479632783338382,SF,Engineering,Backend,Social Connections
-Eve,Leo,0.7617384070385828,SF,Engineering,Backend,Social Connections
-Frank,Grace,0.8358604481268025,NYC,Marketing,Digital,Social Connections
-Frank,Henry,0.6259328176778169,NYC,Marketing,Digital,Social Connections
-Frank,Iris,0.535977728152918,NYC,Marketing,Digital,Social Connections
-Frank,Jack,0.4374036212383968,NYC,Marketing,Digital,Social Connections
-Frank,Kate,0.5508207694818223,NYC,Marketing,Digital,Social Connections
-Frank,Leo,0.506112665250402,NYC,Marketing,Digital,Social Connections
-Grace,Henry,0.706187726002922,LA,Marketing,Digital,Social Connections
-Grace,Iris,0.34544095527963137,LA,Marketing,Digital,Social Connections
-Grace,Jack,0.5111014065846383,LA,Marketing,Digital,Social Connections
-Grace,Kate,0.6357417564802119,LA,Marketing,Digital,Social Connections
-Grace,Leo,0.4654906073114946,LA,Marketing,Digital,Social Connections
-Henry,Iris,0.4010681118749976,LA,Marketing,Content,Social Connections
-Henry,Jack,0.5131065103557704,LA,Marketing,Content,Social Connections
-Henry,Kate,0.5031261140791673,LA,Marketing,Content,Social Connections
-Henry,Leo,0.42163139023204654,LA,Marketing,Content,Social Connections
-Iris,Jack,0.7756363057462577,NYC,Sales,Enterprise,Social Connections
-Iris,Kate,0.6038563007977558,NYC,Sales,Enterprise,Social Connections
-Iris,Leo,0.3770079924452961,NYC,Sales,Enterprise,Social Connections
-Jack,Kate,0.5471527354439745,SF,Sales,Enterprise,Social Connections
-Jack,Leo,0.41919108103861513,SF,Sales,Enterprise,Social Connections
-Kate,Leo,0.4788213077355884,LA,Sales,SMB,Social Connections
+node1,node2,strength,Location,Department,Team,scenario,correlation_method
+Alice,Bob,0.8043076626467411,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Carol,0.710246983857075,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Dave,0.7007175293423309,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Eve,0.6628191697435933,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Frank,0.5313972882697728,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Grace,0.44498703892435826,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Henry,0.529192118746733,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Iris,0.677344928786093,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Jack,0.45451353652742055,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Kate,0.4485125152405903,NYC,Engineering,Backend,Social Connections,similarity
+Alice,Leo,0.7104019978656555,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Carol,0.8080707960077728,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Dave,0.7628818392547121,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Eve,0.9332657926959228,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Frank,0.6217637776599881,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Grace,0.46786340043310004,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Henry,0.4520626891650631,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Iris,0.5938071556284459,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Jack,0.37991185710144787,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Kate,0.37594237833722083,NYC,Engineering,Backend,Social Connections,similarity
+Bob,Leo,0.6054853782853495,NYC,Engineering,Backend,Social Connections,similarity
+Carol,Dave,0.8082167281055511,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Eve,0.7163277660385035,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Frank,0.4565534507552784,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Grace,0.4913988754950612,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Henry,0.4283530193283457,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Iris,0.509034042022135,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Jack,0.47329412699093854,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Kate,0.43656153397816333,NYC,Engineering,Frontend,Social Connections,similarity
+Carol,Leo,0.5497460476095142,NYC,Engineering,Frontend,Social Connections,similarity
+Dave,Eve,0.7045553140076913,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Frank,0.5211236009392141,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Grace,0.542938302319336,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Henry,0.35134998698213477,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Iris,0.36717178391329913,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Jack,0.6544614976467812,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Kate,0.483884883203359,SF,Engineering,Frontend,Social Connections,similarity
+Dave,Leo,0.8857626371212243,SF,Engineering,Frontend,Social Connections,similarity
+Eve,Frank,0.3988414020019503,SF,Engineering,Backend,Social Connections,similarity
+Eve,Grace,0.5755119561217428,SF,Engineering,Backend,Social Connections,similarity
+Eve,Henry,0.4621895640039826,SF,Engineering,Backend,Social Connections,similarity
+Eve,Iris,0.5461423321179641,SF,Engineering,Backend,Social Connections,similarity
+Eve,Jack,0.46691373593164065,SF,Engineering,Backend,Social Connections,similarity
+Eve,Kate,0.479632783338382,SF,Engineering,Backend,Social Connections,similarity
+Eve,Leo,0.7617384070385828,SF,Engineering,Backend,Social Connections,similarity
+Frank,Grace,0.8358604481268025,NYC,Marketing,Digital,Social Connections,similarity
+Frank,Henry,0.6259328176778169,NYC,Marketing,Digital,Social Connections,similarity
+Frank,Iris,0.535977728152918,NYC,Marketing,Digital,Social Connections,similarity
+Frank,Jack,0.4374036212383968,NYC,Marketing,Digital,Social Connections,similarity
+Frank,Kate,0.5508207694818223,NYC,Marketing,Digital,Social Connections,similarity
+Frank,Leo,0.506112665250402,NYC,Marketing,Digital,Social Connections,similarity
+Grace,Henry,0.706187726002922,LA,Marketing,Digital,Social Connections,similarity
+Grace,Iris,0.34544095527963137,LA,Marketing,Digital,Social Connections,similarity
+Grace,Jack,0.5111014065846383,LA,Marketing,Digital,Social Connections,similarity
+Grace,Kate,0.6357417564802119,LA,Marketing,Digital,Social Connections,similarity
+Grace,Leo,0.4654906073114946,LA,Marketing,Digital,Social Connections,similarity
+Henry,Iris,0.4010681118749976,LA,Marketing,Content,Social Connections,similarity
+Henry,Jack,0.5131065103557704,LA,Marketing,Content,Social Connections,similarity
+Henry,Kate,0.5031261140791673,LA,Marketing,Content,Social Connections,similarity
+Henry,Leo,0.42163139023204654,LA,Marketing,Content,Social Connections,similarity
+Iris,Jack,0.7756363057462577,NYC,Sales,Enterprise,Social Connections,similarity
+Iris,Kate,0.6038563007977558,NYC,Sales,Enterprise,Social Connections,similarity
+Iris,Leo,0.3770079924452961,NYC,Sales,Enterprise,Social Connections,similarity
+Jack,Kate,0.5471527354439745,SF,Sales,Enterprise,Social Connections,similarity
+Jack,Leo,0.41919108103861513,SF,Sales,Enterprise,Social Connections,similarity
+Kate,Leo,0.4788213077355884,LA,Sales,SMB,Social Connections,similarity
 
 </script><script type="text/plain" id="city_graph_data" data-format="csv_embedded" data-src="">
 node1,node2,strength,region,correlation_method,scenario
@@ -3122,322 +3097,322 @@ Miami,Houston,0.5912135239657799,Southeast,spearman,Economic Indicators
 Atlanta,Houston,0.5267285831477792,Southeast,spearman,Economic Indicators
 
 </script><script type="text/plain" id="stock_graph_data" data-format="csv_embedded" data-src="">
-node1,node2,strength,sector,scenario
-AAPL,MSFT,0.7774124734944381,Technology,Short-term (60 days)
-AAPL,GOOGL,0.7282148236463197,Technology,Short-term (60 days)
-AAPL,AMZN,0.7169448937792479,Technology,Short-term (60 days)
-AAPL,TSLA,0.8134639136227855,Technology,Short-term (60 days)
-AAPL,JPM,-0.0824482281049433,Technology,Short-term (60 days)
-AAPL,BAC,0.03673762946233845,Technology,Short-term (60 days)
-AAPL,GS,-0.08458498611445675,Technology,Short-term (60 days)
-AAPL,WFC,-0.12096420565983071,Technology,Short-term (60 days)
-AAPL,JNJ,-0.03175925480345926,Technology,Short-term (60 days)
-AAPL,PFE,0.005774403799553523,Technology,Short-term (60 days)
-AAPL,UNH,0.041018282173004364,Technology,Short-term (60 days)
-AAPL,XOM,0.014615629794144835,Technology,Short-term (60 days)
-AAPL,CVX,0.1058473080474797,Technology,Short-term (60 days)
-AAPL,COP,-0.07615646093366377,Technology,Short-term (60 days)
-MSFT,GOOGL,0.7504699357520142,Technology,Short-term (60 days)
-MSFT,AMZN,0.779873270393533,Technology,Short-term (60 days)
-MSFT,TSLA,0.8635576598314216,Technology,Short-term (60 days)
-MSFT,JPM,-0.06500360154475553,Technology,Short-term (60 days)
-MSFT,BAC,0.01180685919103562,Technology,Short-term (60 days)
-MSFT,GS,-0.12543682639314577,Technology,Short-term (60 days)
-MSFT,WFC,-0.19593713801846535,Technology,Short-term (60 days)
-MSFT,JNJ,0.026121306876213238,Technology,Short-term (60 days)
-MSFT,PFE,0.026707219427540427,Technology,Short-term (60 days)
-MSFT,UNH,0.006529069619343859,Technology,Short-term (60 days)
-MSFT,XOM,-0.1334618113787656,Technology,Short-term (60 days)
-MSFT,CVX,0.04671942623340446,Technology,Short-term (60 days)
-MSFT,COP,-0.11938915326109004,Technology,Short-term (60 days)
-GOOGL,AMZN,0.7845778048620308,Technology,Short-term (60 days)
-GOOGL,TSLA,0.7768198798203378,Technology,Short-term (60 days)
-GOOGL,JPM,-0.11647115172885267,Technology,Short-term (60 days)
-GOOGL,BAC,-0.009400304883926704,Technology,Short-term (60 days)
-GOOGL,GS,-0.1682109497244296,Technology,Short-term (60 days)
-GOOGL,WFC,-0.16415394880067993,Technology,Short-term (60 days)
-GOOGL,JNJ,0.051495543020717544,Technology,Short-term (60 days)
-GOOGL,PFE,-0.07753016743607137,Technology,Short-term (60 days)
-GOOGL,UNH,0.07299428559554823,Technology,Short-term (60 days)
-GOOGL,XOM,-0.011878255553260475,Technology,Short-term (60 days)
-GOOGL,CVX,0.12252193494263013,Technology,Short-term (60 days)
-GOOGL,COP,-0.007287319638514604,Technology,Short-term (60 days)
-AMZN,TSLA,0.7634136611728671,Technology,Short-term (60 days)
-AMZN,JPM,-0.038318577709525965,Technology,Short-term (60 days)
-AMZN,BAC,-0.002915891819242129,Technology,Short-term (60 days)
-AMZN,GS,-0.1193110382922525,Technology,Short-term (60 days)
-AMZN,WFC,-0.20362260016681272,Technology,Short-term (60 days)
-AMZN,JNJ,-0.0359766527186055,Technology,Short-term (60 days)
-AMZN,PFE,0.038063638641858306,Technology,Short-term (60 days)
-AMZN,UNH,0.06639707319906123,Technology,Short-term (60 days)
-AMZN,XOM,-0.08937973865690697,Technology,Short-term (60 days)
-AMZN,CVX,0.0401522817440109,Technology,Short-term (60 days)
-AMZN,COP,-0.054084272509268276,Technology,Short-term (60 days)
-TSLA,JPM,-0.09015527554855148,Technology,Short-term (60 days)
-TSLA,BAC,0.0674780203251227,Technology,Short-term (60 days)
-TSLA,GS,-0.015501055237956956,Technology,Short-term (60 days)
-TSLA,WFC,-0.12968966625616324,Technology,Short-term (60 days)
-TSLA,JNJ,0.0248865956676091,Technology,Short-term (60 days)
-TSLA,PFE,-0.027964574798877352,Technology,Short-term (60 days)
-TSLA,UNH,-0.11904884615027914,Technology,Short-term (60 days)
-TSLA,XOM,-0.006873097842372978,Technology,Short-term (60 days)
-TSLA,CVX,0.203741614394474,Technology,Short-term (60 days)
-TSLA,COP,-0.02097287608420575,Technology,Short-term (60 days)
-JPM,BAC,0.6532003602508824,Finance,Short-term (60 days)
-JPM,GS,0.6221306592194814,Finance,Short-term (60 days)
-JPM,WFC,0.7034515780358142,Finance,Short-term (60 days)
-JPM,JNJ,-0.1919866714699895,Finance,Short-term (60 days)
-JPM,PFE,0.13868984196028075,Finance,Short-term (60 days)
-JPM,UNH,0.10946335455316268,Finance,Short-term (60 days)
-JPM,XOM,0.2011127589339887,Finance,Short-term (60 days)
-JPM,CVX,0.0066106103107645186,Finance,Short-term (60 days)
-JPM,COP,0.06537847999844626,Finance,Short-term (60 days)
-BAC,GS,0.7071160679233086,Finance,Short-term (60 days)
-BAC,WFC,0.6524071759500064,Finance,Short-term (60 days)
-BAC,JNJ,-0.022091466444796155,Finance,Short-term (60 days)
-BAC,PFE,0.14611449444089358,Finance,Short-term (60 days)
-BAC,UNH,0.05918315206659185,Finance,Short-term (60 days)
-BAC,XOM,0.30336195126546517,Finance,Short-term (60 days)
-BAC,CVX,0.07138116323979918,Finance,Short-term (60 days)
-BAC,COP,0.14132862557430514,Finance,Short-term (60 days)
-GS,WFC,0.6612950980899773,Finance,Short-term (60 days)
-GS,JNJ,-0.0711406127657379,Finance,Short-term (60 days)
-GS,PFE,0.02086636219468873,Finance,Short-term (60 days)
-GS,UNH,0.025828427633834708,Finance,Short-term (60 days)
-GS,XOM,0.16315603620440797,Finance,Short-term (60 days)
-GS,CVX,-0.0341460658536425,Finance,Short-term (60 days)
-GS,COP,-0.00228512693789985,Finance,Short-term (60 days)
-WFC,JNJ,-0.1695613336618138,Finance,Short-term (60 days)
-WFC,PFE,-0.1163062811378762,Finance,Short-term (60 days)
-WFC,UNH,0.017117952916904898,Finance,Short-term (60 days)
-WFC,XOM,0.25582964678330766,Finance,Short-term (60 days)
-WFC,CVX,0.10871030474708761,Finance,Short-term (60 days)
-WFC,COP,0.20114178527715607,Finance,Short-term (60 days)
-JNJ,PFE,0.3065178555226647,Healthcare,Short-term (60 days)
-JNJ,UNH,0.26272809127229485,Healthcare,Short-term (60 days)
-JNJ,XOM,0.0744669636825777,Healthcare,Short-term (60 days)
-JNJ,CVX,0.09788892305464394,Healthcare,Short-term (60 days)
-JNJ,COP,0.03936513248606498,Healthcare,Short-term (60 days)
-PFE,UNH,0.27212289778876536,Healthcare,Short-term (60 days)
-PFE,XOM,-0.08659946571787318,Healthcare,Short-term (60 days)
-PFE,CVX,-0.15738176559895176,Healthcare,Short-term (60 days)
-PFE,COP,-0.1885754557653039,Healthcare,Short-term (60 days)
-UNH,XOM,0.025240046405235615,Healthcare,Short-term (60 days)
-UNH,CVX,-0.15094183026053554,Healthcare,Short-term (60 days)
-UNH,COP,-0.1444242175967038,Healthcare,Short-term (60 days)
-XOM,CVX,0.7526947061189304,Energy,Short-term (60 days)
-XOM,COP,0.7784423556087865,Energy,Short-term (60 days)
-CVX,COP,0.7409240447699231,Energy,Short-term (60 days)
-AAPL,MSFT,0.7971928528389141,Technology,Long-term (250 days)
-AAPL,GOOGL,0.7247760416094113,Technology,Long-term (250 days)
-AAPL,AMZN,0.7463471511965406,Technology,Long-term (250 days)
-AAPL,TSLA,0.7679095459261811,Technology,Long-term (250 days)
-AAPL,JPM,-0.02920523153462166,Technology,Long-term (250 days)
-AAPL,BAC,0.05364934998720048,Technology,Long-term (250 days)
-AAPL,GS,-0.0003227711728646761,Technology,Long-term (250 days)
-AAPL,WFC,0.0762933395233198,Technology,Long-term (250 days)
-AAPL,JNJ,0.050900013726348316,Technology,Long-term (250 days)
-AAPL,PFE,-0.05389156633575425,Technology,Long-term (250 days)
-AAPL,UNH,-0.026547808816193185,Technology,Long-term (250 days)
-AAPL,XOM,-0.029123629379253627,Technology,Long-term (250 days)
-AAPL,CVX,0.01125632390545604,Technology,Long-term (250 days)
-AAPL,COP,-0.010236506359463536,Technology,Long-term (250 days)
-MSFT,GOOGL,0.7343396367677104,Technology,Long-term (250 days)
-MSFT,AMZN,0.7718259156129305,Technology,Long-term (250 days)
-MSFT,TSLA,0.7917808923259679,Technology,Long-term (250 days)
-MSFT,JPM,-0.00870692561366502,Technology,Long-term (250 days)
-MSFT,BAC,0.0715214263779739,Technology,Long-term (250 days)
-MSFT,GS,0.03271549329252431,Technology,Long-term (250 days)
-MSFT,WFC,0.0823862602976718,Technology,Long-term (250 days)
-MSFT,JNJ,0.055936069960647455,Technology,Long-term (250 days)
-MSFT,PFE,-0.03731433542195999,Technology,Long-term (250 days)
-MSFT,UNH,0.005662811148525698,Technology,Long-term (250 days)
-MSFT,XOM,-0.02826387699711945,Technology,Long-term (250 days)
-MSFT,CVX,0.03548943084188413,Technology,Long-term (250 days)
-MSFT,COP,0.01217401932451676,Technology,Long-term (250 days)
-GOOGL,AMZN,0.7457311058520281,Technology,Long-term (250 days)
-GOOGL,TSLA,0.748911401834707,Technology,Long-term (250 days)
-GOOGL,JPM,-0.04508259214384733,Technology,Long-term (250 days)
-GOOGL,BAC,0.06867885181363911,Technology,Long-term (250 days)
-GOOGL,GS,-0.01565683348375322,Technology,Long-term (250 days)
-GOOGL,WFC,0.03230706583840099,Technology,Long-term (250 days)
-GOOGL,JNJ,0.07128122441767899,Technology,Long-term (250 days)
-GOOGL,PFE,-0.08932321706367073,Technology,Long-term (250 days)
-GOOGL,UNH,0.02078069949812157,Technology,Long-term (250 days)
-GOOGL,XOM,0.028976041462998304,Technology,Long-term (250 days)
-GOOGL,CVX,0.030077643110931612,Technology,Long-term (250 days)
-GOOGL,COP,0.06779329765092718,Technology,Long-term (250 days)
-AMZN,TSLA,0.748373792294646,Technology,Long-term (250 days)
-AMZN,JPM,0.003794491456811667,Technology,Long-term (250 days)
-AMZN,BAC,0.07554866743331734,Technology,Long-term (250 days)
-AMZN,GS,0.023671373325188975,Technology,Long-term (250 days)
-AMZN,WFC,0.0474689604640582,Technology,Long-term (250 days)
-AMZN,JNJ,0.00823451055279486,Technology,Long-term (250 days)
-AMZN,PFE,-0.07402482608329262,Technology,Long-term (250 days)
-AMZN,UNH,0.010142996459516863,Technology,Long-term (250 days)
-AMZN,XOM,0.004058934080590599,Technology,Long-term (250 days)
-AMZN,CVX,0.04663791214496197,Technology,Long-term (250 days)
-AMZN,COP,0.029602737365675633,Technology,Long-term (250 days)
-TSLA,JPM,-0.05110227008061185,Technology,Long-term (250 days)
-TSLA,BAC,0.09608978458428288,Technology,Long-term (250 days)
-TSLA,GS,0.04275970510652299,Technology,Long-term (250 days)
-TSLA,WFC,0.05359024921733781,Technology,Long-term (250 days)
-TSLA,JNJ,0.07037621325282524,Technology,Long-term (250 days)
-TSLA,PFE,-0.08347606662236887,Technology,Long-term (250 days)
-TSLA,UNH,-0.04503433857318089,Technology,Long-term (250 days)
-TSLA,XOM,0.014463163387439013,Technology,Long-term (250 days)
-TSLA,CVX,0.08861489496675372,Technology,Long-term (250 days)
-TSLA,COP,0.05526990952710964,Technology,Long-term (250 days)
-JPM,BAC,0.6495409304937002,Finance,Long-term (250 days)
-JPM,GS,0.6932371046281164,Finance,Long-term (250 days)
-JPM,WFC,0.6975264449675336,Finance,Long-term (250 days)
-JPM,JNJ,-0.01653772827078526,Finance,Long-term (250 days)
-JPM,PFE,0.08675151378411221,Finance,Long-term (250 days)
-JPM,UNH,0.11449389086062364,Finance,Long-term (250 days)
-JPM,XOM,0.07327229046693322,Finance,Long-term (250 days)
-JPM,CVX,-0.01085966454263143,Finance,Long-term (250 days)
-JPM,COP,0.03334328795267473,Finance,Long-term (250 days)
-BAC,GS,0.6938833141413305,Finance,Long-term (250 days)
-BAC,WFC,0.671589834154253,Finance,Long-term (250 days)
-BAC,JNJ,-0.027734836255612693,Finance,Long-term (250 days)
-BAC,PFE,-0.047199866689018044,Finance,Long-term (250 days)
-BAC,UNH,-0.01796412040344664,Finance,Long-term (250 days)
-BAC,XOM,0.10860232118322895,Finance,Long-term (250 days)
-BAC,CVX,0.030394477508873495,Finance,Long-term (250 days)
-BAC,COP,0.04947947484711314,Finance,Long-term (250 days)
-GS,WFC,0.6966193586595394,Finance,Long-term (250 days)
-GS,JNJ,-0.006956772912747606,Finance,Long-term (250 days)
-GS,PFE,0.007449041329140483,Finance,Long-term (250 days)
-GS,UNH,0.01417360573225066,Finance,Long-term (250 days)
-GS,XOM,0.017013621808541,Finance,Long-term (250 days)
-GS,CVX,-0.038544223079879314,Finance,Long-term (250 days)
-GS,COP,0.013327314745586981,Finance,Long-term (250 days)
-WFC,JNJ,-0.010928928866613322,Finance,Long-term (250 days)
-WFC,PFE,-0.009986773604823293,Finance,Long-term (250 days)
-WFC,UNH,0.021471280570271582,Finance,Long-term (250 days)
-WFC,XOM,0.07820075785879692,Finance,Long-term (250 days)
-WFC,CVX,0.04712751139177629,Finance,Long-term (250 days)
-WFC,COP,0.07170737895918972,Finance,Long-term (250 days)
-JNJ,PFE,0.4597588328049435,Healthcare,Long-term (250 days)
-JNJ,UNH,0.4137280149638163,Healthcare,Long-term (250 days)
-JNJ,XOM,-0.1087393845945362,Healthcare,Long-term (250 days)
-JNJ,CVX,-0.1359289753274346,Healthcare,Long-term (250 days)
-JNJ,COP,-0.08097450879413332,Healthcare,Long-term (250 days)
-PFE,UNH,0.4483548859388633,Healthcare,Long-term (250 days)
-PFE,XOM,-0.06505050370757108,Healthcare,Long-term (250 days)
-PFE,CVX,-0.09594209243088796,Healthcare,Long-term (250 days)
-PFE,COP,-0.08455744935977456,Healthcare,Long-term (250 days)
-UNH,XOM,-0.08070978960290205,Healthcare,Long-term (250 days)
-UNH,CVX,-0.19700681059187766,Healthcare,Long-term (250 days)
-UNH,COP,-0.17382140130938034,Healthcare,Long-term (250 days)
-XOM,CVX,0.7845773499649997,Energy,Long-term (250 days)
-XOM,COP,0.7869506799853874,Energy,Long-term (250 days)
-CVX,COP,0.7880814898894273,Energy,Long-term (250 days)
-AAPL,MSFT,0.5753640605128552,Technology,Volatility Correlations
-AAPL,GOOGL,0.4663687227586928,Technology,Volatility Correlations
-AAPL,AMZN,0.44092903444174725,Technology,Volatility Correlations
-AAPL,TSLA,0.5396476782296338,Technology,Volatility Correlations
-AAPL,JPM,0.02467158948819663,Technology,Volatility Correlations
-AAPL,BAC,0.05328226788273582,Technology,Volatility Correlations
-AAPL,GS,0.00013954665532134336,Technology,Volatility Correlations
-AAPL,WFC,0.061003307775767374,Technology,Volatility Correlations
-AAPL,JNJ,-0.004589953821187733,Technology,Volatility Correlations
-AAPL,PFE,0.0008341607091569686,Technology,Volatility Correlations
-AAPL,UNH,-0.0023730007964161627,Technology,Volatility Correlations
-AAPL,XOM,0.0239245443672293,Technology,Volatility Correlations
-AAPL,CVX,-0.029488795469551174,Technology,Volatility Correlations
-AAPL,COP,0.08745234676567014,Technology,Volatility Correlations
-MSFT,GOOGL,0.46556854773294587,Technology,Volatility Correlations
-MSFT,AMZN,0.47703993150062424,Technology,Volatility Correlations
-MSFT,TSLA,0.5391962829196753,Technology,Volatility Correlations
-MSFT,JPM,0.027383180579630753,Technology,Volatility Correlations
-MSFT,BAC,0.05865028293166846,Technology,Volatility Correlations
-MSFT,GS,0.10786332051799637,Technology,Volatility Correlations
-MSFT,WFC,0.10560619417081717,Technology,Volatility Correlations
-MSFT,JNJ,0.005368568875967387,Technology,Volatility Correlations
-MSFT,PFE,0.05250858127349495,Technology,Volatility Correlations
-MSFT,UNH,-0.058184366872540784,Technology,Volatility Correlations
-MSFT,XOM,0.03305979073436712,Technology,Volatility Correlations
-MSFT,CVX,-0.036242921384233455,Technology,Volatility Correlations
-MSFT,COP,0.06450739029581648,Technology,Volatility Correlations
-GOOGL,AMZN,0.46085189086642964,Technology,Volatility Correlations
-GOOGL,TSLA,0.45246592570151545,Technology,Volatility Correlations
-GOOGL,JPM,0.04793684072675736,Technology,Volatility Correlations
-GOOGL,BAC,0.02549725670458709,Technology,Volatility Correlations
-GOOGL,GS,0.10163403421610868,Technology,Volatility Correlations
-GOOGL,WFC,0.036251226042097,Technology,Volatility Correlations
-GOOGL,JNJ,-0.0007693682579228903,Technology,Volatility Correlations
-GOOGL,PFE,0.03615314967687872,Technology,Volatility Correlations
-GOOGL,UNH,-0.013028671569162155,Technology,Volatility Correlations
-GOOGL,XOM,0.10186124352668938,Technology,Volatility Correlations
-GOOGL,CVX,-0.0068737184292767305,Technology,Volatility Correlations
-GOOGL,COP,0.1577272644946051,Technology,Volatility Correlations
-AMZN,TSLA,0.47038614047075206,Technology,Volatility Correlations
-AMZN,JPM,0.048148477996765915,Technology,Volatility Correlations
-AMZN,BAC,0.02977144104029714,Technology,Volatility Correlations
-AMZN,GS,0.04872907369934073,Technology,Volatility Correlations
-AMZN,WFC,-0.0010416179013401617,Technology,Volatility Correlations
-AMZN,JNJ,0.02269527073952346,Technology,Volatility Correlations
-AMZN,PFE,-0.025156841682446744,Technology,Volatility Correlations
-AMZN,UNH,-0.03310439749432319,Technology,Volatility Correlations
-AMZN,XOM,0.05906906014159984,Technology,Volatility Correlations
-AMZN,CVX,0.033231755990337015,Technology,Volatility Correlations
-AMZN,COP,0.06353247572243952,Technology,Volatility Correlations
-TSLA,JPM,0.11163714289525069,Technology,Volatility Correlations
-TSLA,BAC,0.0532447647032371,Technology,Volatility Correlations
-TSLA,GS,0.05122163701977548,Technology,Volatility Correlations
-TSLA,WFC,-0.01261179599901188,Technology,Volatility Correlations
-TSLA,JNJ,0.0003913068324057167,Technology,Volatility Correlations
-TSLA,PFE,0.0025175804189954518,Technology,Volatility Correlations
-TSLA,UNH,-0.09152418190660208,Technology,Volatility Correlations
-TSLA,XOM,-0.012038541772814711,Technology,Volatility Correlations
-TSLA,CVX,-0.014657778602780816,Technology,Volatility Correlations
-TSLA,COP,0.10242058325559888,Technology,Volatility Correlations
-JPM,BAC,0.40713243205130073,Finance,Volatility Correlations
-JPM,GS,0.4969302793054016,Finance,Volatility Correlations
-JPM,WFC,0.40425672221026077,Finance,Volatility Correlations
-JPM,JNJ,0.06204472400108672,Finance,Volatility Correlations
-JPM,PFE,-0.06333687270858121,Finance,Volatility Correlations
-JPM,UNH,0.05281525439002768,Finance,Volatility Correlations
-JPM,XOM,0.021677034441649968,Finance,Volatility Correlations
-JPM,CVX,0.051366612096628614,Finance,Volatility Correlations
-JPM,COP,0.008459245925738034,Finance,Volatility Correlations
-BAC,GS,0.4979087624941997,Finance,Volatility Correlations
-BAC,WFC,0.4103775803019631,Finance,Volatility Correlations
-BAC,JNJ,0.07965147555224059,Finance,Volatility Correlations
-BAC,PFE,-0.003238494594309696,Finance,Volatility Correlations
-BAC,UNH,0.05532414498830564,Finance,Volatility Correlations
-BAC,XOM,-0.04381570192535578,Finance,Volatility Correlations
-BAC,CVX,0.026139651726316347,Finance,Volatility Correlations
-BAC,COP,-0.10796600175885292,Finance,Volatility Correlations
-GS,WFC,0.459930671439731,Finance,Volatility Correlations
-GS,JNJ,0.11972559171266367,Finance,Volatility Correlations
-GS,PFE,-0.0295665314950819,Finance,Volatility Correlations
-GS,UNH,0.026901412182305497,Finance,Volatility Correlations
-GS,XOM,-0.03698443219965643,Finance,Volatility Correlations
-GS,CVX,-0.011705301210446639,Finance,Volatility Correlations
-GS,COP,-0.015827817825825156,Finance,Volatility Correlations
-WFC,JNJ,0.06464524321024413,Finance,Volatility Correlations
-WFC,PFE,-0.045933278928399386,Finance,Volatility Correlations
-WFC,UNH,-0.027186319432580083,Finance,Volatility Correlations
-WFC,XOM,-0.015519632551983166,Finance,Volatility Correlations
-WFC,CVX,-0.06305264597656965,Finance,Volatility Correlations
-WFC,COP,-0.0008775740977646425,Finance,Volatility Correlations
-JNJ,PFE,0.17981373691384034,Healthcare,Volatility Correlations
-JNJ,UNH,0.17013439987292858,Healthcare,Volatility Correlations
-JNJ,XOM,0.006353113092021442,Healthcare,Volatility Correlations
-JNJ,CVX,-0.0006734348758861386,Healthcare,Volatility Correlations
-JNJ,COP,-0.10196446018525021,Healthcare,Volatility Correlations
-PFE,UNH,0.20867948259952787,Healthcare,Volatility Correlations
-PFE,XOM,0.07722064876574193,Healthcare,Volatility Correlations
-PFE,CVX,0.07186780160266634,Healthcare,Volatility Correlations
-PFE,COP,0.07094693171537392,Healthcare,Volatility Correlations
-UNH,XOM,0.002327487114228054,Healthcare,Volatility Correlations
-UNH,CVX,0.05394080252179156,Healthcare,Volatility Correlations
-UNH,COP,-0.001518635917862219,Healthcare,Volatility Correlations
-XOM,CVX,0.5526891597288598,Energy,Volatility Correlations
-XOM,COP,0.5684737220607466,Energy,Volatility Correlations
-CVX,COP,0.546567277300785,Energy,Volatility Correlations
+node1,node2,strength,sector,scenario,correlation_method
+AAPL,MSFT,0.7774124734944381,Technology,Short-term (60 days),pearson
+AAPL,GOOGL,0.7282148236463197,Technology,Short-term (60 days),pearson
+AAPL,AMZN,0.7169448937792479,Technology,Short-term (60 days),pearson
+AAPL,TSLA,0.8134639136227855,Technology,Short-term (60 days),pearson
+AAPL,JPM,-0.0824482281049433,Technology,Short-term (60 days),pearson
+AAPL,BAC,0.03673762946233845,Technology,Short-term (60 days),pearson
+AAPL,GS,-0.08458498611445675,Technology,Short-term (60 days),pearson
+AAPL,WFC,-0.12096420565983071,Technology,Short-term (60 days),pearson
+AAPL,JNJ,-0.03175925480345926,Technology,Short-term (60 days),pearson
+AAPL,PFE,0.005774403799553523,Technology,Short-term (60 days),pearson
+AAPL,UNH,0.041018282173004364,Technology,Short-term (60 days),pearson
+AAPL,XOM,0.014615629794144835,Technology,Short-term (60 days),pearson
+AAPL,CVX,0.1058473080474797,Technology,Short-term (60 days),pearson
+AAPL,COP,-0.07615646093366377,Technology,Short-term (60 days),pearson
+MSFT,GOOGL,0.7504699357520142,Technology,Short-term (60 days),pearson
+MSFT,AMZN,0.779873270393533,Technology,Short-term (60 days),pearson
+MSFT,TSLA,0.8635576598314216,Technology,Short-term (60 days),pearson
+MSFT,JPM,-0.06500360154475553,Technology,Short-term (60 days),pearson
+MSFT,BAC,0.01180685919103562,Technology,Short-term (60 days),pearson
+MSFT,GS,-0.12543682639314577,Technology,Short-term (60 days),pearson
+MSFT,WFC,-0.19593713801846535,Technology,Short-term (60 days),pearson
+MSFT,JNJ,0.026121306876213238,Technology,Short-term (60 days),pearson
+MSFT,PFE,0.026707219427540427,Technology,Short-term (60 days),pearson
+MSFT,UNH,0.006529069619343859,Technology,Short-term (60 days),pearson
+MSFT,XOM,-0.1334618113787656,Technology,Short-term (60 days),pearson
+MSFT,CVX,0.04671942623340446,Technology,Short-term (60 days),pearson
+MSFT,COP,-0.11938915326109004,Technology,Short-term (60 days),pearson
+GOOGL,AMZN,0.7845778048620308,Technology,Short-term (60 days),pearson
+GOOGL,TSLA,0.7768198798203378,Technology,Short-term (60 days),pearson
+GOOGL,JPM,-0.11647115172885267,Technology,Short-term (60 days),pearson
+GOOGL,BAC,-0.009400304883926704,Technology,Short-term (60 days),pearson
+GOOGL,GS,-0.1682109497244296,Technology,Short-term (60 days),pearson
+GOOGL,WFC,-0.16415394880067993,Technology,Short-term (60 days),pearson
+GOOGL,JNJ,0.051495543020717544,Technology,Short-term (60 days),pearson
+GOOGL,PFE,-0.07753016743607137,Technology,Short-term (60 days),pearson
+GOOGL,UNH,0.07299428559554823,Technology,Short-term (60 days),pearson
+GOOGL,XOM,-0.011878255553260475,Technology,Short-term (60 days),pearson
+GOOGL,CVX,0.12252193494263013,Technology,Short-term (60 days),pearson
+GOOGL,COP,-0.007287319638514604,Technology,Short-term (60 days),pearson
+AMZN,TSLA,0.7634136611728671,Technology,Short-term (60 days),pearson
+AMZN,JPM,-0.038318577709525965,Technology,Short-term (60 days),pearson
+AMZN,BAC,-0.002915891819242129,Technology,Short-term (60 days),pearson
+AMZN,GS,-0.1193110382922525,Technology,Short-term (60 days),pearson
+AMZN,WFC,-0.20362260016681272,Technology,Short-term (60 days),pearson
+AMZN,JNJ,-0.0359766527186055,Technology,Short-term (60 days),pearson
+AMZN,PFE,0.038063638641858306,Technology,Short-term (60 days),pearson
+AMZN,UNH,0.06639707319906123,Technology,Short-term (60 days),pearson
+AMZN,XOM,-0.08937973865690697,Technology,Short-term (60 days),pearson
+AMZN,CVX,0.0401522817440109,Technology,Short-term (60 days),pearson
+AMZN,COP,-0.054084272509268276,Technology,Short-term (60 days),pearson
+TSLA,JPM,-0.09015527554855148,Technology,Short-term (60 days),pearson
+TSLA,BAC,0.0674780203251227,Technology,Short-term (60 days),pearson
+TSLA,GS,-0.015501055237956956,Technology,Short-term (60 days),pearson
+TSLA,WFC,-0.12968966625616324,Technology,Short-term (60 days),pearson
+TSLA,JNJ,0.0248865956676091,Technology,Short-term (60 days),pearson
+TSLA,PFE,-0.027964574798877352,Technology,Short-term (60 days),pearson
+TSLA,UNH,-0.11904884615027914,Technology,Short-term (60 days),pearson
+TSLA,XOM,-0.006873097842372978,Technology,Short-term (60 days),pearson
+TSLA,CVX,0.203741614394474,Technology,Short-term (60 days),pearson
+TSLA,COP,-0.02097287608420575,Technology,Short-term (60 days),pearson
+JPM,BAC,0.6532003602508824,Finance,Short-term (60 days),pearson
+JPM,GS,0.6221306592194814,Finance,Short-term (60 days),pearson
+JPM,WFC,0.7034515780358142,Finance,Short-term (60 days),pearson
+JPM,JNJ,-0.1919866714699895,Finance,Short-term (60 days),pearson
+JPM,PFE,0.13868984196028075,Finance,Short-term (60 days),pearson
+JPM,UNH,0.10946335455316268,Finance,Short-term (60 days),pearson
+JPM,XOM,0.2011127589339887,Finance,Short-term (60 days),pearson
+JPM,CVX,0.0066106103107645186,Finance,Short-term (60 days),pearson
+JPM,COP,0.06537847999844626,Finance,Short-term (60 days),pearson
+BAC,GS,0.7071160679233086,Finance,Short-term (60 days),pearson
+BAC,WFC,0.6524071759500064,Finance,Short-term (60 days),pearson
+BAC,JNJ,-0.022091466444796155,Finance,Short-term (60 days),pearson
+BAC,PFE,0.14611449444089358,Finance,Short-term (60 days),pearson
+BAC,UNH,0.05918315206659185,Finance,Short-term (60 days),pearson
+BAC,XOM,0.30336195126546517,Finance,Short-term (60 days),pearson
+BAC,CVX,0.07138116323979918,Finance,Short-term (60 days),pearson
+BAC,COP,0.14132862557430514,Finance,Short-term (60 days),pearson
+GS,WFC,0.6612950980899773,Finance,Short-term (60 days),pearson
+GS,JNJ,-0.0711406127657379,Finance,Short-term (60 days),pearson
+GS,PFE,0.02086636219468873,Finance,Short-term (60 days),pearson
+GS,UNH,0.025828427633834708,Finance,Short-term (60 days),pearson
+GS,XOM,0.16315603620440797,Finance,Short-term (60 days),pearson
+GS,CVX,-0.0341460658536425,Finance,Short-term (60 days),pearson
+GS,COP,-0.00228512693789985,Finance,Short-term (60 days),pearson
+WFC,JNJ,-0.1695613336618138,Finance,Short-term (60 days),pearson
+WFC,PFE,-0.1163062811378762,Finance,Short-term (60 days),pearson
+WFC,UNH,0.017117952916904898,Finance,Short-term (60 days),pearson
+WFC,XOM,0.25582964678330766,Finance,Short-term (60 days),pearson
+WFC,CVX,0.10871030474708761,Finance,Short-term (60 days),pearson
+WFC,COP,0.20114178527715607,Finance,Short-term (60 days),pearson
+JNJ,PFE,0.3065178555226647,Healthcare,Short-term (60 days),pearson
+JNJ,UNH,0.26272809127229485,Healthcare,Short-term (60 days),pearson
+JNJ,XOM,0.0744669636825777,Healthcare,Short-term (60 days),pearson
+JNJ,CVX,0.09788892305464394,Healthcare,Short-term (60 days),pearson
+JNJ,COP,0.03936513248606498,Healthcare,Short-term (60 days),pearson
+PFE,UNH,0.27212289778876536,Healthcare,Short-term (60 days),pearson
+PFE,XOM,-0.08659946571787318,Healthcare,Short-term (60 days),pearson
+PFE,CVX,-0.15738176559895176,Healthcare,Short-term (60 days),pearson
+PFE,COP,-0.1885754557653039,Healthcare,Short-term (60 days),pearson
+UNH,XOM,0.025240046405235615,Healthcare,Short-term (60 days),pearson
+UNH,CVX,-0.15094183026053554,Healthcare,Short-term (60 days),pearson
+UNH,COP,-0.1444242175967038,Healthcare,Short-term (60 days),pearson
+XOM,CVX,0.7526947061189304,Energy,Short-term (60 days),pearson
+XOM,COP,0.7784423556087865,Energy,Short-term (60 days),pearson
+CVX,COP,0.7409240447699231,Energy,Short-term (60 days),pearson
+AAPL,MSFT,0.7971928528389141,Technology,Long-term (250 days),pearson
+AAPL,GOOGL,0.7247760416094113,Technology,Long-term (250 days),pearson
+AAPL,AMZN,0.7463471511965406,Technology,Long-term (250 days),pearson
+AAPL,TSLA,0.7679095459261811,Technology,Long-term (250 days),pearson
+AAPL,JPM,-0.02920523153462166,Technology,Long-term (250 days),pearson
+AAPL,BAC,0.05364934998720048,Technology,Long-term (250 days),pearson
+AAPL,GS,-0.0003227711728646761,Technology,Long-term (250 days),pearson
+AAPL,WFC,0.0762933395233198,Technology,Long-term (250 days),pearson
+AAPL,JNJ,0.050900013726348316,Technology,Long-term (250 days),pearson
+AAPL,PFE,-0.05389156633575425,Technology,Long-term (250 days),pearson
+AAPL,UNH,-0.026547808816193185,Technology,Long-term (250 days),pearson
+AAPL,XOM,-0.029123629379253627,Technology,Long-term (250 days),pearson
+AAPL,CVX,0.01125632390545604,Technology,Long-term (250 days),pearson
+AAPL,COP,-0.010236506359463536,Technology,Long-term (250 days),pearson
+MSFT,GOOGL,0.7343396367677104,Technology,Long-term (250 days),pearson
+MSFT,AMZN,0.7718259156129305,Technology,Long-term (250 days),pearson
+MSFT,TSLA,0.7917808923259679,Technology,Long-term (250 days),pearson
+MSFT,JPM,-0.00870692561366502,Technology,Long-term (250 days),pearson
+MSFT,BAC,0.0715214263779739,Technology,Long-term (250 days),pearson
+MSFT,GS,0.03271549329252431,Technology,Long-term (250 days),pearson
+MSFT,WFC,0.0823862602976718,Technology,Long-term (250 days),pearson
+MSFT,JNJ,0.055936069960647455,Technology,Long-term (250 days),pearson
+MSFT,PFE,-0.03731433542195999,Technology,Long-term (250 days),pearson
+MSFT,UNH,0.005662811148525698,Technology,Long-term (250 days),pearson
+MSFT,XOM,-0.02826387699711945,Technology,Long-term (250 days),pearson
+MSFT,CVX,0.03548943084188413,Technology,Long-term (250 days),pearson
+MSFT,COP,0.01217401932451676,Technology,Long-term (250 days),pearson
+GOOGL,AMZN,0.7457311058520281,Technology,Long-term (250 days),pearson
+GOOGL,TSLA,0.748911401834707,Technology,Long-term (250 days),pearson
+GOOGL,JPM,-0.04508259214384733,Technology,Long-term (250 days),pearson
+GOOGL,BAC,0.06867885181363911,Technology,Long-term (250 days),pearson
+GOOGL,GS,-0.01565683348375322,Technology,Long-term (250 days),pearson
+GOOGL,WFC,0.03230706583840099,Technology,Long-term (250 days),pearson
+GOOGL,JNJ,0.07128122441767899,Technology,Long-term (250 days),pearson
+GOOGL,PFE,-0.08932321706367073,Technology,Long-term (250 days),pearson
+GOOGL,UNH,0.02078069949812157,Technology,Long-term (250 days),pearson
+GOOGL,XOM,0.028976041462998304,Technology,Long-term (250 days),pearson
+GOOGL,CVX,0.030077643110931612,Technology,Long-term (250 days),pearson
+GOOGL,COP,0.06779329765092718,Technology,Long-term (250 days),pearson
+AMZN,TSLA,0.748373792294646,Technology,Long-term (250 days),pearson
+AMZN,JPM,0.003794491456811667,Technology,Long-term (250 days),pearson
+AMZN,BAC,0.07554866743331734,Technology,Long-term (250 days),pearson
+AMZN,GS,0.023671373325188975,Technology,Long-term (250 days),pearson
+AMZN,WFC,0.0474689604640582,Technology,Long-term (250 days),pearson
+AMZN,JNJ,0.00823451055279486,Technology,Long-term (250 days),pearson
+AMZN,PFE,-0.07402482608329262,Technology,Long-term (250 days),pearson
+AMZN,UNH,0.010142996459516863,Technology,Long-term (250 days),pearson
+AMZN,XOM,0.004058934080590599,Technology,Long-term (250 days),pearson
+AMZN,CVX,0.04663791214496197,Technology,Long-term (250 days),pearson
+AMZN,COP,0.029602737365675633,Technology,Long-term (250 days),pearson
+TSLA,JPM,-0.05110227008061185,Technology,Long-term (250 days),pearson
+TSLA,BAC,0.09608978458428288,Technology,Long-term (250 days),pearson
+TSLA,GS,0.04275970510652299,Technology,Long-term (250 days),pearson
+TSLA,WFC,0.05359024921733781,Technology,Long-term (250 days),pearson
+TSLA,JNJ,0.07037621325282524,Technology,Long-term (250 days),pearson
+TSLA,PFE,-0.08347606662236887,Technology,Long-term (250 days),pearson
+TSLA,UNH,-0.04503433857318089,Technology,Long-term (250 days),pearson
+TSLA,XOM,0.014463163387439013,Technology,Long-term (250 days),pearson
+TSLA,CVX,0.08861489496675372,Technology,Long-term (250 days),pearson
+TSLA,COP,0.05526990952710964,Technology,Long-term (250 days),pearson
+JPM,BAC,0.6495409304937002,Finance,Long-term (250 days),pearson
+JPM,GS,0.6932371046281164,Finance,Long-term (250 days),pearson
+JPM,WFC,0.6975264449675336,Finance,Long-term (250 days),pearson
+JPM,JNJ,-0.01653772827078526,Finance,Long-term (250 days),pearson
+JPM,PFE,0.08675151378411221,Finance,Long-term (250 days),pearson
+JPM,UNH,0.11449389086062364,Finance,Long-term (250 days),pearson
+JPM,XOM,0.07327229046693322,Finance,Long-term (250 days),pearson
+JPM,CVX,-0.01085966454263143,Finance,Long-term (250 days),pearson
+JPM,COP,0.03334328795267473,Finance,Long-term (250 days),pearson
+BAC,GS,0.6938833141413305,Finance,Long-term (250 days),pearson
+BAC,WFC,0.671589834154253,Finance,Long-term (250 days),pearson
+BAC,JNJ,-0.027734836255612693,Finance,Long-term (250 days),pearson
+BAC,PFE,-0.047199866689018044,Finance,Long-term (250 days),pearson
+BAC,UNH,-0.01796412040344664,Finance,Long-term (250 days),pearson
+BAC,XOM,0.10860232118322895,Finance,Long-term (250 days),pearson
+BAC,CVX,0.030394477508873495,Finance,Long-term (250 days),pearson
+BAC,COP,0.04947947484711314,Finance,Long-term (250 days),pearson
+GS,WFC,0.6966193586595394,Finance,Long-term (250 days),pearson
+GS,JNJ,-0.006956772912747606,Finance,Long-term (250 days),pearson
+GS,PFE,0.007449041329140483,Finance,Long-term (250 days),pearson
+GS,UNH,0.01417360573225066,Finance,Long-term (250 days),pearson
+GS,XOM,0.017013621808541,Finance,Long-term (250 days),pearson
+GS,CVX,-0.038544223079879314,Finance,Long-term (250 days),pearson
+GS,COP,0.013327314745586981,Finance,Long-term (250 days),pearson
+WFC,JNJ,-0.010928928866613322,Finance,Long-term (250 days),pearson
+WFC,PFE,-0.009986773604823293,Finance,Long-term (250 days),pearson
+WFC,UNH,0.021471280570271582,Finance,Long-term (250 days),pearson
+WFC,XOM,0.07820075785879692,Finance,Long-term (250 days),pearson
+WFC,CVX,0.04712751139177629,Finance,Long-term (250 days),pearson
+WFC,COP,0.07170737895918972,Finance,Long-term (250 days),pearson
+JNJ,PFE,0.4597588328049435,Healthcare,Long-term (250 days),pearson
+JNJ,UNH,0.4137280149638163,Healthcare,Long-term (250 days),pearson
+JNJ,XOM,-0.1087393845945362,Healthcare,Long-term (250 days),pearson
+JNJ,CVX,-0.1359289753274346,Healthcare,Long-term (250 days),pearson
+JNJ,COP,-0.08097450879413332,Healthcare,Long-term (250 days),pearson
+PFE,UNH,0.4483548859388633,Healthcare,Long-term (250 days),pearson
+PFE,XOM,-0.06505050370757108,Healthcare,Long-term (250 days),pearson
+PFE,CVX,-0.09594209243088796,Healthcare,Long-term (250 days),pearson
+PFE,COP,-0.08455744935977456,Healthcare,Long-term (250 days),pearson
+UNH,XOM,-0.08070978960290205,Healthcare,Long-term (250 days),pearson
+UNH,CVX,-0.19700681059187766,Healthcare,Long-term (250 days),pearson
+UNH,COP,-0.17382140130938034,Healthcare,Long-term (250 days),pearson
+XOM,CVX,0.7845773499649997,Energy,Long-term (250 days),pearson
+XOM,COP,0.7869506799853874,Energy,Long-term (250 days),pearson
+CVX,COP,0.7880814898894273,Energy,Long-term (250 days),pearson
+AAPL,MSFT,0.5753640605128552,Technology,Volatility Correlations,pearson
+AAPL,GOOGL,0.4663687227586928,Technology,Volatility Correlations,pearson
+AAPL,AMZN,0.44092903444174725,Technology,Volatility Correlations,pearson
+AAPL,TSLA,0.5396476782296338,Technology,Volatility Correlations,pearson
+AAPL,JPM,0.02467158948819663,Technology,Volatility Correlations,pearson
+AAPL,BAC,0.05328226788273582,Technology,Volatility Correlations,pearson
+AAPL,GS,0.00013954665532134336,Technology,Volatility Correlations,pearson
+AAPL,WFC,0.061003307775767374,Technology,Volatility Correlations,pearson
+AAPL,JNJ,-0.004589953821187733,Technology,Volatility Correlations,pearson
+AAPL,PFE,0.0008341607091569686,Technology,Volatility Correlations,pearson
+AAPL,UNH,-0.0023730007964161627,Technology,Volatility Correlations,pearson
+AAPL,XOM,0.0239245443672293,Technology,Volatility Correlations,pearson
+AAPL,CVX,-0.029488795469551174,Technology,Volatility Correlations,pearson
+AAPL,COP,0.08745234676567014,Technology,Volatility Correlations,pearson
+MSFT,GOOGL,0.46556854773294587,Technology,Volatility Correlations,pearson
+MSFT,AMZN,0.47703993150062424,Technology,Volatility Correlations,pearson
+MSFT,TSLA,0.5391962829196753,Technology,Volatility Correlations,pearson
+MSFT,JPM,0.027383180579630753,Technology,Volatility Correlations,pearson
+MSFT,BAC,0.05865028293166846,Technology,Volatility Correlations,pearson
+MSFT,GS,0.10786332051799637,Technology,Volatility Correlations,pearson
+MSFT,WFC,0.10560619417081717,Technology,Volatility Correlations,pearson
+MSFT,JNJ,0.005368568875967387,Technology,Volatility Correlations,pearson
+MSFT,PFE,0.05250858127349495,Technology,Volatility Correlations,pearson
+MSFT,UNH,-0.058184366872540784,Technology,Volatility Correlations,pearson
+MSFT,XOM,0.03305979073436712,Technology,Volatility Correlations,pearson
+MSFT,CVX,-0.036242921384233455,Technology,Volatility Correlations,pearson
+MSFT,COP,0.06450739029581648,Technology,Volatility Correlations,pearson
+GOOGL,AMZN,0.46085189086642964,Technology,Volatility Correlations,pearson
+GOOGL,TSLA,0.45246592570151545,Technology,Volatility Correlations,pearson
+GOOGL,JPM,0.04793684072675736,Technology,Volatility Correlations,pearson
+GOOGL,BAC,0.02549725670458709,Technology,Volatility Correlations,pearson
+GOOGL,GS,0.10163403421610868,Technology,Volatility Correlations,pearson
+GOOGL,WFC,0.036251226042097,Technology,Volatility Correlations,pearson
+GOOGL,JNJ,-0.0007693682579228903,Technology,Volatility Correlations,pearson
+GOOGL,PFE,0.03615314967687872,Technology,Volatility Correlations,pearson
+GOOGL,UNH,-0.013028671569162155,Technology,Volatility Correlations,pearson
+GOOGL,XOM,0.10186124352668938,Technology,Volatility Correlations,pearson
+GOOGL,CVX,-0.0068737184292767305,Technology,Volatility Correlations,pearson
+GOOGL,COP,0.1577272644946051,Technology,Volatility Correlations,pearson
+AMZN,TSLA,0.47038614047075206,Technology,Volatility Correlations,pearson
+AMZN,JPM,0.048148477996765915,Technology,Volatility Correlations,pearson
+AMZN,BAC,0.02977144104029714,Technology,Volatility Correlations,pearson
+AMZN,GS,0.04872907369934073,Technology,Volatility Correlations,pearson
+AMZN,WFC,-0.0010416179013401617,Technology,Volatility Correlations,pearson
+AMZN,JNJ,0.02269527073952346,Technology,Volatility Correlations,pearson
+AMZN,PFE,-0.025156841682446744,Technology,Volatility Correlations,pearson
+AMZN,UNH,-0.03310439749432319,Technology,Volatility Correlations,pearson
+AMZN,XOM,0.05906906014159984,Technology,Volatility Correlations,pearson
+AMZN,CVX,0.033231755990337015,Technology,Volatility Correlations,pearson
+AMZN,COP,0.06353247572243952,Technology,Volatility Correlations,pearson
+TSLA,JPM,0.11163714289525069,Technology,Volatility Correlations,pearson
+TSLA,BAC,0.0532447647032371,Technology,Volatility Correlations,pearson
+TSLA,GS,0.05122163701977548,Technology,Volatility Correlations,pearson
+TSLA,WFC,-0.01261179599901188,Technology,Volatility Correlations,pearson
+TSLA,JNJ,0.0003913068324057167,Technology,Volatility Correlations,pearson
+TSLA,PFE,0.0025175804189954518,Technology,Volatility Correlations,pearson
+TSLA,UNH,-0.09152418190660208,Technology,Volatility Correlations,pearson
+TSLA,XOM,-0.012038541772814711,Technology,Volatility Correlations,pearson
+TSLA,CVX,-0.014657778602780816,Technology,Volatility Correlations,pearson
+TSLA,COP,0.10242058325559888,Technology,Volatility Correlations,pearson
+JPM,BAC,0.40713243205130073,Finance,Volatility Correlations,pearson
+JPM,GS,0.4969302793054016,Finance,Volatility Correlations,pearson
+JPM,WFC,0.40425672221026077,Finance,Volatility Correlations,pearson
+JPM,JNJ,0.06204472400108672,Finance,Volatility Correlations,pearson
+JPM,PFE,-0.06333687270858121,Finance,Volatility Correlations,pearson
+JPM,UNH,0.05281525439002768,Finance,Volatility Correlations,pearson
+JPM,XOM,0.021677034441649968,Finance,Volatility Correlations,pearson
+JPM,CVX,0.051366612096628614,Finance,Volatility Correlations,pearson
+JPM,COP,0.008459245925738034,Finance,Volatility Correlations,pearson
+BAC,GS,0.4979087624941997,Finance,Volatility Correlations,pearson
+BAC,WFC,0.4103775803019631,Finance,Volatility Correlations,pearson
+BAC,JNJ,0.07965147555224059,Finance,Volatility Correlations,pearson
+BAC,PFE,-0.003238494594309696,Finance,Volatility Correlations,pearson
+BAC,UNH,0.05532414498830564,Finance,Volatility Correlations,pearson
+BAC,XOM,-0.04381570192535578,Finance,Volatility Correlations,pearson
+BAC,CVX,0.026139651726316347,Finance,Volatility Correlations,pearson
+BAC,COP,-0.10796600175885292,Finance,Volatility Correlations,pearson
+GS,WFC,0.459930671439731,Finance,Volatility Correlations,pearson
+GS,JNJ,0.11972559171266367,Finance,Volatility Correlations,pearson
+GS,PFE,-0.0295665314950819,Finance,Volatility Correlations,pearson
+GS,UNH,0.026901412182305497,Finance,Volatility Correlations,pearson
+GS,XOM,-0.03698443219965643,Finance,Volatility Correlations,pearson
+GS,CVX,-0.011705301210446639,Finance,Volatility Correlations,pearson
+GS,COP,-0.015827817825825156,Finance,Volatility Correlations,pearson
+WFC,JNJ,0.06464524321024413,Finance,Volatility Correlations,pearson
+WFC,PFE,-0.045933278928399386,Finance,Volatility Correlations,pearson
+WFC,UNH,-0.027186319432580083,Finance,Volatility Correlations,pearson
+WFC,XOM,-0.015519632551983166,Finance,Volatility Correlations,pearson
+WFC,CVX,-0.06305264597656965,Finance,Volatility Correlations,pearson
+WFC,COP,-0.0008775740977646425,Finance,Volatility Correlations,pearson
+JNJ,PFE,0.17981373691384034,Healthcare,Volatility Correlations,pearson
+JNJ,UNH,0.17013439987292858,Healthcare,Volatility Correlations,pearson
+JNJ,XOM,0.006353113092021442,Healthcare,Volatility Correlations,pearson
+JNJ,CVX,-0.0006734348758861386,Healthcare,Volatility Correlations,pearson
+JNJ,COP,-0.10196446018525021,Healthcare,Volatility Correlations,pearson
+PFE,UNH,0.20867948259952787,Healthcare,Volatility Correlations,pearson
+PFE,XOM,0.07722064876574193,Healthcare,Volatility Correlations,pearson
+PFE,CVX,0.07186780160266634,Healthcare,Volatility Correlations,pearson
+PFE,COP,0.07094693171537392,Healthcare,Volatility Correlations,pearson
+UNH,XOM,0.002327487114228054,Healthcare,Volatility Correlations,pearson
+UNH,CVX,0.05394080252179156,Healthcare,Volatility Correlations,pearson
+UNH,COP,-0.001518635917862219,Healthcare,Volatility Correlations,pearson
+XOM,CVX,0.5526891597288598,Energy,Volatility Correlations,pearson
+XOM,COP,0.5684737220607466,Energy,Volatility Correlations,pearson
+CVX,COP,0.546567277300785,Energy,Volatility Correlations,pearson
 
 </script>
 
@@ -3560,10 +3535,10 @@ Adjust the cutoff slider to filter weak correlations. Stocks in the same sector 
 
     <div style="margin-bottom: 15px;">
     <label for="cutoff_slider_stock_network"><strong>Connection cutoff:</strong>
-           <span id="cutoff_value_stock_network">0.6612950980899773</span>
+           <span id="cutoff_value_stock_network">0.5</span>
     </label>
     <input type="range" id="cutoff_slider_stock_network"
-           min="0" max="1" step="0.05" value="0.6612950980899773"
+           min="0" max="1" step="0.05" value="0.5"
            style="width: 75%; margin-left: 10px;"
            oninput="document.getElementById('cutoff_value_stock_network').textContent = this.value; updateEdges_stock_network()">
 </div>
@@ -3654,10 +3629,10 @@ Pearson measures linear relationships while Spearman measures rank-based relatio
 
     <div style="margin-bottom: 15px;">
     <label for="cutoff_slider_city_network"><strong>Connection cutoff:</strong>
-           <span id="cutoff_value_city_network">0.6598626643850626</span>
+           <span id="cutoff_value_city_network">0.5</span>
     </label>
     <input type="range" id="cutoff_slider_city_network"
-           min="0" max="1" step="0.05" value="0.6598626643850626"
+           min="0" max="1" step="0.05" value="0.5"
            style="width: 75%; margin-left: 10px;"
            oninput="document.getElementById('cutoff_value_city_network').textContent = this.value; updateEdges_city_network()">
 </div>
@@ -3998,6 +3973,6 @@ of all nodes with connections overlaid.</p>
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

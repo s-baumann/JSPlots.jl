@@ -392,11 +392,10 @@ module JSPlots
     export SanKey
 
     include("corrplot.jl")
-    include("corrplot_advanced.jl")
-    export CorrPlot, CorrelationScenario, compute_correlations, cluster_from_correlation
+    export CorrPlot, compute_correlations, prepare_corrplot_data
 
     include("graph.jl")
-    export Graph, GraphScenario, calculate_smart_cutoff
+    export Graph
 
     include("radarchart.jl")
     export RadarChart

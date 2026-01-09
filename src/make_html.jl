@@ -7,6 +7,43 @@ const SEGMENT_SEPARATOR = """
 <br>
 """
 
+"""
+    convert_zoneddatetime_to_datetime(df::DataFrame)
+
+Convert all ZonedDateTime columns in a DataFrame to DateTime by extracting the UTC datetime.
+Returns a copy of the DataFrame with converted columns, leaving the original unchanged.
+
+This ensures that temporal data displays properly in JavaScript visualizations, which expect
+DateTime objects rather than timezone-aware ZonedDateTime objects.
+"""
+function convert_zoneddatetime_to_datetime(df::DataFrame)
+    # Check if any columns need conversion
+    needs_conversion = false
+    for col in names(df)
+        col_type = eltype(df[!, col])
+        if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
+            needs_conversion = true
+            break
+        end
+    end
+
+    # If no conversion needed, return original DataFrame
+    if !needs_conversion
+        return df
+    end
+
+    # Make a copy and convert ZonedDateTime columns
+    df_converted = copy(df)
+    for col in names(df_converted)
+        col_type = eltype(df_converted[!, col])
+        if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
+            # Convert ZonedDateTime to DateTime (using UTC time)
+            df_converted[!, col] = [ismissing(x) ? missing : DateTime(x, UTC) for x in df_converted[!, col]]
+        end
+    end
+
+    return df_converted
+end
 
 const FULL_PAGE_TEMPLATE = raw"""
 <!DOCTYPE html>
@@ -643,6 +680,9 @@ ___PIVOT_TABLES___
 """
 
 function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_embedded)
+    # Convert ZonedDateTime columns to DateTime for proper display
+    df = convert_zoneddatetime_to_datetime(df)
+
     data_string = ""
     data_src = ""
 
@@ -953,6 +993,9 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         # Save all dataframes as separate files based on format
         for data_label in files_to_do
             df = pt.dataframes[data_label]
+            # Convert ZonedDateTime columns to DateTime for proper display
+            df = convert_zoneddatetime_to_datetime(df)
+
             if pt.dataformat == :csv_external
                 file_path = joinpath(data_dir, "$(string(data_label)).csv")
                 CSV.write(file_path, df)
@@ -975,16 +1018,13 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                 con = DBInterface.connect(DuckDB.DB)
 
                 # Convert Symbol columns to String (DuckDB doesn't support Symbol type)
+                # ZonedDateTime already converted above
                 df_converted = copy(df)
                 for col in names(df_converted)
                     col_type = eltype(df_converted[!, col])
                     # Check if the column type is Symbol or Union{Missing, Symbol} or similar
                     if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
                         df_converted[!, col] = string.(df_converted[!, col])
-                    end
-                    # Check if the column type is ZonedDateTime or Union{Missing, ZonedDateTime} or similar
-                    if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
-                        df_converted[!, col] = [ismissing(x) ? missing : x.utc_datetime for x in df_converted[!, col] ]
                     end
                 end
 
@@ -1315,6 +1355,9 @@ end
 Helper function to save a single DataFrame in the specified format.
 """
 function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
+    # Convert ZonedDateTime columns to DateTime for proper display
+    df = convert_zoneddatetime_to_datetime(df)
+
     if dataformat == :csv_external
         file_path = joinpath(data_dir, "$(string(data_label)).csv")
         CSV.write(file_path, df)
@@ -1334,15 +1377,12 @@ function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dat
         file_path = joinpath(data_dir, "$(string(data_label)).parquet")
         con = DBInterface.connect(DuckDB.DB)
 
-        # Convert Symbol columns to String
+        # Convert Symbol columns to String (ZonedDateTime already converted above)
         df_converted = copy(df)
         for col in names(df_converted)
             col_type = eltype(df_converted[!, col])
             if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
                 df_converted[!, col] = string.(df_converted[!, col])
-            end
-            if col_type <: ZonedDateTime || (col_type isa Union && ZonedDateTime in Base.uniontypes(col_type))
-                df_converted[!, col] = [ismissing(x) ? missing : x.utc_datetime for x in df_converted[!, col] ]
             end
         end
 

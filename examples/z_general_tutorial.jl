@@ -709,9 +709,8 @@ df_stocks = DataFrame(stock_returns, stock_symbols)
 # Scenario 1: Short-term returns (daily)
 short_vars = Symbol.(stock_symbols)
 cors_short = compute_correlations(df_stocks, short_vars)
-hc_short = cluster_from_correlation(cors_short.pearson, linkage=:ward)
-scenario_short = CorrelationScenario("Short-term Returns (Daily)",
-    cors_short.pearson, cors_short.spearman, hc_short, stock_symbols)
+corr_data_short = prepare_corrplot_data(cors_short.pearson, cors_short.spearman, stock_symbols,
+                                        scenario="Short-term Returns (Daily)")
 
 # Scenario 2: Long-term returns (20-day rolling)
 df_longterm = DataFrame()
@@ -721,9 +720,8 @@ for sym in stock_symbols
 end
 long_vars = Symbol.(stock_symbols)
 cors_long = compute_correlations(df_longterm, long_vars)
-hc_long = cluster_from_correlation(cors_long.pearson, linkage=:ward)
-scenario_long = CorrelationScenario("Long-term Returns (20-day)",
-    cors_long.pearson, cors_long.spearman, hc_long, stock_symbols)
+corr_data_long = prepare_corrplot_data(cors_long.pearson, cors_long.spearman, stock_symbols,
+                                       scenario="Long-term Returns (20-day)")
 
 # Scenario 3: Volatility correlations (rolling std deviation)
 df_volatility = DataFrame()
@@ -734,13 +732,12 @@ for sym in stock_symbols
 end
 vol_vars = Symbol.(stock_symbols)
 cors_vol = compute_correlations(df_volatility, vol_vars)
-hc_vol = cluster_from_correlation(cors_vol.pearson, linkage=:ward)
-scenario_vol = CorrelationScenario("Volatility Correlations",
-    cors_vol.pearson, cors_vol.spearman, hc_vol, stock_symbols)
+corr_data_vol = prepare_corrplot_data(cors_vol.pearson, cors_vol.spearman, stock_symbols,
+                                      scenario="Volatility Correlations")
 
-# Prepare correlation data - this will be used by BOTH CorrPlot and Graph
+# Combine all scenarios into one DataFrame
 # The data has columns: node1, node2, strength, scenario, correlation_method
-stock_corr_data = JSPlots.prepare_corrplot_advanced_data([scenario_short, scenario_long, scenario_vol])
+stock_corr_data = vcat(corr_data_short, corr_data_long, corr_data_vol)
 
 # Add sector information for Graph node coloring
 stock_sectors = Dict(
@@ -751,39 +748,27 @@ stock_sectors = Dict(
 )
 stock_corr_data[!, :sector] = [stock_sectors[asset] for asset in stock_corr_data.node1]
 
-# Create advanced CorrPlot with multiple scenarios
-corrplot5 = CorrPlot(:stock_advanced, [scenario_short, scenario_long, scenario_vol], :stock_corr_data;
+# Create CorrPlot with multiple scenarios
+corrplot5 = CorrPlot(:stock_advanced, stock_corr_data, :stock_corr_data;
     title = "Stock Market Correlation Analysis - Multiple Scenarios",
-    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns. Note that it will only appear if i) you select order by dendrogram and ii) you select all of the variables. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
+    notes = "A Correlation Plot with Dendrogram shows relationships between variables using hierarchical clustering. The dendrogram (top) groups similar variables based on their correlation patterns, with clustering performed dynamically in your browser. Note that it will only appear if i) you select order by dendrogram and ii) you select all of the variables. The correlation matrix (bottom) uses two different correlation measures: Pearson correlations (top-right triangle, marked with 'P:') measure linear relationships, while Spearman correlations (bottom-left triangle, marked with 'S:') measure monotonic relationships and are robust to outliers. You can change the clustering linkage method (Ward, Average, Single, Complete) to see different groupings. Variables are automatically reordered by the clustering to reveal correlation blocks. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CorrPlot examples</a>",
+    scenario_col = :scenario,
     default_scenario = "Short-term Returns (Daily)",
     default_variables = ["AAPL", "MSFT", "JPM", "JNJ"],
     allow_manual_order = true
 )
 
-# Graph - Network visualization using the EXACT SAME data as CorrPlot
-# Both charts read from :stock_corr_data - no data duplication!
-stock_names_for_graph = unique([stock_corr_data.node1; stock_corr_data.node2])
-
-# Create GraphScenario objects for all three scenarios
-graph_scenario_short = GraphScenario("Short-term Returns (Daily)", true, stock_names_for_graph)
-graph_scenario_long = GraphScenario("Long-term Returns (20-day)", true, stock_names_for_graph)
-graph_scenario_vol = GraphScenario("Volatility Correlations", true, stock_names_for_graph)
-
-# Calculate smart cutoff using Pearson correlations only
-pearson_data = filter(r -> r.correlation_method == "pearson", stock_corr_data)
-smart_cutoff = calculate_smart_cutoff(pearson_data, "Short-term Returns (Daily)", true, 0.15)
-
 # Create Graph using the SAME data as CorrPlot
 graph_stock = Graph(:stock_network,
-                    [graph_scenario_short, graph_scenario_long, graph_scenario_vol],
+                    stock_corr_data,
                     :stock_corr_data;
     title = "Graph",
     notes = "This Graph allows you to visualise the relationships between variables. The dataformat to make this is a DataFrame with columns: node1, node2, strength, scenario, correlation_method, sector. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html\" style=\"color: blue; font-weight: bold;\">See here for more Graph examples</a>",
-    cutoff = smart_cutoff,
+    cutoff = 0.5,
     color_cols = [:sector],
-    default_color_col = :sector,
     show_edge_labels = false,
     layout = :cose,
+    scenario_col = :scenario,
     default_scenario = "Short-term Returns (Daily)"
 )
 
@@ -916,101 +901,108 @@ radar_products = [
 ]
 
 radar_data_rows = []
-for product in radar_products
-    # Determine product category and tier
-    if occursin("Cloud Platform", product)
-        category = "Infrastructure"
-        base_tech = 85.0
-        base_ui = 70.0
-        base_perf = 90.0
-    elseif occursin("Analytics", product)
-        category = "Data & AI"
-        base_tech = 90.0
-        base_ui = 85.0
-        base_perf = 80.0
-    elseif occursin("Security", product)
-        category = "Security"
-        base_tech = 95.0
-        base_ui = 65.0
-        base_perf = 85.0
-    else  # Collaboration
-        category = "Productivity"
-        base_tech = 75.0
-        base_ui = 95.0
-        base_perf = 70.0
+
+# Generate data for two scenarios: Current Version and Next Release
+for scenario in ["Current Version", "Next Release"]
+    scenario_boost = scenario == "Next Release" ? 8.0 : 0.0  # Next release is better
+
+    for product in radar_products
+        # Determine product category and tier
+        if occursin("Cloud Platform", product)
+            category = "Infrastructure"
+            base_tech = 85.0
+            base_ui = 70.0
+            base_perf = 90.0
+        elseif occursin("Analytics", product)
+            category = "Data & AI"
+            base_tech = 90.0
+            base_ui = 85.0
+            base_perf = 80.0
+        elseif occursin("Security", product)
+            category = "Security"
+            base_tech = 95.0
+            base_ui = 65.0
+            base_perf = 85.0
+        else  # Collaboration
+            category = "Productivity"
+            base_tech = 75.0
+            base_ui = 95.0
+            base_perf = 70.0
+        end
+
+        # Determine tier
+        if occursin("Enterprise", product)
+            tier = "Enterprise"
+            tier_mult = 1.2
+            price_mult = 3.0
+        elseif occursin("Pro", product)
+            tier = "Professional"
+            tier_mult = 1.0
+            price_mult = 1.5
+        else
+            tier = "Starter"
+            tier_mult = 0.8
+            price_mult = 1.0
+        end
+
+        # Technical Performance metrics (grouped)
+        tech_reliability = min(100.0, base_tech * tier_mult + scenario_boost + randn(rng_radar) * 3)
+        tech_scalability = min(100.0, (base_tech - 5) * tier_mult + scenario_boost + randn(rng_radar) * 3)
+        tech_api_quality = min(100.0, (base_tech + 5) * tier_mult + scenario_boost + randn(rng_radar) * 3)
+        tech_integration = min(100.0, base_tech * tier_mult + scenario_boost + randn(rng_radar) * 4)
+
+        # User Experience metrics (grouped) - bigger improvement in next release
+        ux_ease_of_use = min(100.0, base_ui * tier_mult + scenario_boost * 1.5 + randn(rng_radar) * 4)
+        ux_design = min(100.0, (base_ui + 5) * tier_mult + scenario_boost * 1.5 + randn(rng_radar) * 3)
+        ux_customization = min(100.0, (base_ui - 10) * tier_mult + scenario_boost + randn(rng_radar) * 5)
+        ux_mobile = min(100.0, base_ui * tier_mult + scenario_boost * 1.5 + randn(rng_radar) * 6)
+
+        # Performance metrics (grouped)
+        perf_speed = min(100.0, base_perf * tier_mult + scenario_boost + randn(rng_radar) * 4)
+        perf_efficiency = min(100.0, (base_perf + 5) * tier_mult + scenario_boost + randn(rng_radar) * 3)
+        perf_uptime = min(100.0, (base_perf + 10) * tier_mult + scenario_boost * 0.5 + randn(rng_radar) * 2)
+
+        # Business Value metrics (grouped)
+        biz_roi = min(100.0, 100.0 - (price_mult - 1) * 20 + scenario_boost + randn(rng_radar) * 5)
+        biz_support = min(100.0, 60.0 * tier_mult + scenario_boost + randn(rng_radar) * 8)
+        biz_documentation = min(100.0, 70.0 * tier_mult + scenario_boost * 1.2 + randn(rng_radar) * 5)
+        biz_training = min(100.0, 65.0 * tier_mult + scenario_boost + randn(rng_radar) * 7)
+
+        # Market Position metrics (grouped) - less affected by release
+        market_adoption = min(100.0, 50.0 + scenario_boost * 0.3 + randn(rng_radar) * 15)
+        market_satisfaction = min(100.0, 75.0 + scenario_boost * 0.5 + randn(rng_radar) * 10)
+        market_growth = min(100.0, 60.0 + scenario_boost * 0.7 + randn(rng_radar) * 12)
+
+        push!(radar_data_rows, (
+            label = product,
+            category = category,
+            tier = tier,
+            scenario = scenario,
+            # Technical Performance
+            Reliability = tech_reliability,
+            Scalability = tech_scalability,
+            API_Quality = tech_api_quality,
+            Integration = tech_integration,
+            # User Experience
+            Ease_of_Use = ux_ease_of_use,
+            Design = ux_design,
+            Customization = ux_customization,
+            Mobile = ux_mobile,
+            # Performance
+            Speed = perf_speed,
+            Efficiency = perf_efficiency,
+            Uptime = perf_uptime,
+            # Business Value
+            ROI = biz_roi,
+            Support = biz_support,
+            Documentation = biz_documentation,
+            Training = biz_training,
+            # Market Position
+            Adoption = market_adoption,
+            Satisfaction = market_satisfaction,
+            Growth = market_growth
+        ))
     end
-
-    # Determine tier
-    if occursin("Enterprise", product)
-        tier = "Enterprise"
-        tier_mult = 1.2
-        price_mult = 3.0
-    elseif occursin("Pro", product)
-        tier = "Professional"
-        tier_mult = 1.0
-        price_mult = 1.5
-    else
-        tier = "Starter"
-        tier_mult = 0.8
-        price_mult = 1.0
-    end
-
-    # Technical Performance metrics (grouped)
-    tech_reliability = min(100.0, base_tech * tier_mult + randn(rng_radar) * 3)
-    tech_scalability = min(100.0, (base_tech - 5) * tier_mult + randn(rng_radar) * 3)
-    tech_api_quality = min(100.0, (base_tech + 5) * tier_mult + randn(rng_radar) * 3)
-    tech_integration = min(100.0, base_tech * tier_mult + randn(rng_radar) * 4)
-
-    # User Experience metrics (grouped)
-    ux_ease_of_use = min(100.0, base_ui * tier_mult + randn(rng_radar) * 4)
-    ux_design = min(100.0, (base_ui + 5) * tier_mult + randn(rng_radar) * 3)
-    ux_customization = min(100.0, (base_ui - 10) * tier_mult + randn(rng_radar) * 5)
-    ux_mobile = min(100.0, base_ui * tier_mult + randn(rng_radar) * 6)
-
-    # Performance metrics (grouped)
-    perf_speed = min(100.0, base_perf * tier_mult + randn(rng_radar) * 4)
-    perf_efficiency = min(100.0, (base_perf + 5) * tier_mult + randn(rng_radar) * 3)
-    perf_uptime = min(100.0, (base_perf + 10) * tier_mult + randn(rng_radar) * 2)
-
-    # Business Value metrics (grouped)
-    biz_roi = min(100.0, 100.0 - (price_mult - 1) * 20 + randn(rng_radar) * 5)
-    biz_support = min(100.0, 60.0 * tier_mult + randn(rng_radar) * 8)
-    biz_documentation = min(100.0, 70.0 * tier_mult + randn(rng_radar) * 5)
-    biz_training = min(100.0, 65.0 * tier_mult + randn(rng_radar) * 7)
-
-    # Market Position metrics (grouped)
-    market_adoption = min(100.0, 50.0 + randn(rng_radar) * 15)
-    market_satisfaction = min(100.0, 75.0 + randn(rng_radar) * 10)
-    market_growth = min(100.0, 60.0 + randn(rng_radar) * 12)
-
-    push!(radar_data_rows, (
-        label = product,
-        category = category,
-        tier = tier,
-        # Technical Performance
-        Reliability = tech_reliability,
-        Scalability = tech_scalability,
-        API_Quality = tech_api_quality,
-        Integration = tech_integration,
-        # User Experience
-        Ease_of_Use = ux_ease_of_use,
-        Design = ux_design,
-        Customization = ux_customization,
-        Mobile = ux_mobile,
-        # Performance
-        Speed = perf_speed,
-        Efficiency = perf_efficiency,
-        Uptime = perf_uptime,
-        # Business Value
-        ROI = biz_roi,
-        Support = biz_support,
-        Documentation = biz_documentation,
-        Training = biz_training,
-        # Market Position
-        Adoption = market_adoption,
-        Satisfaction = market_satisfaction,
-        Growth = market_growth
-    ))
 end
 
 radar_df = DataFrame(radar_data_rows)
@@ -1045,13 +1037,12 @@ radar_chart = RadarChart(:product_radar, :radar_data;
                   :Adoption, :Satisfaction, :Growth],
     label_col = :label,
     group_mapping = radar_group_mapping,
-    facet_x = :category,
-    facet_y = :tier,
+    scenario_col = :scenario,
     color_col = :category,
     variable_selector = true,
     max_variables = 3,
     title = "Product Performance RadarChart",
-    notes = "RadarChart (spider chart) displaying multi-dimensional product analysis across 18 metrics grouped into 5 categories: Technical Performance, User Experience, Performance, Business Value, and Market Position. <strong>Interactive Features:</strong> (1) <strong>Variable Selector:</strong> Choose which metrics to display (minimum 3, recommended 6-8 for clarity). (2) <strong>Item Selector:</strong> Select which products to compare. (3) <strong>Faceting:</strong> Filter by product category (Infrastructure/Data & AI/Security/Productivity) and tier (Enterprise/Professional/Starter). (4) <strong>Grouped Axes:</strong> Related metrics are grouped together with category labels. (5) <strong>Color Coding:</strong> Products colored by category for easy identification. All scores normalized to 0-100 scale where higher is better. <strong>Tip:</strong> Start by selecting 6-8 metrics from different groups and 2-3 products to compare their strengths and weaknesses. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for RadarChart examples</a>",
+    notes = "RadarChart (spider chart) displaying many dimensions in a geometric way. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for RadarChart examples</a>",
     max_value = 100.0,
     show_legend = true,
     show_grid_labels = true

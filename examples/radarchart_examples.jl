@@ -124,16 +124,23 @@ food_groups = Dict{Symbol, String}(
     :Biodiversity => "Sustainability"
 )
 
+# Define variable limits to prevent Vitamin C from dominating the scale
+food_limits = Dict{Symbol, Float64}(
+    :Vitamin_C => 20.0,  # Limit Vitamin C so broccoli doesn't make everything else tiny
+    :Fiber => 10.0,
+    :Antioxidants => 10.0
+)
+
 radar2 = RadarChart(:foods_radar, :foods_data;
     value_cols = [:Vitamin_C, :Fiber, :Antioxidants, :Sweetness, :Aroma, :Acidity,
                   :Juiciness, :Firmness, :Smoothness, :Affordability, :Price, :Yield,
                   :CO2e, :Water_use, :Pesticides, :Biodiversity],
     label_col = :label,
     group_mapping = food_groups,
+    variable_limits = food_limits,
     color_col = :category,
     title = "Food Nutritional and Sustainability Profile",
-    notes = "Axes are grouped by category: Nutrition, Sensory, Economics, and Sustainability. Higher values are better.",
-    max_value = 100.0,
+    notes = "Axes are grouped by category: Nutrition (blue labels), Sensory, Economics, and Sustainability. Variable limits are set to prevent outliers from dominating the scale (e.g., Vitamin C capped at 20). Higher values are better.",
     show_legend = true
 )
 
@@ -194,42 +201,104 @@ radar3 = RadarChart(:skills_radar, :skills_data;
 # =============================================================================
 
 example4_text = TextBlock("""
-<h2>Example 4: University Rankings with Faceting</h2>
-<p>Compare universities across different metrics with faceting by region and type.</p>
+<h2>Example 4: University Rankings with Scenarios</h2>
+<p>Compare universities across different ranking systems using scenario selection.</p>
 <p><strong>Features demonstrated:</strong></p>
 <ul>
-    <li>Faceting by region (geographic location)</li>
-    <li>Faceting by type (public/private)</li>
+    <li>Scenario selector to switch between different ranking methodologies</li>
     <li>Multiple universities displayed simultaneously</li>
+    <li>Color-coded by region</li>
 </ul>
-<p><strong>Try this:</strong> Use the facet selectors to filter universities by region and type.</p>
+<p><strong>Try this:</strong> Switch between "Overall Rankings" and "Research Focus" scenarios to see how university scores change based on different criteria.</p>
 """)
 
-# University rankings data
-universities_df = DataFrame(
-    label = ["MIT", "Stanford", "Harvard", "Berkeley", "Caltech",
-             "Oxford", "Cambridge", "ETH Zurich", "Tokyo", "NUS"],
-    region = ["North America", "North America", "North America", "North America", "North America",
-              "Europe", "Europe", "Europe", "Asia", "Asia"],
-    type = ["Private", "Private", "Private", "Public", "Private",
-            "Public", "Public", "Public", "Public", "Public"],
-    Academic_Reputation = [100.0, 98.0, 99.0, 96.0, 97.0, 98.0, 97.0, 95.0, 93.0, 92.0],
-    Research_Output = [99.0, 98.0, 97.0, 95.0, 96.0, 96.0, 95.0, 94.0, 91.0, 88.0],
-    Faculty_Quality = [98.0, 99.0, 98.0, 94.0, 99.0, 97.0, 96.0, 95.0, 90.0, 87.0],
-    Industry_Connections = [95.0, 100.0, 92.0, 90.0, 94.0, 88.0, 85.0, 92.0, 85.0, 90.0],
-    International_Outlook = [88.0, 90.0, 85.0, 82.0, 87.0, 95.0, 94.0, 98.0, 75.0, 100.0],
-    Student_Satisfaction = [92.0, 94.0, 90.0, 88.0, 91.0, 93.0, 92.0, 90.0, 85.0, 87.0]
-)
+# University rankings data with two scenarios: Overall and Research Focus
+universities_data = []
+
+# Define universities
+universities = [
+    ("MIT", "North America"),
+    ("Stanford", "North America"),
+    ("Harvard", "North America"),
+    ("Berkeley", "North America"),
+    ("Caltech", "North America"),
+    ("Oxford", "Europe"),
+    ("Cambridge", "Europe"),
+    ("ETH Zurich", "Europe"),
+    ("Tokyo", "Asia"),
+    ("NUS", "Asia")
+]
+
+# Overall Rankings scenario - balanced across all metrics
+for (name, region) in universities
+    # Adjust scores by university and region
+    base_score = if occursin("MIT", name) || occursin("Stanford", name)
+        95.0
+    elseif occursin("Harvard", name) || occursin("Caltech", name)
+        93.0
+    elseif occursin("Berkeley", name)
+        91.0
+    elseif occursin("Oxford", name) || occursin("Cambridge", name)
+        92.0
+    elseif occursin("ETH", name)
+        89.0
+    else
+        85.0
+    end
+
+    push!(universities_data, (
+        label = name,
+        region = region,
+        scenario = "Overall Rankings",
+        Academic_Reputation = base_score + rand(-3:3),
+        Research_Output = base_score + rand(-2:2),
+        Faculty_Quality = base_score + rand(-3:3),
+        Industry_Connections = base_score - 5 + rand(-5:5),
+        International_Outlook = region == "Asia" ? 95.0 : base_score - 10 + rand(-5:5),
+        Student_Satisfaction = base_score - 3 + rand(-4:4)
+    ))
+end
+
+# Research Focus scenario - emphasizes research metrics
+for (name, region) in universities
+    # Research-focused universities score higher in this scenario
+    base_score = if occursin("MIT", name)
+        98.0
+    elseif occursin("Caltech", name)
+        97.0
+    elseif occursin("Stanford", name) || occursin("ETH", name)
+        94.0
+    elseif occursin("Berkeley", name)
+        93.0
+    elseif occursin("Cambridge", name) || occursin("Oxford", name)
+        92.0
+    else
+        87.0
+    end
+
+    push!(universities_data, (
+        label = name,
+        region = region,
+        scenario = "Research Focus",
+        Academic_Reputation = base_score + rand(-2:2),
+        Research_Output = base_score + 2 + rand(-2:2),  # Higher in research scenario
+        Faculty_Quality = base_score + rand(-2:2),
+        Industry_Connections = base_score - 10 + rand(-5:5),  # Less emphasis
+        International_Outlook = region == "Asia" ? 95.0 : base_score - 8 + rand(-4:4),
+        Student_Satisfaction = base_score - 5 + rand(-5:5)  # Less emphasis
+    ))
+end
+
+universities_df = DataFrame(universities_data)
 
 radar4 = RadarChart(:universities_radar, :universities_data;
     value_cols = [:Academic_Reputation, :Research_Output, :Faculty_Quality,
                   :Industry_Connections, :International_Outlook, :Student_Satisfaction],
     label_col = :label,
-    facet_x = :region,
-    facet_y = :type,
+    scenario_col = :scenario,
     color_col = :region,
     title = "University Rankings Comparison",
-    notes = "Compare top universities across key metrics. Use facet selectors to filter by region and type.",
+    notes = "Compare top universities across key metrics with two ranking methodologies. Switch scenarios to see how different ranking systems affect scores. 'Overall Rankings' provides a balanced view, while 'Research Focus' emphasizes research output and faculty quality.",
     max_value = 100.0,
     show_legend = true
 )
@@ -292,9 +361,10 @@ summary = TextBlock("""
 <h3>Key Features</h3>
 <ul>
     <li><strong>Grouped axes:</strong> Group related metrics together with labels</li>
+    <li><strong>Variable limits:</strong> Set maximum values per variable to prevent outliers from dominating</li>
+    <li><strong>Scenarios:</strong> Switch between different data scenarios</li>
     <li><strong>Variable selector:</strong> Choose which axes to display</li>
     <li><strong>Item selector:</strong> Choose which items to compare</li>
-    <li><strong>Faceting:</strong> Filter by categorical variables</li>
     <li><strong>Color coding:</strong> Color items by category</li>
     <li><strong>Flexible scaling:</strong> Auto-scale or specify maximum value</li>
 </ul>
