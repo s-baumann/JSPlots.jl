@@ -925,5 +925,244 @@ function build_corrplot_functional_html(chart_title_str, data_label, scenarios,
     """
 end
 
+"""
+    cluster_from_correlation(corr_matrix::AbstractMatrix; linkage::Symbol=:ward)
+
+Perform hierarchical clustering on a correlation matrix.
+
+# Arguments
+- `corr_matrix::AbstractMatrix`: Correlation matrix (n×n)
+- `linkage::Symbol`: Linkage method (:ward, :average, :single, :complete)
+
+# Returns
+- `Clustering.Hclust`: Hierarchical clustering result with fields:
+  - `merges`: Merge matrix
+  - `heights`: Height of each merge
+  - `order`: Order of leaves in dendrogram
+
+# Example
+```julia
+cors = compute_correlations(df, [:x1, :x2, :x3])
+hc = cluster_from_correlation(cors.pearson, linkage=:ward)
+```
+"""
+function cluster_from_correlation(corr_matrix::AbstractMatrix{<:Real}; linkage::Symbol=:ward)
+    n = size(corr_matrix, 1)
+
+    if n < 2
+        error("Need at least 2 variables for clustering")
+    end
+
+    # Convert correlation to distance
+    dist_matrix = zeros(n, n)
+    for i in 1:n
+        for j in 1:n
+            dist_matrix[i, j] = sqrt(max(0.0, 0.5 * (1 - abs(corr_matrix[i, j]))))
+        end
+    end
+
+    # Perform hierarchical clustering
+    return hclust(dist_matrix, linkage=linkage, branchorder=:optimal)
+end
+
+"""
+    CorrelationScenario
+
+Struct holding correlation data for a specific scenario in advanced CorrPlot visualizations.
+
+# Fields
+- `name::String`: Scenario name
+- `pearson::Matrix{Float64}`: Pearson correlation matrix
+- `spearman::Matrix{Float64}`: Spearman correlation matrix
+- `hc::Clustering.Hclust`: Hierarchical clustering result
+- `var_labels::Vector{String}`: Variable names
+
+# Example
+```julia
+cors = compute_correlations(df, [:x1, :x2, :x3])
+hc = cluster_from_correlation(cors.pearson, linkage=:ward)
+scenario = CorrelationScenario("My Scenario", cors.pearson, cors.spearman, hc, ["x1", "x2", "x3"])
+```
+"""
+struct CorrelationScenario
+    name::String
+    pearson::Matrix{Float64}
+    spearman::Matrix{Float64}
+    hc::Clustering.Hclust
+    var_labels::Vector{String}
+
+    function CorrelationScenario(name::String,
+                                pearson::AbstractMatrix{<:Real},
+                                spearman::AbstractMatrix{<:Real},
+                                hc::Clustering.Hclust,
+                                var_labels::Vector{String})
+        # Validate matrices
+        n = length(var_labels)
+
+        if size(pearson) != (n, n)
+            error("Pearson matrix size $(size(pearson)) doesn't match number of variables ($n)")
+        end
+
+        if size(spearman) != (n, n)
+            error("Spearman matrix size $(size(spearman)) doesn't match number of variables ($n)")
+        end
+
+        if length(hc.order) != n
+            error("Dendrogram order length $(length(hc.order)) doesn't match number of variables ($n)")
+        end
+
+        new(name, Matrix{Float64}(pearson), Matrix{Float64}(spearman), hc, var_labels)
+    end
+end
+
+"""
+    prepare_corrplot_data(pearson, spearman, hc, var_labels)
+
+OLD API: Prepare correlation data from matrices for basic CorrPlot (backward compatibility).
+
+This function is provided for backward compatibility. New code should use the version
+that takes matrices directly without hclust: `prepare_corrplot_data(pearson, spearman, var_labels)`.
+
+# Arguments
+- `pearson::Matrix`: Pearson correlation matrix
+- `spearman::Matrix`: Spearman correlation matrix
+- `hc::Clustering.Hclust`: Hierarchical clustering (ignored in new API)
+- `var_labels::Vector{String}`: Variable names
+
+# Returns
+DataFrame with correlation data
+"""
+function prepare_corrplot_data(pearson::AbstractMatrix{<:Real},
+                               spearman::AbstractMatrix{<:Real},
+                               hc::Clustering.Hclust,
+                               var_labels::Union{Vector{String}, Vector{Symbol}};
+                               scenario::String="default")
+    # Just call the new API, ignoring hc
+    return prepare_corrplot_data(pearson, spearman, var_labels; scenario=scenario)
+end
+
+"""
+    prepare_corrplot_advanced_data(scenarios::Vector{CorrelationScenario})
+
+Prepare correlation data from multiple scenarios for advanced CorrPlot.
+
+Converts CorrelationScenario objects into a single DataFrame suitable for CorrPlot.
+
+# Arguments
+- `scenarios::Vector{CorrelationScenario}`: Vector of correlation scenarios
+
+# Returns
+DataFrame with columns: node1, node2, strength, scenario, correlation_method
+"""
+function prepare_corrplot_advanced_data(scenarios::Vector{CorrelationScenario})
+    dfs = DataFrame[]
+
+    for scenario in scenarios
+        df = prepare_corrplot_data(scenario.pearson, scenario.spearman,
+                                   scenario.var_labels; scenario=scenario.name)
+        push!(dfs, df)
+    end
+
+    return vcat(dfs...)
+end
+
+"""
+    CorrPlot(chart_title, pearson, spearman, hc, var_labels, data_label; kwargs...)
+
+OLD API: Create a basic CorrPlot from correlation matrices (backward compatibility).
+
+This constructor is provided for backward compatibility. New code should use:
+- For simple plots: Create DataFrame with prepare_corrplot_data() then pass to new constructor
+- For advanced plots: Use the new constructor with DataFrame directly
+
+# Arguments
+- `chart_title::Symbol`: Chart identifier
+- `pearson::Matrix`: Pearson correlation matrix
+- `spearman::Matrix`: Spearman correlation matrix
+- `hc::Clustering.Hclust`: Hierarchical clustering
+- `var_labels::Vector{String}`: Variable names
+- `data_label::Symbol`: Data identifier
+
+# Keyword Arguments
+- `title::String`: Chart title
+- `notes::String`: Descriptive notes
+"""
+function CorrPlot(chart_title::Symbol,
+                 pearson::AbstractMatrix{<:Real},
+                 spearman::AbstractMatrix{<:Real},
+                 hc::Clustering.Hclust,
+                 var_labels::Vector{String},
+                 data_label::Symbol;
+                 title::String = "Correlation Plot with Dendrogram",
+                 notes::String = "")
+    # Validate matrices
+    n = length(var_labels)
+
+    if size(pearson) != (n, n)
+        error("Pearson matrix size $(size(pearson)) doesn't match number of variables ($n)")
+    end
+
+    if size(spearman) != (n, n)
+        error("Spearman matrix size $(size(spearman)) doesn't match number of variables ($n)")
+    end
+
+    if length(hc.order) != n
+        error("Dendrogram order length $(length(hc.order)) doesn't match number of variables ($n)")
+    end
+
+    # Convert to DataFrame using new API
+    corr_df = prepare_corrplot_data(pearson, spearman, var_labels)
+
+    # Call new constructor
+    return CorrPlot(chart_title, corr_df, data_label;
+                   title=title, notes=notes, allow_manual_order=false)
+end
+
+"""
+    CorrPlot(chart_title, scenarios, data_label; kwargs...)
+
+OLD API: Create an advanced CorrPlot from multiple scenarios (backward compatibility).
+
+This constructor is provided for backward compatibility. New code should use:
+prepare_corrplot_advanced_data() to create DataFrame, then pass to new constructor.
+
+# Arguments
+- `chart_title::Symbol`: Chart identifier
+- `scenarios::Vector{CorrelationScenario}`: Correlation scenarios
+- `data_label::Symbol`: Data identifier
+
+# Keyword Arguments
+- `title::String`: Chart title
+- `notes::String`: Descriptive notes
+- `default_scenario::Union{String, Nothing}`: Default scenario name
+- `default_variables::Union{Vector{String}, Nothing}`: Default selected variables
+- `allow_manual_order::Bool`: Enable manual variable reordering
+"""
+function CorrPlot(chart_title::Symbol,
+                 scenarios::Vector{CorrelationScenario},
+                 data_label::Symbol;
+                 title::String = "Correlation Plot with Dendrogram",
+                 notes::String = "",
+                 default_scenario::Union{String, Nothing} = nothing,
+                 default_variables::Union{Vector{String}, Nothing} = nothing,
+                 allow_manual_order::Bool = true)
+    # Validate
+    if isempty(scenarios)
+        error("Must provide at least one scenario")
+    end
+
+    # Convert to DataFrame using new API
+    corr_df = prepare_corrplot_advanced_data(scenarios)
+
+    # Call new constructor
+    return CorrPlot(chart_title, corr_df, data_label;
+                   title=title, notes=notes,
+                   scenario_col=:scenario,
+                   default_scenario=default_scenario,
+                   default_variables=default_variables,
+                   allow_manual_order=allow_manual_order)
+end
+
 # Export functions
 export CorrPlot, compute_correlations, prepare_corrplot_data
+export cluster_from_correlation, CorrelationScenario, prepare_corrplot_advanced_data

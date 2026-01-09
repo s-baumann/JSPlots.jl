@@ -708,5 +708,186 @@ end
 # Dependencies
 dependencies(g::GraphChart) = [g.data_label]
 
+"""
+    GraphScenario
+
+OLD API: Struct holding graph/network data for a specific scenario (backward compatibility).
+
+# Fields
+- `name::String`: Scenario name
+- `is_correlation::Bool`: Whether strength values are correlations (true) or distances (false)
+- `node_labels::Vector{String}`: Node names
+
+# Example
+```julia
+scenario = GraphScenario("My Network", true, ["A", "B", "C", "D"])
+```
+"""
+struct GraphScenario
+    name::String
+    is_correlation::Bool
+    node_labels::Vector{String}
+
+    function GraphScenario(name::String, is_correlation::Bool, node_labels::Vector{String})
+        new(name, is_correlation, node_labels)
+    end
+end
+
+"""
+    calculate_smart_cutoff(graph_df, scenario_name, is_correlation, target_fraction)
+
+OLD API: Calculate an optimal cutoff threshold for graph edges (backward compatibility).
+
+For correlation data (is_correlation=true): Returns threshold where the top target_fraction
+of edges are shown (sorted by strength descending).
+
+For distance data (is_correlation=false): Returns threshold where the bottom target_fraction
+of edges are shown (sorted by strength ascending).
+
+# Arguments
+- `graph_df::DataFrame`: Graph data with columns node1, node2, strength, scenario
+- `scenario_name::String`: Name of scenario to calculate cutoff for
+- `is_correlation::Bool`: Whether strength is correlation (true) or distance (false)
+- `target_fraction::Float64`: Fraction of edges to display (0.0 to 1.0)
+
+# Returns
+Float64: Cutoff threshold value
+
+# Example
+```julia
+cutoff = calculate_smart_cutoff(graph_df, "My Scenario", true, 0.5)  # Show top 50% of edges
+```
+"""
+function calculate_smart_cutoff(graph_df::DataFrame,
+                               scenario_name::String,
+                               is_correlation::Bool,
+                               target_fraction::Float64)
+    # Filter for this scenario
+    scenario_df = filter(row -> row.scenario == scenario_name, graph_df)
+
+    if nrow(scenario_df) == 0
+        @warn "No data found for scenario '$scenario_name', using default cutoff 0.5"
+        return 0.5
+    end
+
+    # Get strength values
+    strengths = scenario_df.strength
+
+    # Sort based on type
+    if is_correlation
+        # For correlation: higher is stronger, so sort descending
+        sorted_strengths = sort(strengths, rev=true)
+    else
+        # For distance: lower is stronger, so sort ascending
+        sorted_strengths = sort(strengths, rev=false)
+    end
+
+    # Calculate index for target fraction
+    n_edges = length(sorted_strengths)
+    target_idx = max(1, round(Int, n_edges * target_fraction))
+
+    # Return threshold at that index
+    return sorted_strengths[target_idx]
+end
+
+"""
+    Graph(chart_title, scenarios, data_label; kwargs...)
+
+OLD API: Create a Graph from GraphScenario objects (backward compatibility).
+
+This constructor is provided for backward compatibility. New code should:
+1. Create a DataFrame with columns: node1, node2, strength, scenario, correlation_method
+2. Pass the DataFrame directly to the new Graph constructor
+
+# Arguments
+- `chart_title::Symbol`: Chart identifier
+- `scenarios::Vector{GraphScenario}`: Graph scenarios
+- `data_label::Symbol`: Data identifier
+
+# Keyword Arguments
+- `title::String`: Chart title
+- `notes::String`: Descriptive notes
+- `cutoff::Float64`: Strength threshold for showing edges
+- `color_cols::Union{Vector{Symbol}, Nothing}`: Columns for node coloring
+- `default_color_col::Union{Symbol, Nothing}`: Default color column
+- `show_edge_labels::Bool`: Whether to show edge strength labels
+- `layout::Symbol`: Graph layout algorithm
+- `default_scenario::Union{String, Nothing}`: Default scenario name
+- `default_variables::Union{Vector{String}, Nothing}`: Default selected variables
+"""
+function Graph(chart_title::Symbol,
+              scenarios::Vector{GraphScenario},
+              data_label::Symbol;
+              title::String = "Network Graph",
+              notes::String = "",
+              cutoff::Float64 = 0.5,
+              color_cols::Union{Vector{Symbol}, Nothing} = nothing,
+              default_color_col::Union{Symbol, Nothing} = nothing,
+              show_edge_labels::Bool = false,
+              layout::Symbol = :cose,
+              default_scenario::Union{String, Nothing} = nothing,
+              default_variables::Union{Vector{String}, Nothing} = nothing)
+
+    # Validate
+    if isempty(scenarios)
+        error("Must provide at least one scenario")
+    end
+
+    # We can't actually convert GraphScenario to a proper DataFrame without the actual
+    # edge data. The old API expected the user to also provide the data externally.
+    # For backward compatibility, we'll create a minimal graph that expects the data
+    # to be provided via JSPlotPage's data_dict.
+
+    # Create a dummy DataFrame that will be replaced by external data
+    # This maintains the old API behavior where data was external
+    node_labels = scenarios[1].node_labels
+    scenario_names = [s.name for s in scenarios]
+
+    # Create minimal placeholder DataFrame with one row per scenario
+    # This ensures the constructor can identify scenarios
+    rows = []
+    for scenario in scenarios
+        if !isempty(scenario.node_labels) && length(scenario.node_labels) >= 2
+            # Add one edge for this scenario so it's recognized
+            push!(rows, (
+                node1 = scenario.node_labels[1],
+                node2 = scenario.node_labels[2],
+                strength = 0.5,
+                scenario = scenario.name,
+                correlation_method = "pearson"
+            ))
+        end
+    end
+
+    graph_df = if isempty(rows)
+        # If no valid scenarios, create empty DataFrame
+        DataFrame(
+            node1 = String[],
+            node2 = String[],
+            strength = Float64[],
+            scenario = String[],
+            correlation_method = String[]
+        )
+    else
+        DataFrame(rows)
+    end
+
+    # Determine default scenario
+    if isnothing(default_scenario) && !isempty(scenarios)
+        default_scenario = scenarios[1].name
+    end
+
+    # Call new constructor
+    return Graph(chart_title, graph_df, data_label;
+                title=title, notes=notes,
+                cutoff=cutoff,
+                color_cols=color_cols,
+                show_edge_labels=show_edge_labels,
+                layout=layout,
+                scenario_col=:scenario,
+                default_scenario=default_scenario,
+                default_variables=default_variables)
+end
+
 # Export
-export Graph
+export Graph, GraphScenario, calculate_smart_cutoff
