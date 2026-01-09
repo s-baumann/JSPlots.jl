@@ -1208,6 +1208,432 @@ $(function(){
         console.error('Error loading data for chart ribbon:', error);
     });
 })();
+(function() {
+    let radarData_product_radar = null;
+    let selectedVariables_product_radar = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
+    let selectedLabels_product_radar = [];
+    let selectedScenario_product_radar = null;
+
+    const VALUE_COLS = ["Reliability","Scalability","API_Quality","Integration","Ease_of_Use","Design","Customization","Mobile","Speed","Efficiency","Uptime","ROI","Support","Documentation","Training","Adoption","Satisfaction","Growth"];
+    const LABEL_COL = "label";
+    const GROUP_MAPPING = {"Scalability":"Technical Performance","Adoption":"Market Position","ROI":"Business Value","Uptime":"Performance","Reliability":"Technical Performance","Support":"Business Value","API_Quality":"Technical Performance","Design":"User Experience","Documentation":"Business Value","Mobile":"User Experience","Growth":"Market Position","Integration":"Technical Performance","Training":"Business Value","Satisfaction":"Market Position","Customization":"User Experience","Ease_of_Use":"User Experience","Speed":"Performance","Efficiency":"Performance"};
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = "scenario";
+    const COLOR_COL = "category";
+    const DEFAULT_COLOR = "#1f77b4";
+    const MAX_VALUE = 100.0;
+    const MAX_VARIABLES = 3;
+    const SHOW_LEGEND = true;
+    const SHOW_GRID_LABELS = true;
+    const VARIABLE_SELECTOR = true;
+
+    // Load data
+    loadDataset('radar_data').then(function(data) {
+        radarData_product_radar = data;
+        initializeRadarChart_product_radar();
+    }).catch(function(error) {
+        console.error('Error loading data:', error);
+        document.getElementById('radar_product_radar').innerHTML =
+            '<p style="color: red;">Error loading data: ' + error.message + '</p>';
+    });
+
+    function initializeRadarChart_product_radar() {
+        const data = radarData_product_radar;
+        if (!data || data.length === 0) {
+            document.getElementById('radar_product_radar').innerHTML = '<p>No data available</p>';
+            return;
+        }
+
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_product_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_product_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
+        // Populate variable selector
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_product_radar');
+            if (varSelect) {
+                varSelect.innerHTML = '';
+                VALUE_COLS.forEach(function(col) {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.text = col.replace(/_/g, ' ');
+                    option.selected = selectedVariables_product_radar.includes(col);
+                    varSelect.appendChild(option);
+                });
+            }
+        } else {
+            selectedVariables_product_radar = VALUE_COLS;
+        }
+
+        // Populate label selector
+        const labelSelect = document.getElementById('label_select_product_radar');
+        if (labelSelect) {
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_product_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_product_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
+            labelSelect.innerHTML = '';
+            uniqueLabels.forEach(function(label) {
+                const option = document.createElement('option');
+                option.value = label;
+                option.text = label;
+                option.selected = true;
+                labelSelect.appendChild(option);
+            });
+            const maxToSelect = MAX_VARIABLES || uniqueLabels.length;
+            selectedLabels_product_radar = uniqueLabels.slice(0, maxToSelect);
+
+            // Set selected options
+            Array.from(labelSelect.options).forEach(function(opt) {
+                opt.selected = selectedLabels_product_radar.includes(opt.value);
+            });
+        }
+
+        updateRadarChart_product_radar();
+    }
+
+    window.updateRadarChart_product_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_product_radar');
+            if (scenarioSelect) {
+                selectedScenario_product_radar = scenarioSelect.value;
+            }
+        }
+
+        // Get selected variables
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_product_radar');
+            if (varSelect) {
+                selectedVariables_product_radar = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+                if (selectedVariables_product_radar.length < 3) {
+                    document.getElementById('radar_product_radar').innerHTML =
+                        '<p style="color: orange;">Please select at least 3 variables to display a radar chart.</p>';
+                    return;
+                }
+            }
+        }
+
+        // Get selected labels
+        const labelSelect = document.getElementById('label_select_product_radar');
+        if (labelSelect) {
+            selectedLabels_product_radar = Array.from(labelSelect.selectedOptions).map(opt => opt.value);
+
+            if (selectedLabels_product_radar.length === 0) {
+                document.getElementById('radar_product_radar').innerHTML =
+                    '<p style="color: orange;">Please select at least one item to display.</p>';
+                return;
+            }
+        }
+
+        renderRadarChart_product_radar(selectedVariables_product_radar, selectedLabels_product_radar, selectedScenario_product_radar);
+    }
+
+    function renderRadarChart_product_radar(variables, labels, scenario) {
+        const data = radarData_product_radar;
+        const container = document.getElementById('radar_product_radar');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        // Filter data by labels and scenario
+        let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
+
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
+        }
+
+        if (filteredData.length === 0) {
+            container.innerHTML = '<p>No data matches the selected filters.</p>';
+            return;
+        }
+
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
+                    const val = parseFloat(d[v]);
+                    if (!isNaN(val) && val > maxVal) {
+                        maxVal = val;
+                    }
+                });
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
+
+        // Group variables by group_mapping
+        const groupedVars = {};
+        const ungroupedVars = [];
+
+        variables.forEach(function(v) {
+            if (GROUP_MAPPING.hasOwnProperty(v)) {
+                const group = GROUP_MAPPING[v];
+                if (!groupedVars[group]) {
+                    groupedVars[group] = [];
+                }
+                groupedVars[group].push(v);
+            } else {
+                ungroupedVars.push(v);
+            }
+        });
+
+        // Create ordered list of axes with groups
+        const axes = [];
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
+            groupedVars[group].forEach(function(v) {
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
+            });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
+        });
+
+        ungroupedVars.forEach(function(v) {
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
+        });
+
+        // Create color mapping
+        const colorMap = {};
+        if (COLOR_COL) {
+            const uniqueColors = [...new Set(filteredData.map(d => d[COLOR_COL]))];
+            // D3 v3 API: use d3.scale.category10()
+            const colorScale = d3.scale.category10();
+            uniqueColors.forEach(function(c, i) {
+                colorMap[c] = colorScale(i);
+            });
+        }
+
+        // Calculate layout
+        const numCharts = filteredData.length;
+        const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+
+        // Create SVG container
+        const svg = d3.select(container)
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', Math.ceil(numCharts / chartsPerRow) * chartSize);
+
+        // Draw each radar chart
+        filteredData.forEach(function(d, idx) {
+            const row = Math.floor(idx / chartsPerRow);
+            const col = idx % chartsPerRow;
+            const x = col * chartSize;
+            const y = row * chartSize;
+
+            const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
+
+            drawSingleRadar_product_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
+        });
+
+        // Add legend
+        if (SHOW_LEGEND && COLOR_COL) {
+            addLegend_product_radar(container, colorMap);
+        }
+    }
+
+    function drawSingleRadar_product_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
+        const radius = (size - 2 * margin) / 2;
+        const centerX = offsetX + size / 2;
+        const centerY = offsetY + size / 2;
+
+        const g = svg.append('g')
+            .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
+
+        // Draw grid circles
+        const levels = 5;
+        for (let i = 1; i <= levels; i++) {
+            const r = radius * i / levels;
+            g.append('circle')
+                .attr('r', r)
+                .attr('fill', 'none')
+                .attr('stroke', '#ddd')
+                .attr('stroke-width', 1);
+
+            if (SHOW_GRID_LABELS && i === levels) {
+                g.append('text')
+                    .attr('x', 5)
+                    .attr('y', -r)
+                    .attr('font-size', '10px')
+                    .attr('fill', '#666')
+                    .text(gridMax.toFixed(1));
+            }
+        }
+
+        // Draw axes
+        const angleSlice = Math.PI * 2 / axes.length;
+
+        axes.forEach(function(axis, i) {
+            const angle = angleSlice * i - Math.PI / 2;
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle);
+
+            // Draw axis line
+            g.append('line')
+                .attr('x1', 0)
+                .attr('y1', 0)
+                .attr('x2', x)
+                .attr('y2', y)
+                .attr('stroke', '#999')
+                .attr('stroke-width', 1);
+
+            // Draw axis label
+            const labelRadius = radius + 15;
+            const labelX = labelRadius * Math.cos(angle);
+            const labelY = labelRadius * Math.sin(angle);
+
+            g.append('text')
+                .attr('x', labelX)
+                .attr('y', labelY)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '10px')
+                .attr('fill', '#333')
+                .text(axis.name.replace(/_/g, ' '));
+        });
+
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
+            const x = labelRadius * Math.cos(midAngle);
+            const y = labelRadius * Math.sin(midAngle);
+
+            g.append('text')
+                .attr('x', x)
+                .attr('y', y)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '12px')
+                .attr('font-weight', 'bold')
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
+        });
+
+        // Draw data polygon
+        const points = [];
+        axes.forEach(function(axis, i) {
+            const value = parseFloat(dataPoint[axis.name]) || 0;
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
+            const angle = angleSlice * i - Math.PI / 2;
+            const r = radius * normalizedValue;
+            const x = r * Math.cos(angle);
+            const y = r * Math.sin(angle);
+            points.push([x, y]);
+        });
+
+        // Close the polygon
+        if (points.length > 0) {
+            const pathData = 'M' + points.map(p => p.join(',')).join('L') + 'Z';
+
+            g.append('path')
+                .attr('d', pathData)
+                .attr('fill', color)
+                .attr('fill-opacity', 0.3)
+                .attr('stroke', color)
+                .attr('stroke-width', 2);
+
+            // Draw points
+            points.forEach(function(p) {
+                g.append('circle')
+                    .attr('cx', p[0])
+                    .attr('cy', p[1])
+                    .attr('r', 3)
+                    .attr('fill', color);
+            });
+        }
+
+        // Add title
+        g.append('text')
+            .attr('x', 0)
+            .attr('y', -radius - 45)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', '12px')
+            .attr('font-weight', 'bold')
+            .attr('fill', '#333')
+            .text(dataPoint[LABEL_COL]);
+    }
+
+    function addLegend_product_radar(container, colorMap) {
+        const legendDiv = document.createElement('div');
+        legendDiv.style.marginTop = '20px';
+        legendDiv.innerHTML = '<strong>Legend:</strong>';
+
+        const legendItems = document.createElement('div');
+        legendItems.style.display = 'flex';
+        legendItems.style.flexWrap = 'wrap';
+        legendItems.style.gap = '15px';
+        legendItems.style.marginTop = '10px';
+
+        Object.keys(colorMap).forEach(function(key) {
+            const item = document.createElement('div');
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '5px';
+
+            const colorBox = document.createElement('div');
+            colorBox.style.width = '20px';
+            colorBox.style.height = '20px';
+            colorBox.style.backgroundColor = colorMap[key];
+            colorBox.style.border = '1px solid #ccc';
+
+            const label = document.createElement('span');
+            label.textContent = key;
+
+            item.appendChild(colorBox);
+            item.appendChild(label);
+            legendItems.appendChild(item);
+        });
+
+        legendDiv.appendChild(legendItems);
+        container.appendChild(legendDiv);
+    }
+})();
 
 
 });
@@ -1215,12 +1641,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script>
+<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Situational Charts</h1>
-<p>This shows examples of Waterfall and SanKey. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time.</p>
+<p>This shows examples of Waterfall, SanKey, and RadarChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics.</p>
 
 <h2>Profit & Loss Waterfall</h2>
 <p>A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement. <strong>Features:</strong> Automatic cumulative calculation, side-by-side table grouped by category, click bars or table rows to exclude items, toggle categories with checkboxes, switch between value-based (green/red) and category-based coloring, black total bar (toggleable). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html" style="color: blue; font-weight: bold;">See here for more Waterfall examples</a></p>
@@ -1392,8 +1818,50 @@ $(function(){
 <div class="sankey-container-ribbon">
     <div id="ribbon"></div>
 </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sankey_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sankey_data.parquet</p><br>
+<hr>
+<br>
+<div class="chart-container" id="container_product_radar">
+    <h3>Product Performance RadarChart</h3>
+    <p>RadarChart (spider chart) displaying many dimensions in a geometric way. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html" style="color: blue; font-weight: bold;">See here for RadarChart examples</a></p>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+        <div style="flex: 0 0 auto; min-width: 200px;">
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+<div style="margin-bottom: 15px;">
+    <label for="scenario_select_product_radar"><strong>Scenario:</strong></label>
+    <select id="scenario_select_product_radar" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+</div>
+
+<div style="margin-bottom: 15px;">
+    <label for="var_select_product_radar"><strong>Select variables:</strong></label>
+    <select id="var_select_product_radar" multiple size="8" style="width: 100%; max-width: 300px;" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+        Hold Ctrl (Cmd on Mac) to select multiple
+    </div>
+</div>
+
+<div style="margin-bottom: 15px;">
+    <label for="label_select_product_radar"><strong>Select items to display:</strong></label>
+    <select id="label_select_product_radar" multiple size="6" style="width: 100%; max-width: 300px;" onchange="updateRadarChart_product_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+        Hold Ctrl (Cmd on Mac) to select multiple
+    </div>
+</div>
+
+        </div>
+        <div style="flex: 1 1 auto; min-width: 400px;">
+            <div id="radar_product_radar" style="width: 100%;"></div>
+        </div>
+    </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: radar_data.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>
