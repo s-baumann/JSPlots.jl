@@ -37,6 +37,7 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[AreaChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html)** - This does both Area Charts as well as Bar Charts
 - **[ScatterPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html)** - 2D scatter plots with marginal distributions
 - **[Path](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html)** - Trajectory visualization showing ordered paths through 2D space with direction arrows
+- **[BumpChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html)** - BumpChart showing rankings over time.
 
 #### Distributional Plots
 - **[DistPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html)** - Distribution visualization combining histogram, box plot, and rug plot
@@ -57,7 +58,10 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
 - **[SanKey](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html)** - Make SanKey plots showing how observations change affiliation over multiple waves.
 - **[RadarChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html)** - Make RadarCharts showing how a single entity performs on various metrics.
-- **[OHLCVChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcv_examples.html)** - Coming Soon
+
+#### Financial Time Series
+- **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
+- **[ExecutionPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html)** - Execution plots for transaction cost analhsis of buying or selling securities.
 
 
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 

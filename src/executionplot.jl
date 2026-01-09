@@ -317,9 +317,88 @@ struct ExecutionPlot <: JSPlotsType
                     });
                 }
 
+                // Calculate shortfall timeline
+                const sideMultiplier = side === 'buy' ? 1 : -1;
+                const shortfallTimes = [];
+                const cumImpShortfalls = [];
+                const cumVwapShortfalls = [];
+
+                let cumImpShortfall = 0;
+                let cumVwapShortfall = 0;
+
+                fills.forEach((fill, idx) => {
+                    if (deselectedFills.has(idx)) return;
+
+                    const qty = fill[QUANTITY_COL];
+                    const price = fill[PRICE_COL];
+                    const rollingVWAP = calculateRollingVWAP(fills, idx);
+
+                    const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+                    const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
+
+                    cumImpShortfall += impShortfall;
+                    cumVwapShortfall += vwapShortfall;
+
+                    shortfallTimes.push(fill[FILL_TIME_COL]);
+                    cumImpShortfalls.push(cumImpShortfall);
+                    cumVwapShortfalls.push(cumVwapShortfall);
+                });
+
+                // Add shortfall timeline traces
+                traces.push({
+                    x: shortfallTimes,
+                    y: cumImpShortfalls,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'Imp. Shortfall',
+                    line: {color: '#FFA15A', width: 2},
+                    marker: {size: 6},
+                    xaxis: 'x',
+                    yaxis: 'y3',
+                    hovertemplate: 'Time: %{x}<br>Imp. Shortfall: %{y:.2f}<extra></extra>'
+                });
+
+                traces.push({
+                    x: shortfallTimes,
+                    y: cumVwapShortfalls,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: 'VWAP Shortfall',
+                    line: {color: '#ab63fa', width: 2},
+                    marker: {size: 6},
+                    xaxis: 'x',
+                    yaxis: 'y3',
+                    hovertemplate: 'Time: %{x}<br>VWAP Shortfall: %{y:.2f}<extra></extra>'
+                });
+
+                // Add zero reference line for shortfall chart
+                if (shortfallTimes.length > 0) {
+                    traces.push({
+                        x: [shortfallTimes[0], shortfallTimes[shortfallTimes.length - 1]],
+                        y: [0, 0],
+                        type: 'scatter',
+                        mode: 'lines',
+                        name: 'Zero',
+                        line: {color: 'gray', width: 1, dash: 'dash'},
+                        xaxis: 'x',
+                        yaxis: 'y3',
+                        showlegend: false,
+                        hoverinfo: 'skip'
+                    });
+                }
+
+                // Adjust layout for three subplots
                 const layout = {
-                    xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
-                    yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+                    xaxis: {title: 'Time', anchor: showVolume ? 'y3' : 'y3'},
+                    yaxis: {
+                        title: 'Price',
+                        domain: showVolume ? [0.45, 1] : [0.35, 1]
+                    },
+                    yaxis3: {
+                        title: 'Cumulative Shortfall',
+                        domain: [0, showVolume ? 0.25 : 0.3],
+                        anchor: 'x'
+                    },
                     hovermode: 'closest',
                     showlegend: true
                 };
@@ -327,7 +406,7 @@ struct ExecutionPlot <: JSPlotsType
                 if (showVolume) {
                     layout.yaxis2 = {
                         title: 'Volume',
-                        domain: [0, 0.25],
+                        domain: [0.3, 0.4],
                         anchor: 'x'
                     };
                 }
@@ -335,17 +414,17 @@ struct ExecutionPlot <: JSPlotsType
                 Plotly.newPlot('$chart_title_safe', traces, layout, {responsive: true});
             }
 
-            function calculateVWAP(fills) {
-                // Calculate VWAP for active (non-deselected) fills
-                const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-                if (activeFills.length === 0) return 0;
-
+            function calculateRollingVWAP(fills, upToIndex) {
+                // Calculate VWAP for active fills up to and including upToIndex
                 let totalValue = 0;
                 let totalQty = 0;
-                activeFills.forEach(fill => {
-                    totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
-                    totalQty += fill[QUANTITY_COL];
-                });
+                for (let i = 0; i <= upToIndex; i++) {
+                    if (!deselectedFills.has(i)) {
+                        const fill = fills[i];
+                        totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+                        totalQty += fill[QUANTITY_COL];
+                    }
+                }
                 return totalQty > 0 ? totalValue / totalQty : 0;
             }
 
@@ -375,9 +454,6 @@ struct ExecutionPlot <: JSPlotsType
             function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
                 const container = document.getElementById('fills_table_$chart_title_safe');
                 if (!container) return;
-
-                // Calculate VWAP once
-                const vwap = calculateVWAP(fills);
 
                 let html = '<h4>Fill Details</h4>';
                 html += '<table id="fills_table_content_$chart_title_safe" style="width:100%; border-collapse: collapse;">';
@@ -409,8 +485,12 @@ struct ExecutionPlot <: JSPlotsType
                     }
 
                     const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+
+                    // Calculate rolling VWAP up to this fill
+                    const rollingVWAP = calculateRollingVWAP(fills, idx);
+
                     const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-                    const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+                    const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
                     const spreadCrossing = getSpreadCrossing(fill, side);
 
                     if (!isDeselected) {
@@ -446,9 +526,6 @@ struct ExecutionPlot <: JSPlotsType
                 const container = document.getElementById('summary_table_$chart_title_safe');
                 if (!container) return;
 
-                // Calculate VWAP
-                const vwap = calculateVWAP(fills);
-
                 // Get active fills only
                 const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
 
@@ -467,7 +544,10 @@ struct ExecutionPlot <: JSPlotsType
 
                 const sideMultiplier = side === 'buy' ? 1 : -1;
 
-                activeFills.forEach(fill => {
+                // Need to iterate through all fills (not just active) to get correct indices for rolling VWAP
+                fills.forEach((fill, idx) => {
+                    if (deselectedFills.has(idx)) return; // Skip deselected fills
+
                     const category = String(fill[colorCol]);
                     if (!categories[category]) {
                         categories[category] = {
@@ -481,8 +561,12 @@ struct ExecutionPlot <: JSPlotsType
 
                     const qty = fill[QUANTITY_COL];
                     const price = fill[PRICE_COL];
+
+                    // Use rolling VWAP up to this fill
+                    const rollingVWAP = calculateRollingVWAP(fills, idx);
+
                     const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-                    const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+                    const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
                     const spreadCrossing = getSpreadCrossing(fill, side);
 
                     categories[category].totalImpShortfall += impShortfall;
@@ -674,7 +758,7 @@ struct ExecutionPlot <: JSPlotsType
                 </label>
             </div>
 
-            <div id="$chart_title_safe" style="width: 100%; height: 600px;"></div>
+            <div id="$chart_title_safe" style="width: 100%; height: 800px;"></div>
 
             <div style="display: flex; margin-top: 20px;">
                 <div id="fills_table_$chart_title_safe" style="flex: 1; margin-right: 20px;"></div>

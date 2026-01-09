@@ -675,10 +675,11 @@ bump_chart = BumpChart(:bump_rankings, df_rankings, :rankings_data;
     entity_col=:product,
     filters=Dict{Symbol,Any}(:region => unique(df_rankings.region), :segment => unique(df_rankings.segment)),
     facet_cols=[:region, :segment],
+    default_facet_cols = [:region, :segment],
     y_mode="Ranking",
     line_width=3,
     title="Product Rankings Over Time",
-    notes="A BumpChart shows how entities rank over time based on different performance metrics. This chart displays product rankings (Laptop, Tablet, Phone) across quarters. Use the Performance Metric dropdown to switch between sales, profit, quantity, or satisfaction metrics. Filter by region and segment to focus on specific market areas. Toggle between 'Ranking' mode (shows relative position with dense ranking) and 'Absolute' mode (shows actual metric values). Enable faceting to see rankings broken down by region or segment. Hover over a line to highlight it - all other lines turn grey to emphasize the selected product across all facets. Dense ranking is used: if two products tie for rank 1, both get rank 1, and the next product gets rank 2 (no gaps). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BumpChart examples</a>")
+    notes="A BumpChart shows how entities rank over time based on different performance metrics. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BumpChart examples</a>")
 
 # More Exotic Plot Types
 # Corrplot.

@@ -142,7 +142,7 @@ using Dates
         chart = ExecutionPlot(:vwap_test, test_tob_df, test_volume_df, test_fills_df,
                                  test_metadata_df, (:tob7, :vol7, :fills7, :meta7))
 
-        @test occursin("calculateVWAP", chart.functional_html)
+        @test occursin("calculateRollingVWAP", chart.functional_html)
         @test occursin("totalValue += fill[PRICE_COL] * fill[QUANTITY_COL]", chart.functional_html)
         @test occursin("totalQty += fill[QUANTITY_COL]", chart.functional_html)
     end
@@ -161,7 +161,7 @@ using Dates
                                  test_metadata_df, (:tob9, :vol9, :fills9, :meta9))
 
         @test occursin("impShortfall = sideMultiplier * (price - benchmarkPrice) * qty", chart.functional_html)
-        @test occursin("vwapShortfall = sideMultiplier * (price - vwap) * qty", chart.functional_html)
+        @test occursin("vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty", chart.functional_html)
         @test occursin("cumImpShortfall", chart.functional_html)
         @test occursin("cumVwapShortfall", chart.functional_html)
     end
@@ -215,7 +215,7 @@ using Dates
         @test occursin("show_volume_checkbox", chart.appearance_html)
         @test occursin("Show Volume", chart.appearance_html)
         @test occursin("yaxis2", chart.functional_html)
-        @test occursin("domain: [0, 0.25]", chart.functional_html)
+        @test occursin("yaxis3", chart.functional_html)  # Shortfall timeline subplot
     end
 
     @testset "Benchmark selector" begin

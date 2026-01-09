@@ -627,7 +627,7 @@ $(function(){
     const SIDE_COL = 'side';
     const DESIRED_QUANTITY_COL = 'desired_quantity';
     const COLOR_COLS = ['venue', 'aggressiveness'];
-    const COLOR_MAPS = {'venue': {'NYSE': '#ab63fa', 'ARCA': '#636efa', 'BATS': '#EF553B', 'NASDAQ': '#00cc96'}, 'aggressiveness': {'Mid': '#636efa', 'Aggressive': '#00cc96', 'Passive': '#EF553B'}};
+    const COLOR_MAPS = {'venue': {'NYSE': '#ab63fa', 'ARCA': '#00cc96', 'BATS': '#636efa', 'NASDAQ': '#EF553B'}, 'aggressiveness': {'Mid': '#636efa', 'Aggressive': '#00cc96', 'Passive': '#EF553B'}};
     const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
                            '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
 
@@ -784,9 +784,88 @@ $(function(){
             });
         }
 
+        // Calculate shortfall timeline
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+        const shortfallTimes = [];
+        const cumImpShortfalls = [];
+        const cumVwapShortfalls = [];
+
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return;
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
+
+            cumImpShortfall += impShortfall;
+            cumVwapShortfall += vwapShortfall;
+
+            shortfallTimes.push(fill[FILL_TIME_COL]);
+            cumImpShortfalls.push(cumImpShortfall);
+            cumVwapShortfalls.push(cumVwapShortfall);
+        });
+
+        // Add shortfall timeline traces
+        traces.push({
+            x: shortfallTimes,
+            y: cumImpShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'Imp. Shortfall',
+            line: {color: '#FFA15A', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>Imp. Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        traces.push({
+            x: shortfallTimes,
+            y: cumVwapShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'VWAP Shortfall',
+            line: {color: '#ab63fa', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>VWAP Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        // Add zero reference line for shortfall chart
+        if (shortfallTimes.length > 0) {
+            traces.push({
+                x: [shortfallTimes[0], shortfallTimes[shortfallTimes.length - 1]],
+                y: [0, 0],
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Zero',
+                line: {color: 'gray', width: 1, dash: 'dash'},
+                xaxis: 'x',
+                yaxis: 'y3',
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+        }
+
+        // Adjust layout for three subplots
         const layout = {
-            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
-            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            xaxis: {title: 'Time', anchor: showVolume ? 'y3' : 'y3'},
+            yaxis: {
+                title: 'Price',
+                domain: showVolume ? [0.45, 1] : [0.35, 1]
+            },
+            yaxis3: {
+                title: 'Cumulative Shortfall',
+                domain: [0, showVolume ? 0.25 : 0.3],
+                anchor: 'x'
+            },
             hovermode: 'closest',
             showlegend: true
         };
@@ -794,7 +873,7 @@ $(function(){
         if (showVolume) {
             layout.yaxis2 = {
                 title: 'Volume',
-                domain: [0, 0.25],
+                domain: [0.3, 0.4],
                 anchor: 'x'
             };
         }
@@ -802,17 +881,17 @@ $(function(){
         Plotly.newPlot('example1_exec', traces, layout, {responsive: true});
     }
 
-    function calculateVWAP(fills) {
-        // Calculate VWAP for active (non-deselected) fills
-        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-        if (activeFills.length === 0) return 0;
-
+    function calculateRollingVWAP(fills, upToIndex) {
+        // Calculate VWAP for active fills up to and including upToIndex
         let totalValue = 0;
         let totalQty = 0;
-        activeFills.forEach(fill => {
-            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
-            totalQty += fill[QUANTITY_COL];
-        });
+        for (let i = 0; i <= upToIndex; i++) {
+            if (!deselectedFills.has(i)) {
+                const fill = fills[i];
+                totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+                totalQty += fill[QUANTITY_COL];
+            }
+        }
         return totalQty > 0 ? totalValue / totalQty : 0;
     }
 
@@ -842,9 +921,6 @@ $(function(){
     function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
         const container = document.getElementById('fills_table_example1_exec');
         if (!container) return;
-
-        // Calculate VWAP once
-        const vwap = calculateVWAP(fills);
 
         let html = '<h4>Fill Details</h4>';
         html += '<table id="fills_table_content_example1_exec" style="width:100%; border-collapse: collapse;">';
@@ -876,8 +952,12 @@ $(function(){
             }
 
             const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+
+            // Calculate rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             if (!isDeselected) {
@@ -913,9 +993,6 @@ $(function(){
         const container = document.getElementById('summary_table_example1_exec');
         if (!container) return;
 
-        // Calculate VWAP
-        const vwap = calculateVWAP(fills);
-
         // Get active fills only
         const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
 
@@ -934,7 +1011,10 @@ $(function(){
 
         const sideMultiplier = side === 'buy' ? 1 : -1;
 
-        activeFills.forEach(fill => {
+        // Need to iterate through all fills (not just active) to get correct indices for rolling VWAP
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return; // Skip deselected fills
+
             const category = String(fill[colorCol]);
             if (!categories[category]) {
                 categories[category] = {
@@ -948,8 +1028,12 @@ $(function(){
 
             const qty = fill[QUANTITY_COL];
             const price = fill[PRICE_COL];
+
+            // Use rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             categories[category].totalImpShortfall += impShortfall;
@@ -1112,7 +1196,7 @@ $(function(){
     const SIDE_COL = 'side';
     const DESIRED_QUANTITY_COL = 'desired_quantity';
     const COLOR_COLS = ['strategy', 'fill_type'];
-    const COLOR_MAPS = {'strategy': {'VWAP': '#00cc96', 'POV': '#636efa', 'Opportunistic': '#EF553B', 'TWAP': '#ab63fa'}, 'fill_type': {'Market': '#00cc96', 'Peg': '#636efa', 'Limit': '#EF553B'}};
+    const COLOR_MAPS = {'strategy': {'VWAP': '#ab63fa', 'POV': '#00cc96', 'Opportunistic': '#636efa', 'TWAP': '#EF553B'}, 'fill_type': {'Market': '#EF553B', 'Peg': '#00cc96', 'Limit': '#636efa'}};
     const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
                            '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
 
@@ -1269,9 +1353,88 @@ $(function(){
             });
         }
 
+        // Calculate shortfall timeline
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+        const shortfallTimes = [];
+        const cumImpShortfalls = [];
+        const cumVwapShortfalls = [];
+
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return;
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
+
+            cumImpShortfall += impShortfall;
+            cumVwapShortfall += vwapShortfall;
+
+            shortfallTimes.push(fill[FILL_TIME_COL]);
+            cumImpShortfalls.push(cumImpShortfall);
+            cumVwapShortfalls.push(cumVwapShortfall);
+        });
+
+        // Add shortfall timeline traces
+        traces.push({
+            x: shortfallTimes,
+            y: cumImpShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'Imp. Shortfall',
+            line: {color: '#FFA15A', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>Imp. Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        traces.push({
+            x: shortfallTimes,
+            y: cumVwapShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'VWAP Shortfall',
+            line: {color: '#ab63fa', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>VWAP Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        // Add zero reference line for shortfall chart
+        if (shortfallTimes.length > 0) {
+            traces.push({
+                x: [shortfallTimes[0], shortfallTimes[shortfallTimes.length - 1]],
+                y: [0, 0],
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Zero',
+                line: {color: 'gray', width: 1, dash: 'dash'},
+                xaxis: 'x',
+                yaxis: 'y3',
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+        }
+
+        // Adjust layout for three subplots
         const layout = {
-            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
-            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            xaxis: {title: 'Time', anchor: showVolume ? 'y3' : 'y3'},
+            yaxis: {
+                title: 'Price',
+                domain: showVolume ? [0.45, 1] : [0.35, 1]
+            },
+            yaxis3: {
+                title: 'Cumulative Shortfall',
+                domain: [0, showVolume ? 0.25 : 0.3],
+                anchor: 'x'
+            },
             hovermode: 'closest',
             showlegend: true
         };
@@ -1279,7 +1442,7 @@ $(function(){
         if (showVolume) {
             layout.yaxis2 = {
                 title: 'Volume',
-                domain: [0, 0.25],
+                domain: [0.3, 0.4],
                 anchor: 'x'
             };
         }
@@ -1287,17 +1450,17 @@ $(function(){
         Plotly.newPlot('example2_exec', traces, layout, {responsive: true});
     }
 
-    function calculateVWAP(fills) {
-        // Calculate VWAP for active (non-deselected) fills
-        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-        if (activeFills.length === 0) return 0;
-
+    function calculateRollingVWAP(fills, upToIndex) {
+        // Calculate VWAP for active fills up to and including upToIndex
         let totalValue = 0;
         let totalQty = 0;
-        activeFills.forEach(fill => {
-            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
-            totalQty += fill[QUANTITY_COL];
-        });
+        for (let i = 0; i <= upToIndex; i++) {
+            if (!deselectedFills.has(i)) {
+                const fill = fills[i];
+                totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+                totalQty += fill[QUANTITY_COL];
+            }
+        }
         return totalQty > 0 ? totalValue / totalQty : 0;
     }
 
@@ -1327,9 +1490,6 @@ $(function(){
     function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
         const container = document.getElementById('fills_table_example2_exec');
         if (!container) return;
-
-        // Calculate VWAP once
-        const vwap = calculateVWAP(fills);
 
         let html = '<h4>Fill Details</h4>';
         html += '<table id="fills_table_content_example2_exec" style="width:100%; border-collapse: collapse;">';
@@ -1361,8 +1521,12 @@ $(function(){
             }
 
             const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+
+            // Calculate rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             if (!isDeselected) {
@@ -1398,9 +1562,6 @@ $(function(){
         const container = document.getElementById('summary_table_example2_exec');
         if (!container) return;
 
-        // Calculate VWAP
-        const vwap = calculateVWAP(fills);
-
         // Get active fills only
         const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
 
@@ -1419,7 +1580,10 @@ $(function(){
 
         const sideMultiplier = side === 'buy' ? 1 : -1;
 
-        activeFills.forEach(fill => {
+        // Need to iterate through all fills (not just active) to get correct indices for rolling VWAP
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return; // Skip deselected fills
+
             const category = String(fill[colorCol]);
             if (!categories[category]) {
                 categories[category] = {
@@ -1433,8 +1597,12 @@ $(function(){
 
             const qty = fill[QUANTITY_COL];
             const price = fill[PRICE_COL];
+
+            // Use rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             categories[category].totalImpShortfall += impShortfall;
@@ -1597,7 +1765,7 @@ $(function(){
     const SIDE_COL = 'side';
     const DESIRED_QUANTITY_COL = 'desired_quantity';
     const COLOR_COLS = ['urgency', 'venue'];
-    const COLOR_MAPS = {'urgency': {'Low': '#EF553B', 'High': '#636efa'}, 'venue': {'NYSE': '#EF553B', 'ARCA': '#636efa', 'BATS': '#ab63fa', 'NASDAQ': '#00cc96'}};
+    const COLOR_MAPS = {'urgency': {'Low': '#EF553B', 'High': '#636efa'}, 'venue': {'NYSE': '#EF553B', 'ARCA': '#00cc96', 'BATS': '#ab63fa', 'NASDAQ': '#636efa'}};
     const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
                            '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
 
@@ -1754,9 +1922,88 @@ $(function(){
             });
         }
 
+        // Calculate shortfall timeline
+        const sideMultiplier = side === 'buy' ? 1 : -1;
+        const shortfallTimes = [];
+        const cumImpShortfalls = [];
+        const cumVwapShortfalls = [];
+
+        let cumImpShortfall = 0;
+        let cumVwapShortfall = 0;
+
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return;
+
+            const qty = fill[QUANTITY_COL];
+            const price = fill[PRICE_COL];
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
+            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
+
+            cumImpShortfall += impShortfall;
+            cumVwapShortfall += vwapShortfall;
+
+            shortfallTimes.push(fill[FILL_TIME_COL]);
+            cumImpShortfalls.push(cumImpShortfall);
+            cumVwapShortfalls.push(cumVwapShortfall);
+        });
+
+        // Add shortfall timeline traces
+        traces.push({
+            x: shortfallTimes,
+            y: cumImpShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'Imp. Shortfall',
+            line: {color: '#FFA15A', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>Imp. Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        traces.push({
+            x: shortfallTimes,
+            y: cumVwapShortfalls,
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'VWAP Shortfall',
+            line: {color: '#ab63fa', width: 2},
+            marker: {size: 6},
+            xaxis: 'x',
+            yaxis: 'y3',
+            hovertemplate: 'Time: %{x}<br>VWAP Shortfall: %{y:.2f}<extra></extra>'
+        });
+
+        // Add zero reference line for shortfall chart
+        if (shortfallTimes.length > 0) {
+            traces.push({
+                x: [shortfallTimes[0], shortfallTimes[shortfallTimes.length - 1]],
+                y: [0, 0],
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Zero',
+                line: {color: 'gray', width: 1, dash: 'dash'},
+                xaxis: 'x',
+                yaxis: 'y3',
+                showlegend: false,
+                hoverinfo: 'skip'
+            });
+        }
+
+        // Adjust layout for three subplots
         const layout = {
-            xaxis: {title: 'Time', anchor: showVolume ? 'y' : undefined},
-            yaxis: {title: 'Price', domain: showVolume ? [0.3, 1] : [0, 1]},
+            xaxis: {title: 'Time', anchor: showVolume ? 'y3' : 'y3'},
+            yaxis: {
+                title: 'Price',
+                domain: showVolume ? [0.45, 1] : [0.35, 1]
+            },
+            yaxis3: {
+                title: 'Cumulative Shortfall',
+                domain: [0, showVolume ? 0.25 : 0.3],
+                anchor: 'x'
+            },
             hovermode: 'closest',
             showlegend: true
         };
@@ -1764,7 +2011,7 @@ $(function(){
         if (showVolume) {
             layout.yaxis2 = {
                 title: 'Volume',
-                domain: [0, 0.25],
+                domain: [0.3, 0.4],
                 anchor: 'x'
             };
         }
@@ -1772,17 +2019,17 @@ $(function(){
         Plotly.newPlot('example3_exec', traces, layout, {responsive: true});
     }
 
-    function calculateVWAP(fills) {
-        // Calculate VWAP for active (non-deselected) fills
-        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-        if (activeFills.length === 0) return 0;
-
+    function calculateRollingVWAP(fills, upToIndex) {
+        // Calculate VWAP for active fills up to and including upToIndex
         let totalValue = 0;
         let totalQty = 0;
-        activeFills.forEach(fill => {
-            totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
-            totalQty += fill[QUANTITY_COL];
-        });
+        for (let i = 0; i <= upToIndex; i++) {
+            if (!deselectedFills.has(i)) {
+                const fill = fills[i];
+                totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
+                totalQty += fill[QUANTITY_COL];
+            }
+        }
         return totalQty > 0 ? totalValue / totalQty : 0;
     }
 
@@ -1812,9 +2059,6 @@ $(function(){
     function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
         const container = document.getElementById('fills_table_example3_exec');
         if (!container) return;
-
-        // Calculate VWAP once
-        const vwap = calculateVWAP(fills);
 
         let html = '<h4>Fill Details</h4>';
         html += '<table id="fills_table_content_example3_exec" style="width:100%; border-collapse: collapse;">';
@@ -1846,8 +2090,12 @@ $(function(){
             }
 
             const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
+
+            // Calculate rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             if (!isDeselected) {
@@ -1883,9 +2131,6 @@ $(function(){
         const container = document.getElementById('summary_table_example3_exec');
         if (!container) return;
 
-        // Calculate VWAP
-        const vwap = calculateVWAP(fills);
-
         // Get active fills only
         const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
 
@@ -1904,7 +2149,10 @@ $(function(){
 
         const sideMultiplier = side === 'buy' ? 1 : -1;
 
-        activeFills.forEach(fill => {
+        // Need to iterate through all fills (not just active) to get correct indices for rolling VWAP
+        fills.forEach((fill, idx) => {
+            if (deselectedFills.has(idx)) return; // Skip deselected fills
+
             const category = String(fill[colorCol]);
             if (!categories[category]) {
                 categories[category] = {
@@ -1918,8 +2166,12 @@ $(function(){
 
             const qty = fill[QUANTITY_COL];
             const price = fill[PRICE_COL];
+
+            // Use rolling VWAP up to this fill
+            const rollingVWAP = calculateRollingVWAP(fills, idx);
+
             const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - vwap) * qty;
+            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
             const spreadCrossing = getSpreadCrossing(fill, side);
 
             categories[category].totalImpShortfall += impShortfall;
@@ -2074,122 +2326,122 @@ $(function(){
 
 <script type="text/plain" id="volume_data3" data-format="csv_embedded" data-src="">
 time_from,time_to,volume
-2024-01-16T10:00:00.0,2024-01-16T10:02:00.0,98079
-2024-01-16T10:02:00.0,2024-01-16T10:04:00.0,225323
-2024-01-16T10:04:00.0,2024-01-16T10:06:00.0,103268
-2024-01-16T10:06:00.0,2024-01-16T10:08:00.0,190110
-2024-01-16T10:08:00.0,2024-01-16T10:10:00.0,138420
-2024-01-16T10:10:00.0,2024-01-16T10:12:00.0,200284
-2024-01-16T10:12:00.0,2024-01-16T10:14:00.0,109940
-2024-01-16T10:14:00.0,2024-01-16T10:16:00.0,191506
-2024-01-16T10:16:00.0,2024-01-16T10:18:00.0,193437
-2024-01-16T10:18:00.0,2024-01-16T10:20:00.0,158627
-2024-01-16T10:20:00.0,2024-01-16T10:22:00.0,120887
-2024-01-16T10:22:00.0,2024-01-16T10:24:00.0,247751
-2024-01-16T10:24:00.0,2024-01-16T10:26:00.0,233887
-2024-01-16T10:26:00.0,2024-01-16T10:28:00.0,239507
-2024-01-16T10:28:00.0,2024-01-16T10:30:00.0,212853
-2024-01-16T10:30:00.0,2024-01-16T10:32:00.0,159395
-2024-01-16T10:32:00.0,2024-01-16T10:34:00.0,146127
-2024-01-16T10:34:00.0,2024-01-16T10:36:00.0,190504
-2024-01-16T10:36:00.0,2024-01-16T10:38:00.0,227894
-2024-01-16T10:38:00.0,2024-01-16T10:40:00.0,223284
-2024-01-16T10:40:00.0,2024-01-16T10:42:00.0,236198
-2024-01-16T10:42:00.0,2024-01-16T10:44:00.0,137065
-2024-01-16T10:44:00.0,2024-01-16T10:46:00.0,234508
-2024-01-16T10:46:00.0,2024-01-16T10:48:00.0,219593
-2024-01-16T10:48:00.0,2024-01-16T10:50:00.0,144539
-2024-01-16T10:50:00.0,2024-01-16T10:52:00.0,88673
-2024-01-16T10:52:00.0,2024-01-16T10:54:00.0,88978
-2024-01-16T10:54:00.0,2024-01-16T10:56:00.0,133124
-2024-01-16T10:56:00.0,2024-01-16T10:58:00.0,107724
-2024-01-16T10:58:00.0,2024-01-16T11:00:00.0,183037
+2024-01-16T10:00:00.0,2024-01-16T10:02:00.0,191773
+2024-01-16T10:02:00.0,2024-01-16T10:04:00.0,81150
+2024-01-16T10:04:00.0,2024-01-16T10:06:00.0,84167
+2024-01-16T10:06:00.0,2024-01-16T10:08:00.0,157236
+2024-01-16T10:08:00.0,2024-01-16T10:10:00.0,85456
+2024-01-16T10:10:00.0,2024-01-16T10:12:00.0,241939
+2024-01-16T10:12:00.0,2024-01-16T10:14:00.0,206254
+2024-01-16T10:14:00.0,2024-01-16T10:16:00.0,139693
+2024-01-16T10:16:00.0,2024-01-16T10:18:00.0,139638
+2024-01-16T10:18:00.0,2024-01-16T10:20:00.0,246598
+2024-01-16T10:20:00.0,2024-01-16T10:22:00.0,240189
+2024-01-16T10:22:00.0,2024-01-16T10:24:00.0,81589
+2024-01-16T10:24:00.0,2024-01-16T10:26:00.0,203588
+2024-01-16T10:26:00.0,2024-01-16T10:28:00.0,153537
+2024-01-16T10:28:00.0,2024-01-16T10:30:00.0,110274
+2024-01-16T10:30:00.0,2024-01-16T10:32:00.0,119755
+2024-01-16T10:32:00.0,2024-01-16T10:34:00.0,86549
+2024-01-16T10:34:00.0,2024-01-16T10:36:00.0,151262
+2024-01-16T10:36:00.0,2024-01-16T10:38:00.0,128633
+2024-01-16T10:38:00.0,2024-01-16T10:40:00.0,90882
+2024-01-16T10:40:00.0,2024-01-16T10:42:00.0,172117
+2024-01-16T10:42:00.0,2024-01-16T10:44:00.0,146911
+2024-01-16T10:44:00.0,2024-01-16T10:46:00.0,235874
+2024-01-16T10:46:00.0,2024-01-16T10:48:00.0,80089
+2024-01-16T10:48:00.0,2024-01-16T10:50:00.0,234886
+2024-01-16T10:50:00.0,2024-01-16T10:52:00.0,189346
+2024-01-16T10:52:00.0,2024-01-16T10:54:00.0,204776
+2024-01-16T10:54:00.0,2024-01-16T10:56:00.0,204689
+2024-01-16T10:56:00.0,2024-01-16T10:58:00.0,205880
+2024-01-16T10:58:00.0,2024-01-16T11:00:00.0,98354
 
 </script><script type="text/plain" id="fills_data1" data-format="csv_embedded" data-src="">
 time,quantity,price,execution_name,venue,aggressiveness
-2024-01-15T09:35:15.0,300,150.02141675092048,Execution_1,ARCA,Mid
-2024-01-15T09:36:05.0,400,150.01925378550183,Execution_1,BATS,Passive
-2024-01-15T09:41:38.0,500,149.858755824218,Execution_1,NASDAQ,Mid
-2024-01-15T09:41:44.0,350,149.86175582421802,Execution_1,ARCA,Mid
-2024-01-15T09:42:04.0,450,149.91579073197664,Execution_1,BATS,Passive
-2024-01-15T09:42:16.0,400,149.92579073197663,Execution_1,ARCA,Mid
-2024-01-15T09:43:34.0,350,149.84780444394696,Execution_1,NASDAQ,Aggressive
-2024-01-15T09:43:52.0,500,149.84580444394695,Execution_1,BATS,Passive
-2024-01-15T09:43:54.0,400,149.84680444394695,Execution_1,ARCA,Mid
-2024-01-15T09:43:58.0,350,149.85980444394696,Execution_1,ARCA,Mid
-2024-01-15T09:44:40.0,450,149.75796154835777,Execution_1,ARCA,Mid
-2024-01-15T09:45:31.0,400,149.71514105728198,Execution_1,NASDAQ,Mid
-2024-01-15T09:51:47.0,500,149.86477045993465,Execution_1,ARCA,Mid
-2024-01-15T09:54:18.0,350,149.93934998275444,Execution_1,BATS,Mid
-2024-01-15T09:56:08.0,400,150.01359817525508,Execution_1,NYSE,Mid
-2024-01-15T09:57:04.0,450,149.94680421135345,Execution_1,NASDAQ,Aggressive
-2024-01-15T09:58:23.0,350,150.00524869975672,Execution_1,ARCA,Aggressive
-2024-01-15T10:02:42.0,500,149.9933290702978,Execution_1,ARCA,Aggressive
-2024-01-15T10:02:53.0,400,150.0013290702978,Execution_1,NASDAQ,Aggressive
-2024-01-15T10:10:43.0,350,149.96689103407377,Execution_1,ARCA,Mid
-2024-01-15T10:11:50.0,450,149.85011406216537,Execution_1,BATS,Passive
-2024-01-15T10:12:11.0,400,149.78917115692124,Execution_1,NYSE,Mid
-2024-01-15T10:14:11.0,500,149.76779019406374,Execution_1,NYSE,Passive
-2024-01-15T10:20:52.0,350,149.61748741699896,Execution_1,NYSE,Passive
-2024-01-15T10:22:53.0,400,149.60932756264958,Execution_1,NASDAQ,Mid
+2024-01-15T09:39:13.0,300,150.00975912484247,Execution_1,BATS,Mid
+2024-01-15T09:40:31.0,400,150.14897785829547,Execution_1,BATS,Passive
+2024-01-15T09:40:38.0,500,150.13997785829548,Execution_1,NASDAQ,Aggressive
+2024-01-15T09:41:00.0,350,150.15397785829546,Execution_1,ARCA,Mid
+2024-01-15T09:41:46.0,450,150.1752010408337,Execution_1,BATS,Aggressive
+2024-01-15T09:46:38.0,400,150.16141280079603,Execution_1,BATS,Passive
+2024-01-15T09:47:19.0,350,150.09640461588558,Execution_1,NASDAQ,Aggressive
+2024-01-15T09:47:43.0,500,150.0844003739778,Execution_1,ARCA,Aggressive
+2024-01-15T09:48:04.0,400,150.12014771469998,Execution_1,ARCA,Mid
+2024-01-15T09:48:35.0,350,150.14804641519734,Execution_1,ARCA,Passive
+2024-01-15T09:49:24.0,450,150.16162704399423,Execution_1,BATS,Aggressive
+2024-01-15T09:50:15.0,400,150.25291658337696,Execution_1,NYSE,Aggressive
+2024-01-15T09:50:42.0,500,150.2913907400628,Execution_1,BATS,Passive
+2024-01-15T09:52:52.0,350,150.30567093512383,Execution_1,ARCA,Aggressive
+2024-01-15T09:53:03.0,400,150.28672201293804,Execution_1,BATS,Aggressive
+2024-01-15T09:54:47.0,450,150.08117033004777,Execution_1,BATS,Mid
+2024-01-15T09:55:57.0,350,150.04722320040642,Execution_1,NYSE,Passive
+2024-01-15T09:59:25.0,500,150.26070998264498,Execution_1,NYSE,Aggressive
+2024-01-15T10:05:54.0,400,150.10562441814446,Execution_1,ARCA,Mid
+2024-01-15T10:06:27.0,350,150.1173888319077,Execution_1,NYSE,Mid
+2024-01-15T10:07:24.0,450,150.14436557119137,Execution_1,NASDAQ,Mid
+2024-01-15T10:10:12.0,400,149.95613009958421,Execution_1,NYSE,Passive
+2024-01-15T10:10:38.0,500,149.92885437515324,Execution_1,NASDAQ,Aggressive
+2024-01-15T10:14:37.0,350,149.99317777210268,Execution_1,BATS,Aggressive
+2024-01-15T10:24:04.0,400,150.60265890742497,Execution_1,NYSE,Aggressive
 
 </script><script type="text/plain" id="fills_data3" data-format="csv_embedded" data-src="">
 time,quantity,price,execution_name,venue,urgency
-2024-01-16T10:01:50.0,443,200.1620969007741,Aggressive_Buy,ARCA,High
-2024-01-16T10:02:19.0,583,200.14663278244137,Aggressive_Buy,NYSE,High
-2024-01-16T10:02:21.0,582,200.15163278244137,Aggressive_Buy,ARCA,High
-2024-01-16T10:02:31.0,403,200.101580918924,Aggressive_Buy,ARCA,High
-2024-01-16T10:04:12.0,427,200.06002548854394,Aggressive_Buy,ARCA,High
-2024-01-16T10:05:47.0,518,200.00130425212544,Aggressive_Buy,NYSE,High
-2024-01-16T10:07:32.0,425,200.2920144864467,Aggressive_Buy,NYSE,High
-2024-01-16T10:08:12.0,464,200.34564358982868,Aggressive_Buy,NASDAQ,High
-2024-01-16T10:08:41.0,496,200.40748076939127,Aggressive_Buy,NASDAQ,High
-2024-01-16T10:08:53.0,546,200.38810311987595,Aggressive_Buy,ARCA,High
-2024-01-16T10:09:24.0,442,200.5536945702827,Aggressive_Buy,ARCA,High
-2024-01-16T10:10:53.0,553,200.5832553453047,Aggressive_Buy,NASDAQ,High
-2024-01-16T10:11:09.0,530,200.50224081982358,Aggressive_Buy,NYSE,High
-2024-01-16T10:11:16.0,455,200.62396730428003,Aggressive_Buy,NASDAQ,High
-2024-01-16T10:11:43.0,515,200.71668432420503,Aggressive_Buy,NYSE,High
-2024-01-16T10:12:07.0,596,200.80576470737478,Aggressive_Buy,NYSE,High
-2024-01-16T10:12:39.0,499,201.00082525308343,Aggressive_Buy,NASDAQ,High
-2024-01-16T10:13:42.0,576,201.25982503463644,Aggressive_Buy,ARCA,High
-2024-01-16T10:13:54.0,450,201.21469139298185,Aggressive_Buy,NYSE,High
-2024-01-16T10:14:39.0,520,201.42100626156963,Aggressive_Buy,ARCA,High
-2024-01-16T10:05:08.0,294,200.0637169580096,Patient_Buy,NASDAQ,Low
-2024-01-16T10:05:26.0,392,200.03904480294085,Patient_Buy,NYSE,Low
-2024-01-16T10:05:40.0,389,199.96461425086943,Patient_Buy,ARCA,Low
-2024-01-16T10:05:49.0,393,199.96930425212543,Patient_Buy,BATS,Low
-2024-01-16T10:06:23.0,333,199.9408047470197,Patient_Buy,NYSE,Low
-2024-01-16T10:07:37.0,372,200.2650144864467,Patient_Buy,ARCA,Low
-2024-01-16T10:07:51.0,279,200.3558485492289,Patient_Buy,NYSE,Low
-2024-01-16T10:12:20.0,324,200.9286416073004,Patient_Buy,NYSE,Low
-2024-01-16T10:12:29.0,272,200.9286416073004,Patient_Buy,NASDAQ,Low
-2024-01-16T10:17:32.0,336,201.76251635554624,Patient_Buy,ARCA,Low
-2024-01-16T10:21:11.0,269,202.00981215341096,Patient_Buy,BATS,Low
-2024-01-16T10:21:30.0,277,202.02946184414708,Patient_Buy,NYSE,Low
-2024-01-16T10:21:54.0,308,202.0738153032822,Patient_Buy,NASDAQ,Low
-2024-01-16T10:23:37.0,356,202.50371495472154,Patient_Buy,NASDAQ,Low
-2024-01-16T10:24:28.0,343,202.83086054131408,Patient_Buy,BATS,Low
-2024-01-16T10:28:00.0,309,202.52241529756867,Patient_Buy,BATS,Low
-2024-01-16T10:30:20.0,280,202.38812168461718,Patient_Buy,NASDAQ,Low
-2024-01-16T10:30:38.0,368,202.370283355948,Patient_Buy,NASDAQ,Low
-2024-01-16T10:30:44.0,360,202.356283355948,Patient_Buy,BATS,Low
-2024-01-16T10:32:25.0,321,202.28954294862666,Patient_Buy,ARCA,Low
-2024-01-16T10:37:08.0,382,202.1943810782973,Patient_Buy,NASDAQ,Low
-2024-01-16T10:37:34.0,327,202.15534618076842,Patient_Buy,NASDAQ,Low
-2024-01-16T10:38:43.0,322,202.05842512779233,Patient_Buy,NYSE,Low
-2024-01-16T10:39:53.0,384,202.2840214671257,Patient_Buy,BATS,Low
-2024-01-16T10:39:59.0,383,202.2770214671257,Patient_Buy,NYSE,Low
-2024-01-16T10:41:10.0,253,202.35608318242174,Patient_Buy,NYSE,Low
-2024-01-16T10:43:24.0,360,202.2051244931828,Patient_Buy,NYSE,Low
-2024-01-16T10:43:59.0,300,202.12795172715371,Patient_Buy,ARCA,Low
-2024-01-16T10:46:47.0,323,202.0656112197591,Patient_Buy,ARCA,Low
-2024-01-16T10:46:50.0,389,202.06861121975908,Patient_Buy,BATS,Low
-2024-01-16T10:47:15.0,380,202.08952820342324,Patient_Buy,BATS,Low
-2024-01-16T10:47:18.0,277,202.15894176855835,Patient_Buy,BATS,Low
-2024-01-16T10:48:33.0,257,202.2463510811069,Patient_Buy,NYSE,Low
-2024-01-16T10:49:24.0,341,202.24899938493988,Patient_Buy,BATS,Low
-2024-01-16T10:51:39.0,254,202.02088592852112,Patient_Buy,NYSE,Low
+2024-01-16T10:02:17.0,469,200.17541105178887,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:03:28.0,472,200.27601269446782,Aggressive_Buy,NYSE,High
+2024-01-16T10:04:05.0,448,200.17473173927146,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:05:22.0,426,199.97907723602066,Aggressive_Buy,NYSE,High
+2024-01-16T10:05:48.0,472,199.85911262770023,Aggressive_Buy,ARCA,High
+2024-01-16T10:05:48.0,477,199.86511262770023,Aggressive_Buy,NYSE,High
+2024-01-16T10:06:05.0,455,200.0126708394072,Aggressive_Buy,NYSE,High
+2024-01-16T10:06:07.0,484,199.9996708394072,Aggressive_Buy,NYSE,High
+2024-01-16T10:06:32.0,588,200.03427781609602,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:07:30.0,475,200.15010838736924,Aggressive_Buy,ARCA,High
+2024-01-16T10:08:17.0,455,200.10955000863342,Aggressive_Buy,ARCA,High
+2024-01-16T10:08:39.0,524,200.1000451661359,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:09:38.0,452,200.12051040984107,Aggressive_Buy,ARCA,High
+2024-01-16T10:09:58.0,591,200.22683402531365,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:11:06.0,524,200.0326705901537,Aggressive_Buy,NYSE,High
+2024-01-16T10:11:06.0,498,200.02167059015372,Aggressive_Buy,ARCA,High
+2024-01-16T10:12:19.0,445,200.22351151263712,Aggressive_Buy,NYSE,High
+2024-01-16T10:12:38.0,570,200.28137020917657,Aggressive_Buy,NYSE,High
+2024-01-16T10:12:43.0,503,200.28437020917656,Aggressive_Buy,NASDAQ,High
+2024-01-16T10:12:49.0,475,200.40471782428742,Aggressive_Buy,NYSE,High
+2024-01-16T10:05:00.0,315,200.07466035974602,Patient_Buy,ARCA,Low
+2024-01-16T10:06:11.0,349,199.9936708394072,Patient_Buy,NASDAQ,Low
+2024-01-16T10:08:44.0,395,200.0860451661359,Patient_Buy,BATS,Low
+2024-01-16T10:08:50.0,293,200.01004744540015,Patient_Buy,BATS,Low
+2024-01-16T10:09:04.0,378,200.1561915450257,Patient_Buy,ARCA,Low
+2024-01-16T10:11:56.0,346,200.10389479882465,Patient_Buy,BATS,Low
+2024-01-16T10:12:30.0,375,200.2195115126371,Patient_Buy,NASDAQ,Low
+2024-01-16T10:13:23.0,252,200.6166213633836,Patient_Buy,NYSE,Low
+2024-01-16T10:13:59.0,270,200.65172460301426,Patient_Buy,NASDAQ,Low
+2024-01-16T10:17:52.0,277,201.45672064298182,Patient_Buy,BATS,Low
+2024-01-16T10:18:00.0,306,201.4597206429818,Patient_Buy,NYSE,Low
+2024-01-16T10:18:46.0,271,201.68934183859017,Patient_Buy,BATS,Low
+2024-01-16T10:19:38.0,400,201.81972500713482,Patient_Buy,NYSE,Low
+2024-01-16T10:19:52.0,321,201.8543008615944,Patient_Buy,NASDAQ,Low
+2024-01-16T10:21:58.0,346,202.05582294496836,Patient_Buy,NYSE,Low
+2024-01-16T10:22:01.0,378,202.13521024274706,Patient_Buy,BATS,Low
+2024-01-16T10:23:56.0,349,202.17610143570747,Patient_Buy,ARCA,Low
+2024-01-16T10:25:27.0,250,202.0469076467355,Patient_Buy,BATS,Low
+2024-01-16T10:25:43.0,322,201.95803263053193,Patient_Buy,NASDAQ,Low
+2024-01-16T10:26:23.0,340,201.78969070648768,Patient_Buy,BATS,Low
+2024-01-16T10:28:05.0,352,201.95491990271705,Patient_Buy,ARCA,Low
+2024-01-16T10:28:16.0,272,201.9024981329834,Patient_Buy,BATS,Low
+2024-01-16T10:28:59.0,280,201.7224078158071,Patient_Buy,NASDAQ,Low
+2024-01-16T10:34:10.0,252,201.6448573050247,Patient_Buy,ARCA,Low
+2024-01-16T10:34:39.0,279,201.66573639817923,Patient_Buy,NASDAQ,Low
+2024-01-16T10:36:04.0,312,201.6086070190547,Patient_Buy,NASDAQ,Low
+2024-01-16T10:36:39.0,331,201.48001071335378,Patient_Buy,NASDAQ,Low
+2024-01-16T10:38:57.0,386,201.43287713983682,Patient_Buy,BATS,Low
+2024-01-16T10:39:44.0,367,201.432632737897,Patient_Buy,NASDAQ,Low
+2024-01-16T10:40:33.0,257,201.3596826372792,Patient_Buy,NYSE,Low
+2024-01-16T10:43:38.0,360,201.6496347484681,Patient_Buy,NYSE,Low
+2024-01-16T10:44:57.0,393,201.64020034950138,Patient_Buy,ARCA,Low
+2024-01-16T10:52:37.0,311,201.86863109962252,Patient_Buy,NYSE,Low
+2024-01-16T10:52:54.0,278,201.8390194914298,Patient_Buy,BATS,Low
+2024-01-16T10:53:35.0,253,201.99700405710198,Patient_Buy,NYSE,Low
 
 </script><script type="text/plain" id="metadata2" data-format="csv_embedded" data-src="">
 execution_name,side,desired_quantity
@@ -2197,50 +2449,50 @@ Execution_2,sell,15000
 
 </script><script type="text/plain" id="volume_data1" data-format="csv_embedded" data-src="">
 time_from,time_to,volume
-2024-01-15T09:30:00.0,2024-01-15T09:35:00.0,174477
-2024-01-15T09:35:00.0,2024-01-15T09:40:00.0,93214
-2024-01-15T09:40:00.0,2024-01-15T09:45:00.0,70552
-2024-01-15T09:45:00.0,2024-01-15T09:50:00.0,81018
-2024-01-15T09:50:00.0,2024-01-15T09:55:00.0,128572
-2024-01-15T09:55:00.0,2024-01-15T10:00:00.0,123509
-2024-01-15T10:00:00.0,2024-01-15T10:05:00.0,104360
-2024-01-15T10:05:00.0,2024-01-15T10:10:00.0,102773
-2024-01-15T10:10:00.0,2024-01-15T10:15:00.0,149678
-2024-01-15T10:15:00.0,2024-01-15T10:20:00.0,100951
-2024-01-15T10:20:00.0,2024-01-15T10:25:00.0,79413
+2024-01-15T09:30:00.0,2024-01-15T09:35:00.0,52268
+2024-01-15T09:35:00.0,2024-01-15T09:40:00.0,142858
+2024-01-15T09:40:00.0,2024-01-15T09:45:00.0,107574
+2024-01-15T09:45:00.0,2024-01-15T09:50:00.0,177446
+2024-01-15T09:50:00.0,2024-01-15T09:55:00.0,95315
+2024-01-15T09:55:00.0,2024-01-15T10:00:00.0,179936
+2024-01-15T10:00:00.0,2024-01-15T10:05:00.0,116628
+2024-01-15T10:05:00.0,2024-01-15T10:10:00.0,128137
+2024-01-15T10:10:00.0,2024-01-15T10:15:00.0,122754
+2024-01-15T10:15:00.0,2024-01-15T10:20:00.0,73151
+2024-01-15T10:20:00.0,2024-01-15T10:25:00.0,164954
 
 </script><script type="text/plain" id="fills_data2" data-format="csv_embedded" data-src="">
 time,quantity,price,execution_name,strategy,fill_type
-2024-01-15T14:03:59.0,492,75.04298778755887,Execution_2,POV,Peg
-2024-01-15T14:05:21.0,499,74.97133288678181,Execution_2,Opportunistic,Limit
-2024-01-15T14:07:44.0,345,75.04717396678068,Execution_2,VWAP,Limit
-2024-01-15T14:10:58.0,546,75.05644183152558,Execution_2,TWAP,Peg
-2024-01-15T14:12:32.0,438,74.96672663195659,Execution_2,VWAP,Peg
-2024-01-15T14:13:01.0,567,75.01944269767814,Execution_2,TWAP,Market
-2024-01-15T14:14:51.0,589,75.02604379260183,Execution_2,POV,Limit
-2024-01-15T14:15:16.0,453,75.05380027318965,Execution_2,TWAP,Peg
-2024-01-15T14:16:39.0,330,75.1041805527839,Execution_2,Opportunistic,Peg
-2024-01-15T14:26:22.0,456,75.26514039009747,Execution_2,POV,Limit
-2024-01-15T14:27:01.0,226,75.27559543195936,Execution_2,TWAP,Limit
-2024-01-15T14:27:27.0,504,75.26299948225198,Execution_2,TWAP,Peg
-2024-01-15T14:34:04.0,269,75.1242307632933,Execution_2,Opportunistic,Limit
-2024-01-15T14:34:18.0,372,75.1272307632933,Execution_2,VWAP,Market
-2024-01-15T14:34:45.0,509,75.13938773091266,Execution_2,POV,Limit
-2024-01-15T14:41:06.0,452,75.06384824038588,Execution_2,POV,Limit
-2024-01-15T14:42:08.0,403,75.01528963471839,Execution_2,TWAP,Peg
-2024-01-15T14:45:48.0,540,74.98305048283824,Execution_2,POV,Peg
-2024-01-15T14:46:49.0,261,74.99180479430507,Execution_2,TWAP,Limit
-2024-01-15T14:47:03.0,412,74.93585654731956,Execution_2,TWAP,Limit
-2024-01-15T14:47:08.0,411,74.92885654731955,Execution_2,TWAP,Limit
-2024-01-15T14:48:50.0,214,74.85214444185853,Execution_2,TWAP,Limit
-2024-01-15T14:49:28.0,340,74.90785731005262,Execution_2,Opportunistic,Limit
-2024-01-15T14:49:41.0,387,74.97386757988194,Execution_2,POV,Market
-2024-01-15T14:52:10.0,550,74.82531811618843,Execution_2,POV,Market
-2024-01-15T14:52:20.0,230,74.82431811618844,Execution_2,Opportunistic,Market
-2024-01-15T14:52:34.0,540,74.83416264693132,Execution_2,Opportunistic,Peg
-2024-01-15T14:54:52.0,542,74.7966278983489,Execution_2,Opportunistic,Market
-2024-01-15T14:56:20.0,274,74.77825918469078,Execution_2,Opportunistic,Market
-2024-01-15T14:56:30.0,324,74.77504285984166,Execution_2,VWAP,Peg
+2024-01-15T14:03:21.0,201,75.11139321812331,Execution_2,Opportunistic,Limit
+2024-01-15T14:03:44.0,442,75.09809868279848,Execution_2,TWAP,Market
+2024-01-15T14:04:19.0,560,75.09773788595761,Execution_2,TWAP,Peg
+2024-01-15T14:09:09.0,247,74.88536953890346,Execution_2,POV,Peg
+2024-01-15T14:10:37.0,586,74.86858154966396,Execution_2,Opportunistic,Limit
+2024-01-15T14:10:57.0,217,74.81322044657624,Execution_2,TWAP,Peg
+2024-01-15T14:11:15.0,295,74.84568115097122,Execution_2,VWAP,Limit
+2024-01-15T14:11:33.0,433,74.8752594507403,Execution_2,Opportunistic,Limit
+2024-01-15T14:21:06.0,526,75.06099385248862,Execution_2,VWAP,Peg
+2024-01-15T14:21:26.0,274,75.08031513865386,Execution_2,POV,Limit
+2024-01-15T14:22:54.0,348,75.13916217078697,Execution_2,POV,Market
+2024-01-15T14:28:13.0,528,75.15093286124292,Execution_2,VWAP,Limit
+2024-01-15T14:28:16.0,347,75.15793286124291,Execution_2,POV,Peg
+2024-01-15T14:29:03.0,346,75.21159515095155,Execution_2,POV,Limit
+2024-01-15T14:30:57.0,432,75.20412737224143,Execution_2,POV,Peg
+2024-01-15T14:31:03.0,225,75.23828951154304,Execution_2,TWAP,Limit
+2024-01-15T14:34:12.0,508,75.32863336104089,Execution_2,TWAP,Peg
+2024-01-15T14:35:02.0,479,75.33057593908333,Execution_2,Opportunistic,Limit
+2024-01-15T14:36:33.0,298,75.19513059050065,Execution_2,POV,Peg
+2024-01-15T14:38:01.0,534,75.12744162159171,Execution_2,VWAP,Limit
+2024-01-15T14:42:33.0,294,75.13750589612177,Execution_2,POV,Peg
+2024-01-15T14:43:56.0,397,75.25637032142824,Execution_2,Opportunistic,Market
+2024-01-15T14:45:15.0,387,75.22821154529252,Execution_2,VWAP,Peg
+2024-01-15T14:46:55.0,203,75.08166562088981,Execution_2,TWAP,Peg
+2024-01-15T14:48:29.0,595,75.02301232620532,Execution_2,POV,Peg
+2024-01-15T14:48:53.0,504,75.04567168039145,Execution_2,TWAP,Peg
+2024-01-15T14:51:46.0,311,75.088658305082,Execution_2,POV,Market
+2024-01-15T14:53:02.0,545,75.02587410507569,Execution_2,Opportunistic,Limit
+2024-01-15T14:54:59.0,399,74.99311677733887,Execution_2,Opportunistic,Market
+2024-01-15T14:56:33.0,473,74.93373932944706,Execution_2,Opportunistic,Peg
 
 </script><script type="text/plain" id="metadata1" data-format="csv_embedded" data-src="">
 execution_name,arrival_price,side,desired_quantity
@@ -2253,578 +2505,578 @@ Patient_Buy,200.0,buy,12000
 
 </script><script type="text/plain" id="tob_data1" data-format="csv_embedded" data-src="">
 time,bid,ask
-2024-01-15T09:30:00.0,150.01018516783137,150.03018516783135
-2024-01-15T09:30:30.0,149.9642659969191,149.98426599691908
-2024-01-15T09:31:00.0,149.97135400472754,149.99135400472753
-2024-01-15T09:31:30.0,149.9534023165777,149.97340231657768
-2024-01-15T09:32:00.0,149.8746122007755,149.89461220077547
-2024-01-15T09:32:30.0,149.95973761783097,149.97973761783095
-2024-01-15T09:33:00.0,149.96633188733156,149.98633188733154
-2024-01-15T09:33:30.0,149.93486025842017,149.95486025842015
-2024-01-15T09:34:00.0,149.89936123303747,149.91936123303745
-2024-01-15T09:34:30.0,150.0127432617367,150.03274326173667
-2024-01-15T09:35:00.0,149.9944509924121,150.0144509924121
-2024-01-15T09:35:30.0,150.0024167509205,150.02241675092048
-2024-01-15T09:36:00.0,150.0000964641433,150.02009646414328
-2024-01-15T09:36:30.0,149.99525378550186,150.01525378550184
-2024-01-15T09:37:00.0,150.02538729053757,150.04538729053755
-2024-01-15T09:37:30.0,149.97992497456528,149.99992497456526
-2024-01-15T09:38:00.0,149.96361635446792,149.9836163544679
-2024-01-15T09:38:30.0,150.01627657604217,150.03627657604216
-2024-01-15T09:39:00.0,149.97191314343266,149.99191314343264
-2024-01-15T09:39:30.0,149.94484368042316,149.96484368042314
-2024-01-15T09:40:00.0,149.93152634095406,149.95152634095405
-2024-01-15T09:40:30.0,149.8998925497726,149.91989254977258
-2024-01-15T09:41:00.0,149.91867939491425,149.93867939491423
-2024-01-15T09:41:30.0,149.9158370037136,149.93583700371357
-2024-01-15T09:42:00.0,149.83375582421803,149.853755824218
-2024-01-15T09:42:30.0,149.89979073197665,149.91979073197663
-2024-01-15T09:43:00.0,149.82010464763732,149.8401046476373
-2024-01-15T09:43:30.0,149.83058486403672,149.8505848640367
-2024-01-15T09:44:00.0,149.83280444394697,149.85280444394695
-2024-01-15T09:44:30.0,149.76784702869466,149.78784702869464
-2024-01-15T09:45:00.0,149.74196154835778,149.76196154835776
-2024-01-15T09:45:30.0,149.68104662281647,149.70104662281645
-2024-01-15T09:46:00.0,149.698141057282,149.71814105728197
-2024-01-15T09:46:30.0,149.7041226900902,149.72412269009018
-2024-01-15T09:47:00.0,149.66450259451335,149.68450259451333
-2024-01-15T09:47:30.0,149.68387987962478,149.70387987962476
-2024-01-15T09:48:00.0,149.748581226088,149.76858122608797
-2024-01-15T09:48:30.0,149.77529873165238,149.79529873165237
-2024-01-15T09:49:00.0,149.83809602290467,149.85809602290465
-2024-01-15T09:49:30.0,149.88311736594363,149.90311736594361
-2024-01-15T09:50:00.0,149.8649562244354,149.88495622443537
-2024-01-15T09:50:30.0,149.86476588060737,149.88476588060735
-2024-01-15T09:51:00.0,149.79600966807257,149.81600966807255
-2024-01-15T09:51:30.0,149.83786475083326,149.85786475083324
-2024-01-15T09:52:00.0,149.84977045993466,149.86977045993464
-2024-01-15T09:52:30.0,149.83931243288436,149.85931243288434
-2024-01-15T09:53:00.0,149.84062362950962,149.8606236295096
-2024-01-15T09:53:30.0,149.81951087824146,149.83951087824144
-2024-01-15T09:54:00.0,149.8967134784312,149.91671347843118
-2024-01-15T09:54:30.0,149.92334998275444,149.94334998275443
-2024-01-15T09:55:00.0,149.86585390956438,149.88585390956436
-2024-01-15T09:55:30.0,149.9157384206054,149.9357384206054
-2024-01-15T09:56:00.0,149.9354435836601,149.95544358366007
-2024-01-15T09:56:30.0,149.9865981752551,150.00659817525508
-2024-01-15T09:57:00.0,149.977456555998,149.99745655599799
-2024-01-15T09:57:30.0,149.93680421135346,149.95680421135344
-2024-01-15T09:58:00.0,149.97165857810185,149.99165857810183
-2024-01-15T09:58:30.0,149.99324869975675,150.01324869975673
-2024-01-15T09:59:00.0,150.04852589143988,150.06852589143986
-2024-01-15T09:59:30.0,150.07848491807584,150.09848491807583
-2024-01-15T10:00:00.0,150.05372764865888,150.07372764865886
-2024-01-15T10:00:30.0,150.02000997631166,150.04000997631164
-2024-01-15T10:01:00.0,149.96156842154164,149.98156842154162
-2024-01-15T10:01:30.0,150.06601521763508,150.08601521763507
-2024-01-15T10:02:00.0,150.00882802835716,150.02882802835714
-2024-01-15T10:02:30.0,149.9803682942784,150.0003682942784
-2024-01-15T10:03:00.0,149.9793290702978,149.9993290702978
-2024-01-15T10:03:30.0,149.92655291997576,149.94655291997574
-2024-01-15T10:04:00.0,149.9626271453463,149.98262714534627
-2024-01-15T10:04:30.0,149.88409154394128,149.90409154394126
-2024-01-15T10:05:00.0,149.88964995766187,149.90964995766186
-2024-01-15T10:05:30.0,149.9468189428001,149.96681894280007
-2024-01-15T10:06:00.0,149.96666772089603,149.986667720896
-2024-01-15T10:06:30.0,150.00578794900122,150.0257879490012
-2024-01-15T10:07:00.0,150.01305868019574,150.03305868019572
-2024-01-15T10:07:30.0,149.99560679524757,150.01560679524755
-2024-01-15T10:08:00.0,149.8859354493055,149.90593544930547
-2024-01-15T10:08:30.0,149.87234218362607,149.89234218362606
-2024-01-15T10:09:00.0,149.88726888850042,149.9072688885004
-2024-01-15T10:09:30.0,149.85661527558315,149.87661527558313
-2024-01-15T10:10:00.0,149.93562075705378,149.95562075705377
-2024-01-15T10:10:30.0,149.86618736174174,149.88618736174172
-2024-01-15T10:11:00.0,149.95089103407378,149.97089103407376
-2024-01-15T10:11:30.0,149.9044726753741,149.9244726753741
-2024-01-15T10:12:00.0,149.8261140621654,149.84611406216538
-2024-01-15T10:12:30.0,149.75917115692127,149.77917115692125
-2024-01-15T10:13:00.0,149.72635174558124,149.74635174558122
-2024-01-15T10:13:30.0,149.67502142607873,149.6950214260787
-2024-01-15T10:14:00.0,149.73809448701735,149.75809448701733
-2024-01-15T10:14:30.0,149.74079019406375,149.76079019406373
-2024-01-15T10:15:00.0,149.71457462455382,149.7345746245538
-2024-01-15T10:15:30.0,149.63120109441772,149.6512010944177
-2024-01-15T10:16:00.0,149.57890973440297,149.59890973440295
-2024-01-15T10:16:30.0,149.4941194388043,149.51411943880427
-2024-01-15T10:17:00.0,149.45767229273736,149.47767229273734
-2024-01-15T10:17:30.0,149.5675349960944,149.58753499609438
-2024-01-15T10:18:00.0,149.56129708136064,149.58129708136062
-2024-01-15T10:18:30.0,149.50050733389844,149.52050733389842
-2024-01-15T10:19:00.0,149.55449592832494,149.57449592832492
-2024-01-15T10:19:30.0,149.50042703168836,149.52042703168834
-2024-01-15T10:20:00.0,149.51989197841098,149.53989197841096
-2024-01-15T10:20:30.0,149.57096115941613,149.5909611594161
-2024-01-15T10:21:00.0,149.59348741699898,149.61348741699896
-2024-01-15T10:21:30.0,149.52409098431642,149.5440909843164
-2024-01-15T10:22:00.0,149.50319672306642,149.5231967230664
-2024-01-15T10:22:30.0,149.4702091766481,149.49020917664808
-2024-01-15T10:23:00.0,149.5793275626496,149.5993275626496
-2024-01-15T10:23:30.0,149.56187606141123,149.5818760614112
-2024-01-15T10:24:00.0,149.55342861229707,149.57342861229705
-2024-01-15T10:24:30.0,149.54602334422745,149.56602334422743
-2024-01-15T10:25:00.0,149.4988342276766,149.5188342276766
-2024-01-15T10:25:30.0,149.44438915130073,149.4643891513007
-2024-01-15T10:26:00.0,149.43255897307014,149.45255897307013
-2024-01-15T10:26:30.0,149.41852230907818,149.43852230907817
-2024-01-15T10:27:00.0,149.44075928901222,149.4607592890122
-2024-01-15T10:27:30.0,149.4025378813787,149.42253788137867
-2024-01-15T10:28:00.0,149.40007723652909,149.42007723652907
-2024-01-15T10:28:30.0,149.46094415062095,149.48094415062093
-2024-01-15T10:29:00.0,149.48091374859595,149.50091374859593
-2024-01-15T10:29:30.0,149.47811156238495,149.49811156238493
-2024-01-15T10:30:00.0,149.56359388986004,149.58359388986003
+2024-01-15T09:30:00.0,149.9707340733185,149.9907340733185
+2024-01-15T09:30:30.0,150.02024333423816,150.04024333423814
+2024-01-15T09:31:00.0,150.00370063263745,150.02370063263743
+2024-01-15T09:31:30.0,150.0651744930174,150.08517449301738
+2024-01-15T09:32:00.0,150.0323299193527,150.05232991935267
+2024-01-15T09:32:30.0,150.01765761735055,150.03765761735053
+2024-01-15T09:33:00.0,149.93773698381153,149.95773698381151
+2024-01-15T09:33:30.0,149.94583589373948,149.96583589373947
+2024-01-15T09:34:00.0,149.93126397647498,149.95126397647496
+2024-01-15T09:34:30.0,149.9387912732695,149.95879127326947
+2024-01-15T09:35:00.0,149.97814481012722,149.9981448101272
+2024-01-15T09:35:30.0,149.95088082943187,149.97088082943185
+2024-01-15T09:36:00.0,150.01526595439336,150.03526595439334
+2024-01-15T09:36:30.0,150.06094180199597,150.08094180199595
+2024-01-15T09:37:00.0,150.0532092838915,150.0732092838915
+2024-01-15T09:37:30.0,150.0309440567082,150.05094405670818
+2024-01-15T09:38:00.0,149.95871748522168,149.97871748522167
+2024-01-15T09:38:30.0,149.92994058961028,149.94994058961026
+2024-01-15T09:39:00.0,149.9746221731079,149.99462217310787
+2024-01-15T09:39:30.0,149.99275912484248,150.01275912484246
+2024-01-15T09:40:00.0,149.9757595156387,149.9957595156387
+2024-01-15T09:40:30.0,150.0274366492015,150.04743664920147
+2024-01-15T09:41:00.0,150.1239778582955,150.14397785829547
+2024-01-15T09:41:30.0,150.15012375899036,150.17012375899034
+2024-01-15T09:42:00.0,150.16320104083374,150.18320104083372
+2024-01-15T09:42:30.0,150.18868759744046,150.20868759744044
+2024-01-15T09:43:00.0,150.23549096922372,150.2554909692237
+2024-01-15T09:43:30.0,150.212126102072,150.232126102072
+2024-01-15T09:44:00.0,150.20640692020126,150.22640692020124
+2024-01-15T09:44:30.0,150.23177634634442,150.2517763463444
+2024-01-15T09:45:00.0,150.22373277837346,150.24373277837344
+2024-01-15T09:45:30.0,150.18691610394416,150.20691610394414
+2024-01-15T09:46:00.0,150.18290874285265,150.20290874285263
+2024-01-15T09:46:30.0,150.14672870345103,150.166728703451
+2024-01-15T09:47:00.0,150.14841280079605,150.16841280079603
+2024-01-15T09:47:30.0,150.0704046158856,150.09040461588557
+2024-01-15T09:48:00.0,150.0724003739778,150.0924003739778
+2024-01-15T09:48:30.0,150.0911477147,150.1111477147
+2024-01-15T09:49:00.0,150.13004641519737,150.15004641519735
+2024-01-15T09:49:30.0,150.13662704399425,150.15662704399423
+2024-01-15T09:50:00.0,150.27585661820447,150.29585661820445
+2024-01-15T09:50:30.0,150.22691658337698,150.24691658337696
+2024-01-15T09:51:00.0,150.26939074006282,150.2893907400628
+2024-01-15T09:51:30.0,150.2275620213372,150.2475620213372
+2024-01-15T09:52:00.0,150.27269954620422,150.2926995462042
+2024-01-15T09:52:30.0,150.30725982959933,150.3272598295993
+2024-01-15T09:53:00.0,150.27967093512385,150.29967093512383
+2024-01-15T09:53:30.0,150.26872201293807,150.28872201293805
+2024-01-15T09:54:00.0,150.20627353222105,150.22627353222103
+2024-01-15T09:54:30.0,150.10964228984835,150.12964228984833
+2024-01-15T09:55:00.0,150.06017033004778,150.08017033004776
+2024-01-15T09:55:30.0,150.01627385149095,150.03627385149093
+2024-01-15T09:56:00.0,150.03622320040643,150.0562232004064
+2024-01-15T09:56:30.0,150.06492684531275,150.08492684531274
+2024-01-15T09:57:00.0,150.14687481693818,150.16687481693816
+2024-01-15T09:57:30.0,150.22828620139404,150.24828620139402
+2024-01-15T09:58:00.0,150.24766835802606,150.26766835802604
+2024-01-15T09:58:30.0,150.32386954536526,150.34386954536524
+2024-01-15T09:59:00.0,150.23423943896486,150.25423943896485
+2024-01-15T09:59:30.0,150.239709982645,150.25970998264498
+2024-01-15T10:00:00.0,150.26158440627043,150.2815844062704
+2024-01-15T10:00:30.0,150.19640565069776,150.21640565069774
+2024-01-15T10:01:00.0,150.1117579839474,150.13175798394738
+2024-01-15T10:01:30.0,150.07706984379533,150.0970698437953
+2024-01-15T10:02:00.0,150.05489056697505,150.07489056697503
+2024-01-15T10:02:30.0,150.11355903140566,150.13355903140564
+2024-01-15T10:03:00.0,150.10819307305295,150.12819307305293
+2024-01-15T10:03:30.0,150.14823163006125,150.16823163006123
+2024-01-15T10:04:00.0,150.12136278716235,150.14136278716234
+2024-01-15T10:04:30.0,150.10205236680181,150.1220523668018
+2024-01-15T10:05:00.0,150.0412492006049,150.0612492006049
+2024-01-15T10:05:30.0,150.0349536233439,150.0549536233439
+2024-01-15T10:06:00.0,150.07762441814447,150.09762441814445
+2024-01-15T10:06:30.0,150.09438883190774,150.11438883190772
+2024-01-15T10:07:00.0,150.10476178376194,150.12476178376193
+2024-01-15T10:07:30.0,150.11636557119138,150.13636557119136
+2024-01-15T10:08:00.0,150.10954340679237,150.12954340679235
+2024-01-15T10:08:30.0,149.98817926860727,150.00817926860725
+2024-01-15T10:09:00.0,150.01469786306677,150.03469786306675
+2024-01-15T10:09:30.0,150.0143625698656,150.03436256986558
+2024-01-15T10:10:00.0,149.8880497971255,149.90804979712547
+2024-01-15T10:10:30.0,149.93913009958422,149.9591300995842
+2024-01-15T10:11:00.0,149.91785437515324,149.93785437515322
+2024-01-15T10:11:30.0,149.9707549726832,149.9907549726832
+2024-01-15T10:12:00.0,149.94312465737946,149.96312465737944
+2024-01-15T10:12:30.0,149.96494862941935,149.98494862941934
+2024-01-15T10:13:00.0,149.97467511646124,149.99467511646122
+2024-01-15T10:13:30.0,149.99450080392364,150.01450080392362
+2024-01-15T10:14:00.0,149.98188767700998,150.00188767700996
+2024-01-15T10:14:30.0,149.95064137301637,149.97064137301635
+2024-01-15T10:15:00.0,149.9651777721027,149.98517777210267
+2024-01-15T10:15:30.0,150.02706781945676,150.04706781945674
+2024-01-15T10:16:00.0,150.0377360098287,150.0577360098287
+2024-01-15T10:16:30.0,150.05337279386157,150.07337279386155
+2024-01-15T10:17:00.0,150.0879030693474,150.10790306934737
+2024-01-15T10:17:30.0,150.07229581354238,150.09229581354236
+2024-01-15T10:18:00.0,150.07952958959217,150.09952958959215
+2024-01-15T10:18:30.0,150.07529315198647,150.09529315198645
+2024-01-15T10:19:00.0,150.07056623071463,150.09056623071461
+2024-01-15T10:19:30.0,150.11504852576888,150.13504852576887
+2024-01-15T10:20:00.0,150.12321152122138,150.14321152122136
+2024-01-15T10:20:30.0,150.23375496448224,150.25375496448223
+2024-01-15T10:21:00.0,150.26894717961318,150.28894717961316
+2024-01-15T10:21:30.0,150.29505443328193,150.31505443328192
+2024-01-15T10:22:00.0,150.3072166108549,150.3272166108549
+2024-01-15T10:22:30.0,150.2746211005571,150.2946211005571
+2024-01-15T10:23:00.0,150.41105797552962,150.4310579755296
+2024-01-15T10:23:30.0,150.45840732790768,150.47840732790766
+2024-01-15T10:24:00.0,150.52039712233395,150.54039712233393
+2024-01-15T10:24:30.0,150.58765890742498,150.60765890742496
+2024-01-15T10:25:00.0,150.6573838556628,150.67738385566278
+2024-01-15T10:25:30.0,150.54876208231948,150.56876208231947
+2024-01-15T10:26:00.0,150.5582110282969,150.5782110282969
+2024-01-15T10:26:30.0,150.5569588552024,150.57695885520238
+2024-01-15T10:27:00.0,150.5066315634266,150.52663156342658
+2024-01-15T10:27:30.0,150.50266179564966,150.52266179564964
+2024-01-15T10:28:00.0,150.55204384038404,150.57204384038403
+2024-01-15T10:28:30.0,150.55687406381708,150.57687406381706
+2024-01-15T10:29:00.0,150.5897869272996,150.60978692729958
+2024-01-15T10:29:30.0,150.61061232732288,150.63061232732286
+2024-01-15T10:30:00.0,150.57635658064544,150.59635658064542
 
 </script><script type="text/plain" id="tob_data2" data-format="csv_embedded" data-src="">
 time,bid,ask
-2024-01-15T14:00:00.0,74.96028593834419,74.97528593834417
-2024-01-15T14:00:20.0,74.9533698611663,74.96836986116628
-2024-01-15T14:00:40.0,74.95257470092848,74.96757470092847
-2024-01-15T14:01:00.0,74.93653314522729,74.95153314522727
-2024-01-15T14:01:20.0,74.92129016603052,74.9362901660305
-2024-01-15T14:01:40.0,74.92466252674413,74.93966252674412
-2024-01-15T14:02:00.0,74.94808459807507,74.96308459807506
-2024-01-15T14:02:20.0,74.96199058272006,74.97699058272005
-2024-01-15T14:02:40.0,75.03905490096975,75.05405490096973
-2024-01-15T14:03:00.0,75.04210351476152,75.05710351476151
-2024-01-15T14:03:20.0,74.99774161059487,75.01274161059486
-2024-01-15T14:03:40.0,75.01282282949731,75.0278228294973
-2024-01-15T14:04:00.0,75.04498778755887,75.05998778755885
-2024-01-15T14:04:20.0,75.02120393906391,75.0362039390639
-2024-01-15T14:04:40.0,75.00742019139696,75.02242019139695
-2024-01-15T14:05:00.0,75.0006747140805,75.01567471408049
-2024-01-15T14:05:20.0,74.97758908307908,74.99258908307907
-2024-01-15T14:05:40.0,74.96533288678181,74.9803328867818
-2024-01-15T14:06:00.0,74.94740905903838,74.96240905903836
-2024-01-15T14:06:20.0,74.96264501151602,74.977645011516
-2024-01-15T14:06:40.0,74.96658965566026,74.98158965566024
-2024-01-15T14:07:00.0,74.94908273937682,74.9640827393768
-2024-01-15T14:07:20.0,74.96127025403275,74.97627025403274
-2024-01-15T14:07:40.0,75.00867673950006,75.02367673950005
-2024-01-15T14:08:00.0,75.03917396678068,75.05417396678067
-2024-01-15T14:08:20.0,75.03935875997952,75.05435875997951
-2024-01-15T14:08:40.0,75.00876288650146,75.02376288650144
-2024-01-15T14:09:00.0,75.05343004413571,75.0684300441357
-2024-01-15T14:09:20.0,75.06149485293666,75.07649485293665
-2024-01-15T14:09:40.0,75.0096923693606,75.02469236936058
-2024-01-15T14:10:00.0,75.03500000608915,75.05000000608914
-2024-01-15T14:10:20.0,75.00180230503386,75.01680230503385
-2024-01-15T14:10:40.0,75.05032497260906,75.06532497260905
-2024-01-15T14:11:00.0,75.04844183152558,75.06344183152557
-2024-01-15T14:11:20.0,75.04914077970999,75.06414077970997
-2024-01-15T14:11:40.0,75.02701656743008,75.04201656743007
-2024-01-15T14:12:00.0,74.98141914411984,74.99641914411983
-2024-01-15T14:12:20.0,74.93451831889004,74.94951831889003
-2024-01-15T14:12:40.0,74.96372663195659,74.97872663195658
-2024-01-15T14:13:00.0,74.97921433895748,74.99421433895746
-2024-01-15T14:13:20.0,75.01144269767815,75.02644269767814
-2024-01-15T14:13:40.0,75.03294503202862,75.04794503202861
-2024-01-15T14:14:00.0,75.02899068278215,75.04399068278214
-2024-01-15T14:14:20.0,75.04720274361738,75.06220274361736
-2024-01-15T14:14:40.0,75.04479820667383,75.05979820667382
-2024-01-15T14:15:00.0,75.02904379260183,75.04404379260181
-2024-01-15T14:15:20.0,75.04580027318966,75.06080027318964
-2024-01-15T14:15:40.0,75.08536518050717,75.10036518050715
-2024-01-15T14:16:00.0,75.0707939285989,75.08579392859889
-2024-01-15T14:16:20.0,75.06297717543315,75.07797717543313
-2024-01-15T14:16:40.0,75.0991805527839,75.11418055278389
-2024-01-15T14:17:00.0,75.1246926333224,75.13969263332238
-2024-01-15T14:17:20.0,75.19314291430696,75.20814291430695
-2024-01-15T14:17:40.0,75.19510432713199,75.21010432713197
-2024-01-15T14:18:00.0,75.18609781569207,75.20109781569205
-2024-01-15T14:18:20.0,75.18024949934,75.19524949933998
-2024-01-15T14:18:40.0,75.1894887574383,75.20448875743828
-2024-01-15T14:19:00.0,75.16581718359234,75.18081718359232
-2024-01-15T14:19:20.0,75.17389894171303,75.18889894171302
-2024-01-15T14:19:40.0,75.19660136826029,75.21160136826028
-2024-01-15T14:20:00.0,75.23464561693099,75.24964561693098
-2024-01-15T14:20:20.0,75.2180838594066,75.23308385940659
-2024-01-15T14:20:40.0,75.23442959785416,75.24942959785415
-2024-01-15T14:21:00.0,75.27237828474722,75.2873782847472
-2024-01-15T14:21:20.0,75.27911257683915,75.29411257683914
-2024-01-15T14:21:40.0,75.29446425449282,75.30946425449281
-2024-01-15T14:22:00.0,75.28583095806405,75.30083095806404
-2024-01-15T14:22:20.0,75.30395657912106,75.31895657912105
-2024-01-15T14:22:40.0,75.32950992262171,75.3445099226217
-2024-01-15T14:23:00.0,75.41930240071194,75.43430240071193
-2024-01-15T14:23:20.0,75.44229017208579,75.45729017208578
-2024-01-15T14:23:40.0,75.41966941278932,75.4346694127893
-2024-01-15T14:24:00.0,75.34008540497304,75.35508540497302
-2024-01-15T14:24:20.0,75.32974943423396,75.34474943423395
-2024-01-15T14:24:40.0,75.33237432820572,75.3473743282057
-2024-01-15T14:25:00.0,75.34510515944757,75.36010515944756
-2024-01-15T14:25:20.0,75.31855451274086,75.33355451274085
-2024-01-15T14:25:40.0,75.33312145483615,75.34812145483613
-2024-01-15T14:26:00.0,75.28958514748211,75.3045851474821
-2024-01-15T14:26:20.0,75.28007404579631,75.2950740457963
-2024-01-15T14:26:40.0,75.27014039009747,75.28514039009745
-2024-01-15T14:27:00.0,75.25924884718293,75.27424884718292
-2024-01-15T14:27:20.0,75.27659543195936,75.29159543195935
-2024-01-15T14:27:40.0,75.25299948225198,75.26799948225197
-2024-01-15T14:28:00.0,75.26757188111284,75.28257188111283
-2024-01-15T14:28:20.0,75.22951934577215,75.24451934577213
-2024-01-15T14:28:40.0,75.23288419062679,75.24788419062678
-2024-01-15T14:29:00.0,75.23699644615715,75.25199644615714
-2024-01-15T14:29:20.0,75.2149181005303,75.22991810053028
-2024-01-15T14:29:40.0,75.2422118403777,75.25721184037769
-2024-01-15T14:30:00.0,75.31461117187072,75.32961117187071
-2024-01-15T14:30:20.0,75.23621005106841,75.2512100510684
-2024-01-15T14:30:40.0,75.1680470467012,75.18304704670119
-2024-01-15T14:31:00.0,75.21016291979255,75.22516291979254
-2024-01-15T14:31:20.0,75.20821936656377,75.22321936656375
-2024-01-15T14:31:40.0,75.21534704434167,75.23034704434166
-2024-01-15T14:32:00.0,75.2082771633584,75.22327716335839
-2024-01-15T14:32:20.0,75.21963882730202,75.234638827302
-2024-01-15T14:32:40.0,75.18490881954769,75.19990881954767
-2024-01-15T14:33:00.0,75.1727814013515,75.18778140135149
-2024-01-15T14:33:20.0,75.15083246252547,75.16583246252546
-2024-01-15T14:33:40.0,75.08952806852642,75.1045280685264
-2024-01-15T14:34:00.0,75.15587268139241,75.1708726813924
-2024-01-15T14:34:20.0,75.1232307632933,75.13823076329328
-2024-01-15T14:34:40.0,75.12963652778934,75.14463652778933
-2024-01-15T14:35:00.0,75.13438773091266,75.14938773091265
-2024-01-15T14:35:20.0,75.10668534800428,75.12168534800426
-2024-01-15T14:35:40.0,75.12121985336677,75.13621985336675
-2024-01-15T14:36:00.0,75.14118890362637,75.15618890362636
-2024-01-15T14:36:20.0,75.15891142643632,75.1739114264363
-2024-01-15T14:36:40.0,75.12658685675737,75.14158685675736
-2024-01-15T14:37:00.0,75.1265685471018,75.14156854710178
-2024-01-15T14:37:20.0,75.13418586358696,75.14918586358695
-2024-01-15T14:37:40.0,75.12818124244708,75.14318124244707
-2024-01-15T14:38:00.0,75.1157834553713,75.13078345537129
-2024-01-15T14:38:20.0,75.15298866720156,75.16798866720154
-2024-01-15T14:38:40.0,75.18028371604348,75.19528371604346
-2024-01-15T14:39:00.0,75.15426207623126,75.16926207623125
-2024-01-15T14:39:20.0,75.14658698415747,75.16158698415745
-2024-01-15T14:39:40.0,75.10285476219936,75.11785476219934
-2024-01-15T14:40:00.0,75.0505343341733,75.0655343341733
-2024-01-15T14:40:20.0,75.0343142427746,75.04931424277459
-2024-01-15T14:40:40.0,75.01079597733421,75.0257959773342
-2024-01-15T14:41:00.0,75.0308759720977,75.04587597209769
-2024-01-15T14:41:20.0,75.05584824038588,75.07084824038587
-2024-01-15T14:41:40.0,75.0376709929194,75.05267099291939
-2024-01-15T14:42:00.0,75.0472896323401,75.06228963234008
-2024-01-15T14:42:20.0,75.02028963471838,75.03528963471837
-2024-01-15T14:42:40.0,75.02017147011912,75.03517147011911
-2024-01-15T14:43:00.0,75.00465210679342,75.0196521067934
-2024-01-15T14:43:20.0,74.97375922274172,74.9887592227417
-2024-01-15T14:43:40.0,74.97211473778322,74.9871147377832
-2024-01-15T14:44:00.0,75.00132066316746,75.01632066316745
-2024-01-15T14:44:20.0,75.02369209647671,75.0386920964767
-2024-01-15T14:44:40.0,75.05223900060629,75.06723900060628
-2024-01-15T14:45:00.0,75.03387131464974,75.04887131464973
-2024-01-15T14:45:20.0,75.0372489055948,75.05224890559478
-2024-01-15T14:45:40.0,74.9833205087137,74.99832050871369
-2024-01-15T14:46:00.0,74.97605048283823,74.99105048283822
-2024-01-15T14:46:20.0,74.91684022270188,74.93184022270187
-2024-01-15T14:46:40.0,74.93872049007736,74.95372049007734
-2024-01-15T14:47:00.0,74.98280479430507,74.99780479430505
-2024-01-15T14:47:20.0,74.92985654731956,74.94485654731955
-2024-01-15T14:47:40.0,74.88170653035554,74.89670653035553
-2024-01-15T14:48:00.0,74.82998042636808,74.84498042636807
-2024-01-15T14:48:20.0,74.84853328756809,74.86353328756807
-2024-01-15T14:48:40.0,74.82959602284971,74.8445960228497
-2024-01-15T14:49:00.0,74.85314444185853,74.86814444185852
-2024-01-15T14:49:20.0,74.88505946627951,74.9000594662795
-2024-01-15T14:49:40.0,74.90685731005262,74.9218573100526
-2024-01-15T14:50:00.0,74.97786757988194,74.99286757988193
-2024-01-15T14:50:20.0,74.96993892416273,74.98493892416272
-2024-01-15T14:50:40.0,74.90893770759244,74.92393770759243
-2024-01-15T14:51:00.0,74.87128347368082,74.8862834736808
-2024-01-15T14:51:20.0,74.90881289733274,74.92381289733272
-2024-01-15T14:51:40.0,74.88428816390702,74.899288163907
-2024-01-15T14:52:00.0,74.85074044078308,74.86574044078307
-2024-01-15T14:52:20.0,74.82631811618843,74.84131811618842
-2024-01-15T14:52:40.0,74.82416264693131,74.8391626469313
-2024-01-15T14:53:00.0,74.79004801840925,74.80504801840924
-2024-01-15T14:53:20.0,74.80609071455766,74.82109071455764
-2024-01-15T14:53:40.0,74.78979223141397,74.80479223141396
-2024-01-15T14:54:00.0,74.80758792457836,74.82258792457834
-2024-01-15T14:54:20.0,74.81461497343389,74.82961497343388
-2024-01-15T14:54:40.0,74.78399320722134,74.79899320722133
-2024-01-15T14:55:00.0,74.7906278983489,74.80562789834889
-2024-01-15T14:55:20.0,74.7367734700207,74.75177347002068
-2024-01-15T14:55:40.0,74.74266168356718,74.75766168356716
-2024-01-15T14:56:00.0,74.77701248740547,74.79201248740546
-2024-01-15T14:56:20.0,74.76925918469078,74.78425918469077
-2024-01-15T14:56:40.0,74.78004285984166,74.79504285984164
-2024-01-15T14:57:00.0,74.82952753141294,74.84452753141292
-2024-01-15T14:57:20.0,74.81720068456984,74.83220068456983
-2024-01-15T14:57:40.0,74.821012434196,74.836012434196
-2024-01-15T14:58:00.0,74.82433493014612,74.83933493014611
-2024-01-15T14:58:20.0,74.78539455148965,74.80039455148963
-2024-01-15T14:58:40.0,74.80271567063429,74.81771567063427
-2024-01-15T14:59:00.0,74.80847342804424,74.82347342804422
-2024-01-15T14:59:20.0,74.77965645544346,74.79465645544344
-2024-01-15T14:59:40.0,74.71776702006461,74.7327670200646
-2024-01-15T15:00:00.0,74.72776915408642,74.7427691540864
+2024-01-15T14:00:00.0,74.94472427513081,74.9597242751308
+2024-01-15T14:00:20.0,74.98722416090179,75.00222416090178
+2024-01-15T14:00:40.0,74.9636808147069,74.97868081470689
+2024-01-15T14:01:00.0,74.97615817030633,74.99115817030632
+2024-01-15T14:01:20.0,75.01520814018616,75.03020814018615
+2024-01-15T14:01:40.0,75.00142968339884,75.01642968339883
+2024-01-15T14:02:00.0,74.98271294867689,74.99771294867688
+2024-01-15T14:02:20.0,74.96751126987954,74.98251126987952
+2024-01-15T14:02:40.0,75.0323464472682,75.04734644726818
+2024-01-15T14:03:00.0,75.08748654326938,75.10248654326936
+2024-01-15T14:03:20.0,75.08792969890658,75.10292969890656
+2024-01-15T14:03:40.0,75.11139321812331,75.1263932181233
+2024-01-15T14:04:00.0,75.09209868279848,75.10709868279847
+2024-01-15T14:04:20.0,75.09173788595761,75.1067378859576
+2024-01-15T14:04:40.0,75.0892919141384,75.10429191413839
+2024-01-15T14:05:00.0,75.08909888804335,75.10409888804334
+2024-01-15T14:05:20.0,74.9963387211512,75.01133872115119
+2024-01-15T14:05:40.0,74.99630032565,75.01130032564998
+2024-01-15T14:06:00.0,75.00429821398556,75.01929821398555
+2024-01-15T14:06:20.0,75.01309356026077,75.02809356026076
+2024-01-15T14:06:40.0,75.04365296519386,75.05865296519384
+2024-01-15T14:07:00.0,75.0169940159293,75.03199401592929
+2024-01-15T14:07:20.0,75.00288169831573,75.01788169831572
+2024-01-15T14:07:40.0,74.98452823822637,74.99952823822636
+2024-01-15T14:08:00.0,74.92526609483032,74.9402660948303
+2024-01-15T14:08:20.0,74.92829492230324,74.94329492230322
+2024-01-15T14:08:40.0,74.91451632480457,74.92951632480455
+2024-01-15T14:09:00.0,74.93427976116902,74.94927976116901
+2024-01-15T14:09:20.0,74.88936953890347,74.90436953890345
+2024-01-15T14:09:40.0,74.93020461127614,74.94520461127613
+2024-01-15T14:10:00.0,74.90049930007729,74.91549930007727
+2024-01-15T14:10:20.0,74.86988482153251,74.8848848215325
+2024-01-15T14:10:40.0,74.86558154966396,74.88058154966394
+2024-01-15T14:11:00.0,74.80722044657624,74.82222044657622
+2024-01-15T14:11:20.0,74.83668115097122,74.8516811509712
+2024-01-15T14:11:40.0,74.8732594507403,74.88825945074029
+2024-01-15T14:12:00.0,74.90040870688568,74.91540870688567
+2024-01-15T14:12:20.0,74.86978393682794,74.88478393682793
+2024-01-15T14:12:40.0,74.90435173683042,74.91935173683041
+2024-01-15T14:13:00.0,74.90643771240322,74.9214377124032
+2024-01-15T14:13:20.0,74.9440274472047,74.95902744720469
+2024-01-15T14:13:40.0,74.9353411396669,74.95034113966689
+2024-01-15T14:14:00.0,74.94773740002512,74.9627374000251
+2024-01-15T14:14:20.0,74.95840974492322,74.9734097449232
+2024-01-15T14:14:40.0,74.95734228247947,74.97234228247946
+2024-01-15T14:15:00.0,74.98226935754376,74.99726935754374
+2024-01-15T14:15:20.0,74.99194285681084,75.00694285681082
+2024-01-15T14:15:40.0,74.95373896433165,74.96873896433164
+2024-01-15T14:16:00.0,74.95494476093583,74.96994476093582
+2024-01-15T14:16:20.0,75.00030142594714,75.01530142594713
+2024-01-15T14:16:40.0,74.99303542527038,75.00803542527036
+2024-01-15T14:17:00.0,74.97675211281519,74.99175211281518
+2024-01-15T14:17:20.0,74.99279602257083,75.00779602257082
+2024-01-15T14:17:40.0,74.99563559234025,75.01063559234024
+2024-01-15T14:18:00.0,75.00311935805297,75.01811935805296
+2024-01-15T14:18:20.0,75.00444886033938,75.01944886033937
+2024-01-15T14:18:40.0,75.01756338523928,75.03256338523927
+2024-01-15T14:19:00.0,75.03262804704711,75.0476280470471
+2024-01-15T14:19:20.0,75.00879361800948,75.02379361800946
+2024-01-15T14:19:40.0,74.97850236286273,74.99350236286271
+2024-01-15T14:20:00.0,75.04366832616401,75.058668326164
+2024-01-15T14:20:20.0,75.04101229487509,75.05601229487507
+2024-01-15T14:20:40.0,75.07948513783398,75.09448513783397
+2024-01-15T14:21:00.0,75.08551872771444,75.10051872771443
+2024-01-15T14:21:20.0,75.05899385248863,75.07399385248861
+2024-01-15T14:21:40.0,75.07931513865385,75.09431513865384
+2024-01-15T14:22:00.0,75.09703983128384,75.11203983128382
+2024-01-15T14:22:20.0,75.16296147036597,75.17796147036596
+2024-01-15T14:22:40.0,75.16174518827349,75.17674518827347
+2024-01-15T14:23:00.0,75.13916217078697,75.15416217078696
+2024-01-15T14:23:20.0,75.1193491186643,75.13434911866429
+2024-01-15T14:23:40.0,75.13244721325154,75.14744721325152
+2024-01-15T14:24:00.0,75.11504410088959,75.13004410088958
+2024-01-15T14:24:20.0,75.0744676558531,75.08946765585308
+2024-01-15T14:24:40.0,75.05710061114169,75.07210061114168
+2024-01-15T14:25:00.0,75.07726036324729,75.09226036324728
+2024-01-15T14:25:20.0,75.02155887202483,75.03655887202481
+2024-01-15T14:25:40.0,75.0315227783739,75.04652277837388
+2024-01-15T14:26:00.0,75.09944536911611,75.1144453691161
+2024-01-15T14:26:20.0,75.04521560823834,75.06021560823832
+2024-01-15T14:26:40.0,75.06020938204702,75.075209382047
+2024-01-15T14:27:00.0,75.0536367859952,75.06863678599518
+2024-01-15T14:27:20.0,75.07703184389324,75.09203184389322
+2024-01-15T14:27:40.0,75.06836831907926,75.08336831907924
+2024-01-15T14:28:00.0,75.09602053536796,75.11102053536794
+2024-01-15T14:28:20.0,75.14993286124292,75.1649328612429
+2024-01-15T14:28:40.0,75.16224305570606,75.17724305570604
+2024-01-15T14:29:00.0,75.16779949286804,75.18279949286803
+2024-01-15T14:29:20.0,75.20459515095155,75.21959515095153
+2024-01-15T14:29:40.0,75.16380200948691,75.1788020094869
+2024-01-15T14:30:00.0,75.17135759035205,75.18635759035203
+2024-01-15T14:30:20.0,75.19180114992156,75.20680114992155
+2024-01-15T14:30:40.0,75.21999236701434,75.23499236701433
+2024-01-15T14:31:00.0,75.19412737224143,75.20912737224141
+2024-01-15T14:31:20.0,75.23628951154305,75.25128951154304
+2024-01-15T14:31:40.0,75.22074539073735,75.23574539073734
+2024-01-15T14:32:00.0,75.23137232444648,75.24637232444647
+2024-01-15T14:32:20.0,75.25766531145321,75.2726653114532
+2024-01-15T14:32:40.0,75.25946497547072,75.2744649754707
+2024-01-15T14:33:00.0,75.26938784654682,75.2843878465468
+2024-01-15T14:33:20.0,75.30522906685908,75.32022906685907
+2024-01-15T14:33:40.0,75.28307250552018,75.29807250552017
+2024-01-15T14:34:00.0,75.29506023134152,75.31006023134151
+2024-01-15T14:34:20.0,75.33063336104088,75.34563336104087
+2024-01-15T14:34:40.0,75.29477219855428,75.30977219855427
+2024-01-15T14:35:00.0,75.33467953525678,75.34967953525677
+2024-01-15T14:35:20.0,75.33357593908333,75.34857593908332
+2024-01-15T14:35:40.0,75.28757584406232,75.3025758440623
+2024-01-15T14:36:00.0,75.2389451700804,75.25394517008039
+2024-01-15T14:36:20.0,75.20280415482355,75.21780415482354
+2024-01-15T14:36:40.0,75.19313059050066,75.20813059050064
+2024-01-15T14:37:00.0,75.19060362189414,75.20560362189413
+2024-01-15T14:37:20.0,75.174825108494,75.18982510849399
+2024-01-15T14:37:40.0,75.15072697222384,75.16572697222382
+2024-01-15T14:38:00.0,75.1869782259812,75.2019782259812
+2024-01-15T14:38:20.0,75.13144162159172,75.1464416215917
+2024-01-15T14:38:40.0,75.19285125900429,75.20785125900427
+2024-01-15T14:39:00.0,75.21267774318684,75.22767774318683
+2024-01-15T14:39:20.0,75.18655733883466,75.20155733883465
+2024-01-15T14:39:40.0,75.18668163274539,75.20168163274538
+2024-01-15T14:40:00.0,75.16489833099604,75.17989833099602
+2024-01-15T14:40:20.0,75.1827745667864,75.19777456678639
+2024-01-15T14:40:40.0,75.18511698879462,75.2001169887946
+2024-01-15T14:41:00.0,75.1776289894139,75.19262898941389
+2024-01-15T14:41:20.0,75.18388968400455,75.19888968400454
+2024-01-15T14:41:40.0,75.19055185443408,75.20555185443406
+2024-01-15T14:42:00.0,75.16193097981062,75.1769309798106
+2024-01-15T14:42:20.0,75.1736882443154,75.18868824431539
+2024-01-15T14:42:40.0,75.13850589612177,75.15350589612176
+2024-01-15T14:43:00.0,75.1837473415614,75.19874734156139
+2024-01-15T14:43:20.0,75.19308686145494,75.20808686145493
+2024-01-15T14:43:40.0,75.23241740822886,75.24741740822884
+2024-01-15T14:44:00.0,75.25137032142824,75.26637032142823
+2024-01-15T14:44:20.0,75.25940780332094,75.27440780332093
+2024-01-15T14:44:40.0,75.22709228001723,75.24209228001722
+2024-01-15T14:45:00.0,75.24999304853343,75.26499304853341
+2024-01-15T14:45:20.0,75.22521154529252,75.24021154529251
+2024-01-15T14:45:40.0,75.22237277647393,75.23737277647392
+2024-01-15T14:46:00.0,75.20851257017151,75.2235125701715
+2024-01-15T14:46:20.0,75.16379393206729,75.17879393206728
+2024-01-15T14:46:40.0,75.11775235727391,75.1327523572739
+2024-01-15T14:47:00.0,75.08466562088981,75.0996656208898
+2024-01-15T14:47:20.0,75.0706989779895,75.08569897798948
+2024-01-15T14:47:40.0,75.05120568715856,75.06620568715854
+2024-01-15T14:48:00.0,74.99485439722866,75.00985439722865
+2024-01-15T14:48:20.0,74.99611196908593,75.01111196908592
+2024-01-15T14:48:40.0,75.01601232620531,75.0310123262053
+2024-01-15T14:49:00.0,75.03767168039145,75.05267168039144
+2024-01-15T14:49:20.0,75.04269324814851,75.0576932481485
+2024-01-15T14:49:40.0,75.05518110765252,75.0701811076525
+2024-01-15T14:50:00.0,75.06986324999308,75.08486324999306
+2024-01-15T14:50:20.0,75.05406002985887,75.06906002985886
+2024-01-15T14:50:40.0,75.01691736273258,75.03191736273257
+2024-01-15T14:51:00.0,75.06080563572445,75.07580563572444
+2024-01-15T14:51:20.0,75.04082205920135,75.05582205920133
+2024-01-15T14:51:40.0,75.07127913207822,75.0862791320782
+2024-01-15T14:52:00.0,75.093658305082,75.10865830508199
+2024-01-15T14:52:20.0,75.05741094492106,75.07241094492105
+2024-01-15T14:52:40.0,75.07400365908063,75.08900365908062
+2024-01-15T14:53:00.0,75.04100908750955,75.05600908750954
+2024-01-15T14:53:20.0,75.02387410507569,75.03887410507568
+2024-01-15T14:53:40.0,74.98093114266216,74.99593114266214
+2024-01-15T14:54:00.0,74.99884611184791,75.0138461118479
+2024-01-15T14:54:20.0,75.03323155572028,75.04823155572026
+2024-01-15T14:54:40.0,74.9737553544266,74.98875535442659
+2024-01-15T14:55:00.0,74.98511677733887,75.00011677733886
+2024-01-15T14:55:20.0,74.97028776418497,74.98528776418496
+2024-01-15T14:55:40.0,74.97114011298456,74.98614011298454
+2024-01-15T14:56:00.0,74.96580324461479,74.98080324461478
+2024-01-15T14:56:20.0,74.9512328009151,74.96623280091508
+2024-01-15T14:56:40.0,74.92873932944707,74.94373932944706
+2024-01-15T14:57:00.0,74.93406899506557,74.94906899506556
+2024-01-15T14:57:20.0,74.92560882406607,74.94060882406606
+2024-01-15T14:57:40.0,74.91006402124414,74.92506402124413
+2024-01-15T14:58:00.0,74.86527908803842,74.8802790880384
+2024-01-15T14:58:20.0,74.83174716848654,74.84674716848653
+2024-01-15T14:58:40.0,74.79124344214544,74.80624344214543
+2024-01-15T14:59:00.0,74.82389858529866,74.83889858529865
+2024-01-15T14:59:20.0,74.8180453047643,74.83304530476428
+2024-01-15T14:59:40.0,74.84123185452964,74.85623185452963
+2024-01-15T15:00:00.0,74.853948348101,74.86894834810099
 
 </script><script type="text/plain" id="volume_data2" data-format="csv_embedded" data-src="">
 time_from,time_to,volume
-2024-01-15T14:00:00.0,2024-01-15T14:03:00.0,58374
-2024-01-15T14:03:00.0,2024-01-15T14:06:00.0,115712
-2024-01-15T14:06:00.0,2024-01-15T14:09:00.0,109074
-2024-01-15T14:09:00.0,2024-01-15T14:12:00.0,52326
-2024-01-15T14:12:00.0,2024-01-15T14:15:00.0,65305
-2024-01-15T14:15:00.0,2024-01-15T14:18:00.0,124673
-2024-01-15T14:18:00.0,2024-01-15T14:21:00.0,92001
-2024-01-15T14:21:00.0,2024-01-15T14:24:00.0,66567
-2024-01-15T14:24:00.0,2024-01-15T14:27:00.0,138770
-2024-01-15T14:27:00.0,2024-01-15T14:30:00.0,111410
-2024-01-15T14:30:00.0,2024-01-15T14:33:00.0,113075
-2024-01-15T14:33:00.0,2024-01-15T14:36:00.0,87799
-2024-01-15T14:36:00.0,2024-01-15T14:39:00.0,133360
-2024-01-15T14:39:00.0,2024-01-15T14:42:00.0,45133
-2024-01-15T14:42:00.0,2024-01-15T14:45:00.0,125440
-2024-01-15T14:45:00.0,2024-01-15T14:48:00.0,34283
-2024-01-15T14:48:00.0,2024-01-15T14:51:00.0,75710
-2024-01-15T14:51:00.0,2024-01-15T14:54:00.0,104329
-2024-01-15T14:54:00.0,2024-01-15T14:57:00.0,126452
-2024-01-15T14:57:00.0,2024-01-15T15:00:00.0,107197
+2024-01-15T14:00:00.0,2024-01-15T14:03:00.0,31554
+2024-01-15T14:03:00.0,2024-01-15T14:06:00.0,112152
+2024-01-15T14:06:00.0,2024-01-15T14:09:00.0,125774
+2024-01-15T14:09:00.0,2024-01-15T14:12:00.0,63811
+2024-01-15T14:12:00.0,2024-01-15T14:15:00.0,76251
+2024-01-15T14:15:00.0,2024-01-15T14:18:00.0,111671
+2024-01-15T14:18:00.0,2024-01-15T14:21:00.0,51625
+2024-01-15T14:21:00.0,2024-01-15T14:24:00.0,36062
+2024-01-15T14:24:00.0,2024-01-15T14:27:00.0,43567
+2024-01-15T14:27:00.0,2024-01-15T14:30:00.0,129620
+2024-01-15T14:30:00.0,2024-01-15T14:33:00.0,105445
+2024-01-15T14:33:00.0,2024-01-15T14:36:00.0,106467
+2024-01-15T14:36:00.0,2024-01-15T14:39:00.0,144949
+2024-01-15T14:39:00.0,2024-01-15T14:42:00.0,51920
+2024-01-15T14:42:00.0,2024-01-15T14:45:00.0,113387
+2024-01-15T14:45:00.0,2024-01-15T14:48:00.0,65660
+2024-01-15T14:48:00.0,2024-01-15T14:51:00.0,117385
+2024-01-15T14:51:00.0,2024-01-15T14:54:00.0,113708
+2024-01-15T14:54:00.0,2024-01-15T14:57:00.0,143491
+2024-01-15T14:57:00.0,2024-01-15T15:00:00.0,120122
 
 </script><script type="text/plain" id="tob_data3" data-format="csv_embedded" data-src="">
 time,bid,ask
-2024-01-16T10:00:00.0,199.9709364443461,199.99593644434609
-2024-01-16T10:00:15.0,199.93814328829495,199.96314328829493
-2024-01-16T10:00:30.0,200.02099086963054,200.04599086963051
-2024-01-16T10:00:45.0,200.14283756974737,200.16783756974735
-2024-01-16T10:01:00.0,200.0271578538065,200.05215785380648
-2024-01-16T10:01:15.0,200.0913908045173,200.11639080451727
-2024-01-16T10:01:30.0,200.03403595803974,200.05903595803971
-2024-01-16T10:01:45.0,200.0682756716121,200.09327567161208
-2024-01-16T10:02:00.0,200.1290969007741,200.15409690077408
-2024-01-16T10:02:15.0,200.1895740246562,200.21457402465617
-2024-01-16T10:02:30.0,200.11363278244139,200.13863278244136
-2024-01-16T10:02:45.0,200.070580918924,200.095580918924
-2024-01-16T10:03:00.0,200.06022107103567,200.08522107103565
-2024-01-16T10:03:15.0,200.24563462702014,200.27063462702012
-2024-01-16T10:03:30.0,200.07131160993475,200.09631160993473
-2024-01-16T10:03:45.0,200.02914218086093,200.0541421808609
-2024-01-16T10:04:00.0,199.92810929272343,199.9531092927234
-2024-01-16T10:04:15.0,200.01602548854396,200.04102548854394
-2024-01-16T10:04:30.0,199.97588656847037,200.00088656847035
-2024-01-16T10:04:45.0,200.00584211123518,200.03084211123516
-2024-01-16T10:05:00.0,199.96167865880506,199.98667865880503
-2024-01-16T10:05:15.0,200.0427169580096,200.06771695800958
-2024-01-16T10:05:30.0,200.02304480294086,200.04804480294084
-2024-01-16T10:05:45.0,199.93961425086945,199.96461425086943
-2024-01-16T10:06:00.0,199.95830425212546,199.98330425212544
-2024-01-16T10:06:15.0,199.9691471732455,199.99414717324547
-2024-01-16T10:06:30.0,199.92180474701973,199.9468047470197
-2024-01-16T10:06:45.0,199.91107311077917,199.93607311077915
-2024-01-16T10:07:00.0,200.0456591607023,200.07065916070226
-2024-01-16T10:07:15.0,200.14531197840267,200.17031197840265
-2024-01-16T10:07:30.0,200.1903948695142,200.21539486951417
-2024-01-16T10:07:45.0,200.24701448644672,200.2720144864467
-2024-01-16T10:08:00.0,200.33384854922892,200.3588485492289
-2024-01-16T10:08:15.0,200.3196435898287,200.34464358982868
-2024-01-16T10:08:30.0,200.30309915481166,200.32809915481164
-2024-01-16T10:08:45.0,200.3794807693913,200.40448076939128
-2024-01-16T10:09:00.0,200.35810311987598,200.38310311987595
-2024-01-16T10:09:15.0,200.38269872888134,200.40769872888131
-2024-01-16T10:09:30.0,200.51369457028272,200.5386945702827
-2024-01-16T10:09:45.0,200.42120714045038,200.44620714045035
-2024-01-16T10:10:00.0,200.45560447362786,200.48060447362784
-2024-01-16T10:10:15.0,200.53295693196748,200.55795693196745
-2024-01-16T10:10:30.0,200.4944531532708,200.51945315327077
-2024-01-16T10:10:45.0,200.53024820503535,200.55524820503533
-2024-01-16T10:11:00.0,200.54825534530474,200.57325534530472
-2024-01-16T10:11:15.0,200.4762408198236,200.50124081982358
-2024-01-16T10:11:30.0,200.59096730428004,200.61596730428002
-2024-01-16T10:11:45.0,200.67968432420506,200.70468432420503
-2024-01-16T10:12:00.0,200.6862418158409,200.71124181584088
-2024-01-16T10:12:15.0,200.7677647073748,200.79276470737477
-2024-01-16T10:12:30.0,200.90964160730041,200.9346416073004
-2024-01-16T10:12:45.0,200.97182525308347,200.99682525308344
-2024-01-16T10:13:00.0,201.15431483522238,201.17931483522236
-2024-01-16T10:13:15.0,201.17238257291305,201.19738257291303
-2024-01-16T10:13:30.0,201.20399765297552,201.2289976529755
-2024-01-16T10:13:45.0,201.23482503463646,201.25982503463644
-2024-01-16T10:14:00.0,201.17969139298188,201.20469139298186
-2024-01-16T10:14:15.0,201.29443646050618,201.31943646050615
-2024-01-16T10:14:30.0,201.2303201884327,201.25532018843268
-2024-01-16T10:14:45.0,201.38800626156964,201.41300626156962
-2024-01-16T10:15:00.0,201.38018450163332,201.4051845016333
-2024-01-16T10:15:15.0,201.3167986317911,201.34179863179108
-2024-01-16T10:15:30.0,201.44391718009493,201.4689171800949
-2024-01-16T10:15:45.0,201.65070725147288,201.67570725147286
-2024-01-16T10:16:00.0,201.67066679150312,201.6956667915031
-2024-01-16T10:16:15.0,201.68829388152452,201.7132938815245
-2024-01-16T10:16:30.0,201.63451939403575,201.65951939403573
-2024-01-16T10:16:45.0,201.713218741084,201.73821874108398
-2024-01-16T10:17:00.0,201.68429716896094,201.70929716896092
-2024-01-16T10:17:15.0,201.78642177223455,201.81142177223452
-2024-01-16T10:17:30.0,201.69470690487498,201.71970690487495
-2024-01-16T10:17:45.0,201.74251635554626,201.76751635554623
-2024-01-16T10:18:00.0,201.70879887335798,201.73379887335796
-2024-01-16T10:18:15.0,201.70182160096368,201.72682160096366
-2024-01-16T10:18:30.0,201.65739792334915,201.68239792334913
-2024-01-16T10:18:45.0,201.63284045515383,201.6578404551538
-2024-01-16T10:19:00.0,201.57689274040598,201.60189274040596
-2024-01-16T10:19:15.0,201.62436214609096,201.64936214609094
-2024-01-16T10:19:30.0,201.73611724075792,201.7611172407579
-2024-01-16T10:19:45.0,201.65442447193655,201.67942447193653
-2024-01-16T10:20:00.0,201.59388352196467,201.61888352196465
-2024-01-16T10:20:15.0,201.6303243587592,201.65532435875917
-2024-01-16T10:20:30.0,201.72939123360052,201.7543912336005
-2024-01-16T10:20:45.0,201.72037193700749,201.74537193700746
-2024-01-16T10:21:00.0,201.84591731153745,201.87091731153743
-2024-01-16T10:21:15.0,201.986812153411,202.01181215341097
-2024-01-16T10:21:30.0,202.0094618441471,202.03446184414707
-2024-01-16T10:21:45.0,202.0141092605522,202.03910926055218
-2024-01-16T10:22:00.0,202.06081530328223,202.0858153032822
-2024-01-16T10:22:15.0,201.9753330731959,202.0003330731959
-2024-01-16T10:22:30.0,202.03937900388024,202.06437900388022
-2024-01-16T10:22:45.0,202.0652325888696,202.09023258886958
-2024-01-16T10:23:00.0,202.18122462919038,202.20622462919036
-2024-01-16T10:23:15.0,202.2771894756331,202.30218947563307
-2024-01-16T10:23:30.0,202.37318472902774,202.39818472902772
-2024-01-16T10:23:45.0,202.49171495472157,202.51671495472155
-2024-01-16T10:24:00.0,202.6527546922997,202.6777546922997
-2024-01-16T10:24:15.0,202.79511809204257,202.82011809204255
-2024-01-16T10:24:30.0,202.8198605413141,202.8448605413141
-2024-01-16T10:24:45.0,202.68182701049219,202.70682701049216
-2024-01-16T10:25:00.0,202.73587183241654,202.7608718324165
-2024-01-16T10:25:15.0,202.65644410432463,202.6814441043246
-2024-01-16T10:25:30.0,202.7796484356276,202.80464843562757
-2024-01-16T10:25:45.0,202.71928158570773,202.7442815857077
-2024-01-16T10:26:00.0,202.6633342272396,202.68833422723958
-2024-01-16T10:26:15.0,202.73968940043028,202.76468940043026
-2024-01-16T10:26:30.0,202.6776630060846,202.70266300608458
-2024-01-16T10:26:45.0,202.70953545922555,202.73453545922553
-2024-01-16T10:27:00.0,202.74802970216038,202.77302970216036
-2024-01-16T10:27:15.0,202.62935771424074,202.65435771424072
-2024-01-16T10:27:30.0,202.64883593002435,202.67383593002432
-2024-01-16T10:27:45.0,202.52315150708444,202.5481515070844
-2024-01-16T10:28:00.0,202.5054152975687,202.53041529756868
-2024-01-16T10:28:15.0,202.5756680405738,202.60066804057377
-2024-01-16T10:28:30.0,202.61219722237792,202.6371972223779
-2024-01-16T10:28:45.0,202.543386924332,202.56838692433197
-2024-01-16T10:29:00.0,202.60167569561918,202.62667569561916
-2024-01-16T10:29:15.0,202.52104565412205,202.54604565412203
-2024-01-16T10:29:30.0,202.5034936399676,202.52849363996756
-2024-01-16T10:29:45.0,202.57660505397976,202.60160505397974
-2024-01-16T10:30:00.0,202.52120860562755,202.54620860562753
-2024-01-16T10:30:15.0,202.36690904179665,202.39190904179662
-2024-01-16T10:30:30.0,202.3741216846172,202.39912168461717
-2024-01-16T10:30:45.0,202.34528335594803,202.370283355948
-2024-01-16T10:31:00.0,202.32258232443812,202.3475823244381
-2024-01-16T10:31:15.0,202.30206137769466,202.32706137769463
-2024-01-16T10:31:30.0,202.38553987869153,202.4105398786915
-2024-01-16T10:31:45.0,202.38656321924972,202.4115632192497
-2024-01-16T10:32:00.0,202.35555065121483,202.3805506512148
-2024-01-16T10:32:15.0,202.23142167250958,202.25642167250956
-2024-01-16T10:32:30.0,202.27354294862667,202.29854294862665
-2024-01-16T10:32:45.0,202.20940405297387,202.23440405297384
-2024-01-16T10:33:00.0,202.16455671509488,202.18955671509485
-2024-01-16T10:33:15.0,202.113501834224,202.13850183422397
-2024-01-16T10:33:30.0,202.03255665454586,202.05755665454583
-2024-01-16T10:33:45.0,202.08506740613922,202.1100674061392
-2024-01-16T10:34:00.0,202.07113959222374,202.09613959222372
-2024-01-16T10:34:15.0,202.1003750416409,202.12537504164086
-2024-01-16T10:34:30.0,202.04661991069543,202.0716199106954
-2024-01-16T10:34:45.0,202.05238628613623,202.0773862861362
-2024-01-16T10:35:00.0,201.98418891404535,202.00918891404532
-2024-01-16T10:35:15.0,201.9538398449173,201.97883984491727
-2024-01-16T10:35:30.0,201.9637787002737,201.98877870027368
-2024-01-16T10:35:45.0,202.02144976369738,202.04644976369735
-2024-01-16T10:36:00.0,201.91963361504264,201.94463361504262
-2024-01-16T10:36:15.0,201.9778440321381,202.00284403213809
-2024-01-16T10:36:30.0,201.97572489737038,202.00072489737036
-2024-01-16T10:36:45.0,202.05120457711374,202.0762045771137
-2024-01-16T10:37:00.0,202.14344841181827,202.16844841181825
-2024-01-16T10:37:15.0,202.18338107829734,202.20838107829732
-2024-01-16T10:37:30.0,202.13973889360852,202.1647388936085
-2024-01-16T10:37:45.0,202.13334618076843,202.1583461807684
-2024-01-16T10:38:00.0,201.9167082019552,201.94170820195518
-2024-01-16T10:38:15.0,201.88486099664527,201.90986099664525
-2024-01-16T10:38:30.0,201.9147616575819,201.93976165758187
-2024-01-16T10:38:45.0,202.03542512779237,202.06042512779234
-2024-01-16T10:39:00.0,201.98748042088974,202.01248042088972
-2024-01-16T10:39:15.0,202.11159759933415,202.13659759933412
-2024-01-16T10:39:30.0,202.25760190478803,202.282601904788
-2024-01-16T10:39:45.0,202.27237759192994,202.29737759192992
-2024-01-16T10:40:00.0,202.26502146712573,202.2900214671257
-2024-01-16T10:40:15.0,202.43613362106137,202.46113362106135
-2024-01-16T10:40:30.0,202.38777249014728,202.41277249014726
-2024-01-16T10:40:45.0,202.37636730552634,202.40136730552632
-2024-01-16T10:41:00.0,202.36296187212093,202.3879618721209
-2024-01-16T10:41:15.0,202.33708318242176,202.36208318242174
-2024-01-16T10:41:30.0,202.2208434474799,202.24584344747987
-2024-01-16T10:41:45.0,202.1351737859703,202.16017378597027
-2024-01-16T10:42:00.0,202.17710499603655,202.20210499603652
-2024-01-16T10:42:15.0,202.1474113730675,202.1724113730675
-2024-01-16T10:42:30.0,202.12432242710136,202.14932242710134
-2024-01-16T10:42:45.0,202.1787011194401,202.20370111944007
-2024-01-16T10:43:00.0,202.11083783862762,202.1358378386276
-2024-01-16T10:43:15.0,202.00113741130562,202.0261374113056
-2024-01-16T10:43:30.0,202.19212449318283,202.2171244931828
-2024-01-16T10:43:45.0,202.25711401105846,202.28211401105844
-2024-01-16T10:44:00.0,202.11595172715374,202.14095172715372
-2024-01-16T10:44:15.0,202.11392145745208,202.13892145745206
-2024-01-16T10:44:30.0,202.15317586800654,202.17817586800652
-2024-01-16T10:44:45.0,202.10522183460537,202.13022183460535
-2024-01-16T10:45:00.0,202.18545050524992,202.2104505052499
-2024-01-16T10:45:15.0,202.1575142006261,202.1825142006261
-2024-01-16T10:45:30.0,202.06291428284376,202.08791428284374
-2024-01-16T10:45:45.0,201.90473563057427,201.92973563057424
-2024-01-16T10:46:00.0,201.94148486376312,201.9664848637631
-2024-01-16T10:46:15.0,202.00058956455524,202.02558956455522
-2024-01-16T10:46:30.0,202.11160236660479,202.13660236660476
-2024-01-16T10:46:45.0,202.02497644680852,202.0499764468085
-2024-01-16T10:47:00.0,202.0446112197591,202.06961121975908
-2024-01-16T10:47:15.0,202.07052820342327,202.09552820342324
-2024-01-16T10:47:30.0,202.13694176855836,202.16194176855834
-2024-01-16T10:47:45.0,202.2106890288797,202.23568902887968
-2024-01-16T10:48:00.0,202.2475162634086,202.2725162634086
-2024-01-16T10:48:15.0,202.12303094493873,202.1480309449387
-2024-01-16T10:48:30.0,202.20083184209372,202.2258318420937
-2024-01-16T10:48:45.0,202.23535108110693,202.2603510811069
-2024-01-16T10:49:00.0,202.27060605265257,202.29560605265254
-2024-01-16T10:49:15.0,202.234708318567,202.25970831856696
-2024-01-16T10:49:30.0,202.2249993849399,202.24999938493988
-2024-01-16T10:49:45.0,202.19397133345424,202.21897133345422
-2024-01-16T10:50:00.0,202.24758239334452,202.2725823933445
-2024-01-16T10:50:15.0,202.2272839157894,202.25228391578938
-2024-01-16T10:50:30.0,202.1356345527154,202.16063455271538
-2024-01-16T10:50:45.0,202.14399574297917,202.16899574297915
-2024-01-16T10:51:00.0,202.13701692594208,202.16201692594205
-2024-01-16T10:51:15.0,202.06328249175948,202.08828249175946
-2024-01-16T10:51:30.0,202.0541876855879,202.07918768558787
-2024-01-16T10:51:45.0,202.00388592852116,202.02888592852113
-2024-01-16T10:52:00.0,202.05293445492657,202.07793445492655
-2024-01-16T10:52:15.0,202.20146162266616,202.22646162266614
-2024-01-16T10:52:30.0,202.16699470665682,202.1919947066568
-2024-01-16T10:52:45.0,202.17202872412676,202.19702872412674
-2024-01-16T10:53:00.0,202.1589227183328,202.18392271833278
-2024-01-16T10:53:15.0,202.14094436561322,202.1659443656132
-2024-01-16T10:53:30.0,202.16980534867454,202.19480534867452
-2024-01-16T10:53:45.0,202.27932892875035,202.30432892875032
-2024-01-16T10:54:00.0,202.1748454578,202.19984545779997
-2024-01-16T10:54:15.0,202.2130354152371,202.23803541523708
-2024-01-16T10:54:30.0,202.29408583845353,202.3190858384535
-2024-01-16T10:54:45.0,202.20881389842248,202.23381389842245
-2024-01-16T10:55:00.0,202.25590088041977,202.28090088041975
-2024-01-16T10:55:15.0,202.25181535332212,202.2768153533221
-2024-01-16T10:55:30.0,202.23598147670413,202.2609814767041
-2024-01-16T10:55:45.0,202.1904733444977,202.21547334449767
-2024-01-16T10:56:00.0,202.20675380810945,202.23175380810943
-2024-01-16T10:56:15.0,202.1502245632442,202.17522456324417
-2024-01-16T10:56:30.0,202.03665558896583,202.0616555889658
-2024-01-16T10:56:45.0,202.09310054394993,202.1181005439499
-2024-01-16T10:57:00.0,202.07961760041195,202.10461760041193
-2024-01-16T10:57:15.0,202.2532120756997,202.27821207569968
-2024-01-16T10:57:30.0,202.23035645680818,202.25535645680816
-2024-01-16T10:57:45.0,202.12758206290886,202.15258206290883
-2024-01-16T10:58:00.0,202.15413843330904,202.17913843330902
-2024-01-16T10:58:15.0,202.07045936517414,202.09545936517412
-2024-01-16T10:58:30.0,201.99557829812835,202.02057829812833
-2024-01-16T10:58:45.0,201.96201637890823,201.9870163789082
-2024-01-16T10:59:00.0,202.00983959363492,202.0348395936349
-2024-01-16T10:59:15.0,202.02579751965905,202.05079751965903
-2024-01-16T10:59:30.0,202.01369398030627,202.03869398030625
-2024-01-16T10:59:45.0,201.99476614772522,202.0197661477252
-2024-01-16T11:00:00.0,202.03019425424642,202.0551942542464
+2024-01-16T10:00:00.0,199.8826951879389,199.90769518793888
+2024-01-16T10:00:15.0,200.00814062299372,200.0331406229937
+2024-01-16T10:00:30.0,200.0330000576933,200.05800005769328
+2024-01-16T10:00:45.0,200.03975449744777,200.06475449744775
+2024-01-16T10:01:00.0,200.07459175565666,200.09959175565663
+2024-01-16T10:01:15.0,200.0096668302337,200.03466683023368
+2024-01-16T10:01:30.0,200.17925187860232,200.2042518786023
+2024-01-16T10:01:45.0,200.10357177945602,200.128571779456
+2024-01-16T10:02:00.0,200.23484295333083,200.2598429533308
+2024-01-16T10:02:15.0,200.17611758756897,200.20111758756894
+2024-01-16T10:02:30.0,200.1504110517889,200.17541105178887
+2024-01-16T10:02:45.0,200.21093930981164,200.2359393098116
+2024-01-16T10:03:00.0,200.2780752162256,200.30307521622558
+2024-01-16T10:03:15.0,200.21982537477402,200.244825374774
+2024-01-16T10:03:30.0,200.23201269446784,200.25701269446782
+2024-01-16T10:03:45.0,200.22603136656548,200.25103136656546
+2024-01-16T10:04:00.0,200.13309717407066,200.15809717407063
+2024-01-16T10:04:15.0,200.1447317392715,200.16973173927147
+2024-01-16T10:04:30.0,200.20627040743713,200.2312704074371
+2024-01-16T10:04:45.0,200.14597657407342,200.1709765740734
+2024-01-16T10:05:00.0,200.05366035974603,200.078660359746
+2024-01-16T10:05:15.0,199.9474373699619,199.97243736996188
+2024-01-16T10:05:30.0,199.94007723602067,199.96507723602065
+2024-01-16T10:05:45.0,199.9561502126732,199.98115021267319
+2024-01-16T10:06:00.0,199.82111262770024,199.84611262770022
+2024-01-16T10:06:15.0,199.97067083940723,199.9956708394072
+2024-01-16T10:06:30.0,199.97072498323254,199.99572498323252
+2024-01-16T10:06:45.0,200.00627781609606,200.03127781609604
+2024-01-16T10:07:00.0,200.06036112732468,200.08536112732466
+2024-01-16T10:07:15.0,200.1138881413434,200.1388881413434
+2024-01-16T10:07:30.0,200.11710838736926,200.14210838736923
+2024-01-16T10:07:45.0,200.18430667381065,200.20930667381063
+2024-01-16T10:08:00.0,200.15055303582395,200.17555303582392
+2024-01-16T10:08:15.0,200.02066326165897,200.04566326165894
+2024-01-16T10:08:30.0,200.06755000863345,200.09255000863342
+2024-01-16T10:08:45.0,200.07404516613593,200.0990451661359
+2024-01-16T10:09:00.0,199.98504744540017,200.01004744540015
+2024-01-16T10:09:15.0,200.13619154502572,200.1611915450257
+2024-01-16T10:09:30.0,200.16555265516675,200.19055265516673
+2024-01-16T10:09:45.0,200.0945104098411,200.11951040984107
+2024-01-16T10:10:00.0,200.1868340253137,200.21183402531366
+2024-01-16T10:10:15.0,200.1054095894804,200.13040958948037
+2024-01-16T10:10:30.0,200.06305062675202,200.088050626752
+2024-01-16T10:10:45.0,199.92786797905396,199.95286797905393
+2024-01-16T10:11:00.0,199.99695874146582,200.0219587414658
+2024-01-16T10:11:15.0,199.99467059015373,200.0196705901537
+2024-01-16T10:11:30.0,200.02660922616673,200.0516092261667
+2024-01-16T10:11:45.0,200.1571417456188,200.18214174561876
+2024-01-16T10:12:00.0,200.08989479882467,200.11489479882465
+2024-01-16T10:12:15.0,200.22002544261142,200.2450254426114
+2024-01-16T10:12:30.0,200.19651151263713,200.2215115126371
+2024-01-16T10:12:45.0,200.24837020917658,200.27337020917656
+2024-01-16T10:13:00.0,200.36871782428744,200.39371782428742
+2024-01-16T10:13:15.0,200.4458062486844,200.47080624868437
+2024-01-16T10:13:30.0,200.6006213633836,200.62562136338357
+2024-01-16T10:13:45.0,200.5487251024349,200.57372510243488
+2024-01-16T10:14:00.0,200.62972460301427,200.65472460301424
+2024-01-16T10:14:15.0,200.65043127842625,200.67543127842623
+2024-01-16T10:14:30.0,200.57145797738886,200.59645797738884
+2024-01-16T10:14:45.0,200.614406068516,200.63940606851597
+2024-01-16T10:15:00.0,200.72029662873993,200.7452966287399
+2024-01-16T10:15:15.0,200.95000698237803,200.975006982378
+2024-01-16T10:15:30.0,201.09273926971176,201.11773926971173
+2024-01-16T10:15:45.0,201.18716724984458,201.21216724984455
+2024-01-16T10:16:00.0,201.21781913381295,201.24281913381293
+2024-01-16T10:16:15.0,201.25272920316596,201.27772920316593
+2024-01-16T10:16:30.0,201.36928085333946,201.39428085333944
+2024-01-16T10:16:45.0,201.3988603728207,201.42386037282068
+2024-01-16T10:17:00.0,201.513275507282,201.53827550728198
+2024-01-16T10:17:15.0,201.498360976157,201.52336097615697
+2024-01-16T10:17:30.0,201.58228352133895,201.60728352133893
+2024-01-16T10:17:45.0,201.5987742123382,201.6237742123382
+2024-01-16T10:18:00.0,201.44272064298184,201.46772064298182
+2024-01-16T10:18:15.0,201.62144057490275,201.64644057490273
+2024-01-16T10:18:30.0,201.60267120868562,201.6276712086856
+2024-01-16T10:18:45.0,201.63568591832674,201.66068591832672
+2024-01-16T10:19:00.0,201.6763418385902,201.70134183859017
+2024-01-16T10:19:15.0,201.63913068360273,201.6641306836027
+2024-01-16T10:19:30.0,201.6886338547149,201.71363385471489
+2024-01-16T10:19:45.0,201.80472500713483,201.8297250071348
+2024-01-16T10:20:00.0,201.83430086159441,201.8593008615944
+2024-01-16T10:20:15.0,201.85286874270895,201.87786874270893
+2024-01-16T10:20:30.0,201.8136588934428,201.83865889344278
+2024-01-16T10:20:45.0,201.88790212875065,201.91290212875063
+2024-01-16T10:21:00.0,201.89748670636214,201.92248670636212
+2024-01-16T10:21:15.0,201.91244678878292,201.9374467887829
+2024-01-16T10:21:30.0,201.8483818768955,201.87338187689548
+2024-01-16T10:21:45.0,201.961202067436,201.98620206743598
+2024-01-16T10:22:00.0,202.0388229449684,202.06382294496836
+2024-01-16T10:22:15.0,202.11421024274708,202.13921024274705
+2024-01-16T10:22:30.0,202.2035533353314,202.22855333533138
+2024-01-16T10:22:45.0,202.1586908099873,202.18369080998727
+2024-01-16T10:23:00.0,202.03463913431662,202.0596391343166
+2024-01-16T10:23:15.0,202.0282801390564,202.05328013905637
+2024-01-16T10:23:30.0,202.03149877843913,202.0564987784391
+2024-01-16T10:23:45.0,202.1328481563804,202.15784815638037
+2024-01-16T10:24:00.0,202.16010143570747,202.18510143570745
+2024-01-16T10:24:15.0,202.17561450215314,202.20061450215312
+2024-01-16T10:24:30.0,202.30120395176365,202.32620395176363
+2024-01-16T10:24:45.0,202.2330150647244,202.2580150647244
+2024-01-16T10:25:00.0,202.05078201167413,202.0757820116741
+2024-01-16T10:25:15.0,201.99138702280095,202.01638702280093
+2024-01-16T10:25:30.0,202.0319076467355,202.05690764673548
+2024-01-16T10:25:45.0,201.93503263053196,201.96003263053194
+2024-01-16T10:26:00.0,201.98260802502588,202.00760802502586
+2024-01-16T10:26:15.0,201.9598517488328,201.98485174883277
+2024-01-16T10:26:30.0,201.7686907064877,201.79369070648767
+2024-01-16T10:26:45.0,201.70488279779562,201.7298827977956
+2024-01-16T10:27:00.0,201.69567625115548,201.72067625115545
+2024-01-16T10:27:15.0,201.7630127634089,201.7880127634089
+2024-01-16T10:27:30.0,201.80204608949253,201.8270460894925
+2024-01-16T10:27:45.0,201.74224958581286,201.76724958581283
+2024-01-16T10:28:00.0,201.8257019739295,201.8507019739295
+2024-01-16T10:28:15.0,201.93091990271708,201.95591990271706
+2024-01-16T10:28:30.0,201.88549813298343,201.9104981329834
+2024-01-16T10:28:45.0,201.72085283155405,201.74585283155403
+2024-01-16T10:29:00.0,201.7004078158071,201.72540781580707
+2024-01-16T10:29:15.0,201.69401596510002,201.7190159651
+2024-01-16T10:29:30.0,201.66441090538711,201.6894109053871
+2024-01-16T10:29:45.0,201.5640523997331,201.58905239973308
+2024-01-16T10:30:00.0,201.6471627923902,201.67216279239017
+2024-01-16T10:30:15.0,201.6169329010248,201.64193290102477
+2024-01-16T10:30:30.0,201.73561694242218,201.76061694242216
+2024-01-16T10:30:45.0,201.82785821216123,201.8528582121612
+2024-01-16T10:31:00.0,201.85067442106688,201.87567442106686
+2024-01-16T10:31:15.0,201.87821511881177,201.90321511881174
+2024-01-16T10:31:30.0,201.800983609789,201.82598360978898
+2024-01-16T10:31:45.0,201.66282227747857,201.68782227747855
+2024-01-16T10:32:00.0,201.6982816933417,201.72328169334168
+2024-01-16T10:32:15.0,201.65882120868162,201.6838212086816
+2024-01-16T10:32:30.0,201.7312291491142,201.75622914911418
+2024-01-16T10:32:45.0,201.7507202497825,201.77572024978247
+2024-01-16T10:33:00.0,201.6665387137817,201.69153871378168
+2024-01-16T10:33:15.0,201.59944769447443,201.6244476944744
+2024-01-16T10:33:30.0,201.6631056875562,201.68810568755617
+2024-01-16T10:33:45.0,201.70246584956314,201.72746584956312
+2024-01-16T10:34:00.0,201.68140884638856,201.70640884638854
+2024-01-16T10:34:15.0,201.6308573050247,201.65585730502468
+2024-01-16T10:34:30.0,201.55358745750715,201.57858745750713
+2024-01-16T10:34:45.0,201.65073639817925,201.67573639817923
+2024-01-16T10:35:00.0,201.77945723958757,201.80445723958755
+2024-01-16T10:35:15.0,201.81969098960613,201.8446909896061
+2024-01-16T10:35:30.0,201.76781155086368,201.79281155086366
+2024-01-16T10:35:45.0,201.84588841817975,201.87088841817973
+2024-01-16T10:36:00.0,201.57921573580848,201.60421573580845
+2024-01-16T10:36:15.0,201.59160701905472,201.6166070190547
+2024-01-16T10:36:30.0,201.44395285184504,201.46895285184502
+2024-01-16T10:36:45.0,201.4550107133538,201.48001071335378
+2024-01-16T10:37:00.0,201.5568669694609,201.5818669694609
+2024-01-16T10:37:15.0,201.4029664946298,201.42796649462977
+2024-01-16T10:37:30.0,201.37972812659376,201.40472812659374
+2024-01-16T10:37:45.0,201.35452377008966,201.37952377008963
+2024-01-16T10:38:00.0,201.44348403507294,201.46848403507292
+2024-01-16T10:38:15.0,201.48293214772968,201.50793214772966
+2024-01-16T10:38:30.0,201.4510312490278,201.47603124902778
+2024-01-16T10:38:45.0,201.34561108340026,201.37061108340023
+2024-01-16T10:39:00.0,201.42187713983685,201.44687713983683
+2024-01-16T10:39:15.0,201.40784063212584,201.43284063212582
+2024-01-16T10:39:30.0,201.37249075054967,201.39749075054965
+2024-01-16T10:39:45.0,201.410632737897,201.43563273789698
+2024-01-16T10:40:00.0,201.39482902172364,201.41982902172361
+2024-01-16T10:40:15.0,201.37047924010028,201.39547924010026
+2024-01-16T10:40:30.0,201.397461595886,201.42246159588598
+2024-01-16T10:40:45.0,201.33668263727924,201.36168263727922
+2024-01-16T10:41:00.0,201.35557516957167,201.38057516957164
+2024-01-16T10:41:15.0,201.31634272944257,201.34134272944254
+2024-01-16T10:41:30.0,201.37468635637424,201.39968635637422
+2024-01-16T10:41:45.0,201.3915397496744,201.41653974967437
+2024-01-16T10:42:00.0,201.4016157799652,201.42661577996518
+2024-01-16T10:42:15.0,201.4061675233233,201.43116752332327
+2024-01-16T10:42:30.0,201.37089915312416,201.39589915312413
+2024-01-16T10:42:45.0,201.4772005791741,201.5022005791741
+2024-01-16T10:43:00.0,201.53933568527242,201.5643356852724
+2024-01-16T10:43:15.0,201.58729960853663,201.6122996085366
+2024-01-16T10:43:30.0,201.5427047486397,201.56770474863967
+2024-01-16T10:43:45.0,201.63163474846812,201.6566347484681
+2024-01-16T10:44:00.0,201.60451870953702,201.629518709537
+2024-01-16T10:44:15.0,201.61360607862454,201.63860607862452
+2024-01-16T10:44:30.0,201.55816288443614,201.58316288443612
+2024-01-16T10:44:45.0,201.58335023267898,201.60835023267896
+2024-01-16T10:45:00.0,201.62920034950142,201.6542003495014
+2024-01-16T10:45:15.0,201.54995806994418,201.57495806994416
+2024-01-16T10:45:30.0,201.65695067635468,201.68195067635466
+2024-01-16T10:45:45.0,201.7658967930407,201.79089679304067
+2024-01-16T10:46:00.0,201.76634731482636,201.79134731482634
+2024-01-16T10:46:15.0,201.82767726793836,201.85267726793833
+2024-01-16T10:46:30.0,201.7310225517113,201.75602255171128
+2024-01-16T10:46:45.0,201.76321090617324,201.78821090617322
+2024-01-16T10:47:00.0,201.74324298196512,201.7682429819651
+2024-01-16T10:47:15.0,201.7838935114365,201.80889351143648
+2024-01-16T10:47:30.0,201.7226730920551,201.74767309205507
+2024-01-16T10:47:45.0,201.7299682190741,201.75496821907407
+2024-01-16T10:48:00.0,201.58891481739045,201.61391481739042
+2024-01-16T10:48:15.0,201.56314186376608,201.58814186376605
+2024-01-16T10:48:30.0,201.7456893189009,201.77068931890088
+2024-01-16T10:48:45.0,201.7385783641292,201.7635783641292
+2024-01-16T10:49:00.0,201.78185857163677,201.80685857163675
+2024-01-16T10:49:15.0,201.81528499772205,201.84028499772202
+2024-01-16T10:49:30.0,201.84730632486117,201.87230632486114
+2024-01-16T10:49:45.0,201.89648559208447,201.92148559208445
+2024-01-16T10:50:00.0,201.94345794579118,201.96845794579116
+2024-01-16T10:50:15.0,201.80590271276287,201.83090271276285
+2024-01-16T10:50:30.0,201.74583630108282,201.7708363010828
+2024-01-16T10:50:45.0,201.7152642941003,201.74026429410029
+2024-01-16T10:51:00.0,201.75034987488746,201.77534987488744
+2024-01-16T10:51:15.0,201.81303578060795,201.83803578060792
+2024-01-16T10:51:30.0,201.78441877998026,201.80941877998023
+2024-01-16T10:51:45.0,201.85790258736677,201.88290258736674
+2024-01-16T10:52:00.0,201.9181033444103,201.94310334441028
+2024-01-16T10:52:15.0,201.82614921110164,201.8511492111016
+2024-01-16T10:52:30.0,201.84764151227793,201.8726415122779
+2024-01-16T10:52:45.0,201.85763109962255,201.88263109962253
+2024-01-16T10:53:00.0,201.82901949142982,201.8540194914298
+2024-01-16T10:53:15.0,201.85795410252913,201.8829541025291
+2024-01-16T10:53:30.0,201.87330924496888,201.89830924496886
+2024-01-16T10:53:45.0,201.98700405710198,202.01200405710196
+2024-01-16T10:54:00.0,202.21968111486896,202.24468111486894
+2024-01-16T10:54:15.0,202.15892716235913,202.1839271623591
+2024-01-16T10:54:30.0,202.20619346804162,202.2311934680416
+2024-01-16T10:54:45.0,202.26809276229005,202.29309276229003
+2024-01-16T10:55:00.0,202.26374175613068,202.28874175613066
+2024-01-16T10:55:15.0,202.39851743906817,202.42351743906815
+2024-01-16T10:55:30.0,202.52718804454082,202.5521880445408
+2024-01-16T10:55:45.0,202.53377059679977,202.55877059679975
+2024-01-16T10:56:00.0,202.45841235960896,202.48341235960893
+2024-01-16T10:56:15.0,202.44816316097143,202.4731631609714
+2024-01-16T10:56:30.0,202.53782103626693,202.5628210362669
+2024-01-16T10:56:45.0,202.47910110110703,202.504101101107
+2024-01-16T10:57:00.0,202.53636325577108,202.56136325577106
+2024-01-16T10:57:15.0,202.51110487523223,202.5361048752322
+2024-01-16T10:57:30.0,202.58316040599675,202.60816040599673
+2024-01-16T10:57:45.0,202.60572446725536,202.63072446725533
+2024-01-16T10:58:00.0,202.57503563457092,202.6000356345709
+2024-01-16T10:58:15.0,202.6361757318654,202.66117573186537
+2024-01-16T10:58:30.0,202.82060277044775,202.84560277044773
+2024-01-16T10:58:45.0,202.82732945077157,202.85232945077155
+2024-01-16T10:59:00.0,202.66828953060028,202.69328953060025
+2024-01-16T10:59:15.0,202.48087289417347,202.50587289417345
+2024-01-16T10:59:30.0,202.50235216452424,202.52735216452422
+2024-01-16T10:59:45.0,202.44707832949973,202.4720783294997
+2024-01-16T11:00:00.0,202.3978440272464,202.42284402724638
 
 </script>
 
@@ -2855,7 +3107,7 @@ time,bid,ask
         </label>
     </div>
 
-    <div id="example1_exec" style="width: 100%; height: 600px;"></div>
+    <div id="example1_exec" style="width: 100%; height: 800px;"></div>
 
     <div style="display: flex; margin-top: 20px;">
         <div id="fills_table_example1_exec" style="flex: 1; margin-right: 20px;"></div>
@@ -2886,7 +3138,7 @@ time,bid,ask
         </label>
     </div>
 
-    <div id="example2_exec" style="width: 100%; height: 600px;"></div>
+    <div id="example2_exec" style="width: 100%; height: 800px;"></div>
 
     <div style="display: flex; margin-top: 20px;">
         <div id="fills_table_example2_exec" style="flex: 1; margin-right: 20px;"></div>
@@ -2919,7 +3171,7 @@ time,bid,ask
         </label>
     </div>
 
-    <div id="example3_exec" style="width: 100%; height: 600px;"></div>
+    <div id="example3_exec" style="width: 100%; height: 800px;"></div>
 
     <div style="display: flex; margin-top: 20px;">
         <div id="fills_table_example3_exec" style="flex: 1; margin-right: 20px;"></div>
