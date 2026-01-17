@@ -187,7 +187,7 @@ grouped_linklist = LinkList(
 
 # Create the page
 page = JSPlotPage(
-    Dict{Symbol, DataFrame}(),
+    Dict{Symbol, Any}(),
     [
         intro,
         automatic_explanation,

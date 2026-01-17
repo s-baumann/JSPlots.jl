@@ -659,7 +659,7 @@ end
 # corr_data1, corr_data2, corr_data3, corr_data4, econ_corr_data (corr_data6), climate_corr_data (corr_data7)
 
 # Create data dictionary with all correlation data
-data_dict = Dict{Symbol, DataFrame}(
+data_dict = Dict{Symbol, Any}(
     :financial_corr_data => corr_data1,
     :sales_corr_data => corr_data2,
     :science_corr_data => corr_data3,

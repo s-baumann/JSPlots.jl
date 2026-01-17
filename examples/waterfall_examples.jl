@@ -318,7 +318,7 @@ end
 
 # Create embedded format (single HTML file with all data included)
 page = JSPlotPage(
-    Dict{Symbol, DataFrame}(
+    Dict{Symbol, Any}(
         :pnl_data => df_pnl,
         :cash_data => df_cashflow,
         :variance_data => variance_data,

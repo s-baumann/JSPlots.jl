@@ -212,7 +212,7 @@ println("Creating HTML page...")
 
 # Create page with all picture examples
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(),
+    Dict{Symbol,Any}(),
     [header, pic1, gif_pic, filtered_pic, simple_filtered_pic],
     dataformat=:csv_embedded
 )

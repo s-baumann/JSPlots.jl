@@ -37,7 +37,6 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[AreaChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html)** - This does both Area Charts as well as Bar Charts
 - **[ScatterPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html)** - 2D scatter plots with marginal distributions
 - **[Path](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html)** - Trajectory visualization showing ordered paths through 2D space with direction arrows
-- **[BumpChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html)** - BumpChart showing rankings over time.
 
 #### Distributional Plots
 - **[DistPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html)** - Distribution visualization combining histogram, box plot, and rug plot
@@ -52,16 +51,19 @@ The plot types are below. For each you can click on the name of the chart and se
 #### Variable Relationship Plots
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
 - **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
-- **[TSne](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsne_examples.html)** - Coming Soon
+- **[TSne](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html)** - Use t-sne to cluster similar points together in a 2 dimensional space.
+
+#### Financial Time Series
+- **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
+- **[ExecutionChart]()** - Coming Soon
 
 #### Situational Plots
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
 - **[SanKey](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html)** - Make SanKey plots showing how observations change affiliation over multiple waves.
 - **[RadarChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html)** - Make RadarCharts showing how a single entity performs on various metrics.
+- **[BumpChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html)** - BumpChart showing rankings over time.
 
-#### Financial Time Series
-- **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
-- **[ExecutionChart]()** - Coming Soon
+
 
 
 

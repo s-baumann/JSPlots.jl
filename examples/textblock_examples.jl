@@ -125,7 +125,7 @@ summary = TextBlock("""
 
 # Create a single page combining all text block examples
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(:df => df),
+    Dict{Symbol,Any}(),
     [header, text1, text2, text3, company_header, multi_image_content, simple_image, summary],
     tab_title = "TextBlock Examples"
 )

@@ -184,7 +184,7 @@ feature_text = TextBlock("""
 
 # Create single combined page with all tables
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(:detailed_sales => detailed_sales),
+    Dict{Symbol,Any}(:detailed_sales => detailed_sales),
     [header, table1, table2, table3, table4, table_top, table_dept,
      table_large, feature_text, table_comparison],
     tab_title = "Table Examples"

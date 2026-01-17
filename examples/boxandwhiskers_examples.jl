@@ -300,7 +300,7 @@ bw7 = BoxAndWhiskers(:aspect_bw, df_aspect, :aspect_data;
 # =============================================================================
 
 # Create data dictionary
-data_dict = Dict{Symbol, DataFrame}(
+data_dict = Dict{Symbol, Any}(
     :basic_data => df_basic,
     :colored_data => df_colored,
     :grouped_data => df_grouped,

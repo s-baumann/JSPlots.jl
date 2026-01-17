@@ -70,7 +70,7 @@ and there are many more. For some details on these see the specific section on t
 """)
 
 coding_practices_theory_page = JSPlotPage(
-    Dict{Symbol, DataFrame}(),
+    Dict{Symbol, Any}(),
     [coding_patterns],
     tab_title="General Coding Patterns",
     page_header = "General Coding Patterns",
@@ -320,7 +320,7 @@ the HTML file directly in a browser since all data is embedded - no launcher scr
 """)
 
 dataformat_theory_page = JSPlotPage(
-    Dict{Symbol, DataFrame}(),
+    Dict{Symbol, Any}(),
     [dataformat_theory],
     tab_title="Data Storage Formats",
     page_header = "Understanding Data Storage Formats",
@@ -434,7 +434,7 @@ with flags to allow local file access.</p>
 """)
 
 pages_theory_page = JSPlotPage(
-    Dict{Symbol, DataFrame}(),
+    Dict{Symbol, Any}(),
     [pages_theory],
     tab_title="Creating Multi-Page Reports",
     page_header = "How to Create Multi-Page Reports",
@@ -574,8 +574,7 @@ od["Multimedia"] = [
 od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
     ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
     ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
-    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows"),
-    ("BumpChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html", "Rankings over time with dense ranking and cross-facet highlighting")]
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
@@ -585,10 +584,13 @@ od["3D Plots"] = [
     ("Scatter3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html", "3D scatter plots with PCA eigenvectors"),
     ("Surface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html", "3D surface visualization"),
     ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
-od["Variable Relationships"] = [("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations.")]
+od["Variable Relationships"] = [("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations."),
+    ("Graph", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html", "Network graphs showing relationships between entities with adjustable cutoffs and layouts"),
+    ("TSNEPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html", "Interactive t-SNE dimensionality reduction with feature selection and configurable parameters")]
 od["Situational Charts"] = [
     ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
-    ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
+    ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves."),
+    ("BumpChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html", "Rankings over time with dense ranking and cross-facet highlighting")]
 od["Financial Charts"] = [
     ("CandlestickChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html", "Candlestick candlestick charts with volume, renormalization, and time range controls")]
 
@@ -677,27 +679,6 @@ path_chart = Path(:path, df_business_path, :business_path_data;
     show_arrows=true,
     use_alpharange=true,
     notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
-
-# BumpChart - Rankings over time
-# Aggregate data by quarter and product to show rankings
-df_rankings = @linq df |>
-    groupby([:quarter, :product, :region, :segment]) |>
-    combine(:sales_total = sum(:sales),
-            :profit_total = sum(:profit),
-            :quantity_total = sum(:quantity),
-            :satisfaction_avg = mean(:satisfaction))
-
-bump_chart = BumpChart(:bump_rankings, df_rankings, :rankings_data;
-    x_col=:quarter,
-    performance_cols=[:sales_total, :profit_total, :quantity_total, :satisfaction_avg],
-    entity_col=:product,
-    filters=Dict{Symbol,Any}(:region => unique(df_rankings.region), :segment => unique(df_rankings.segment)),
-    facet_cols=[:region, :segment],
-    default_facet_cols = [:region, :segment],
-    y_mode="Ranking",
-    line_width=3,
-    title="Product Rankings Over Time",
-    notes="A BumpChart shows how entities rank over time based on different performance metrics. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BumpChart examples</a>")
 
 # More Exotic Plot Types
 # Corrplot.
@@ -813,6 +794,40 @@ graph_stock = Graph(:stock_network,
     layout = :cose,
     scenario_col = :scenario,
     default_scenario = "Short-term Returns (Daily)"
+)
+
+# TSNEPlot - Interactive t-SNE visualization
+# Create stock feature data from the returns
+tsne_stock_data = DataFrame(
+    stock = stock_symbols,
+    sector = [stock_sectors[s] for s in stock_symbols],
+    mean_return = [mean(df_stocks[!, Symbol(s)]) for s in stock_symbols],
+    volatility = [std(df_stocks[!, Symbol(s)]) for s in stock_symbols],
+    max_drawdown = [minimum(df_stocks[!, Symbol(s)]) for s in stock_symbols],
+    best_day = [maximum(df_stocks[!, Symbol(s)]) for s in stock_symbols],
+    skewness = [begin
+        vals = df_stocks[!, Symbol(s)]
+        m = mean(vals)
+        s_std = std(vals)
+        mean(((vals .- m) ./ s_std) .^ 3)
+    end for s in stock_symbols],
+    kurtosis = [begin
+        vals = df_stocks[!, Symbol(s)]
+        m = mean(vals)
+        s_std = std(vals)
+        mean(((vals .- m) ./ s_std) .^ 4) - 3
+    end for s in stock_symbols]
+)
+
+tsne_chart = TSNEPlot(:stock_tsne, tsne_stock_data, :tsne_stock_data;
+    entity_col = :stock,
+    feature_cols = [:mean_return, :volatility, :max_drawdown, :best_day, :skewness, :kurtosis],
+    color_cols = [:sector],
+    tooltip_cols = [:sector, :mean_return, :volatility],
+    perplexity = 5.0,
+    learning_rate = 200.0,
+    title = "Stock Similarity (t-SNE)",
+    notes = "TSNEPlot performs t-SNE dimensionality reduction entirely in the browser. This example shows 10 stocks positioned by similarity across 6 statistical features. <strong>Key Features:</strong> Interactive feature selection (Available/Selected lists let you choose which variables define similarity), Rescaling options (None, Z-score, Z-score capped, Quantile), Configurable early exaggeration (iterations and factor), Three step modes: 'Step (small)' for single non-exaggerated steps, 'Exaggerated Step' for large movements, 'Run to Convergence' for automatic optimization. You can drag nodes to manually reposition them and resume iteration. Color by sector to see if similar stocks cluster together. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for TSNEPlot examples</a>"
 )
 
 # ===== Financial Charts =====
@@ -1155,6 +1170,28 @@ radar_chart = RadarChart(:product_radar, :radar_data;
     show_grid_labels = true
 )
 
+# BumpChart - Rankings over time
+# Aggregate data by quarter and product to show rankings
+df_rankings = @linq df |>
+    groupby([:quarter, :product, :region, :segment]) |>
+    combine(:sales_total = sum(:sales),
+            :profit_total = sum(:profit),
+            :quantity_total = sum(:quantity),
+            :satisfaction_avg = mean(:satisfaction))
+
+bump_chart = BumpChart(:bump_rankings, df_rankings, :rankings_data;
+    x_col=:quarter,
+    performance_cols=[:sales_total, :profit_total, :quantity_total, :satisfaction_avg],
+    entity_col=:product,
+    filters=Dict{Symbol,Any}(:region => unique(df_rankings.region), :segment => unique(df_rankings.segment)),
+    facet_cols=[:region, :segment],
+    default_facet_cols = [:region, :segment],
+    y_mode="Ranking",
+    line_width=3,
+    title="Product Rankings Over Time",
+    notes="A BumpChart shows how entities rank over time based on different performance metrics. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for BumpChart examples</a>")
+
+
 
 # ===== Distributional Plots =====
 distribution_section = TextBlock("<h1>Distributional Plots</h1>")
@@ -1451,7 +1488,8 @@ all_data = Dict{Symbol, Any}(
     :sankey_data => sankey_df,
     :radar_data => radar_df,
     :boxwhiskers_data => boxwhiskers_data,
-    :stock_corr_data => stock_corr_data
+    :stock_corr_data => stock_corr_data,
+    :tsne_stock_data => tsne_stock_data
 )
 
 tabular_plot_page =  JSPlotPage(
@@ -1471,10 +1509,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, bump_chart],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and BumpChart.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot and Path.",
     dataformat = :parquet
 )
 
@@ -1507,20 +1545,20 @@ images_page =  JSPlotPage(
 
 variable_relationships_page =  JSPlotPage(
     all_data,
-    [corrplot5, graph_stock],
+    [corrplot5, graph_stock, tsne_chart],
     tab_title="Variable Relationship Charts",
     page_header = "Variable Relationship Charts",
-    notes = "This shows examples of CorrPlot and Graph using the same underlying correlation data. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network with nodes and edges. Both charts demonstrate different ways to explore the same correlation structure.",
+    notes = "This shows examples of CorrPlot, Graph, and TSNEPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network. TSNEPlot performs t-SNE dimensionality reduction in the browser, letting you interactively explore which features drive similarity between entities.",
     dataformat = :parquet
 )
 
 
 situational_plot_page =  JSPlotPage(
     all_data,
-    [waterfall_chart, sankey_chart, radar_chart],
+    [waterfall_chart, sankey_chart, radar_chart, bump_chart],
     tab_title="Situational Charts",
     page_header = "Situational Charts",
-    notes = "This shows examples of Waterfall, SanKey, and RadarChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics.",
+    notes = "This shows examples of Waterfall, SanKey, RadarChart, and BumpChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics. BumpChart shows rankings over time with dense ranking and cross-facet highlighting.",
     dataformat = :parquet
 )
 

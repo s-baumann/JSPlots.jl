@@ -110,6 +110,10 @@ using Random
         include("chart_tests/test_bumpchart.jl")
     end
 
+    @testset "TSNEPlot Tests" begin
+        include("chart_tests/test_tsneplot.jl")
+    end
+
     @testset "Pages Tests" begin
         include("chart_tests/test_pages.jl")
     end

@@ -654,7 +654,7 @@ summary = TextBlock("""
 """)
 
 # Combine all datasets into a dictionary
-datasets = Dict{Symbol,DataFrame}(
+datasets = Dict{Symbol,Any}(
     :df1 => df1,
     :pie_data => df2,
     :weather_data => weather_df

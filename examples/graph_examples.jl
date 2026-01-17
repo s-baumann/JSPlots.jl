@@ -1000,7 +1000,7 @@ summary = TextBlock("""
 # =============================================================================
 
 # Collect all data
-data_dict = Dict{Symbol, DataFrame}(
+data_dict = Dict{Symbol, Any}(
     :stock_graph_data => graph_data1,
     :city_graph_data => graph_data2,
     :social_graph_data => graph_data3,

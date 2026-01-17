@@ -251,7 +251,7 @@ conclusion = TextBlock("""
 
 # Create single combined page
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :df1 => df1,
         :df2 => df2,
         :df3 => df3,

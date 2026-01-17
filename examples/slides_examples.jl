@@ -333,7 +333,7 @@ summary = TextBlock("""
 
 # Embedded version (single file)
 page_embedded = JSPlotPage(
-    Dict{Symbol,DataFrame}(:sales_data => df_subset),
+    Dict{Symbol,Any}(:sales_data => df_subset),
     [header, example1_text, slides1, example2_text, slides2, example4_text, slides4, summary],
     tab_title = "Slides Examples (Embedded)"
 )
@@ -342,7 +342,7 @@ create_html(page_embedded, "generated_html_examples/slides_examples_embedded.htm
 
 # External version (with directory structure)
 page_external = JSPlotPage(
-    Dict{Symbol,DataFrame}(:revenue_data => df_external),
+    Dict{Symbol,Any}(:revenue_data => df_external),
     [header, example3_text, slides3, summary],
     tab_title = "Slides Examples (External)",
     dataformat = :parquet

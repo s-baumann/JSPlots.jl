@@ -342,7 +342,7 @@ end
 
 # Create embedded format
 page = JSPlotPage(
-    Dict{Symbol, DataFrame}(
+    Dict{Symbol, Any}(
         :voter_data => df_voters,
         :shopkeeper_budget => shopkeeper_budget
     ),

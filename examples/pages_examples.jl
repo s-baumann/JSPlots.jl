@@ -154,7 +154,7 @@ coverpage_header = TextBlock("""
 """)
 
 coverpage1 = JSPlotPage(
-    Dict{Symbol,DataFrame}(),  # No data needed on coverpage
+    Dict{Symbol,Any}(),  # No data needed on coverpage
     [coverpage_header, links],
     tab_title = "2024 Business Report",
     page_header = "Annual Business Report 2024",

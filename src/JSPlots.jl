@@ -412,6 +412,9 @@ module JSPlots
     include("bumpchart.jl")
     export BumpChart
 
+    include("tsneplot.jl")
+    export TSNEPlot
+
     include("Pages.jl")
     export JSPlotPage, Pages, sanitize_filename, extract_dataframes_from_struct, is_struct_with_dataframes
 
