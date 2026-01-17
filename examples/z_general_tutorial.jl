@@ -1,4 +1,5 @@
 using JSPlots, DataFrames, DataFramesMeta, Dates, StableRNGs, Statistics, OrderedCollections, VegaLite
+using RefinedSlippage, HighFrequencyCovariance, Distributions, LinearAlgebra
 
 # Introduction
 intro = TextBlock("""
@@ -894,6 +895,109 @@ candlestick_chart = CandlestickChart(:financial_candlestick, candlestick_df, :ca
     title="Stock Price Analysis - Q1 2024",
     notes="An Candlestick (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and Candlestick (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the Candlestick bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CandlestickChart examples</a>")
 
+# ExecutionPlot - Trading Execution Analysis
+# Generate simulated execution data for 5 different orders
+rng_exec = StableRNG(456)
+dims_exec = 5
+ticks_exec = 15000  # Need enough ticks for 5 executions with 500 time slots each
+
+# Generate correlated price paths for 5 assets
+brownian_corr_exec = Hermitian(0.6 .+ 0.4*I(dims_exec))
+ts_exec, true_covar_exec, _, _ = HighFrequencyCovariance.generate_random_path(
+    dims_exec, ticks_exec; syncronous=true, brownian_corr_matrix=brownian_corr_exec,
+    vol_dist = Distributions.Uniform(0.0008, 0.0015),
+    micro_noise_dist = Distributions.Uniform(0, 0.0000001),
+)
+
+# Create bid/ask data
+bidask_exec = copy(ts_exec.df)
+bidask_exec[!, :Value] .= exp.(bidask_exec.Value)
+rename!(bidask_exec, Dict(:Time => :time, :Name => :symbol, :Value => :bid_price))
+bidask_exec[:, :ask_price] = bidask_exec[:, :bid_price] .* (1.002 .+ (0.001 .* rand(rng_exec, size(bidask_exec,1))))
+
+exec_assets = true_covar_exec.labels
+unique_times_exec = sort(unique(bidask_exec.time))
+
+# Generate 5 executions, each for a different asset
+exec_fills_parts = DataFrame[]
+exec_metadata_parts = DataFrame[]
+
+for exec_idx in 1:5
+    asset = exec_assets[exec_idx]
+    fills_per_exec = rand(rng_exec, 8:15)
+
+    # Get time window for this execution
+    start_tick = 1 + (exec_idx - 1) * 500
+    end_tick = min(start_tick + 400, length(unique_times_exec))
+    exec_times = unique_times_exec[start_tick:end_tick]
+
+    subframe = bidask_exec[(bidask_exec.symbol .== asset) .& (bidask_exec.time .>= exec_times[1]) .& (bidask_exec.time .<= exec_times[end]), :]
+
+    fill_indices = round.(Int, range(1, nrow(subframe), length=fills_per_exec))
+    fill_times = subframe.time[fill_indices]
+    fill_prices = [subframe.bid_price[i] + rand(rng_exec) * (subframe.ask_price[i] - subframe.bid_price[i]) for i in fill_indices]
+    fill_quantities = rand(rng_exec, 500:2000, fills_per_exec)
+
+    exec_name = "Order_$(exec_idx)_$(asset)"
+
+    # Add categorical columns for coloring and tooltips
+    order_types = rand(rng_exec, ["limit", "market", "iceberg"], fills_per_exec)
+    exchanges = rand(rng_exec, ["NYSE", "NASDAQ", "BATS", "IEX"], fills_per_exec)
+    brokers = rand(rng_exec, ["GoldmanSachs", "MorganStanley", "JPMorgan"], fills_per_exec)
+
+    push!(exec_fills_parts, DataFrame(
+        time = fill_times,
+        quantity = fill_quantities,
+        price = fill_prices,
+        execution_name = fill(exec_name, fills_per_exec),
+        asset = fill(asset, fills_per_exec),
+        order_type = order_types,
+        exchange = exchanges,
+        broker = brokers
+    ))
+
+    arrival_price = (subframe.bid_price[1] + subframe.ask_price[1]) / 2
+    side = exec_idx % 2 == 0 ? "buy" : "sell"
+
+    push!(exec_metadata_parts, DataFrame(
+        execution_name = [exec_name],
+        arrival_price = [arrival_price],
+        side = [side],
+        desired_quantity = [sum(fill_quantities)]
+    ))
+end
+
+exec_fills = reduce(vcat, exec_fills_parts)
+exec_metadata = reduce(vcat, exec_metadata_parts)
+
+# Create volume data
+volume_times_exec = unique(bidask_exec.time[1:30:end])
+n_vol_intervals = length(volume_times_exec) - 1
+volume_exec_parts = DataFrame[]
+for asset in exec_assets
+    push!(volume_exec_parts, DataFrame(
+        time_from = volume_times_exec[1:end-1],
+        time_to = volume_times_exec[2:end],
+        symbol = fill(asset, n_vol_intervals),
+        volume = rand(rng_exec, 30000:150000, n_vol_intervals)
+    ))
+end
+volume_exec = reduce(vcat, volume_exec_parts)
+
+# Create ExecutionData with peers (refined slippage)
+exec_data_tutorial = ExecutionData(exec_fills, exec_metadata, bidask_exec, true_covar_exec; volume=volume_exec)
+calculate_slippage!(exec_data_tutorial)
+
+# Create ExecutionPlot with tooltips showing broker and order_type
+execution_plot = ExecutionPlot(:execution_analysis, exec_data_tutorial, :exec_data;
+    tooltip_cols = [:broker],  # order_type and exchange are auto-included from color_cols
+    title = "Trading Execution Analysis",
+    notes = "ExecutionPlot provides comprehensive analysis of trading execution quality using the RefinedSlippage methodology. <strong>Key Features:</strong> Dropdown to select individual executions, color fills by order type or exchange, units dropdown to switch between bps/pct/USD, summary table with key metrics (classical slippage, vs VWAP, refined slippage, spread crossing). <strong>Views:</strong> Bid/Ask shows market spread with fills and volume bars, Mid+CF shows counterfactual prices from peer correlations, +Peers overlays correlated asset price paths, Progress shows execution completion %, Spread Pos shows where fills occurred within the bid-ask spread, Slippage shows cumulative slippage metrics over the order. Volume toggle adds market volume bars. Data source documentation appears below the chart. <strong>References:</strong> <a href=\"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5114581\" style=\"color: blue; font-weight: bold;\">SSRN paper on Refined Slippage</a> | <a href=\"https://github.com/s-baumann/RefinedSlippage.jl\" style=\"color: blue; font-weight: bold;\">RefinedSlippage.jl GitHub repo</a> | <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ExecutionPlot examples</a>"
+)
+
+# Get the prepared data for the page
+exec_data_dict = get_execution_data_dict(execution_plot)
+
 # Waterfall
 # Create waterfall data showing profit breakdown
 waterfall_data = DataFrame(
@@ -1492,6 +1596,9 @@ all_data = Dict{Symbol, Any}(
     :tsne_stock_data => tsne_stock_data
 )
 
+# Merge execution data into all_data
+merge!(all_data, exec_data_dict)
+
 tabular_plot_page =  JSPlotPage(
     all_data,
     [dataset_intro,
@@ -1564,10 +1671,10 @@ situational_plot_page =  JSPlotPage(
 
 financial_plot_page =  JSPlotPage(
     all_data,
-    [financial_section, candlestick_chart],
+    [financial_section, candlestick_chart, execution_plot],
     tab_title="Financial Charts",
     page_header = "Financial Charts",
-    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls.",
+    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology. See the <a href=\"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5114581\" style=\"color: blue;\">SSRN paper</a> and <a href=\"https://github.com/s-baumann/RefinedSlippage.jl\" style=\"color: blue;\">RefinedSlippage.jl</a> for methodology details.",
     dataformat = :parquet
 )
 

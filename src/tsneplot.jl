@@ -314,24 +314,37 @@ function build_tsne_appearance_html(chart_title_str, title, notes,
     </div>
     """
 
-    # Aspect ratio slider
-    aspect_ratio_default = 1.0
-    log_default = log(aspect_ratio_default)
+    # Aspect ratio and zoom sliders
+    aspect_ratio_default = 0.6
+    zoom_default = 1.0
     aspect_ratio_slider = """
-    <div style="margin-bottom: 15px;">
-        <label for="aspect_ratio_slider_$chart_title_str"><strong>Aspect Ratio:</strong>
-               <span id="aspect_ratio_label_$chart_title_str">$aspect_ratio_default</span>
-        </label>
-        <input type="range" id="aspect_ratio_slider_$chart_title_str"
-               min="-1.61" max="0.69" step="0.01" value="$log_default"
-               style="width: 70%; margin-left: 10px;">
+    <div style="margin-bottom: 10px; display: flex; gap: 30px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <label for="aspect_ratio_slider_$chart_title_str"><strong>Aspect Ratio:</strong>
+                   <span id="aspect_ratio_label_$chart_title_str">$aspect_ratio_default</span>
+            </label>
+            <input type="range" id="aspect_ratio_slider_$chart_title_str"
+                   min="0.3" max="1.2" step="0.05" value="$aspect_ratio_default"
+                   style="width: 70%; margin-left: 10px;">
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <label for="zoom_slider_$chart_title_str"><strong>Zoom:</strong>
+                   <span id="zoom_label_$chart_title_str">$zoom_default</span>x
+            </label>
+            <input type="range" id="zoom_slider_$chart_title_str"
+                   min="0.2" max="5.0" step="0.1" value="$zoom_default"
+                   style="width: 70%; margin-left: 10px;">
+        </div>
     </div>
     """
 
     return """
     <style>
+        .tsne-container-$chart_title_str {
+            position: relative;
+        }
         .tsne-tooltip-$chart_title_str {
-            position: absolute;
+            position: fixed;
             display: none;
             background-color: rgba(0, 0, 0, 0.85);
             color: white;
@@ -356,7 +369,7 @@ function build_tsne_appearance_html(chart_title_str, title, notes,
             user-select: none;
         }
     </style>
-    <div class="tsne-container">
+    <div class="tsne-container-$chart_title_str">
         <h2>$title</h2>
         <p>$notes</p>
         $variable_selection_html
@@ -417,6 +430,13 @@ function build_tsne_functional_html(chart_title_str, data_label,
         // Current transform state (for drag coordinate conversion)
         let currentTransform = { scale: 1, centerX: 0, centerY: 0 };
 
+        // Pan offset (in embedding coordinates)
+        let panOffsetX = 0;
+        let panOffsetY = 0;
+
+        // Zoom factor (for manual zoom control)
+        let zoomFactor = 1.0;
+
         // SVG elements
         let svg = null;
         let width = 800;
@@ -424,8 +444,10 @@ function build_tsne_functional_html(chart_title_str, data_label,
         const margin = { top: 20, right: 20, bottom: 20, left: 20 };
         const nodeRadius = 8;
 
-        // Tooltip
-        const tooltipDiv = document.getElementById('tooltip_$chart_title_str');
+        // Tooltip - get dynamically to ensure DOM is ready
+        function getTooltipDiv() {
+            return document.getElementById('tooltip_$chart_title_str');
+        }
 
         // Load data
         loadDataset('$(data_label)').then(function(data) {
@@ -657,7 +679,19 @@ function build_tsne_functional_html(chart_title_str, data_label,
                 .attr('width', width)
                 .attr('height', height);
 
-            // D3 v3 drag behavior
+            // Add background rect for pan events
+            svg.append('rect')
+                .attr('class', 'tsne-background-$chart_title_str')
+                .attr('width', width)
+                .attr('height', height)
+                .attr('fill', 'transparent')
+                .style('cursor', 'move')
+                .call(d3.behavior.drag()
+                    .on('dragstart', panStarted)
+                    .on('drag', panning)
+                    .on('dragend', panEnded));
+
+            // D3 v3 drag behavior for nodes
             const drag = d3.behavior.drag()
                 .origin(function(d) { return d; })
                 .on('dragstart', dragStarted)
@@ -665,6 +699,34 @@ function build_tsne_functional_html(chart_title_str, data_label,
                 .on('dragend', dragEnded);
 
             window.tsneDrag_$chart_title_str = drag;
+        }
+
+        // Pan handlers
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+
+        function panStarted() {
+            isPanning = true;
+            panStartX = d3.event.x;
+            panStartY = d3.event.y;
+            d3.event.sourceEvent.stopPropagation();
+        }
+
+        function panning() {
+            if (!isPanning) return;
+            const dx = d3.event.x - panStartX;
+            const dy = d3.event.y - panStartY;
+            // Convert screen delta to embedding delta
+            panOffsetX -= dx / currentTransform.scale;
+            panOffsetY -= dy / currentTransform.scale;
+            panStartX = d3.event.x;
+            panStartY = d3.event.y;
+            render();
+        }
+
+        function panEnded() {
+            isPanning = false;
         }
 
         function dragStarted(d) {
@@ -696,16 +758,18 @@ function build_tsne_functional_html(chart_title_str, data_label,
         }
 
         function setupAspectRatio() {
-            const slider = document.getElementById('aspect_ratio_slider_$chart_title_str');
-            const label = document.getElementById('aspect_ratio_label_$chart_title_str');
+            const aspectSlider = document.getElementById('aspect_ratio_slider_$chart_title_str');
+            const aspectLabel = document.getElementById('aspect_ratio_label_$chart_title_str');
+            const zoomSlider = document.getElementById('zoom_slider_$chart_title_str');
+            const zoomLabel = document.getElementById('zoom_label_$chart_title_str');
             const container = document.getElementById('tsne_canvas_$chart_title_str');
 
-            if (!slider || !label || !container) return;
+            if (!aspectSlider || !aspectLabel || !container) return;
 
-            slider.addEventListener('input', function() {
-                const logValue = parseFloat(this.value);
-                const aspectRatio = Math.exp(logValue);
-                label.textContent = aspectRatio.toFixed(2);
+            // Aspect ratio slider - changes viewport height/width ratio
+            aspectSlider.addEventListener('input', function() {
+                const aspectRatio = parseFloat(this.value);
+                aspectLabel.textContent = aspectRatio.toFixed(2);
 
                 width = container.offsetWidth;
                 height = width * aspectRatio;
@@ -713,13 +777,26 @@ function build_tsne_functional_html(chart_title_str, data_label,
 
                 if (svg) {
                     svg.attr('width', width).attr('height', height);
+                    // Update background rect size
+                    svg.select('.tsne-background-$chart_title_str')
+                        .attr('width', width)
+                        .attr('height', height);
                     render();
                 }
             });
 
-            const initialLogValue = parseFloat(slider.value);
-            const initialAspectRatio = Math.exp(initialLogValue);
-            label.textContent = initialAspectRatio.toFixed(2);
+            // Zoom slider - changes how much of the embedding is visible
+            if (zoomSlider && zoomLabel) {
+                zoomSlider.addEventListener('input', function() {
+                    zoomFactor = parseFloat(this.value);
+                    zoomLabel.textContent = zoomFactor.toFixed(1);
+                    render();
+                });
+            }
+
+            // Initialize aspect ratio
+            const initialAspectRatio = parseFloat(aspectSlider.value);
+            aspectLabel.textContent = initialAspectRatio.toFixed(2);
             height = width * initialAspectRatio;
             container.style.height = height + 'px';
         }
@@ -888,6 +965,9 @@ function build_tsne_functional_html(chart_title_str, data_label,
             iteration = 0;
             lastTotalMovement = 0;
             cachedP = null;
+            // Reset pan offset
+            panOffsetX = 0;
+            panOffsetY = 0;
             updateStatus('Ready');
             updateIterationDisplay();
 
@@ -995,6 +1075,7 @@ function build_tsne_functional_html(chart_title_str, data_label,
 
         function render() {
             if (!svg || !positions || positions.length === 0) return;
+            if (width <= 0 || height <= 0) return;
 
             // Find bounds and scale to fit canvas
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -1005,24 +1086,38 @@ function build_tsne_functional_html(chart_title_str, data_label,
                 if (p.y > maxY) maxY = p.y;
             });
 
-            const rangeX = maxX - minX || 1;
-            const rangeY = maxY - minY || 1;
-            const innerWidth = width - margin.left - margin.right - 2 * nodeRadius;
-            const innerHeight = height - margin.top - margin.bottom - 2 * nodeRadius;
-            const scale = Math.min(innerWidth / rangeX, innerHeight / rangeY) * 0.9;
+            // Handle case where all points are at the same location
+            let rangeX = maxX - minX;
+            let rangeY = maxY - minY;
+            if (rangeX < 1e-10) rangeX = 1;
+            if (rangeY < 1e-10) rangeY = 1;
+
+            const innerWidth = Math.max(1, width - margin.left - margin.right - 2 * nodeRadius);
+            const innerHeight = Math.max(1, height - margin.top - margin.bottom - 2 * nodeRadius);
+
+            // Base scale fits all points, zoom factor adjusts how much is visible
+            const baseScale = Math.min(innerWidth / rangeX, innerHeight / rangeY) * 0.9;
+            const currentZoom = zoomFactor || 1.0;
+            const scale = isFinite(baseScale) ? baseScale * currentZoom : 1;
             const centerX = (minX + maxX) / 2;
             const centerY = (minY + maxY) / 2;
 
+            // Apply pan offset to center (ensure panOffset is valid)
+            const validPanX = isFinite(panOffsetX) ? panOffsetX : 0;
+            const validPanY = isFinite(panOffsetY) ? panOffsetY : 0;
+            const viewCenterX = centerX + validPanX;
+            const viewCenterY = centerY + validPanY;
+
             // Save transform for drag coordinate conversion
             currentTransform.scale = scale;
-            currentTransform.centerX = centerX;
-            currentTransform.centerY = centerY;
+            currentTransform.centerX = viewCenterX;
+            currentTransform.centerY = viewCenterY;
 
             function toScreenX(x) {
-                return width / 2 + (x - centerX) * scale;
+                return width / 2 + (x - viewCenterX) * scale;
             }
             function toScreenY(y) {
-                return height / 2 + (y - centerY) * scale;
+                return height / 2 + (y - viewCenterY) * scale;
             }
 
             // Get current color column
@@ -1109,7 +1204,10 @@ function build_tsne_functional_html(chart_title_str, data_label,
         }
 
         function showTooltip(d) {
-            let content = d.label;
+            const tooltipDiv = getTooltipDiv();
+            if (!tooltipDiv) return;
+
+            let content = '<strong>' + d.label + '</strong>';
 
             TOOLTIP_COLS.forEach(function(col) {
                 const val = d.data[col];
@@ -1121,7 +1219,7 @@ function build_tsne_functional_html(chart_title_str, data_label,
                     } else {
                         formattedValue = val;
                     }
-                    content += '\\n' + colName + ': ' + formattedValue;
+                    content += '<br>' + colName + ': ' + formattedValue;
                 }
             });
 
@@ -1131,15 +1229,22 @@ function build_tsne_functional_html(chart_title_str, data_label,
         }
 
         function moveTooltip() {
-            const container = document.getElementById('tsne_canvas_$chart_title_str');
-            const containerRect = container.getBoundingClientRect();
+            const tooltipDiv = getTooltipDiv();
+            if (!tooltipDiv) return;
+
             const event = d3.event;
-            tooltipDiv.style.left = (event.pageX - containerRect.left + window.scrollX + 15) + 'px';
-            tooltipDiv.style.top = (event.pageY - containerRect.top + window.scrollY + 15) + 'px';
+            if (!event) return;
+
+            // Use clientX/clientY with position:fixed for accurate positioning
+            tooltipDiv.style.left = (event.clientX + 15) + 'px';
+            tooltipDiv.style.top = (event.clientY + 15) + 'px';
         }
 
         function hideTooltip() {
-            tooltipDiv.style.display = 'none';
+            const tooltipDiv = getTooltipDiv();
+            if (tooltipDiv) {
+                tooltipDiv.style.display = 'none';
+            }
         }
     })();
     """

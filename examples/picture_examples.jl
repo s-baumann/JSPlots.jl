@@ -49,7 +49,7 @@ gr()  # Use GR backend
 anim_data = @animate for i in 1:20
     x = range(0, 2π, length=100)
     y = sin.(x .+ i/3)
-    plot(x, y, ylim=(-1.2, 1.2),
+    Plots.plot(x, y, ylim=(-1.2, 1.2),
          title="Sine Wave Animation",
          xlabel="x", ylabel="sin(x + t)",
          legend=false, linewidth=2)

@@ -415,6 +415,9 @@ module JSPlots
     include("tsneplot.jl")
     export TSNEPlot
 
+    include("executionplot.jl")
+    export ExecutionPlot, prepare_execution_data, get_execution_data_dict
+
     include("Pages.jl")
     export JSPlotPage, Pages, sanitize_filename, extract_dataframes_from_struct, is_struct_with_dataframes
 

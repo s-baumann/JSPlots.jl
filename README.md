@@ -51,11 +51,11 @@ The plot types are below. For each you can click on the name of the chart and se
 #### Variable Relationship Plots
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
 - **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
-- **[TSne](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html)** - Use t-sne to cluster similar points together in a 2 dimensional space.
+- **[TSNEPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html)** - Use t-sne to cluster similar points together in a 2 dimensional space.
 
 #### Financial Time Series
 - **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
-- **[ExecutionChart]()** - Coming Soon
+- **[ExecutionChart]()** - A chart showing fills relative to bid and ask over the course of trading a security.
 
 #### Situational Plots
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
