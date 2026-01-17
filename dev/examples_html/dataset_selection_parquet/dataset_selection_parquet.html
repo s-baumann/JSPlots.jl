@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Regional Analysis</title>
+    <title>Dataset Selection (Parquet)</title>
     <meta charset="UTF-8">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
@@ -703,360 +703,114 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
-    (function() {
-    // Filter configuration
-    const CATEGORICAL_FILTERS = [];
-    const CONTINUOUS_FILTERS = [];
+    // Store current data and settings for this pivot table
+    window.pivotTableDatadataset_selector_parquet = {};
+    window.pivotTableConfigdataset_selector_parquet = {"rendererName":"Heatmap","rows":["Category"],"aggregatorName":"Sum","rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}}};
 
-    // Plotly default colors
-    const plotlyColors = [
-        'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
-        'rgb(214, 39, 40)', 'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
-        'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
-        'rgb(23, 190, 207)'
-    ];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTabledataset_selector_parquet(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table dataset_selector_parquet from dataset:', datasetName, data);
 
-    const BANDWIDTH = null; // Auto-calculate
-
-    // Kernel density estimation function
-    function kernelDensity(values, bandwidth) {
-        // Use Silverman's rule of thumb if bandwidth not specified
-        if (!bandwidth) {
-            const n = values.length;
-            const mean = values.reduce((a, b) => a + b, 0) / n;
-            const std = Math.sqrt(values.reduce((sum, x) => {
-                return sum + Math.pow(x - mean, 2);
-            }, 0) / n);
-            bandwidth = 1.06 * std * Math.pow(n, -0.2);
-        }
-
-        const min = Math.min(...values);
-        const max = Math.max(...values);
-        const range = max - min;
-        const points = 200;
-        const step = range / points;
-
-        const x = [];
-        const y = [];
-
-        for (let i = 0; i <= points; i++) {
-            const xi = min - range * 0.1 + (range * 1.2) * i / points;
-            x.push(xi);
-
-            let density = 0;
-            for (let j = 0; j < values.length; j++) {
-                const u = (xi - values[j]) / bandwidth;
-                // Gaussian kernel
-                density += Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table dataset_selector_parquet');
             }
-            y.push(density / (values.length * bandwidth));
-        }
 
-        return {x: x, y: y};
-    }
+            // Store the data
+            window.pivotTableDatadataset_selector_parquet[datasetName] = data;
 
-    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
 
-    function createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
-        const traces = [];
-
-        if (GROUP_COL) {
-            // Group data by group column
-            const groups = {};
+            // Add data rows
             data.forEach(function(row) {
-                const key = row[GROUP_COL];
-                if (!groups[key]) groups[key] = [];
-                groups[key].push(row);
-            });
-
-            const groupKeys = Object.keys(groups);
-
-            groupKeys.forEach(function(key, idx) {
-                const groupData = groups[key];
-                let values = groupData.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
-
-                // Apply axis transformation
-                values = applyAxisTransform(values, X_TRANSFORM);
-
-                if (values.length > 0) {
-                    const kde = kernelDensity(values, BANDWIDTH);
-
-                    traces.push({
-                        x: kde.x,
-                        y: kde.y,
-                        name: key,
-                        type: 'scatter',
-                        mode: 'lines',
-                        fill: 'tozeroy',
-                        line: {
-                            color: plotlyColors[idx % plotlyColors.length],
-                            width: 2
-                        },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
-                        xaxis: xaxis,
-                        yaxis: yaxis,
-                        showlegend: showlegend,
-                        legendgroup: key
-                    });
-                }
-            });
-        } else {
-            // Single group
-            let values = data.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
-
-            // Apply axis transformation
-            values = applyAxisTransform(values, X_TRANSFORM);
-
-            if (values.length > 0) {
-                const kde = kernelDensity(values, BANDWIDTH);
-
-                traces.push({
-                    x: kde.x,
-                    y: kde.y,
-                    name: 'Density',
-                    type: 'scatter',
-                    mode: 'lines',
-                    fill: 'tozeroy',
-                    line: {
-                        color: 'rgb(31, 119, 180)',
-                        width: 2
-                    },
-                    fillcolor: 'rgba(31, 119, 180, 0.6)',
-                    xaxis: xaxis,
-                    yaxis: yaxis,
-                    showlegend: false
+                var rowArray = headers.map(function(header) {
+                    return row[header];
                 });
-            }
-        }
-
-        return traces;
-    }
-
-    function renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM) {
-        const traces = createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
-
-        Plotly.newPlot('regional_distribution', traces, {
-            title: 'Revenue Distribution by Region - Q4 2024',
-            showlegend: GROUP_COL !== null,
-            autosize: true,
-            hovermode: 'closest',
-            xaxis: {
-                title: getAxisLabel(VALUE_COL, X_TRANSFORM),
-                showgrid: true,
-                zeroline: true
-            },
-            yaxis: {
-                title: 'Density',
-                showgrid: true,
-                zeroline: true
-            },
-            margin: {t: 100, r: 50, b: 100, l: 80}
-        }, {responsive: true});
-    }
-
-    function renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET_COL, BANDWIDTH, X_TRANSFORM) {
-        const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
-        const nFacets = facetValues.length;
-        const cols = Math.ceil(Math.sqrt(nFacets));
-        const rows = Math.ceil(nFacets / cols);
-        const traces = [];
-
-        facetValues.forEach((facetVal, idx) => {
-            const facetData = data.filter(row => row[FACET_COL] === facetVal);
-            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
-            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-            traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
-        });
-
-        const layout = {
-            title: 'Revenue Distribution by Region - Q4 2024',
-            showlegend: GROUP_COL !== null,
-            grid: {rows: rows, columns: cols, pattern: 'independent'},
-            annotations: facetValues.map((val, idx) => ({
-                text: FACET_COL + ': ' + val,
-                showarrow: false,
-                xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
-                yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
-                x: 0.5,
-                y: 1.1,
-                xanchor: 'center',
-                yanchor: 'bottom'
-            })),
-            margin: {t: 100, r: 50, b: 50, l: 50}
-        };
-
-        facetValues.forEach((val, idx) => {
-            const ax = idx === 0 ? '' : (idx + 1);
-            layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
-            layout['yaxis' + ax] = {title: 'Density'};
-        });
-
-        Plotly.newPlot('regional_distribution', traces, layout, {responsive: true});
-    }
-
-    function renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1_COL, FACET2_COL, BANDWIDTH, X_TRANSFORM) {
-        const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
-        const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
-        const rows = facet1Values.length;
-        const cols = facet2Values.length;
-        const traces = [];
-
-        facet1Values.forEach((facet1Val, rowIdx) => {
-            facet2Values.forEach((facet2Val, colIdx) => {
-                const facetData = data.filter(row =>
-                    row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val
-                );
-
-                if (facetData.length === 0) return;
-
-                const idx = rowIdx * cols + colIdx;
-                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
-                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
-                traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
+                arrayData.push(rowArray);
             });
-        });
 
-        const layout = {
-            title: 'Revenue Distribution by Region - Q4 2024',
-            showlegend: GROUP_COL !== null,
-            grid: {rows: rows, columns: cols, pattern: 'independent'},
-            annotations: [
-                ...facet2Values.map((val, colIdx) => ({
-                    text: FACET2_COL + ': ' + val,
-                    showarrow: false,
-                    xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
-                    yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
-                    x: 0.5,
-                    y: 1.1,
-                    xanchor: 'center',
-                    yanchor: 'bottom'
-                })),
-                ...facet1Values.map((val, rowIdx) => ({
-                    text: FACET1_COL + ': ' + val,
-                    showarrow: false,
-                    xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
-                    yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
-                    x: -0.15,
-                    y: 0.5,
-                    xanchor: 'center',
-                    yanchor: 'middle',
-                    textangle: -90
-                }))
-            ],
-            margin: {t: 100, r: 50, b: 50, l: 50}
-        };
+            console.log('Converted array data for dataset_selector_parquet:', arrayData.slice(0, 3));
 
-        facet1Values.forEach((v1, rowIdx) => {
-            facet2Values.forEach((v2, colIdx) => {
-                const idx = rowIdx * cols + colIdx;
-                const ax = idx === 0 ? '' : (idx + 1);
-                layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
-                layout['yaxis' + ax] = {title: 'Density'};
-            });
-        });
-
-        Plotly.newPlot('regional_distribution', traces, layout, {responsive: true});
-    }
-
-    function updatePlot_regional_distribution(data) {
-        // Get current value column from axes X selector or use default
-        const VALUE_COL = 'Revenue';
-
-        // Get current group column from dropdown or use default
-        let GROUP_COL = 'Region';
-
-        // Handle "None" option for group selector
-        if (GROUP_COL === '_none_') {
-            GROUP_COL = null;
-        }
-
-        // Get current axis transformation
-        const xTransformSelect = document.getElementById('x_transform_select_regional_distribution');
-        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
-
-        // Get bandwidth from slider (0 means auto)
-        const bandwidthSlider = document.getElementById('regional_distribution_bandwidth_slider');
-        const BANDWIDTH = bandwidthSlider ? parseFloat(bandwidthSlider.value) : 0.0;
-
-        let FACET1 = getCol('facet1_select_regional_distribution', null);
-        let FACET2 = getCol('facet2_select_regional_distribution', null);
-        if (FACET1 === 'None') FACET1 = null;
-        if (FACET2 === 'None') FACET2 = null;
-
-        if (FACET1 && FACET2) {
-            renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1, FACET2, BANDWIDTH, X_TRANSFORM);
-        } else if (FACET1) {
-            renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET1, BANDWIDTH, X_TRANSFORM);
-        } else {
-            renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
-        }
-    }
-
-    // Wrapper function
-    window.updateChart_regional_distribution = () => updatePlotWithFilters_regional_distribution();
-
-    // Filter and update function
-    window.updatePlotWithFilters_regional_distribution = function() {
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_regional_distribution');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_regional_distribution' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigdataset_selector_parquet;
+            var pivotEl = $("#dataset_selector_parquet");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
                 };
             }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_dataset_selector_parquet) {
+                    window.toggleTotals_dataset_selector_parquet();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table dataset_selector_parquet:', error);
+            $("#dataset_selector_parquet").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_dataset_selector_parquet = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_dataset_selector_parquet');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('dataset_selector_parquet');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        // Apply filters with observation counting (centralized function)
-        const filteredData = applyFiltersWithCounting(
-            window.allData_regional_distribution,
-            'regional_distribution',
-            CATEGORICAL_FILTERS,
-            CONTINUOUS_FILTERS,
-            filters,
-            rangeFilters
-        );
-
-        // Render with filtered data
-        updatePlot_regional_distribution(filteredData);
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
     };
 
-    // Load and parse CSV data using centralized parser
-    loadDataset('sales_data').then(function(data) {
-        window.allData_regional_distribution = data;
+    // Make dataset change handler global
+    window.changeDataset_dataset_selector_parquet = function() {
+        var select = document.getElementById('dataset_select_dataset_selector_parquet');
+        if (select) {
+            loadPivotTabledataset_selector_parquet(select.value);
+        }
+    };
 
-        // Initialize controls after data is loaded
-        $(function() {
-            
-
-                document.getElementById('regional_distribution_bandwidth_slider').addEventListener('input', function() {
-        var bw = parseFloat(this.value);
-        document.getElementById('regional_distribution_bandwidth_label').textContent = bw === 0 ? 'auto' : bw.toFixed(2);
-        updateChart_regional_distribution();
-    });
-
-
-            // Initial plot
-            updatePlotWithFilters_regional_distribution();
-
-            // Setup aspect ratio control after initial render
-            setupAspectRatioControl('regional_distribution');
-        });
-    }).catch(function(error) {
-        console.error('Error loading data for chart regional_distribution:', error);
-    });
-    })();
+    // Load the initial dataset
+    loadPivotTabledataset_selector_parquet('struct_data.aa');
 
 
 });
@@ -1064,81 +818,58 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="metrics_data" data-format="parquet" data-src="data/metrics_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script>
+<script type="text/plain" id="struct_data.bb" data-format="parquet" data-src="data/struct_data/bb.parquet"></script><script type="text/plain" id="standalone_data" data-format="parquet" data-src="data/standalone_data.parquet"></script><script type="text/plain" id="struct_data.aa" data-format="parquet" data-src="data/struct_data/aa.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
-<h1>Regional Performance Breakdown</h1>
-<p>Q4 2024 regional analysis</p>
+<h1>Dataset Selection with Parquet Format</h1>
+<p></p>
 
     <div class="textblock-content">
-        <h2>Regional Performance Analysis</h2>
-<p>This page focuses on Q4 2024 performance across different regions. The kernel density plot reveals the distribution characteristics of each region's revenue.</p>
-<h3>Regional Characteristics:</h3>
+        <a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>Dataset Selection with Parquet Format</h1>
+<p>This example demonstrates the <strong>dataset selection</strong> feature combined with <strong>Parquet data format</strong>.</p>
+
+<h2>Key Features Demonstrated:</h2>
 <ul>
-    <li><strong>North:</strong> Stable, predictable revenue patterns</li>
-    <li><strong>South:</strong> Higher variability but strong growth</li>
-    <li><strong>East:</strong> Consistent mid-range performance</li>
-    <li><strong>West:</strong> Emerging market with increasing potential</li>
+    <li><strong>Struct with DataFrames:</strong> A struct <code>ExampleFrame</code> with fields <code>aa::DataFrame</code> and <code>bb::Union{Missing,DataFrame}</code></li>
+    <li><strong>Automatic extraction:</strong> DataFrames are extracted with dot-prefixed names (<code>Symbol("struct_data.aa")</code>, <code>Symbol("struct_data.bb")</code>)</li>
+    <li><strong>Subfolder storage:</strong> Struct DataFrames are stored in subfolders (e.g., <code>data/struct_data/aa.parquet</code>)</li>
+    <li><strong>Dataset switching:</strong> Use the dropdown to switch between datasets - data is loaded on-demand</li>
 </ul>
+
+<h2>How Parquet Storage Works:</h2>
+<p>When using <code>dataformat = :parquet</code>, DataFrames from structs are saved in subfolders:</p>
+<ul>
+    <li><code>data/struct_data/aa.parquet</code> - from example_struct.aa</li>
+    <li><code>data/struct_data/bb.parquet</code> - from example_struct.bb</li>
+    <li><code>data/standalone_data.parquet</code> - standalone DataFrame (no subfolder)</li>
+</ul>
+<p>This is efficient for large datasets as data is loaded only when selected.</p>
 
     </div>
 <br>
 <hr>
 <br>
-<h2>Revenue Distribution by Region - Q4 2024</h2>
-<p>Kernel density plot showing revenue distribution patterns across regions</p>
-
-<!-- Filters (for data filtering) -->
-
-<!-- Plot Attributes -->
-<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
-    <h4 style="margin-top: 0;">Plot Attributes</h4>
-    <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-    <div>
-        <label>X: </label>
-        <span style="font-weight: bold;">Revenue</span>
-    </div>
-    <div>
-        <label for="x_transform_select_regional_distribution">X Transform: </label>
-        <select id="x_transform_select_regional_distribution" style="padding: 5px 10px;" onchange="updateChart_regional_distribution()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
+    <h2>dataset_selector_parquet</h2>
+    <p>Dataset selection with Parquet format - switch between datasets stored in subfolders</p>
+        <div style="margin-bottom: 10px;">
+        <label for="dataset_select_dataset_selector_parquet"><strong>Dataset:</strong></label>
+        <select id="dataset_select_dataset_selector_parquet" onchange="changeDataset_dataset_selector_parquet()">
+            <option value="struct_data.aa">struct_data.aa</option>
+            <option value="struct_data.bb">struct_data.bb</option>
+            <option value="standalone_data">standalone_data</option>
         </select>
     </div>
-</div>
-<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
-    <label for="regional_distribution_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="regional_distribution_aspect_ratio_label">0.6</span>
-    <input type="range" id="regional_distribution_aspect_ratio_slider"
-           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
-           style="width: 75%; margin-left: 10px;">
-    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
-</div>
 
-</div>
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_dataset_selector_parquet"  onchange="toggleTotals_dataset_selector_parquet()" />
+            Show Totals
+        </label>
+    </div>
+    <div id="dataset_selector_parquet"></div>
 
-<!-- Chart -->
-<div id="regional_distribution"></div>
-
-        <!-- Bandwidth slider below chart -->
-        <div style="margin: 20px 0;">
-    <label for="regional_distribution_bandwidth_slider">Bandwidth: </label>
-    <span id="regional_distribution_bandwidth_label">auto</span>
-    <input type="range" id="regional_distribution_bandwidth_slider"
-           min="0"
-           max="1.71030013e6"
-           step="34206.0026"
-           value="0.0"
-           style="width: 75%; margin-left: 10px;">
-    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto, max ≈ 1.7103001e6)</span>
-</div>
-
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>

@@ -685,7 +685,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -788,45 +789,114 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
-    loadDataset('sales_data').then(function(data) {
-        console.log('Loaded data for pivot table PivotTable:', data);
+    // Store current data and settings for this pivot table
+    window.pivotTableDataPivotTable = {};
+    window.pivotTableConfigPivotTable = {"rendererName":"Heatmap","rows":["product"],"aggregatorName":"Average","vals":["customers"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#ffffff", "#ccccff", "#99ccff", "#3366ff"]).clamp(true)}}},"cols":["region"]};
 
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table PivotTable');
-        }
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTablePivotTable(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table PivotTable from dataset:', datasetName, data);
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table PivotTable');
+            }
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+            // Store the data
+            window.pivotTableDataPivotTable[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for PivotTable:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigPivotTable;
+            var pivotEl = $("#PivotTable");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_PivotTable) {
+                    window.toggleTotals_PivotTable();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table PivotTable:', error);
+            $("#PivotTable").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_PivotTable = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_PivotTable');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('PivotTable');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for PivotTable:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#PivotTable").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["product"],"aggregatorName":"Average","vals":["customers"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#ffffff", "#ccccff", "#99ccff", "#3366ff"]).clamp(true)}}},"cols":["region"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table PivotTable:', error);
-        $("#PivotTable").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
+    // Make dataset change handler global
+    window.changeDataset_PivotTable = function() {
+        var select = document.getElementById('dataset_select_PivotTable');
+        if (select) {
+            loadPivotTablePivotTable(select.value);
+        }
+    };
+
+    // Load the initial dataset
+    loadPivotTablePivotTable('sales_data');
     window.downloadTableCSV_Table = function() {
         const csvContent = "product,total_sales,total_quantity,total_profit\nPhone,1.2498934909082277e8,2334635,4.983743212838119e7\nLaptop,9.331932174333596e7,1690764,3.718559283865343e7\nTablet,6.289886064762073e7,1987224,2.4985962429159395e7\n";
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -847,7 +917,7 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script>
+<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
@@ -988,9 +1058,23 @@ end</code></pre>
 <hr>
 <br>
     <h2>PivotTable</h2>
-    <p>PivotTables can do quite alot. Indeed many of the charttypes of this package would alternatively be doable just using a PivotTable so you might prefer doing that in some cases.Now we have example data generated (from the above function) we will shoow this in a pivottable (and it will be used throughout the rest of the examples). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html" style="color: blue; font-weight: bold;">See here for PivotTable examples</a></p>
+    <p>PivotTables can do quite alot. Indeed many of the charttypes of this package would alternatively be doable just using a PivotTable so you might prefer doing that in some cases. <strong>Dataset Selection:</strong> This PivotTable demonstrates the ability to switch between multiple datasets - use the dropdown above the table to switch between 'sales_data' (detailed sales records) and 'product_summary' (aggregated product statistics). This is useful when you want to explore the same data at different levels of aggregation. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html" style="color: blue; font-weight: bold;">See here for PivotTable examples</a></p>
+        <div style="margin-bottom: 10px;">
+        <label for="dataset_select_PivotTable"><strong>Dataset:</strong></label>
+        <select id="dataset_select_PivotTable" onchange="changeDataset_PivotTable()">
+            <option value="sales_data">sales_data</option>
+            <option value="product_summary">product_summary</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_PivotTable"  onchange="toggleTotals_PivotTable()" />
+            Show Totals
+        </label>
+    </div>
     <div id="PivotTable"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
+<br>
 <hr>
 <br>
     <div class="jsplots-table-container">
@@ -1051,6 +1135,7 @@ end</code></pre>
         <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html">AreaChart</a></strong>: Stacked area charts</li>
         <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html">ScatterPlot</a></strong>: 2D scatter plots with marginal distributions</li>
         <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html">Path</a></strong>: Trajectory visualization with direction arrows</li>
+        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html">BumpChart</a></strong>: Rankings over time with dense ranking and cross-facet highlighting</li>
     </ul>
     <h4 style="margin-top: 15px; margin-bottom: 5px;">Distributional Plots</h4>
     <ul>
@@ -1074,6 +1159,10 @@ end</code></pre>
         <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html">Waterfall</a></strong>: Make Waterfall plots showing how positive and negative elements add up to an aggregate.</li>
         <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html">SanKey</a></strong>: Make SanKey plots showing how individuals change affiliation over multiple waves.</li>
     </ul>
+    <h4 style="margin-top: 15px; margin-bottom: 5px;">Financial Charts</h4>
+    <ul>
+        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html">CandlestickChart</a></strong>: Candlestick candlestick charts with volume, renormalization, and time range controls</li>
+    </ul>
 
     <div style="padding: 12px; background-color: #fffbdd; border-top: 1px solid #ddd; margin-top: 10px; font-size: 14px;">A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html" style="color: blue; font-weight: bold;">See here for LinkList examples</a></div>
 </div>
@@ -1092,6 +1181,6 @@ You can write whatever HTML you want and put it in a TextBlock which will put it
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.1.</small></p>
 </body>
 </html>

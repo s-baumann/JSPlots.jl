@@ -1,0 +1,2089 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSPlots.jl</title>
+    <meta charset="UTF-8">
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- external libs -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
+
+    <!-- Prism.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    
+
+</head>
+
+<body>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+<script type="module">
+// Import parquet-wasm for Parquet file support
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+
+// Initialize parquet-wasm
+await parquet.default();
+
+// Make parquet available globally for loadDataset
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const SYMBOL_COL = 'symbol';
+    const OPEN_COL = 'open';
+    const HIGH_COL = 'high';
+    const LOW_COL = 'low';
+    const CLOSE_COL = 'close';
+    const VOLUME_COL = 'volume';
+    const HAS_VOLUME = true;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example1_candlestick = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example1_candlestick');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example1_candlestick');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example1_candlestick');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example1_candlestick');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example1_candlestick');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example1_candlestick');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example1_candlestick' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example1_candlestick',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: Candlestick on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: Candlestick only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example1_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example1_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('stock_data_1').then(function(data) {
+        allData = data;
+        window.updateChart_example1_candlestick();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example1_candlestick');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example1_candlestick:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'time_from';
+    const TIME_TO_COL = 'time_to';
+    const SYMBOL_COL = 'symbol';
+    const OPEN_COL = 'open';
+    const HIGH_COL = 'high';
+    const LOW_COL = 'low';
+    const CLOSE_COL = 'close';
+    const VOLUME_COL = 'volume';
+    const HAS_VOLUME = true;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example2_candlestick = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example2_candlestick');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example2_candlestick');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example2_candlestick');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example2_candlestick');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example2_candlestick');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example2_candlestick');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example2_candlestick' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example2_candlestick',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: Candlestick on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: Candlestick only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example2_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example2_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('stock_data_2').then(function(data) {
+        allData = data;
+        window.updateChart_example2_candlestick();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example2_candlestick');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example2_candlestick:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const TIME_FROM_COL = 'quarter';
+    const TIME_TO_COL = 'quarter_end';
+    const SYMBOL_COL = 'company';
+    const OPEN_COL = 'open_price';
+    const HIGH_COL = 'high_price';
+    const LOW_COL = 'low_price';
+    const CLOSE_COL = 'close_price';
+    const VOLUME_COL = '';
+    const HAS_VOLUME = false;
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let allData = [];
+    let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example3_candlestick = function() {
+        // Get current control values
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example3_candlestick');
+        const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
+
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example3_candlestick');
+        const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
+
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example3_candlestick');
+        const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
+
+        const chartTypeSelect = document.getElementById('chart_type_select_example3_candlestick');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
+
+        const displayModeSelect = document.getElementById('display_mode_select_example3_candlestick');
+        const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Faceted';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example3_candlestick');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example3_candlestick' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example3_candlestick',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Group data by symbol
+        const symbolData = {};
+        filteredData.forEach(row => {
+            const symbol = String(row[SYMBOL_COL]);
+            if (!symbolData[symbol]) {
+                symbolData[symbol] = [];
+            }
+            symbolData[symbol].push(row);
+        });
+
+        // Sort each symbol's data by time
+        for (let symbol in symbolData) {
+            symbolData[symbol].sort((a, b) => {
+                const aTime = a[TIME_FROM_COL];
+                const bTime = b[TIME_FROM_COL];
+                if (aTime instanceof Date && bTime instanceof Date) {
+                    return aTime - bTime;
+                }
+                return aTime < bTime ? -1 : (aTime > bTime ? 1 : 0);
+            });
+        }
+
+        // Calculate first bar open prices for renormalization (only once)
+        if (Object.keys(firstBarOpenPrices).length === 0 || !RENORMALIZE) {
+            firstBarOpenPrices = {};
+            for (let symbol in symbolData) {
+                if (symbolData[symbol].length > 0) {
+                    firstBarOpenPrices[symbol] = symbolData[symbol][0][OPEN_COL];
+                }
+            }
+        }
+
+        // Route to appropriate rendering function
+        if (DISPLAY_MODE === 'Overlay') {
+            renderOverlay(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        } else {
+            renderFaceted(symbolData, RENORMALIZE, SHOW_VOLUME, LOG_VOLUME, CHART_TYPE);
+        }
+    };
+
+    // Render overlay mode (all symbols on same chart)
+    function renderOverlay(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const traces = [];
+        const symbols = Object.keys(symbolData).sort();
+        const colorPalette = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                             '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+            const color = colorPalette[idx % colorPalette.length];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: 'x',
+                yaxis: 'y',
+                increasing: {line: {color: color}},
+                decreasing: {line: {color: color}}
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: 'x',
+                    yaxis: 'y2',
+                    marker: {color: color},
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+            }
+        });
+
+        // Layout configuration
+        const layout = {
+            xaxis: {
+                title: TIME_FROM_COL,
+                anchor: 'y'
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            // Two subplots: Candlestick on top, volume on bottom
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price',
+                domain: [0.3, 1]
+            };
+            layout.yaxis2 = {
+                title: logVolume ? 'log(Volume)' : 'Volume',
+                domain: [0, 0.25],
+                anchor: 'x'
+            };
+            layout.barmode = 'group';  // Dodge volume bars
+        } else {
+            // Single plot: Candlestick only
+            layout.yaxis = {
+                title: renormalize ? 'Normalized Price' : 'Price'
+            };
+        }
+
+        Plotly.newPlot('example3_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Render faceted mode (one subplot per symbol)
+    function renderFaceted(symbolData, renormalize, showVolume, logVolume, chartType) {
+        const symbols = Object.keys(symbolData).sort();
+        const nSymbols = symbols.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nSymbols * 1.5));
+        const nRows = Math.ceil(nSymbols / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: false,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        if (showVolume && HAS_VOLUME) {
+            layout.barmode = 'group';
+        }
+
+        symbols.forEach((symbol, idx) => {
+            const data = symbolData[symbol];
+
+            // Prepare Candlestick data
+            const x = data.map(row => row[TIME_FROM_COL]);
+            let open = data.map(row => row[OPEN_COL]);
+            let high = data.map(row => row[HIGH_COL]);
+            let low = data.map(row => row[LOW_COL]);
+            let close = data.map(row => row[CLOSE_COL]);
+
+            // Apply renormalization if enabled
+            if (renormalize && firstBarOpenPrices[symbol] && firstBarOpenPrices[symbol] !== 0) {
+                const base = firstBarOpenPrices[symbol];
+                open = open.map(v => v / base);
+                high = high.map(v => v / base);
+                low = low.map(v => v / base);
+                close = close.map(v => v / base);
+            }
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            // Candlestick trace
+            const candlestickTrace = {
+                x: x,
+                open: open,
+                high: high,
+                low: low,
+                close: close,
+                type: chartType,
+                name: symbol,
+                xaxis: xaxis,
+                yaxis: yaxis
+            };
+            traces.push(candlestickTrace);
+
+            // Volume trace if enabled
+            if (showVolume && HAS_VOLUME) {
+                let volumes = data.map(row => row[VOLUME_COL]);
+                if (logVolume) {
+                    volumes = volumes.map(v => Math.log(v + 1));
+                }
+
+                const yaxis_vol = idx === 0 ? 'y' + (nSymbols + 1) : 'y' + (nSymbols + idx + 1);
+
+                const volumeTrace = {
+                    x: x,
+                    y: volumes,
+                    type: 'bar',
+                    name: symbol + ' Volume',
+                    xaxis: xaxis,
+                    yaxis: yaxis_vol,
+                    showlegend: false
+                };
+                traces.push(volumeTrace);
+
+                // Configure volume yaxis
+                layout[yaxis_vol] = {
+                    title: row === nRows ? (logVolume ? 'log(Vol)' : 'Vol') : '',
+                    anchor: xaxis
+                };
+            }
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? TIME_FROM_COL : '',
+                anchor: yaxis
+            };
+            layout[yaxis] = {
+                title: col === 1 ? (renormalize ? 'Norm Price' : 'Price') : '',
+                anchor: xaxis
+            };
+
+            // Add annotation for symbol label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: symbol,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example3_candlestick', traces, layout, {responsive: true});
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('company_data').then(function(data) {
+        allData = data;
+        window.updateChart_example3_candlestick();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example3_candlestick');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example3_candlestick:', error);
+    });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="company_data" data-format="csv_embedded" data-src="">
+quarter,quarter_end,company,open_price,high_price,low_price,close_price
+1,1,CompanyA,99.68270775544903,101.44405709002477,97.58288946915556,100.2496894695052
+2,2,CompanyA,98.17853638477413,100.53514920045997,96.20109646453767,97.33059898796901
+3,3,CompanyA,95.95583099857298,97.84267554483492,92.87808802939131,97.84267554483492
+4,4,CompanyA,97.55660894505846,101.11072826985522,95.82410095036896,96.3493139939059
+5,5,CompanyA,97.87319180272567,99.22511641387894,95.90956943046177,97.69615049667141
+6,6,CompanyA,102.87697003244774,105.88724179030113,100.90998996010795,101.2831235159966
+7,7,CompanyA,100.45755041151706,102.51048047671318,99.38895923123386,99.38895923123386
+8,8,CompanyA,97.39289788105131,99.25302472163052,97.13578697700174,97.59532388646986
+9,9,CompanyA,96.62085959300524,97.73163352652496,92.77639014890143,96.34703991561888
+10,10,CompanyA,97.597472749957,99.13423795965682,95.28033658171269,97.72986890413404
+11,11,CompanyA,100.24531413427346,102.88885964060135,96.26905456824122,99.35456705436619
+12,12,CompanyA,98.90358158510422,101.50422230131076,96.15374174208229,98.68194053772991
+1,1,CompanyB,55.260399916912604,57.38301578536732,53.515992823417044,57.38301578536732
+2,2,CompanyB,56.39135598836806,58.586889193750864,52.640757001163976,57.699884917034474
+3,3,CompanyB,59.60698283717083,63.04953797063864,55.73027462084163,59.820262682844586
+4,4,CompanyB,59.43779889124641,61.28700807969877,57.90302525800141,59.486734236666734
+5,5,CompanyB,61.16079973151902,62.15382878123083,59.41935032576641,62.15382878123083
+6,6,CompanyB,59.64650460189455,63.34982983028425,56.71132418543879,60.128397804084166
+7,7,CompanyB,57.92097036251544,57.99162103231558,55.13867703701538,57.76889651956201
+8,8,CompanyB,56.755280271392834,58.287353949837104,53.88492371085331,57.27382596682916
+9,9,CompanyB,60.06083827529467,62.48474475038596,58.98007985756877,59.12042324819288
+10,10,CompanyB,54.977640140821975,56.12446840977149,53.22519214862863,54.28923601889961
+11,11,CompanyB,60.42409866839694,60.83227322179855,58.23094134408278,60.1767572702345
+12,12,CompanyB,58.900480683588476,62.63532569804904,58.57004019846796,59.087378515734095
+
+</script><script type="text/plain" id="stock_data_1" data-format="csv_embedded" data-src="">
+time_from,time_to,symbol,open,high,low,close,volume
+2024-01-01,2024-01-01,AAPL,149.68027865288838,151.98943640010577,148.57735772351148,151.98943640010577,4949251
+2024-01-02,2024-01-02,AAPL,150.57242565821673,151.0198821419656,146.2102930068811,149.90318480053043,1769998
+2024-01-03,2024-01-03,AAPL,151.40245666080875,151.40245666080875,146.95252759031243,149.46155338603313,4747257
+2024-01-04,2024-01-04,AAPL,150.16911135190688,150.16911135190688,147.863712531988,149.8001617603186,1800343
+2024-01-05,2024-01-05,AAPL,149.26679593642598,152.68749010117045,146.2851843528816,149.68858100838582,1715267
+2024-01-06,2024-01-06,AAPL,148.50625977177938,149.79891859180444,148.50625977177938,149.51446194506988,1168403
+2024-01-07,2024-01-07,AAPL,148.9696651987457,149.67699032060466,146.14723533471482,147.66720631707423,4406170
+2024-01-08,2024-01-08,AAPL,149.41043536390956,150.1980965414699,147.833036993434,150.1980965414699,4524129
+2024-01-09,2024-01-09,AAPL,149.76270231361482,150.54202043744638,148.89786965434485,150.54202043744638,3698401
+2024-01-10,2024-01-10,AAPL,147.60312194095448,151.40362868520043,147.10571921120905,151.40362868520043,3643037
+2024-01-11,2024-01-11,AAPL,148.02451553054442,150.02060491055173,148.02451553054442,150.02060491055173,1134058
+2024-01-12,2024-01-12,AAPL,146.44313943336354,150.72736834009248,146.44313943336354,149.7150975526181,4276102
+2024-01-13,2024-01-13,AAPL,148.29266644746272,153.44745285202342,147.65205278118543,153.44745285202342,1462523
+2024-01-14,2024-01-14,AAPL,147.7343871988877,150.74292124013937,146.49744921442368,149.20844967044215,3439043
+2024-01-15,2024-01-15,AAPL,148.2340325042408,150.27311317356438,145.5604015937255,148.38802253309225,3840720
+2024-01-16,2024-01-16,AAPL,148.18057202023084,150.43279724407716,146.020148098266,150.43279724407716,3813673
+2024-01-17,2024-01-17,AAPL,147.44526224003627,149.75164504570083,147.44526224003627,149.72553256335877,1232182
+2024-01-18,2024-01-18,AAPL,148.94637689709592,151.61457918475483,147.24472231498322,147.36881306675025,2190627
+2024-01-19,2024-01-19,AAPL,149.09504842964373,149.10439852847358,145.67479125322978,148.9603090835168,3294928
+2024-01-20,2024-01-20,AAPL,147.96754479866985,149.7467110881965,147.02221780040466,147.4724581766133,1996257
+2024-01-21,2024-01-21,AAPL,146.93291211153544,153.22547484215798,146.93291211153544,147.27802767446482,2690989
+2024-01-22,2024-01-22,AAPL,147.2616118778143,152.76724574909034,145.90108956568812,147.74679352437045,4374027
+2024-01-23,2024-01-23,AAPL,149.0021679703987,149.0021679703987,146.01036617541345,146.01036617541345,1775652
+2024-01-24,2024-01-24,AAPL,147.37376959086012,149.74707340140205,142.94128566812424,149.74707340140205,3023963
+2024-01-25,2024-01-25,AAPL,147.40651265337263,149.6016986786606,147.40651265337263,149.6016986786606,1807595
+2024-01-26,2024-01-26,AAPL,148.07716844182346,151.43486728577247,147.24861949409234,151.43486728577247,1999735
+2024-01-27,2024-01-27,AAPL,146.56042378460108,150.6279957611553,144.8883626945096,150.6279957611553,4679082
+2024-01-28,2024-01-28,AAPL,146.1166217584491,150.18373826371294,144.65859006107058,150.18373826371294,1134729
+2024-01-29,2024-01-29,AAPL,145.73549598524008,148.66594323792359,145.73549598524008,148.66594323792359,2556691
+2024-01-30,2024-01-30,AAPL,146.62876513569577,149.46858927882568,146.62876513569577,149.46858927882568,2764704
+2024-01-31,2024-01-31,AAPL,147.63654877081314,149.7530269894179,143.5651124034285,149.7530269894179,3392908
+2024-02-01,2024-02-01,AAPL,147.09466324936275,151.75600903845324,143.24459165677197,151.75600903845324,3174207
+2024-02-02,2024-02-02,AAPL,147.68748494601888,149.22715614232717,143.07325802745828,149.22715614232717,1192168
+2024-02-03,2024-02-03,AAPL,146.57580536674027,150.2759597753813,143.683858787641,150.2759597753813,4608932
+2024-02-04,2024-02-04,AAPL,145.91479691635715,145.91479691635715,144.51818852910247,145.30930039344773,4265785
+2024-02-05,2024-02-05,AAPL,143.88580039528554,147.2276659733991,141.933249497337,147.2276659733991,2041381
+2024-02-06,2024-02-06,AAPL,142.0054995459335,149.91432559818963,142.0054995459335,149.91432559818963,1470121
+2024-02-07,2024-02-07,AAPL,139.89943287608423,149.38116744478464,139.89943287608423,149.38116744478464,4867610
+2024-02-08,2024-02-08,AAPL,139.4877818458523,150.40795564530163,139.4877818458523,150.40795564530163,2311391
+2024-02-09,2024-02-09,AAPL,138.38180869987315,152.02532011974267,138.38180869987315,152.02532011974267,3573383
+2024-02-10,2024-02-10,AAPL,138.01225413199765,151.39587276614722,138.01225413199765,151.39587276614722,4011422
+2024-02-11,2024-02-11,AAPL,137.6301317257314,151.01236171027216,137.6301317257314,151.01236171027216,4891854
+2024-02-12,2024-02-12,AAPL,137.28774583142038,155.35279639569814,137.28774583142038,155.35279639569814,3373996
+2024-02-13,2024-02-13,AAPL,137.95167313843243,156.08299424685598,137.95167313843243,156.08299424685598,4344887
+2024-02-14,2024-02-14,AAPL,137.99066758505793,153.43073421068112,137.99066758505793,153.43073421068112,2117771
+2024-02-15,2024-02-15,AAPL,136.356805271641,152.5949649412924,136.356805271641,152.5949649412924,1419803
+2024-02-16,2024-02-16,AAPL,138.06988559153987,153.2632089891365,138.06988559153987,153.2632089891365,1372966
+2024-02-17,2024-02-17,AAPL,139.06632540240068,154.26174588639577,139.06632540240068,154.26174588639577,1775944
+2024-02-18,2024-02-18,AAPL,138.23382540146676,152.78819557217676,138.23382540146676,152.78819557217676,3435119
+2024-02-19,2024-02-19,AAPL,137.76463885356182,152.47713200872784,137.76463885356182,152.47713200872784,2469669
+2024-02-20,2024-02-20,AAPL,136.54097909517824,155.61367821651743,136.54097909517824,155.61367821651743,1247446
+2024-02-21,2024-02-21,AAPL,137.05790960116607,155.445847579696,137.05790960116607,155.445847579696,4946189
+2024-02-22,2024-02-22,AAPL,136.403502842035,154.00914949262884,136.403502842035,154.00914949262884,4468458
+2024-02-23,2024-02-23,AAPL,136.76800599978037,155.691651155095,136.76800599978037,155.691651155095,2689078
+2024-02-24,2024-02-24,AAPL,138.26510386256817,153.60889710728415,138.26510386256817,153.60889710728415,3075918
+2024-02-25,2024-02-25,AAPL,137.6386589376465,151.64967444276084,137.6386589376465,151.64967444276084,1054850
+2024-02-26,2024-02-26,AAPL,137.8917118826675,154.98808877470626,137.8917118826675,154.98808877470626,4156508
+2024-02-27,2024-02-27,AAPL,135.4949865422964,153.34888385936833,135.4949865422964,153.34888385936833,2762836
+2024-02-28,2024-02-28,AAPL,134.97403180328743,154.0241064545905,134.97403180328743,154.0241064545905,2719580
+2024-02-29,2024-02-29,AAPL,137.26133124403782,154.84282089419244,137.26133124403782,154.84282089419244,1754631
+2024-03-01,2024-03-01,AAPL,139.723731621768,156.93583045113846,139.723731621768,156.93583045113846,3413385
+2024-03-02,2024-03-02,AAPL,139.95389468740808,156.9391986125657,139.95389468740808,156.9391986125657,2452327
+2024-03-03,2024-03-03,AAPL,140.5675364570195,155.8609983628178,140.5675364570195,155.8609983628178,4321758
+2024-03-04,2024-03-04,AAPL,139.80712611793388,157.36651930825886,139.80712611793388,157.36651930825886,4134317
+2024-03-05,2024-03-05,AAPL,139.4713453102683,155.99207179791236,139.4713453102683,155.99207179791236,1855809
+2024-03-06,2024-03-06,AAPL,140.03490887179078,156.37718945360245,140.03490887179078,156.37718945360245,2277812
+2024-03-07,2024-03-07,AAPL,140.07877434058184,156.5138857855509,140.07877434058184,156.5138857855509,4818457
+2024-03-08,2024-03-08,AAPL,141.73553086332961,153.96419044916266,141.73553086332961,153.96419044916266,1536166
+2024-03-09,2024-03-09,AAPL,139.8849611347028,153.51701554239844,139.8849611347028,153.51701554239844,3566205
+2024-03-10,2024-03-10,AAPL,140.1144869573937,153.44263353136296,140.1144869573937,153.44263353136296,4306865
+2024-03-11,2024-03-11,AAPL,139.5092137630282,155.88299375818087,139.5092137630282,155.88299375818087,1579613
+2024-03-12,2024-03-12,AAPL,139.3937060626163,156.83972597973346,139.3937060626163,156.83972597973346,4160221
+2024-03-13,2024-03-13,AAPL,140.55828287632096,156.62316832682484,140.55828287632096,156.62316832682484,2308537
+2024-03-14,2024-03-14,AAPL,141.36554342955878,155.8258755058679,141.36554342955878,155.8258755058679,1867353
+2024-03-15,2024-03-15,AAPL,142.50083622671588,157.7878552823773,142.50083622671588,157.7878552823773,4722064
+2024-03-16,2024-03-16,AAPL,143.14635002991858,157.1319375749034,143.14635002991858,157.1319375749034,1652596
+2024-03-17,2024-03-17,AAPL,144.58058378895572,158.96952439587383,143.80540236313817,158.96952439587383,2568254
+2024-03-18,2024-03-18,AAPL,145.76852397508725,156.69253572413584,144.31689794287334,156.69253572413584,3350788
+2024-03-19,2024-03-19,AAPL,146.09503990100012,160.5807756618136,144.05244842471177,160.5807756618136,3900213
+2024-03-20,2024-03-20,AAPL,146.70990406462363,157.71995866881053,143.83140151684077,157.71995866881053,4121656
+2024-03-21,2024-03-21,AAPL,147.4125931567818,157.87697972879886,143.54599868230233,157.87697972879886,3484275
+2024-03-22,2024-03-22,AAPL,145.5212549676327,156.7430778830267,143.9357827614166,156.7430778830267,1899288
+2024-03-23,2024-03-23,AAPL,145.8300643003227,158.08519784552826,140.3037961046326,158.08519784552826,1346603
+2024-03-24,2024-03-24,AAPL,146.9187569702636,160.0997799156381,140.33885102762977,160.0997799156381,1720579
+2024-03-25,2024-03-25,AAPL,147.3608333824168,158.15238941676301,141.1944726082568,158.15238941676301,4076283
+2024-03-26,2024-03-26,AAPL,147.7043816590954,159.9194899762885,140.79320806306941,159.9194899762885,3024456
+2024-03-27,2024-03-27,AAPL,146.81436756328083,158.25038147152637,139.75710356893939,158.25038147152637,4724274
+2024-03-28,2024-03-28,AAPL,146.12236819836315,160.17821581005518,138.6761391057209,160.17821581005518,2423173
+2024-03-29,2024-03-29,AAPL,144.93300604349497,157.97941838289879,142.40091879750335,157.97941838289879,1274545
+2024-03-30,2024-03-30,AAPL,143.79149203965292,158.71264907483535,143.79149203965292,158.71264907483535,2649621
+2024-03-31,2024-03-31,AAPL,144.38430785354117,158.77029069095377,144.38430785354117,158.77029069095377,2563250
+
+</script><script type="text/plain" id="stock_data_2" data-format="csv_embedded" data-src="">
+time_from,time_to,symbol,open,high,low,close,volume
+2024-01-01,2024-01-01,AAPL,150.25099015098556,152.64132234514068,145.45870078940274,149.7726705048298,3888875
+2024-01-02,2024-01-02,AAPL,148.11119917385003,150.29646941670254,145.5224604790068,147.7127163533339,4249997
+2024-01-03,2024-01-03,AAPL,146.32138489498232,151.15656937055596,142.746729500923,146.71222757696012,3530268
+2024-01-04,2024-01-04,AAPL,146.37995964334684,151.26703070195026,143.00453668958616,145.73951459815402,3759387
+2024-01-05,2024-01-05,AAPL,144.53817016339892,146.45202085205696,144.32653363127483,144.50447074379983,1651497
+2024-01-06,2024-01-06,AAPL,144.94872235287855,147.5938996592372,140.3773422225834,145.77299479720213,4780063
+2024-01-07,2024-01-07,AAPL,145.3384440692702,147.41634212599112,143.3421017828499,144.23424562006574,3295846
+2024-01-08,2024-01-08,AAPL,142.1097161965169,144.0839181913703,139.63501161582585,142.67315864509104,4535615
+2024-01-09,2024-01-09,AAPL,142.76230975934672,143.64380382460266,139.30333155966156,143.00899222308095,2457802
+2024-01-10,2024-01-10,AAPL,145.42129883461558,146.9818753695635,144.6647903304167,146.9818753695635,3550238
+2024-01-11,2024-01-11,AAPL,144.1824093146154,145.5350711546069,142.47066836675242,143.9165340760129,2521907
+2024-01-12,2024-01-12,AAPL,143.73292019914956,146.0278155805253,140.82076263226665,144.07514050902915,4361138
+2024-01-13,2024-01-13,AAPL,144.5921116942377,148.956530614053,139.73542831641873,144.46371681795884,1697822
+2024-01-14,2024-01-14,AAPL,146.26351259345878,147.8633991138604,145.59380835273967,146.65797495532112,4219493
+2024-01-15,2024-01-15,AAPL,146.24984200279408,149.57276022092887,144.14301590019244,146.31649668374658,3686774
+2024-01-16,2024-01-16,AAPL,149.51492073127616,154.20464191249388,144.95293069235998,149.68019294616326,3980809
+2024-01-17,2024-01-17,AAPL,150.27080125586812,154.6412172518751,146.07986430588477,152.26299755003203,2161049
+2024-01-18,2024-01-18,AAPL,152.86480955632402,155.7302795474207,148.57183136766565,152.61580353919305,4566634
+2024-01-19,2024-01-19,AAPL,149.48217085855916,149.90264129554754,147.9046409705074,148.0323840240988,1095953
+2024-01-20,2024-01-20,AAPL,148.64716819123112,149.81577606567927,146.17094775862662,149.81577606567927,4854663
+2024-01-21,2024-01-21,AAPL,148.28825340964272,149.9540283014251,144.13735713378347,148.53256770900788,1038059
+2024-01-22,2024-01-22,AAPL,147.2554716869809,148.51937466052559,143.07847990325325,145.79391175670284,4103356
+2024-01-23,2024-01-23,AAPL,146.65698545640598,151.54431501455556,142.69821191771842,145.36517872567273,2032064
+2024-01-24,2024-01-24,AAPL,143.09999128812467,145.72547535061477,141.7755624505889,144.0973443214369,4350434
+2024-01-25,2024-01-25,AAPL,140.30698876970501,140.62130120979458,138.0908320865635,140.12274315289147,1017617
+2024-01-26,2024-01-26,AAPL,138.1671675202307,138.78767616645902,137.2771559594945,138.37046103989428,2116708
+2024-01-27,2024-01-27,AAPL,138.91888776631126,143.3253580003493,136.99412120332647,139.18966456210185,1414004
+2024-01-28,2024-01-28,AAPL,142.37657696830004,146.83096123856134,141.03216032191364,141.26542188091503,4107711
+2024-01-29,2024-01-29,AAPL,137.80128346239906,140.89631459855107,136.7241738715561,138.93044064799258,1626285
+2024-01-30,2024-01-30,AAPL,137.78918357439028,139.95559872110096,134.97281743944313,137.0868936865947,1811278
+2024-01-31,2024-01-31,AAPL,139.58877620751352,141.770990778896,137.61926738066552,137.9188805660869,2974135
+2024-02-01,2024-02-01,AAPL,139.38179085855958,140.91207176066777,137.50408874710303,139.28023349175356,4459740
+2024-02-02,2024-02-02,AAPL,138.2421491934695,141.8623755753506,137.43322022257598,138.10937897115076,4650147
+2024-02-03,2024-02-03,AAPL,135.33617600421405,137.4374404339743,135.11942002560534,135.82638113709373,4236571
+2024-02-04,2024-02-04,AAPL,136.17233247178584,138.2722835551487,134.8768371868204,136.7511121030599,1482204
+2024-02-05,2024-02-05,AAPL,134.86860471214467,136.90456363578514,132.52243374457865,136.90456363578514,2466846
+2024-02-06,2024-02-06,AAPL,136.7764504900661,136.958343768838,134.7825481687808,134.7825481687808,2787837
+2024-02-07,2024-02-07,AAPL,139.69712837353802,141.065386790204,136.70672961405955,139.68308522715725,2085870
+2024-02-08,2024-02-08,AAPL,140.1263707995161,144.85316959949887,138.7287905119198,138.7287905119198,1364701
+2024-02-09,2024-02-09,AAPL,144.77654344715054,149.6952318658198,143.89369417233274,146.47521211928762,4419768
+2024-02-10,2024-02-10,AAPL,141.77754800939968,143.83886659441916,137.4898637649998,143.83886659441916,2269513
+2024-02-11,2024-02-11,AAPL,138.17333866911804,138.6137151242891,137.5116320878456,137.5116320878456,4516639
+2024-02-12,2024-02-12,AAPL,137.31519183629587,138.44361855529002,133.21085068648787,136.481482982404,1960006
+2024-02-13,2024-02-13,AAPL,137.00260169591738,140.38563146593754,133.9326233500252,137.00169899667182,1604658
+2024-02-14,2024-02-14,AAPL,139.30603552169487,141.33803072935865,135.36021538402935,141.14772293715245,4444910
+2024-02-15,2024-02-15,AAPL,141.84737390103666,145.17372532260922,141.22950113079244,143.13718786409763,4129768
+2024-02-16,2024-02-16,AAPL,140.07933343735422,140.3157485505349,138.00471005053237,139.15657781246793,3471028
+2024-02-17,2024-02-17,AAPL,140.69115637365024,141.9248521089754,137.80425717335987,140.85338649785277,3201533
+2024-02-18,2024-02-18,AAPL,140.28594568201305,142.71628983095042,137.08313352690575,137.9461053595589,1440791
+2024-02-19,2024-02-19,AAPL,140.20463985123942,141.0965683073344,137.48098201977118,141.0965683073344,1047763
+2024-02-20,2024-02-20,AAPL,139.29202637938485,142.49667131798725,138.9810503026856,140.02750209510177,1404756
+2024-02-21,2024-02-21,AAPL,141.57253383909983,145.41989360447926,140.47180895582161,140.47180895582161,3488302
+2024-02-22,2024-02-22,AAPL,136.68940767177244,138.54899980294624,134.4344822194364,135.54716868688303,1696664
+2024-02-23,2024-02-23,AAPL,136.50466424229685,138.14406446946919,135.15391625958478,135.95496105175218,3519300
+2024-02-24,2024-02-24,AAPL,136.4613939583472,141.18166425353783,135.82930823680363,137.6355489455012,3991246
+2024-02-25,2024-02-25,AAPL,135.58315401034076,137.5246611419201,130.59657389326202,134.84069453628777,4726008
+2024-02-26,2024-02-26,AAPL,133.02542931813383,135.66941183656533,130.07419599295457,133.50060066291408,3380740
+2024-02-27,2024-02-27,AAPL,134.99846616370684,138.38789683673036,133.45520985475883,135.6092174530939,3596981
+2024-02-28,2024-02-28,AAPL,136.8956875489415,140.22537856334583,133.49077019235582,139.15958356484154,3523685
+2024-02-29,2024-02-29,AAPL,138.25026429210126,139.1858057571072,134.43229633358067,139.1858057571072,1243155
+2024-01-01,2024-01-01,GOOGL,2795.9223847041803,2800.5811945854853,2795.153052300646,2795.4102395765494,4950838
+2024-01-02,2024-01-02,GOOGL,2798.878461104687,2799.799563841561,2795.888746225209,2799.2820959404057,2318398
+2024-01-03,2024-01-03,GOOGL,2798.8560476694847,2802.7757256810437,2797.9126477057866,2798.7188632702764,1815583
+2024-01-04,2024-01-04,GOOGL,2796.79569077767,2797.745772546745,2794.150481759766,2796.6800797463106,4140652
+2024-01-05,2024-01-05,GOOGL,2799.6460103664754,2801.623573735857,2795.850197091443,2801.149391181129,1243110
+2024-01-06,2024-01-06,GOOGL,2799.188164492353,2800.361734239764,2794.3882816342243,2799.348758083909,1524987
+2024-01-07,2024-01-07,GOOGL,2797.0754623839966,2800.6544011224037,2794.172221918264,2797.622927834196,4287635
+2024-01-08,2024-01-08,GOOGL,2799.276909017444,2803.051934648261,2795.3867099601084,2799.687387399428,2832499
+2024-01-09,2024-01-09,GOOGL,2796.665627165701,2797.2335656512437,2793.036464166879,2794.9517464351834,1648085
+2024-01-10,2024-01-10,GOOGL,2796.0420479575773,2797.928025302797,2794.15279163631,2794.591276509649,2850424
+2024-01-11,2024-01-11,GOOGL,2794.7575292827864,2797.0413722588073,2791.617499273333,2794.4114684029205,1014559
+2024-01-12,2024-01-12,GOOGL,2790.3262951776996,2794.1401910028103,2788.103300630398,2789.4613103794204,4981405
+2024-01-13,2024-01-13,GOOGL,2795.3018194220413,2797.1790681637426,2790.729000545256,2795.3580031481592,3590185
+2024-01-14,2024-01-14,GOOGL,2795.5084915094512,2799.729473841242,2793.1680322792217,2795.9955406201493,2107460
+2024-01-15,2024-01-15,GOOGL,2795.4184465925728,2799.626443730068,2794.7924226721757,2794.832435494428,3822187
+2024-01-16,2024-01-16,GOOGL,2796.4358741563956,2798.057520030911,2792.6522622037505,2794.334959788234,4322154
+2024-01-17,2024-01-17,GOOGL,2799.5395012177514,2801.3428952638906,2797.388385606089,2799.59315039461,2509681
+2024-01-18,2024-01-18,GOOGL,2798.7328283995316,2799.5165047726687,2793.9281383890457,2799.0425076569745,1347223
+2024-01-19,2024-01-19,GOOGL,2797.1484140131292,2797.2742636836547,2792.833307761275,2796.5655589527596,3217455
+2024-01-20,2024-01-20,GOOGL,2798.3875741861475,2802.8678236103337,2794.3127146974884,2797.5353817709756,3239746
+2024-01-21,2024-01-21,GOOGL,2797.9700054892605,2800.852738536252,2795.8623335865445,2795.8623335865445,4961392
+2024-01-22,2024-01-22,GOOGL,2796.592235128864,2798.844601718899,2795.3010526174708,2796.87652522367,1406626
+2024-01-23,2024-01-23,GOOGL,2796.0843919392655,2796.7529768154454,2793.1338760369617,2796.447739151184,1661172
+2024-01-24,2024-01-24,GOOGL,2795.5562264111995,2796.4174537164185,2791.160311198944,2796.4174537164185,1716900
+2024-01-25,2024-01-25,GOOGL,2797.024057533806,2800.8283553929355,2795.7875515858827,2796.9440783620935,2024405
+2024-01-26,2024-01-26,GOOGL,2795.428692763503,2796.5650612433283,2795.347244801344,2796.3842536443667,2578732
+2024-01-27,2024-01-27,GOOGL,2797.5475019157875,2799.833086960125,2795.2265407889245,2797.8705286345134,2911069
+2024-01-28,2024-01-28,GOOGL,2797.7698334860656,2802.5950397013794,2794.1316009989832,2798.882715046699,1702991
+2024-01-29,2024-01-29,GOOGL,2798.5914090589235,2800.108162268861,2796.2054673114094,2798.1562524298565,1856633
+2024-01-30,2024-01-30,GOOGL,2796.870935568424,2801.6528702931423,2792.70033389259,2796.466557137988,2720872
+2024-01-31,2024-01-31,GOOGL,2795.7750528532606,2796.515075083831,2792.749168397448,2796.515075083831,2636267
+2024-02-01,2024-02-01,GOOGL,2796.621513697124,2801.5685282983827,2794.9870677907516,2795.718470180502,2616152
+2024-02-02,2024-02-02,GOOGL,2796.0757889045917,2797.0414638277844,2793.590382064615,2797.0414638277844,4850333
+2024-02-03,2024-02-03,GOOGL,2796.729353174485,2801.2947962952217,2795.5626487142595,2796.023276598216,2730379
+2024-02-04,2024-02-04,GOOGL,2797.356060435529,2801.0608068423035,2796.064635723005,2796.6572738771447,3105218
+2024-02-05,2024-02-05,GOOGL,2798.2360859157993,2802.3931272754644,2795.2015826084557,2797.862743779934,4758339
+2024-02-06,2024-02-06,GOOGL,2799.5883237747594,2800.9684322697562,2796.5339667031535,2799.042793243845,3858715
+2024-02-07,2024-02-07,GOOGL,2798.380328072985,2802.314416677915,2795.113268707722,2798.235077189524,2038961
+2024-02-08,2024-02-08,GOOGL,2794.8151144146086,2798.6557031768143,2791.930183341575,2793.940491972221,1180326
+2024-02-09,2024-02-09,GOOGL,2796.1831369169754,2798.877077789174,2792.3108396289344,2797.275183543192,1391887
+2024-02-10,2024-02-10,GOOGL,2798.252149725252,2800.026126904756,2793.701485287062,2798.9985099110463,3823285
+2024-02-11,2024-02-11,GOOGL,2797.89753581013,2801.366547643458,2796.7979586082247,2797.6889567991666,4925366
+2024-02-12,2024-02-12,GOOGL,2797.9386050509024,2801.4350368516953,2794.147858227275,2798.5376336230956,1852925
+2024-02-13,2024-02-13,GOOGL,2796.4911917586414,2798.0196537253332,2795.544998238898,2795.59914347075,4269542
+2024-02-14,2024-02-14,GOOGL,2794.7336996064564,2796.7101413840683,2793.3558541353605,2794.839415575028,1308087
+2024-02-15,2024-02-15,GOOGL,2794.494854014328,2798.05637782404,2790.070916604889,2794.0458014147925,2321145
+2024-02-16,2024-02-16,GOOGL,2792.875426439672,2796.8743950150283,2790.3389904056226,2793.914183084096,4799516
+2024-02-17,2024-02-17,GOOGL,2797.8236939364674,2799.7831042490493,2796.949578588012,2798.0009248275214,1806136
+2024-02-18,2024-02-18,GOOGL,2797.7654148155957,2797.9597063330025,2792.9877394097066,2797.531670826704,4528363
+2024-02-19,2024-02-19,GOOGL,2794.245971183465,2795.5648524900366,2791.949733495758,2794.267351813708,1423822
+2024-02-20,2024-02-20,GOOGL,2797.785618224602,2801.749151995697,2795.949754528391,2798.5351966759204,2900853
+2024-02-21,2024-02-21,GOOGL,2793.6070020152915,2794.164480795223,2789.887940817608,2794.164480795223,2726552
+2024-02-22,2024-02-22,GOOGL,2793.633835377815,2796.6297011433085,2790.5994487668277,2793.174992146633,4432473
+2024-02-23,2024-02-23,GOOGL,2794.1971743028544,2794.7629568386756,2791.2273594623866,2794.7629568386756,2142590
+2024-02-24,2024-02-24,GOOGL,2792.278121954794,2794.990155304694,2791.5257315081144,2791.980526552461,3125487
+2024-02-25,2024-02-25,GOOGL,2794.633743689241,2798.459333314078,2794.541394346058,2794.541394346058,4718458
+2024-02-26,2024-02-26,GOOGL,2795.4944698135623,2797.9058547988107,2795.23193293646,2795.3107900530185,2539902
+2024-02-27,2024-02-27,GOOGL,2792.7358357789135,2793.7404030746325,2791.4316801952255,2792.716699504802,4882491
+2024-02-28,2024-02-28,GOOGL,2794.0511129651586,2797.2180746713375,2792.1707884127663,2794.42567639665,4560533
+2024-02-29,2024-02-29,GOOGL,2793.7886209798435,2796.845566013455,2788.8011069367303,2792.6160641893084,2419753
+2024-01-01,2024-01-01,MSFT,381.26178243291633,384.16503489958905,376.5838746050349,381.7810626548356,1265120
+2024-01-02,2024-01-02,MSFT,381.9239321373603,383.3177467820275,376.9707364472822,382.41540032415713,3382760
+2024-01-03,2024-01-03,MSFT,380.45520540724465,383.08330810244115,378.33278590833453,381.06071393623614,2001481
+2024-01-04,2024-01-04,MSFT,381.6914606352014,385.0442031178725,379.2738951520357,382.0657194800535,2836897
+2024-01-05,2024-01-05,MSFT,380.8809066667218,382.30991308132485,378.17090621516377,379.6081644173865,4617934
+2024-01-06,2024-01-06,MSFT,380.4740960798205,383.3701772873714,378.375616160143,380.2683722325732,2545234
+2024-01-07,2024-01-07,MSFT,377.2759024962482,377.64130797259367,373.6370396652164,376.81709224250983,4018089
+2024-01-08,2024-01-08,MSFT,380.3944335835196,383.8257769747189,375.86099495346315,377.7725454812557,2045881
+2024-01-09,2024-01-09,MSFT,378.96804956770893,379.3323080968007,377.77032477699106,379.3323080968007,2476152
+2024-01-10,2024-01-10,MSFT,378.087978818747,378.93634578740915,376.95805796894075,378.03648608393945,3644041
+2024-01-11,2024-01-11,MSFT,374.4151981480391,379.0993522742476,373.7195647244141,373.7195647244141,4543440
+2024-01-12,2024-01-12,MSFT,374.3901646944306,376.06333844962404,374.2931767205096,376.06333844962404,4799662
+2024-01-13,2024-01-13,MSFT,377.8277401263166,378.5427430054905,377.24909640223774,378.3426285073071,4620599
+2024-01-14,2024-01-14,MSFT,378.6138321620782,380.45105953172913,374.5464520380409,378.29537853179727,1637563
+2024-01-15,2024-01-15,MSFT,380.6493653468667,383.51848204867133,377.4621901896452,381.19118719523254,3799914
+2024-01-16,2024-01-16,MSFT,379.2508783704141,380.40048843460056,374.8054681493338,377.76283889863925,3674989
+2024-01-17,2024-01-17,MSFT,379.9957898236924,381.6602846596943,375.55610858827896,378.72890445323776,3800567
+2024-01-18,2024-01-18,MSFT,382.7232992055419,386.8149240774666,378.37881421683466,383.0868614245569,1545021
+2024-01-19,2024-01-19,MSFT,382.62627326569566,386.2144044017468,378.67054795386326,383.0148594771083,4931181
+2024-01-20,2024-01-20,MSFT,383.13798605642114,386.7470239494242,380.8001566973073,383.034838416388,2188760
+2024-01-21,2024-01-21,MSFT,382.99015974568556,383.352972066756,379.1389058532965,383.25355408062524,4415610
+2024-01-22,2024-01-22,MSFT,385.2553124707059,388.4115956106088,382.0019215401622,386.54765432348125,2672097
+2024-01-23,2024-01-23,MSFT,387.61539533117485,390.6704389158374,385.66671057024615,386.64317325609596,4981546
+2024-01-24,2024-01-24,MSFT,386.63955025571414,391.20247164096315,382.7863468220389,385.78518130891115,1175861
+2024-01-25,2024-01-25,MSFT,387.26412367315777,387.85525472047163,385.41224152062216,385.41224152062216,3448744
+2024-01-26,2024-01-26,MSFT,384.8793971292691,385.9578605338998,382.28198097958386,385.39949432157545,4791480
+2024-01-27,2024-01-27,MSFT,387.1095712589777,390.0370701650332,385.7615374100144,385.7615374100144,2700890
+2024-01-28,2024-01-28,MSFT,386.4268954331402,388.4199921038704,384.6118968667316,386.05783283530405,1994082
+2024-01-29,2024-01-29,MSFT,381.9919886257955,383.87734911232747,378.66145310452094,380.356324904471,1224557
+2024-01-30,2024-01-30,MSFT,380.29357556309503,384.6199611282897,379.04064331051836,380.64272635728514,4037114
+2024-01-31,2024-01-31,MSFT,380.1744358362685,380.76344698809396,379.4852588315862,380.76344698809396,2721283
+2024-02-01,2024-02-01,MSFT,379.81014070199564,383.4368635808266,375.62814973835134,381.47226158132753,2793428
+2024-02-02,2024-02-02,MSFT,378.37717421820196,378.99555063368786,377.3180549716957,378.9752978579205,4419756
+2024-02-03,2024-02-03,MSFT,375.0899319861845,377.69486164739226,371.5471501849482,374.91844044125094,3174358
+2024-02-04,2024-02-04,MSFT,380.083868904069,380.5609007362114,377.2095371451327,380.5609007362114,3823188
+2024-02-05,2024-02-05,MSFT,380.5902250012933,381.74375283637545,377.61192652720604,379.30429030428735,2812189
+2024-02-06,2024-02-06,MSFT,382.32660909279383,384.12514192325403,377.6062952683772,384.12514192325403,1101678
+2024-02-07,2024-02-07,MSFT,381.67812277493806,385.9864276417008,379.74451496006066,379.74451496006066,3186510
+2024-02-08,2024-02-08,MSFT,381.6827085803149,385.08034599647476,379.95771826113054,379.95771826113054,3011788
+2024-02-09,2024-02-09,MSFT,379.62581896596237,381.38556914330695,374.89184450496657,376.9946922726033,4929078
+2024-02-10,2024-02-10,MSFT,380.93664098431753,385.2425678246321,376.15380013658097,381.25884683266344,1944892
+2024-02-11,2024-02-11,MSFT,380.8920683652796,383.8959003855385,377.10660910670043,381.7938189784878,2868886
+2024-02-12,2024-02-12,MSFT,383.54098159220416,386.4643243453378,383.41668144200526,385.0505259019862,2014442
+2024-02-13,2024-02-13,MSFT,380.6375010084348,382.2339402719437,377.5915157315718,381.12019592561177,3419445
+2024-02-14,2024-02-14,MSFT,377.9715892411921,378.9933850088994,376.6530893174674,378.1830858524407,1230385
+2024-02-15,2024-02-15,MSFT,379.8153085159308,381.7475249353518,378.5232532356807,381.7475249353518,4803386
+2024-02-16,2024-02-16,MSFT,376.09111114378186,378.1747123094318,374.73717599891944,376.03127552523625,4774772
+2024-02-17,2024-02-17,MSFT,374.34696101731487,376.8024407845949,371.35483526413117,371.35483526413117,1009802
+2024-02-18,2024-02-18,MSFT,376.82425342979406,377.7161510385026,373.9104591994467,376.87911225723377,1567805
+2024-02-19,2024-02-19,MSFT,375.34694572536125,375.94865518455754,371.40433270451,375.94865518455754,4741516
+2024-02-20,2024-02-20,MSFT,380.6628925140985,381.32129339579075,379.1565373954404,381.1604751566883,2159735
+2024-02-21,2024-02-21,MSFT,381.1169874911578,385.3173721861061,376.1983260218935,381.56711024819316,2929724
+2024-02-22,2024-02-22,MSFT,378.3180323299757,379.09106298480526,377.9123391066246,379.0241765922276,1314668
+2024-02-23,2024-02-23,MSFT,376.6185973152891,379.068668019432,374.60690036395397,376.7978956071116,4795943
+2024-02-24,2024-02-24,MSFT,376.5655418111769,377.9130013825788,373.95171960263326,375.5766535222044,2253626
+2024-02-25,2024-02-25,MSFT,376.52816170368544,379.89065594103874,372.4541171754469,378.1360977996301,2715572
+2024-02-26,2024-02-26,MSFT,373.8782749023132,376.1559755566635,373.6064243300879,373.6398398298293,3969861
+2024-02-27,2024-02-27,MSFT,373.77787612434525,374.53716325246654,371.8155250175181,374.0164669523394,3004231
+2024-02-28,2024-02-28,MSFT,371.6356305743236,372.1760874837769,366.9147394343795,371.1096236711841,4352848
+2024-02-29,2024-02-29,MSFT,371.32766074932687,376.10705353520586,368.39401081866276,371.33056174159384,3055279
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>Candlestick Chart Examples</h1>
+<p></p>
+
+<h2>Example 1: Single Stock with Volume (AAPL)</h2>
+<p>Daily stock prices with volume bars. Use time sliders to zoom, toggle renormalization and volume display.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example1_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example1_candlestick" onchange="updateChart_example1_candlestick()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example1_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example1_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example1_candlestick" onchange="updateChart_example1_candlestick()">
+                <option value="Overlay" selected>Overlay</option>
+                <option value="Faceted">Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example1_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example1_candlestick" onchange="updateChart_example1_candlestick()">
+            <label for="renormalize_checkbox_example1_candlestick">Renormalize (first bar open = 1)</label>
+        </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="show_volume_checkbox_example1_candlestick" checked onchange="updateChart_example1_candlestick()">
+        <label for="show_volume_checkbox_example1_candlestick">Show Volume</label>
+    </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="log_volume_checkbox_example1_candlestick" onchange="updateChart_example1_candlestick()">
+        <label for="log_volume_checkbox_example1_candlestick">Log Volume</label>
+    </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example1_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example1_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example1_candlestick_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example1_candlestick"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_1</p><br>
+<hr>
+<br>
+<h2>Example 2: Multiple Stocks Comparison</h2>
+<p>Compare stocks with vastly different prices. Enable renormalization to see relative performance (first bar open = 1). Switch between Overlay and Faceted display modes.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example2_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example2_candlestick" onchange="updateChart_example2_candlestick()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example2_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example2_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example2_candlestick" onchange="updateChart_example2_candlestick()">
+                <option value="Overlay" selected>Overlay</option>
+                <option value="Faceted">Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example2_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example2_candlestick" onchange="updateChart_example2_candlestick()">
+            <label for="renormalize_checkbox_example2_candlestick">Renormalize (first bar open = 1)</label>
+        </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="show_volume_checkbox_example2_candlestick" checked onchange="updateChart_example2_candlestick()">
+        <label for="show_volume_checkbox_example2_candlestick">Show Volume</label>
+    </div>
+    <div style="margin: 5px 0;">
+        <input type="checkbox" id="log_volume_checkbox_example2_candlestick" onchange="updateChart_example2_candlestick()">
+        <label for="log_volume_checkbox_example2_candlestick">Log Volume</label>
+    </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example2_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example2_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example2_candlestick_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example2_candlestick"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_2</p><br>
+<hr>
+<br>
+<h2>Example 3: Quarterly Data Without Volume</h2>
+<p>Quarterly company performance using integer time periods. No volume data. Using Candlestick bar style instead of candlesticks. Faceted display shows each company separately.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="chart_type_select_example3_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example3_candlestick" onchange="updateChart_example3_candlestick()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="chart_type_select_example3_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="display_mode_select_example3_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example3_candlestick" onchange="updateChart_example3_candlestick()">
+                <option value="Overlay">Overlay</option>
+                <option value="Faceted" selected>Faceted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="display_mode_select_example3_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="margin: 10px; display: flex; flex-direction: column;">
+        <div style="margin: 5px 0;">
+            <input type="checkbox" id="renormalize_checkbox_example3_candlestick" onchange="updateChart_example3_candlestick()">
+            <label for="renormalize_checkbox_example3_candlestick">Renormalize (first bar open = 1)</label>
+        </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example3_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example3_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example3_candlestick_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example3_candlestick"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company_data</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
+</body>
+</html>

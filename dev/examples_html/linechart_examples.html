@@ -625,7 +625,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -5453,6 +5454,531 @@ $(function(){
         console.error('Error loading data for chart continuous_filters:', error);
     });
 })();
+(function() {
+    // Configuration
+    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const X_COLS = ['Date'];
+    const Y_COLS = ['Price'];
+    const COLOR_COLS = ['color'];
+    const COLOR_MAPS = {'color': {'GOOGL': '#EF553B', 'MSFT': '#00cc96', 'AAPL': '#636efa'}};
+    const DEFAULT_X_COL = 'Date';
+    const DEFAULT_Y_COL = 'Price';
+    const DEFAULT_COLOR_COL = 'color';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;  // Return all values when no aggregation
+        if (method === 'count') return [values.length];
+        if (method === 'sum') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare the actual Date objects
+                    const dateA = xOriginalValues[a];
+                    const dateB = xOriginalValues[b];
+                    return dateA - dateB;  // Date subtraction gives milliseconds difference
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_struct_prices = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_struct_prices');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_struct_prices');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_struct_prices');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_struct_prices');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_struct_prices');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_struct_prices' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_struct_prices');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_struct_prices');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_struct_prices');
+        const facet2Select = document.getElementById('facet2_select_struct_prices');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'struct_prices',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+
+                    // Check if values are Date objects
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
+
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('struct_prices', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+
+                        // Check if values are Date objects
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
+
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('struct_prices', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
+
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('struct_prices', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('financial.prices').then(function(data) {
+        allData = data;
+        window.updateChart_struct_prices();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('struct_prices');
+    }).catch(function(error) {
+        console.error('Error loading data for chart struct_prices:', error);
+    });
+})();
 
 
 });
@@ -5460,7 +5986,833 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="metrics" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="financial.prices" data-format="csv_embedded" data-src="">
+Date,Stock,Price,color
+2024-01-01,AAPL,179.91895320285877,AAPL
+2024-01-02,AAPL,180.4904102390327,AAPL
+2024-01-03,AAPL,179.63379243272684,AAPL
+2024-01-04,AAPL,178.78914919900015,AAPL
+2024-01-05,AAPL,178.57476283030002,AAPL
+2024-01-06,AAPL,178.29888802053773,AAPL
+2024-01-07,AAPL,178.96177242435215,AAPL
+2024-01-08,AAPL,179.69103807702288,AAPL
+2024-01-09,AAPL,180.3787484198216,AAPL
+2024-01-10,AAPL,181.74617553238036,AAPL
+2024-01-11,AAPL,181.27653187967948,AAPL
+2024-01-12,AAPL,180.1790274586101,AAPL
+2024-01-13,AAPL,179.47452815537522,AAPL
+2024-01-14,AAPL,179.62842686626516,AAPL
+2024-01-15,AAPL,179.98279161404312,AAPL
+2024-01-16,AAPL,179.22415787201913,AAPL
+2024-01-17,AAPL,178.0036513016245,AAPL
+2024-01-18,AAPL,176.4973411089747,AAPL
+2024-01-19,AAPL,175.3195438504285,AAPL
+2024-01-20,AAPL,175.0831464859331,AAPL
+2024-01-21,AAPL,175.7297515595631,AAPL
+2024-01-22,AAPL,175.47957434678753,AAPL
+2024-01-23,AAPL,175.30887934010596,AAPL
+2024-01-24,AAPL,175.83237888501282,AAPL
+2024-01-25,AAPL,175.04591033419828,AAPL
+2024-01-26,AAPL,174.40996562880702,AAPL
+2024-01-27,AAPL,173.88679461295013,AAPL
+2024-01-28,AAPL,175.01382529920866,AAPL
+2024-01-29,AAPL,173.93223973213316,AAPL
+2024-01-30,AAPL,173.34317175604434,AAPL
+2024-01-31,AAPL,172.92657935882957,AAPL
+2024-02-01,AAPL,171.51067604161932,AAPL
+2024-02-02,AAPL,169.72801059992855,AAPL
+2024-02-03,AAPL,170.11863661326055,AAPL
+2024-02-04,AAPL,169.69915162029935,AAPL
+2024-02-05,AAPL,171.1794652569693,AAPL
+2024-02-06,AAPL,172.60134813508634,AAPL
+2024-02-07,AAPL,173.18340249521688,AAPL
+2024-02-08,AAPL,172.73160512019464,AAPL
+2024-02-09,AAPL,172.31197523906434,AAPL
+2024-02-10,AAPL,172.11071684999916,AAPL
+2024-02-11,AAPL,170.95720528642772,AAPL
+2024-02-12,AAPL,171.72969926160462,AAPL
+2024-02-13,AAPL,171.1347495656061,AAPL
+2024-02-14,AAPL,170.1106631139749,AAPL
+2024-02-15,AAPL,171.9610419984677,AAPL
+2024-02-16,AAPL,173.32383034155046,AAPL
+2024-02-17,AAPL,173.95475234962427,AAPL
+2024-02-18,AAPL,173.159998897491,AAPL
+2024-02-19,AAPL,172.20927980377925,AAPL
+2024-02-20,AAPL,173.23811276288882,AAPL
+2024-02-21,AAPL,173.3749978509617,AAPL
+2024-02-22,AAPL,172.04761384426953,AAPL
+2024-02-23,AAPL,171.9124786639245,AAPL
+2024-02-24,AAPL,173.4709268609909,AAPL
+2024-02-25,AAPL,175.63113107072326,AAPL
+2024-02-26,AAPL,176.4613450865142,AAPL
+2024-02-27,AAPL,175.29573047585225,AAPL
+2024-02-28,AAPL,175.58135446613298,AAPL
+2024-02-29,AAPL,174.40732124077255,AAPL
+2024-03-01,AAPL,176.06833494435773,AAPL
+2024-03-02,AAPL,177.1191583031288,AAPL
+2024-03-03,AAPL,177.52015584997702,AAPL
+2024-03-04,AAPL,174.94624220191275,AAPL
+2024-03-05,AAPL,175.31617768314004,AAPL
+2024-03-06,AAPL,177.51105396850656,AAPL
+2024-03-07,AAPL,176.61685168921235,AAPL
+2024-03-08,AAPL,176.29214260968118,AAPL
+2024-03-09,AAPL,177.03140635193134,AAPL
+2024-03-10,AAPL,175.71187852956038,AAPL
+2024-03-11,AAPL,175.7619491834708,AAPL
+2024-03-12,AAPL,175.48248723701366,AAPL
+2024-03-13,AAPL,176.89242675465445,AAPL
+2024-03-14,AAPL,176.79039321184962,AAPL
+2024-03-15,AAPL,176.77866068317624,AAPL
+2024-03-16,AAPL,177.16476956124464,AAPL
+2024-03-17,AAPL,177.84931302199323,AAPL
+2024-03-18,AAPL,178.03662275943265,AAPL
+2024-03-19,AAPL,178.86988410120983,AAPL
+2024-03-20,AAPL,177.9198224103365,AAPL
+2024-03-21,AAPL,177.39289924506286,AAPL
+2024-03-22,AAPL,177.56639171862713,AAPL
+2024-03-23,AAPL,177.6244411160098,AAPL
+2024-03-24,AAPL,177.93369436678833,AAPL
+2024-03-25,AAPL,178.1695954158479,AAPL
+2024-03-26,AAPL,176.38103899386894,AAPL
+2024-03-27,AAPL,177.87654918246005,AAPL
+2024-03-28,AAPL,177.44823776585812,AAPL
+2024-03-29,AAPL,175.6452659226701,AAPL
+2024-03-30,AAPL,175.4289836291049,AAPL
+2024-03-31,AAPL,174.78314417101475,AAPL
+2024-01-01,GOOGL,138.7994687546288,GOOGL
+2024-01-02,GOOGL,139.3715023072861,GOOGL
+2024-01-03,GOOGL,139.64574158208956,GOOGL
+2024-01-04,GOOGL,137.60246834750498,GOOGL
+2024-01-05,GOOGL,138.79929962209323,GOOGL
+2024-01-06,GOOGL,138.13447040612613,GOOGL
+2024-01-07,GOOGL,137.2593240455801,GOOGL
+2024-01-08,GOOGL,134.58951735710875,GOOGL
+2024-01-09,GOOGL,133.9622379365127,GOOGL
+2024-01-10,GOOGL,132.2190822337355,GOOGL
+2024-01-11,GOOGL,130.4040562153291,GOOGL
+2024-01-12,GOOGL,130.4577994647629,GOOGL
+2024-01-13,GOOGL,130.14996281327853,GOOGL
+2024-01-14,GOOGL,130.97470048574505,GOOGL
+2024-01-15,GOOGL,129.65309193111693,GOOGL
+2024-01-16,GOOGL,129.67389237614378,GOOGL
+2024-01-17,GOOGL,129.08200648621502,GOOGL
+2024-01-18,GOOGL,128.6927162995634,GOOGL
+2024-01-19,GOOGL,128.64486225111716,GOOGL
+2024-01-20,GOOGL,129.18914253416762,GOOGL
+2024-01-21,GOOGL,130.29114916516366,GOOGL
+2024-01-22,GOOGL,129.8769135417107,GOOGL
+2024-01-23,GOOGL,130.61556099758002,GOOGL
+2024-01-24,GOOGL,132.71115906539924,GOOGL
+2024-01-25,GOOGL,131.80792349257098,GOOGL
+2024-01-26,GOOGL,131.36533834957532,GOOGL
+2024-01-27,GOOGL,131.70603436728194,GOOGL
+2024-01-28,GOOGL,132.5852705465512,GOOGL
+2024-01-29,GOOGL,132.5895995770554,GOOGL
+2024-01-30,GOOGL,133.186574664283,GOOGL
+2024-01-31,GOOGL,133.0484596048205,GOOGL
+2024-02-01,GOOGL,132.61799922244046,GOOGL
+2024-02-02,GOOGL,131.37119103831233,GOOGL
+2024-02-03,GOOGL,130.4688738759166,GOOGL
+2024-02-04,GOOGL,131.769730003008,GOOGL
+2024-02-05,GOOGL,132.0423980029969,GOOGL
+2024-02-06,GOOGL,132.313141170392,GOOGL
+2024-02-07,GOOGL,132.79717627813324,GOOGL
+2024-02-08,GOOGL,132.3376462372372,GOOGL
+2024-02-09,GOOGL,131.55503428584535,GOOGL
+2024-02-10,GOOGL,132.3539624772247,GOOGL
+2024-02-11,GOOGL,133.05323106230222,GOOGL
+2024-02-12,GOOGL,134.81184814299516,GOOGL
+2024-02-13,GOOGL,134.2797641933699,GOOGL
+2024-02-14,GOOGL,133.70897465256317,GOOGL
+2024-02-15,GOOGL,134.16896691661836,GOOGL
+2024-02-16,GOOGL,133.80651926750417,GOOGL
+2024-02-17,GOOGL,134.50320146072687,GOOGL
+2024-02-18,GOOGL,134.78152805886373,GOOGL
+2024-02-19,GOOGL,135.2576866710452,GOOGL
+2024-02-20,GOOGL,134.64055378829786,GOOGL
+2024-02-21,GOOGL,135.41201035647424,GOOGL
+2024-02-22,GOOGL,135.08983400772092,GOOGL
+2024-02-23,GOOGL,134.3175851630433,GOOGL
+2024-02-24,GOOGL,133.57656778779582,GOOGL
+2024-02-25,GOOGL,133.3555923809799,GOOGL
+2024-02-26,GOOGL,133.17222121133997,GOOGL
+2024-02-27,GOOGL,133.53300858457155,GOOGL
+2024-02-28,GOOGL,134.66826051048798,GOOGL
+2024-02-29,GOOGL,133.35892393949854,GOOGL
+2024-03-01,GOOGL,132.21086490588453,GOOGL
+2024-03-02,GOOGL,131.3322714971188,GOOGL
+2024-03-03,GOOGL,130.70783934863258,GOOGL
+2024-03-04,GOOGL,130.1694568562519,GOOGL
+2024-03-05,GOOGL,130.58665944628626,GOOGL
+2024-03-06,GOOGL,131.22934693256886,GOOGL
+2024-03-07,GOOGL,131.23568807626017,GOOGL
+2024-03-08,GOOGL,130.71925655559795,GOOGL
+2024-03-09,GOOGL,130.5260196952922,GOOGL
+2024-03-10,GOOGL,129.6479590245795,GOOGL
+2024-03-11,GOOGL,129.2477220377381,GOOGL
+2024-03-12,GOOGL,129.82788154826818,GOOGL
+2024-03-13,GOOGL,130.0126600532399,GOOGL
+2024-03-14,GOOGL,129.20468674624712,GOOGL
+2024-03-15,GOOGL,129.5007872550581,GOOGL
+2024-03-16,GOOGL,130.29813029325413,GOOGL
+2024-03-17,GOOGL,128.32943487086126,GOOGL
+2024-03-18,GOOGL,127.931335173272,GOOGL
+2024-03-19,GOOGL,127.53127083955867,GOOGL
+2024-03-20,GOOGL,126.55666755099367,GOOGL
+2024-03-21,GOOGL,125.33719794507914,GOOGL
+2024-03-22,GOOGL,123.76435824851265,GOOGL
+2024-03-23,GOOGL,125.78632078713868,GOOGL
+2024-03-24,GOOGL,125.7212983947944,GOOGL
+2024-03-25,GOOGL,126.05661081187752,GOOGL
+2024-03-26,GOOGL,128.14756641057195,GOOGL
+2024-03-27,GOOGL,128.89525333009271,GOOGL
+2024-03-28,GOOGL,130.63182612339284,GOOGL
+2024-03-29,GOOGL,130.53168364831973,GOOGL
+2024-03-30,GOOGL,131.12683848563245,GOOGL
+2024-03-31,GOOGL,131.7385249650737,GOOGL
+2024-01-01,MSFT,397.81182323526383,MSFT
+2024-01-02,MSFT,397.59712844074676,MSFT
+2024-01-03,MSFT,399.3061439675162,MSFT
+2024-01-04,MSFT,400.94026407413554,MSFT
+2024-01-05,MSFT,401.6794205633937,MSFT
+2024-01-06,MSFT,401.37469856773373,MSFT
+2024-01-07,MSFT,401.041619401881,MSFT
+2024-01-08,MSFT,397.47603407262926,MSFT
+2024-01-09,MSFT,397.3129368113628,MSFT
+2024-01-10,MSFT,397.3876322851398,MSFT
+2024-01-11,MSFT,395.0496201691517,MSFT
+2024-01-12,MSFT,397.03671932656357,MSFT
+2024-01-13,MSFT,397.79919839909894,MSFT
+2024-01-14,MSFT,397.6059509461585,MSFT
+2024-01-15,MSFT,398.9339113858936,MSFT
+2024-01-16,MSFT,400.16615252702843,MSFT
+2024-01-17,MSFT,399.70871996939167,MSFT
+2024-01-18,MSFT,400.4556761149805,MSFT
+2024-01-19,MSFT,399.26409610398423,MSFT
+2024-01-20,MSFT,399.99142767184026,MSFT
+2024-01-21,MSFT,399.47793958462074,MSFT
+2024-01-22,MSFT,401.11301269424416,MSFT
+2024-01-23,MSFT,401.11744667559276,MSFT
+2024-01-24,MSFT,401.8209027137554,MSFT
+2024-01-25,MSFT,402.8921705400674,MSFT
+2024-01-26,MSFT,403.3923303061771,MSFT
+2024-01-27,MSFT,402.23752194653014,MSFT
+2024-01-28,MSFT,401.23826608247475,MSFT
+2024-01-29,MSFT,402.07747185340276,MSFT
+2024-01-30,MSFT,401.7298926655953,MSFT
+2024-01-31,MSFT,402.1159470287347,MSFT
+2024-02-01,MSFT,403.5718995235971,MSFT
+2024-02-02,MSFT,403.95302455765665,MSFT
+2024-02-03,MSFT,403.81049950674446,MSFT
+2024-02-04,MSFT,405.00589150352795,MSFT
+2024-02-05,MSFT,403.8545656565376,MSFT
+2024-02-06,MSFT,405.13615164506365,MSFT
+2024-02-07,MSFT,405.900807137918,MSFT
+2024-02-08,MSFT,406.4771632221126,MSFT
+2024-02-09,MSFT,406.60011539538203,MSFT
+2024-02-10,MSFT,405.2147910579633,MSFT
+2024-02-11,MSFT,405.0679067001537,MSFT
+2024-02-12,MSFT,406.61013506550756,MSFT
+2024-02-13,MSFT,406.801145681647,MSFT
+2024-02-14,MSFT,405.083448822407,MSFT
+2024-02-15,MSFT,404.78280588997194,MSFT
+2024-02-16,MSFT,405.4281579600557,MSFT
+2024-02-17,MSFT,404.6471526770656,MSFT
+2024-02-18,MSFT,403.51536393609945,MSFT
+2024-02-19,MSFT,403.9812706276622,MSFT
+2024-02-20,MSFT,404.4976870005931,MSFT
+2024-02-21,MSFT,406.8035992981416,MSFT
+2024-02-22,MSFT,407.0688909432212,MSFT
+2024-02-23,MSFT,407.17404264817156,MSFT
+2024-02-24,MSFT,406.042299800143,MSFT
+2024-02-25,MSFT,405.2800919261978,MSFT
+2024-02-26,MSFT,404.4536073628693,MSFT
+2024-02-27,MSFT,405.56747470418674,MSFT
+2024-02-28,MSFT,405.2119923014501,MSFT
+2024-02-29,MSFT,405.45458295170283,MSFT
+2024-03-01,MSFT,407.20184091620746,MSFT
+2024-03-02,MSFT,407.61926888626834,MSFT
+2024-03-03,MSFT,408.44954530724465,MSFT
+2024-03-04,MSFT,408.76023957004276,MSFT
+2024-03-05,MSFT,407.66164214168606,MSFT
+2024-03-06,MSFT,407.8591971658683,MSFT
+2024-03-07,MSFT,407.04321983800986,MSFT
+2024-03-08,MSFT,407.279822421463,MSFT
+2024-03-09,MSFT,409.51556649517033,MSFT
+2024-03-10,MSFT,408.56282295121736,MSFT
+2024-03-11,MSFT,408.9037303580306,MSFT
+2024-03-12,MSFT,409.3900554964225,MSFT
+2024-03-13,MSFT,410.89048277893556,MSFT
+2024-03-14,MSFT,409.77637180959545,MSFT
+2024-03-15,MSFT,409.05562432613846,MSFT
+2024-03-16,MSFT,408.06174266130046,MSFT
+2024-03-17,MSFT,408.62709106321165,MSFT
+2024-03-18,MSFT,408.8551960766302,MSFT
+2024-03-19,MSFT,408.59026950828525,MSFT
+2024-03-20,MSFT,407.87667612872224,MSFT
+2024-03-21,MSFT,407.9418326343859,MSFT
+2024-03-22,MSFT,408.05813504674234,MSFT
+2024-03-23,MSFT,409.38980082810264,MSFT
+2024-03-24,MSFT,409.0035425682333,MSFT
+2024-03-25,MSFT,409.85742026694,MSFT
+2024-03-26,MSFT,407.6496645845789,MSFT
+2024-03-27,MSFT,407.97619949905294,MSFT
+2024-03-28,MSFT,408.6145921268595,MSFT
+2024-03-29,MSFT,408.1112127727863,MSFT
+2024-03-30,MSFT,407.96625452539473,MSFT
+2024-03-31,MSFT,408.3646997832224,MSFT
+
+</script><script type="text/plain" id="financial.volumes" data-format="csv_embedded" data-src="">
+Date,AAPL,GOOGL,MSFT,color
+2024-01-01,6126870,2959116,1023991,Volume
+2024-01-02,3307396,3468408,2562300,Volume
+2024-01-03,1026438,2138834,5672687,Volume
+2024-01-04,5499703,4425844,6201922,Volume
+2024-01-05,4716189,2681588,1118879,Volume
+2024-01-06,2890067,4399987,7133242,Volume
+2024-01-07,6222253,1392690,2876898,Volume
+2024-01-08,8620472,984816,7967805,Volume
+2024-01-09,5968018,1946672,831441,Volume
+2024-01-10,5462141,4809209,5758196,Volume
+2024-01-11,9494838,3417011,2887985,Volume
+2024-01-12,2577729,3241328,7288490,Volume
+2024-01-13,7174359,1427369,7846913,Volume
+2024-01-14,7773655,4236494,3276129,Volume
+2024-01-15,1865866,3606665,2599310,Volume
+2024-01-16,8062274,4343921,1180961,Volume
+2024-01-17,9180512,3719377,7774954,Volume
+2024-01-18,4934283,1360334,7998370,Volume
+2024-01-19,8841906,1800541,3398363,Volume
+2024-01-20,2149292,592872,6137872,Volume
+2024-01-21,7976693,1143758,2106046,Volume
+2024-01-22,1917624,872317,3683707,Volume
+2024-01-23,3635390,3212748,7870520,Volume
+2024-01-24,5218540,2548977,5966893,Volume
+2024-01-25,2080630,2265086,1696315,Volume
+2024-01-26,1208151,2589521,870462,Volume
+2024-01-27,4980835,1067952,3406505,Volume
+2024-01-28,9452812,718353,890765,Volume
+2024-01-29,8207039,4535209,1076155,Volume
+2024-01-30,7133432,907154,4896244,Volume
+2024-01-31,7912734,4624610,4228236,Volume
+2024-02-01,6754167,3796905,982757,Volume
+2024-02-02,8055052,2091536,3579162,Volume
+2024-02-03,7448765,2092448,7779998,Volume
+2024-02-04,9780602,3565762,2493255,Volume
+2024-02-05,8876574,3910150,7358061,Volume
+2024-02-06,7480260,538755,5721991,Volume
+2024-02-07,9802073,753106,5045420,Volume
+2024-02-08,8460849,1480896,3109252,Volume
+2024-02-09,9727123,1946743,1714480,Volume
+2024-02-10,2271805,2904338,3936877,Volume
+2024-02-11,8077186,1118588,6628851,Volume
+2024-02-12,3381629,3706537,7245151,Volume
+2024-02-13,3002844,4748487,2464823,Volume
+2024-02-14,5925515,2737907,3220717,Volume
+2024-02-15,5894547,4472848,6690126,Volume
+2024-02-16,2835651,805482,4832647,Volume
+2024-02-17,1644086,1439699,7901343,Volume
+2024-02-18,2403903,3277720,6202729,Volume
+2024-02-19,4240294,924636,925571,Volume
+2024-02-20,9158944,3638941,6265703,Volume
+2024-02-21,8942258,3177087,6815532,Volume
+2024-02-22,3647249,2348810,1425992,Volume
+2024-02-23,5210328,2245941,5822178,Volume
+2024-02-24,9374198,907848,2693973,Volume
+2024-02-25,2866309,2703955,5274634,Volume
+2024-02-26,5723067,3620885,4548342,Volume
+2024-02-27,5052770,745847,6097633,Volume
+2024-02-28,8788095,4644643,1038135,Volume
+2024-02-29,8326917,3608800,5528152,Volume
+2024-03-01,7093780,3325981,5265572,Volume
+2024-03-02,5794389,4826333,2556394,Volume
+2024-03-03,2259797,3521653,4784836,Volume
+2024-03-04,1153672,1478767,5045924,Volume
+2024-03-05,6364804,1983769,1256758,Volume
+2024-03-06,8799975,513674,7351961,Volume
+2024-03-07,5564123,1861389,6288806,Volume
+2024-03-08,6232288,4745659,7281695,Volume
+2024-03-09,2575413,778694,2754596,Volume
+2024-03-10,9759032,529747,4470463,Volume
+2024-03-11,3054930,708555,1559008,Volume
+2024-03-12,5432490,4674408,2345671,Volume
+2024-03-13,4493909,4132891,5577314,Volume
+2024-03-14,5289207,2860177,4075590,Volume
+2024-03-15,3373956,3915543,6671600,Volume
+2024-03-16,8192331,1069226,4080566,Volume
+2024-03-17,6178995,4083802,7292474,Volume
+2024-03-18,2658119,3620368,4378985,Volume
+2024-03-19,7046049,3217797,4872001,Volume
+2024-03-20,7556829,1320323,5674012,Volume
+2024-03-21,9692730,1780987,2275894,Volume
+2024-03-22,5903348,1813399,7447170,Volume
+2024-03-23,9844251,2659646,7387571,Volume
+2024-03-24,1805942,3763094,5687850,Volume
+2024-03-25,7315375,4443492,5857763,Volume
+2024-03-26,3426375,4062046,6101773,Volume
+2024-03-27,1255835,4395076,4771605,Volume
+2024-03-28,6378161,4639186,4958769,Volume
+2024-03-29,8988131,4505116,2460635,Volume
+2024-03-30,2074601,3003953,6691278,Volume
+2024-03-31,8318739,1267732,7981953,Volume
+
+</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
+Month,Sales,Year
+1,120,2022
+2,135,2022
+3,150,2022
+4,145,2022
+5,160,2022
+6,175,2022
+7,190,2022
+8,185,2022
+9,200,2022
+10,210,2022
+11,230,2022
+12,250,2022
+1,130,2023
+2,145,2023
+3,165,2023
+4,160,2023
+5,180,2023
+6,195,2023
+7,210,2023
+8,205,2023
+9,220,2023
+10,235,2023
+11,255,2023
+12,280,2023
+1,145,2024
+2,165,2024
+3,185,2024
+4,180,2024
+5,200,2024
+6,220,2024
+7,240,2024
+8,235,2024
+9,250,2024
+10,270,2024
+11,290,2024
+12,320,2024
+
+</script><script type="text/plain" id="facet_data" data-format="csv_embedded" data-src="">
+Month,Sales,Product,Region,color
+1,147.47067733263407,Product A,North,North
+2,139.01637258057025,Product A,North,North
+3,124.2702716144009,Product A,North,North
+4,136.61319543228186,Product A,North,North
+5,166.5233366230693,Product A,North,North
+6,164.58512098052572,Product A,North,North
+7,170.98444446629827,Product A,North,North
+8,136.41668071555176,Product A,North,North
+9,176.2524587682287,Product A,North,North
+10,158.67626425858003,Product A,North,North
+11,184.99107585071508,Product A,North,North
+12,201.58319859070474,Product A,North,North
+1,101.60635325286252,Product A,South,South
+2,148.80637482331525,Product A,South,South
+3,127.3622642643724,Product A,South,South
+4,150.19005423598662,Product A,South,South
+5,149.8986774698636,Product A,South,South
+6,130.86860132538214,Product A,South,South
+7,174.1305551446788,Product A,South,South
+8,143.5050981833848,Product A,South,South
+9,153.3436328427996,Product A,South,South
+10,161.25014360281386,Product A,South,South
+11,189.7860506504099,Product A,South,South
+12,201.16307109378317,Product A,South,South
+1,123.94118238204771,Product A,East,East
+2,141.96115139734812,Product A,East,East
+3,120.68964221500181,Product A,East,East
+4,142.80166354262047,Product A,East,East
+5,166.9070903599692,Product A,East,East
+6,172.17870025571867,Product A,East,East
+7,149.11783925384546,Product A,East,East
+8,175.23876402794585,Product A,East,East
+9,162.77071430871138,Product A,East,East
+10,175.36458140809253,Product A,East,East
+11,197.7652429562071,Product A,East,East
+12,187.49995557784285,Product A,East,East
+1,133.45734802444028,Product A,West,West
+2,114.08652912617745,Product A,West,West
+3,130.87242492326303,Product A,West,West
+4,154.74411685755462,Product A,West,West
+5,159.0834176537349,Product A,West,West
+6,166.47076617495915,Product A,West,West
+7,176.70665404317373,Product A,West,West
+8,135.05154326345857,Product A,West,West
+9,147.22821614197483,Product A,West,West
+10,154.4794039806451,Product A,West,West
+11,168.69405820126295,Product A,West,West
+12,193.33672383801724,Product A,West,West
+1,128.86293618930694,Product B,North,North
+2,154.17023282559725,Product B,North,North
+3,145.2138035966246,Product B,North,North
+4,135.54660233232318,Product B,North,North
+5,127.78933360060817,Product B,North,North
+6,150.58888555147576,Product B,North,North
+7,143.69309589437833,Product B,North,North
+8,146.49357070454266,Product B,North,North
+9,183.65799548208548,Product B,North,North
+10,190.70038658434277,Product B,North,North
+11,185.3236442046341,Product B,North,North
+12,178.78057225144073,Product B,North,North
+1,145.4814114327472,Product B,South,South
+2,107.53810256623811,Product B,South,South
+3,126.07288360044278,Product B,South,South
+4,116.5692203225536,Product B,South,South
+5,127.44300235997675,Product B,South,South
+6,150.74861535733461,Product B,South,South
+7,145.6376346060346,Product B,South,South
+8,172.85601315368234,Product B,South,South
+9,186.5494642314958,Product B,South,South
+10,190.737046251929,Product B,South,South
+11,161.07148106506196,Product B,South,South
+12,185.27112860288963,Product B,South,South
+1,138.84802080756793,Product B,East,East
+2,146.00752085425847,Product B,East,East
+3,119.08722526721917,Product B,East,East
+4,117.03799370394844,Product B,East,East
+5,127.99778570842507,Product B,East,East
+6,129.49103649896892,Product B,East,East
+7,164.9632541854918,Product B,East,East
+8,150.63433524165416,Product B,East,East
+9,182.9861804529088,Product B,East,East
+10,170.54829952405447,Product B,East,East
+11,175.76370501234703,Product B,East,East
+12,168.6620608991382,Product B,East,East
+1,117.28259499801302,Product B,West,West
+2,131.5625870382897,Product B,West,West
+3,113.11392133511846,Product B,West,West
+4,151.02309300072767,Product B,West,West
+5,125.50199998889767,Product B,West,West
+6,128.2991908480613,Product B,West,West
+7,155.97891882200798,Product B,West,West
+8,163.5081140242035,Product B,West,West
+9,150.11666094555545,Product B,West,West
+10,174.1564400607353,Product B,West,West
+11,164.45918588701383,Product B,West,West
+12,181.94773232312752,Product B,West,West
+1,103.46448058901902,Product C,North,North
+2,127.28145436384014,Product C,North,North
+3,145.1497384709465,Product C,North,North
+4,122.45113352435942,Product C,North,North
+5,138.69802634790662,Product C,North,North
+6,142.41290653619848,Product C,North,North
+7,173.52720341799548,Product C,North,North
+8,135.21599475247575,Product C,North,North
+9,144.69053145911795,Product C,North,North
+10,154.94403300529189,Product C,North,North
+11,159.6183592745715,Product C,North,North
+12,157.25108219734352,Product C,North,North
+1,123.72283455233139,Product C,South,South
+2,123.67931394295204,Product C,South,South
+3,134.57887965621143,Product C,South,South
+4,153.937778143659,Product C,South,South
+5,121.71451246602692,Product C,South,South
+6,148.38325495471855,Product C,South,South
+7,152.61406963081112,Product C,South,South
+8,154.87175677752367,Product C,South,South
+9,154.91881315149274,Product C,South,South
+10,163.98467142434077,Product C,South,South
+11,189.91714661934617,Product C,South,South
+12,189.7985754056761,Product C,South,South
+1,132.90506435069275,Product C,East,East
+2,109.98309288234915,Product C,East,East
+3,128.54956118066946,Product C,East,East
+4,131.45060980022518,Product C,East,East
+5,156.33618461151949,Product C,East,East
+6,125.24890921499968,Product C,East,East
+7,130.45345115474248,Product C,East,East
+8,183.2738277455859,Product C,East,East
+9,169.7872247898336,Product C,East,East
+10,168.84446565843132,Product C,East,East
+11,158.4348159404313,Product C,East,East
+12,200.70955167032935,Product C,East,East
+1,147.1428965829283,Product C,West,West
+2,123.25726186025699,Product C,West,West
+3,147.1507966391107,Product C,West,West
+4,115.95235781343064,Product C,West,West
+5,156.70827421781223,Product C,West,West
+6,133.53617054261971,Product C,West,West
+7,155.44707415352732,Product C,West,West
+8,141.16573066389861,Product C,West,West
+9,171.10939627310745,Product C,West,West
+10,177.84009771113818,Product C,West,West
+11,153.8341975213385,Product C,West,West
+12,183.47288182364377,Product C,West,West
+1,127.78701347327996,Product D,North,North
+2,127.7346730313302,Product D,North,North
+3,157.6342330943199,Product D,North,North
+4,140.27084637843978,Product D,North,North
+5,134.67947546140897,Product D,North,North
+6,138.3559612550788,Product D,North,North
+7,159.9002614149651,Product D,North,North
+8,179.06760362783848,Product D,North,North
+9,178.27713930290173,Product D,North,North
+10,154.25073346357888,Product D,North,North
+11,162.06368727243319,Product D,North,North
+12,203.0127737800723,Product D,North,North
+1,106.61729896675429,Product D,South,South
+2,122.6223262223705,Product D,South,South
+3,148.19971958001747,Product D,South,South
+4,141.34084966119184,Product D,South,South
+5,139.02810166091146,Product D,South,South
+6,154.03939560950633,Product D,South,South
+7,163.07926010886706,Product D,South,South
+8,181.07566294456893,Product D,South,South
+9,166.24963552850525,Product D,South,South
+10,170.24165786099053,Product D,South,South
+11,181.5601579139266,Product D,South,South
+12,180.40866840908456,Product D,South,South
+1,121.41181764260216,Product D,East,East
+2,142.82920729980634,Product D,East,East
+3,147.17825697148317,Product D,East,East
+4,133.9837953243968,Product D,East,East
+5,143.73248679358426,Product D,East,East
+6,159.9353497653037,Product D,East,East
+7,168.8868716786574,Product D,East,East
+8,178.5357888614418,Product D,East,East
+9,173.42770739107328,Product D,East,East
+10,192.45699097654494,Product D,East,East
+11,189.108833013626,Product D,East,East
+12,170.10315308500853,Product D,East,East
+1,132.39723152917355,Product D,West,West
+2,107.58194408256239,Product D,West,West
+3,110.13818668299344,Product D,West,West
+4,159.96995224311536,Product D,West,West
+5,149.30686060185621,Product D,West,West
+6,126.71977691604118,Product D,West,West
+7,160.05791077428367,Product D,West,West
+8,181.16487835812228,Product D,West,West
+9,162.05290742784445,Product D,West,West
+10,150.52166825286494,Product D,West,West
+11,189.22406807564948,Product D,West,West
+12,156.12918169756023,Product D,West,West
+
+</script><script type="text/plain" id="agg_data" data-format="csv_embedded" data-src="">
+Month,Sales,Product,color
+1,154.60342962640883,Product A,Product A
+1,121.22238623162559,Product A,Product A
+1,147.5179808418493,Product A,Product A
+1,144.53097514739895,Product A,Product A
+1,118.19467772565741,Product A,Product A
+2,113.52203937700988,Product A,Product A
+2,135.58350218833448,Product A,Product A
+2,141.59506689558066,Product A,Product A
+2,110.55440396761257,Product A,Product A
+2,121.37423861659988,Product A,Product A
+3,143.23595346820605,Product A,Product A
+3,153.0752774948302,Product A,Product A
+3,119.40211229165007,Product A,Product A
+3,148.28581891347835,Product A,Product A
+3,138.1166806573174,Product A,Product A
+4,123.55474772022608,Product A,Product A
+4,147.66269097187848,Product A,Product A
+4,126.27439567513977,Product A,Product A
+4,137.93704810870025,Product A,Product A
+4,161.59042389219374,Product A,Product A
+5,152.3429220413495,Product A,Product A
+5,146.49862721428298,Product A,Product A
+5,158.9757653202371,Product A,Product A
+5,142.75861587725623,Product A,Product A
+5,159.80583119840458,Product A,Product A
+6,130.62891548998215,Product A,Product A
+6,148.88409322297224,Product A,Product A
+6,149.16464120606494,Product A,Product A
+6,166.89738534255133,Product A,Product A
+6,169.8326170373554,Product A,Product A
+7,173.03443489459102,Product A,Product A
+7,160.76490632461946,Product A,Product A
+7,143.3458748854339,Product A,Product A
+7,143.18409386396604,Product A,Product A
+7,140.0497922204147,Product A,Product A
+8,156.16527311584787,Product A,Product A
+8,167.3195134182836,Product A,Product A
+8,144.66874250147148,Product A,Product A
+8,177.40439842076432,Product A,Product A
+8,164.4789212846172,Product A,Product A
+9,149.50607867006744,Product A,Product A
+9,172.10609990410023,Product A,Product A
+9,157.75141045465585,Product A,Product A
+9,153.75352242538568,Product A,Product A
+9,193.39387913839997,Product A,Product A
+10,160.90895671406284,Product A,Product A
+10,176.96359453446414,Product A,Product A
+10,181.13203218738172,Product A,Product A
+10,162.30481421405926,Product A,Product A
+10,158.44829952780776,Product A,Product A
+11,189.72743260891417,Product A,Product A
+11,189.02007682842228,Product A,Product A
+11,170.291450521185,Product A,Product A
+11,171.4787776352751,Product A,Product A
+11,186.42490406801193,Product A,Product A
+12,207.8190745030289,Product A,Product A
+12,202.49447645892576,Product A,Product A
+12,174.23823046498524,Product A,Product A
+12,178.95220304968277,Product A,Product A
+12,189.9089260777039,Product A,Product A
+1,131.16994281118494,Product B,Product B
+1,107.11228400679279,Product B,Product B
+1,133.66255137547034,Product B,Product B
+1,141.95289006465387,Product B,Product B
+1,150.49071911186627,Product B,Product B
+2,154.7200842317478,Product B,Product B
+2,147.79280006909693,Product B,Product B
+2,158.415768101069,Product B,Product B
+2,147.82397688118883,Product B,Product B
+2,131.32054213343213,Product B,Product B
+3,151.3256886897579,Product B,Product B
+3,123.37182184210084,Product B,Product B
+3,132.77541353729745,Product B,Product B
+3,151.6140383283626,Product B,Product B
+3,143.13039889815252,Product B,Product B
+4,127.75077252063937,Product B,Product B
+4,158.6831303547717,Product B,Product B
+4,140.95339794692364,Product B,Product B
+4,132.46599501159514,Product B,Product B
+4,132.9924121572106,Product B,Product B
+5,153.47719159298828,Product B,Product B
+5,144.3477300337986,Product B,Product B
+5,142.11080794346663,Product B,Product B
+5,151.7995032640132,Product B,Product B
+5,126.55254323959846,Product B,Product B
+6,171.4440859612549,Product B,Product B
+6,151.55906266978917,Product B,Product B
+6,137.26444802574704,Product B,Product B
+6,150.8760560399544,Product B,Product B
+6,146.29898058787342,Product B,Product B
+7,182.85777085743422,Product B,Product B
+7,154.10970282439416,Product B,Product B
+7,184.30543075831707,Product B,Product B
+7,144.14728265053193,Product B,Product B
+7,158.39683815883245,Product B,Product B
+8,185.56172374334466,Product B,Product B
+8,144.40317678002432,Product B,Product B
+8,146.91298602254847,Product B,Product B
+8,179.92841168753887,Product B,Product B
+8,163.89934146568422,Product B,Product B
+9,167.57307629713344,Product B,Product B
+9,175.92314946547694,Product B,Product B
+9,163.99034464845968,Product B,Product B
+9,165.46170943966683,Product B,Product B
+9,179.90479412356854,Product B,Product B
+10,169.3241711139548,Product B,Product B
+10,198.0827022334792,Product B,Product B
+10,164.169847892297,Product B,Product B
+10,156.63810254032046,Product B,Product B
+10,172.0065349728467,Product B,Product B
+11,175.203693940075,Product B,Product B
+11,170.52538246228482,Product B,Product B
+11,184.8338020720614,Product B,Product B
+11,161.50528948158066,Product B,Product B
+11,203.86360593032873,Product B,Product B
+12,175.14869994565578,Product B,Product B
+12,206.17660104017656,Product B,Product B
+12,161.39972239932928,Product B,Product B
+12,160.8160092024419,Product B,Product B
+12,206.71750170023512,Product B,Product B
+
+</script><script type="text/plain" id="facet_grid_data" data-format="csv_embedded" data-src="">
+Month,Sales,Product,Region,Year,color
+1,123.54097962383582,Product A,North,2023,2023
+2,113.9111444248085,Product A,North,2023,2023
+3,137.43894309253866,Product A,North,2023,2023
+4,146.39350470399876,Product A,North,2023,2023
+5,155.57739940290807,Product A,North,2023,2023
+6,168.0329177595181,Product A,North,2023,2023
+7,164.59575344105235,Product A,North,2023,2023
+8,160.21515383449855,Product A,North,2023,2023
+9,184.60944801848441,Product A,North,2023,2023
+10,145.37693287524115,Product A,North,2023,2023
+11,155.730692256923,Product A,North,2023,2023
+12,198.5169268240565,Product A,North,2023,2023
+1,130.50377540995373,Product A,North,2024,2024
+2,133.4885246744077,Product A,North,2024,2024
+3,118.02901971441605,Product A,North,2024,2024
+4,118.46594074561364,Product A,North,2024,2024
+5,149.5753389073098,Product A,North,2024,2024
+6,164.89959321513237,Product A,North,2024,2024
+7,161.12070547421334,Product A,North,2024,2024
+8,180.4385710460029,Product A,North,2024,2024
+9,178.53160002054852,Product A,North,2024,2024
+10,186.20951486831223,Product A,North,2024,2024
+11,163.9555191125449,Product A,North,2024,2024
+12,173.0917866123226,Product A,North,2024,2024
+1,105.98408885053837,Product A,South,2023,2023
+2,149.01635234059188,Product A,South,2023,2023
+3,146.20264933787308,Product A,South,2023,2023
+4,137.5135107804935,Product A,South,2023,2023
+5,139.05067464888356,Product A,South,2023,2023
+6,151.4814582710106,Product A,South,2023,2023
+7,153.62683446027776,Product A,South,2023,2023
+8,164.27288941733875,Product A,South,2023,2023
+9,148.19073944498638,Product A,South,2023,2023
+10,160.55997227314097,Product A,South,2023,2023
+11,174.64075401432945,Product A,South,2023,2023
+12,157.9104584916542,Product A,South,2023,2023
+1,129.1590781200147,Product A,South,2024,2024
+2,144.99587913011663,Product A,South,2024,2024
+3,138.5103468134281,Product A,South,2024,2024
+4,149.49755536945673,Product A,South,2024,2024
+5,141.44469399468173,Product A,South,2024,2024
+6,148.04430164046101,Product A,South,2024,2024
+7,135.23002783500883,Product A,South,2024,2024
+8,154.67548668675335,Product A,South,2024,2024
+9,188.01746670655683,Product A,South,2024,2024
+10,153.9453451782911,Product A,South,2024,2024
+11,189.74083424515985,Product A,South,2024,2024
+12,156.13570368366015,Product A,South,2024,2024
+1,139.46042270530168,Product B,North,2023,2023
+2,123.98347490355405,Product B,North,2023,2023
+3,133.41370730332403,Product B,North,2023,2023
+4,131.37324030767212,Product B,North,2023,2023
+5,146.09612373423434,Product B,North,2023,2023
+6,132.60399231955805,Product B,North,2023,2023
+7,154.53421671949732,Product B,North,2023,2023
+8,160.24990522893643,Product B,North,2023,2023
+9,177.4156035477484,Product B,North,2023,2023
+10,178.38277386619677,Product B,North,2023,2023
+11,191.7668557873213,Product B,North,2023,2023
+12,173.07457249476823,Product B,North,2023,2023
+1,123.69402811584563,Product B,North,2024,2024
+2,146.8260743219084,Product B,North,2024,2024
+3,134.03268883356986,Product B,North,2024,2024
+4,124.43477469739273,Product B,North,2024,2024
+5,130.27347578774067,Product B,North,2024,2024
+6,125.03943388936906,Product B,North,2024,2024
+7,153.71973111903898,Product B,North,2024,2024
+8,174.64305667005408,Product B,North,2024,2024
+9,174.45546781191587,Product B,North,2024,2024
+10,178.03215393445828,Product B,North,2024,2024
+11,164.10190218763302,Product B,North,2024,2024
+12,204.2963719820493,Product B,North,2024,2024
+1,132.69204026550642,Product B,South,2023,2023
+2,120.4236319760607,Product B,South,2023,2023
+3,125.89404859210289,Product B,South,2023,2023
+4,131.76427049690244,Product B,South,2023,2023
+5,124.21423792665506,Product B,South,2023,2023
+6,147.22962592292976,Product B,South,2023,2023
+7,154.24543281721347,Product B,South,2023,2023
+8,184.9076125190728,Product B,South,2023,2023
+9,188.23009821076823,Product B,South,2023,2023
+10,152.08674789356354,Product B,South,2023,2023
+11,178.97368022590354,Product B,South,2023,2023
+12,167.30013646271576,Product B,South,2023,2023
+1,107.66523204286646,Product B,South,2024,2024
+2,140.0860860995795,Product B,South,2024,2024
+3,127.40282802204106,Product B,South,2024,2024
+4,143.3620583519149,Product B,South,2024,2024
+5,126.30740302474916,Product B,South,2024,2024
+6,163.38707013542995,Product B,South,2024,2024
+7,134.56724702351642,Product B,South,2024,2024
+8,174.72911201657044,Product B,South,2024,2024
+9,140.22534099762765,Product B,South,2024,2024
+10,193.60957020697788,Product B,South,2024,2024
+11,183.12908200850478,Product B,South,2024,2024
+12,159.17340511918755,Product B,South,2024,2024
+
+</script><script type="text/plain" id="metrics" data-format="csv_embedded" data-src="">
 Department,Quarter,Month,Value,Metric
 Engineering,Q1,Jan,81.15015951422647,Productivity
 Engineering,Q1,Jan,2.0,Sick_Days
@@ -5743,45 +7095,6 @@ Date,Revenue,color
 2024-06-28,9.011736095968649e6,Revenue
 2024-06-29,9.062307353596196e6,Revenue
 2024-06-30,9.110505881917203e6,Revenue
-
-</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
-Month,Sales,Year
-1,120,2022
-2,135,2022
-3,150,2022
-4,145,2022
-5,160,2022
-6,175,2022
-7,190,2022
-8,185,2022
-9,200,2022
-10,210,2022
-11,230,2022
-12,250,2022
-1,130,2023
-2,145,2023
-3,165,2023
-4,160,2023
-5,180,2023
-6,195,2023
-7,210,2023
-8,205,2023
-9,220,2023
-10,235,2023
-11,255,2023
-12,280,2023
-1,145,2024
-2,165,2024
-3,185,2024
-4,180,2024
-5,200,2024
-6,220,2024
-7,240,2024
-8,235,2024
-9,250,2024
-10,270,2024
-11,290,2024
-12,320,2024
 
 </script><script type="text/plain" id="multi_data" data-format="csv_embedded" data-src="">
 time_hours,time_halfhours,temperature_celsius,temperature_fahrenheit,humidity_percent,pressure_hpa,location,color
@@ -6283,423 +7596,6 @@ Month,Return,Stock,Strategy,Region
 10,2.1596683316820737,MSFT,Hold,ASIA
 11,12.595094729512319,MSFT,Hold,ASIA
 12,13.07711235726645,MSFT,Hold,ASIA
-
-</script><script type="text/plain" id="facet_data" data-format="csv_embedded" data-src="">
-Month,Sales,Product,Region,color
-1,147.47067733263407,Product A,North,North
-2,139.01637258057025,Product A,North,North
-3,124.2702716144009,Product A,North,North
-4,136.61319543228186,Product A,North,North
-5,166.5233366230693,Product A,North,North
-6,164.58512098052572,Product A,North,North
-7,170.98444446629827,Product A,North,North
-8,136.41668071555176,Product A,North,North
-9,176.2524587682287,Product A,North,North
-10,158.67626425858003,Product A,North,North
-11,184.99107585071508,Product A,North,North
-12,201.58319859070474,Product A,North,North
-1,101.60635325286252,Product A,South,South
-2,148.80637482331525,Product A,South,South
-3,127.3622642643724,Product A,South,South
-4,150.19005423598662,Product A,South,South
-5,149.8986774698636,Product A,South,South
-6,130.86860132538214,Product A,South,South
-7,174.1305551446788,Product A,South,South
-8,143.5050981833848,Product A,South,South
-9,153.3436328427996,Product A,South,South
-10,161.25014360281386,Product A,South,South
-11,189.7860506504099,Product A,South,South
-12,201.16307109378317,Product A,South,South
-1,123.94118238204771,Product A,East,East
-2,141.96115139734812,Product A,East,East
-3,120.68964221500181,Product A,East,East
-4,142.80166354262047,Product A,East,East
-5,166.9070903599692,Product A,East,East
-6,172.17870025571867,Product A,East,East
-7,149.11783925384546,Product A,East,East
-8,175.23876402794585,Product A,East,East
-9,162.77071430871138,Product A,East,East
-10,175.36458140809253,Product A,East,East
-11,197.7652429562071,Product A,East,East
-12,187.49995557784285,Product A,East,East
-1,133.45734802444028,Product A,West,West
-2,114.08652912617745,Product A,West,West
-3,130.87242492326303,Product A,West,West
-4,154.74411685755462,Product A,West,West
-5,159.0834176537349,Product A,West,West
-6,166.47076617495915,Product A,West,West
-7,176.70665404317373,Product A,West,West
-8,135.05154326345857,Product A,West,West
-9,147.22821614197483,Product A,West,West
-10,154.4794039806451,Product A,West,West
-11,168.69405820126295,Product A,West,West
-12,193.33672383801724,Product A,West,West
-1,128.86293618930694,Product B,North,North
-2,154.17023282559725,Product B,North,North
-3,145.2138035966246,Product B,North,North
-4,135.54660233232318,Product B,North,North
-5,127.78933360060817,Product B,North,North
-6,150.58888555147576,Product B,North,North
-7,143.69309589437833,Product B,North,North
-8,146.49357070454266,Product B,North,North
-9,183.65799548208548,Product B,North,North
-10,190.70038658434277,Product B,North,North
-11,185.3236442046341,Product B,North,North
-12,178.78057225144073,Product B,North,North
-1,145.4814114327472,Product B,South,South
-2,107.53810256623811,Product B,South,South
-3,126.07288360044278,Product B,South,South
-4,116.5692203225536,Product B,South,South
-5,127.44300235997675,Product B,South,South
-6,150.74861535733461,Product B,South,South
-7,145.6376346060346,Product B,South,South
-8,172.85601315368234,Product B,South,South
-9,186.5494642314958,Product B,South,South
-10,190.737046251929,Product B,South,South
-11,161.07148106506196,Product B,South,South
-12,185.27112860288963,Product B,South,South
-1,138.84802080756793,Product B,East,East
-2,146.00752085425847,Product B,East,East
-3,119.08722526721917,Product B,East,East
-4,117.03799370394844,Product B,East,East
-5,127.99778570842507,Product B,East,East
-6,129.49103649896892,Product B,East,East
-7,164.9632541854918,Product B,East,East
-8,150.63433524165416,Product B,East,East
-9,182.9861804529088,Product B,East,East
-10,170.54829952405447,Product B,East,East
-11,175.76370501234703,Product B,East,East
-12,168.6620608991382,Product B,East,East
-1,117.28259499801302,Product B,West,West
-2,131.5625870382897,Product B,West,West
-3,113.11392133511846,Product B,West,West
-4,151.02309300072767,Product B,West,West
-5,125.50199998889767,Product B,West,West
-6,128.2991908480613,Product B,West,West
-7,155.97891882200798,Product B,West,West
-8,163.5081140242035,Product B,West,West
-9,150.11666094555545,Product B,West,West
-10,174.1564400607353,Product B,West,West
-11,164.45918588701383,Product B,West,West
-12,181.94773232312752,Product B,West,West
-1,103.46448058901902,Product C,North,North
-2,127.28145436384014,Product C,North,North
-3,145.1497384709465,Product C,North,North
-4,122.45113352435942,Product C,North,North
-5,138.69802634790662,Product C,North,North
-6,142.41290653619848,Product C,North,North
-7,173.52720341799548,Product C,North,North
-8,135.21599475247575,Product C,North,North
-9,144.69053145911795,Product C,North,North
-10,154.94403300529189,Product C,North,North
-11,159.6183592745715,Product C,North,North
-12,157.25108219734352,Product C,North,North
-1,123.72283455233139,Product C,South,South
-2,123.67931394295204,Product C,South,South
-3,134.57887965621143,Product C,South,South
-4,153.937778143659,Product C,South,South
-5,121.71451246602692,Product C,South,South
-6,148.38325495471855,Product C,South,South
-7,152.61406963081112,Product C,South,South
-8,154.87175677752367,Product C,South,South
-9,154.91881315149274,Product C,South,South
-10,163.98467142434077,Product C,South,South
-11,189.91714661934617,Product C,South,South
-12,189.7985754056761,Product C,South,South
-1,132.90506435069275,Product C,East,East
-2,109.98309288234915,Product C,East,East
-3,128.54956118066946,Product C,East,East
-4,131.45060980022518,Product C,East,East
-5,156.33618461151949,Product C,East,East
-6,125.24890921499968,Product C,East,East
-7,130.45345115474248,Product C,East,East
-8,183.2738277455859,Product C,East,East
-9,169.7872247898336,Product C,East,East
-10,168.84446565843132,Product C,East,East
-11,158.4348159404313,Product C,East,East
-12,200.70955167032935,Product C,East,East
-1,147.1428965829283,Product C,West,West
-2,123.25726186025699,Product C,West,West
-3,147.1507966391107,Product C,West,West
-4,115.95235781343064,Product C,West,West
-5,156.70827421781223,Product C,West,West
-6,133.53617054261971,Product C,West,West
-7,155.44707415352732,Product C,West,West
-8,141.16573066389861,Product C,West,West
-9,171.10939627310745,Product C,West,West
-10,177.84009771113818,Product C,West,West
-11,153.8341975213385,Product C,West,West
-12,183.47288182364377,Product C,West,West
-1,127.78701347327996,Product D,North,North
-2,127.7346730313302,Product D,North,North
-3,157.6342330943199,Product D,North,North
-4,140.27084637843978,Product D,North,North
-5,134.67947546140897,Product D,North,North
-6,138.3559612550788,Product D,North,North
-7,159.9002614149651,Product D,North,North
-8,179.06760362783848,Product D,North,North
-9,178.27713930290173,Product D,North,North
-10,154.25073346357888,Product D,North,North
-11,162.06368727243319,Product D,North,North
-12,203.0127737800723,Product D,North,North
-1,106.61729896675429,Product D,South,South
-2,122.6223262223705,Product D,South,South
-3,148.19971958001747,Product D,South,South
-4,141.34084966119184,Product D,South,South
-5,139.02810166091146,Product D,South,South
-6,154.03939560950633,Product D,South,South
-7,163.07926010886706,Product D,South,South
-8,181.07566294456893,Product D,South,South
-9,166.24963552850525,Product D,South,South
-10,170.24165786099053,Product D,South,South
-11,181.5601579139266,Product D,South,South
-12,180.40866840908456,Product D,South,South
-1,121.41181764260216,Product D,East,East
-2,142.82920729980634,Product D,East,East
-3,147.17825697148317,Product D,East,East
-4,133.9837953243968,Product D,East,East
-5,143.73248679358426,Product D,East,East
-6,159.9353497653037,Product D,East,East
-7,168.8868716786574,Product D,East,East
-8,178.5357888614418,Product D,East,East
-9,173.42770739107328,Product D,East,East
-10,192.45699097654494,Product D,East,East
-11,189.108833013626,Product D,East,East
-12,170.10315308500853,Product D,East,East
-1,132.39723152917355,Product D,West,West
-2,107.58194408256239,Product D,West,West
-3,110.13818668299344,Product D,West,West
-4,159.96995224311536,Product D,West,West
-5,149.30686060185621,Product D,West,West
-6,126.71977691604118,Product D,West,West
-7,160.05791077428367,Product D,West,West
-8,181.16487835812228,Product D,West,West
-9,162.05290742784445,Product D,West,West
-10,150.52166825286494,Product D,West,West
-11,189.22406807564948,Product D,West,West
-12,156.12918169756023,Product D,West,West
-
-</script><script type="text/plain" id="agg_data" data-format="csv_embedded" data-src="">
-Month,Sales,Product,color
-1,154.60342962640883,Product A,Product A
-1,121.22238623162559,Product A,Product A
-1,147.5179808418493,Product A,Product A
-1,144.53097514739895,Product A,Product A
-1,118.19467772565741,Product A,Product A
-2,113.52203937700988,Product A,Product A
-2,135.58350218833448,Product A,Product A
-2,141.59506689558066,Product A,Product A
-2,110.55440396761257,Product A,Product A
-2,121.37423861659988,Product A,Product A
-3,143.23595346820605,Product A,Product A
-3,153.0752774948302,Product A,Product A
-3,119.40211229165007,Product A,Product A
-3,148.28581891347835,Product A,Product A
-3,138.1166806573174,Product A,Product A
-4,123.55474772022608,Product A,Product A
-4,147.66269097187848,Product A,Product A
-4,126.27439567513977,Product A,Product A
-4,137.93704810870025,Product A,Product A
-4,161.59042389219374,Product A,Product A
-5,152.3429220413495,Product A,Product A
-5,146.49862721428298,Product A,Product A
-5,158.9757653202371,Product A,Product A
-5,142.75861587725623,Product A,Product A
-5,159.80583119840458,Product A,Product A
-6,130.62891548998215,Product A,Product A
-6,148.88409322297224,Product A,Product A
-6,149.16464120606494,Product A,Product A
-6,166.89738534255133,Product A,Product A
-6,169.8326170373554,Product A,Product A
-7,173.03443489459102,Product A,Product A
-7,160.76490632461946,Product A,Product A
-7,143.3458748854339,Product A,Product A
-7,143.18409386396604,Product A,Product A
-7,140.0497922204147,Product A,Product A
-8,156.16527311584787,Product A,Product A
-8,167.3195134182836,Product A,Product A
-8,144.66874250147148,Product A,Product A
-8,177.40439842076432,Product A,Product A
-8,164.4789212846172,Product A,Product A
-9,149.50607867006744,Product A,Product A
-9,172.10609990410023,Product A,Product A
-9,157.75141045465585,Product A,Product A
-9,153.75352242538568,Product A,Product A
-9,193.39387913839997,Product A,Product A
-10,160.90895671406284,Product A,Product A
-10,176.96359453446414,Product A,Product A
-10,181.13203218738172,Product A,Product A
-10,162.30481421405926,Product A,Product A
-10,158.44829952780776,Product A,Product A
-11,189.72743260891417,Product A,Product A
-11,189.02007682842228,Product A,Product A
-11,170.291450521185,Product A,Product A
-11,171.4787776352751,Product A,Product A
-11,186.42490406801193,Product A,Product A
-12,207.8190745030289,Product A,Product A
-12,202.49447645892576,Product A,Product A
-12,174.23823046498524,Product A,Product A
-12,178.95220304968277,Product A,Product A
-12,189.9089260777039,Product A,Product A
-1,131.16994281118494,Product B,Product B
-1,107.11228400679279,Product B,Product B
-1,133.66255137547034,Product B,Product B
-1,141.95289006465387,Product B,Product B
-1,150.49071911186627,Product B,Product B
-2,154.7200842317478,Product B,Product B
-2,147.79280006909693,Product B,Product B
-2,158.415768101069,Product B,Product B
-2,147.82397688118883,Product B,Product B
-2,131.32054213343213,Product B,Product B
-3,151.3256886897579,Product B,Product B
-3,123.37182184210084,Product B,Product B
-3,132.77541353729745,Product B,Product B
-3,151.6140383283626,Product B,Product B
-3,143.13039889815252,Product B,Product B
-4,127.75077252063937,Product B,Product B
-4,158.6831303547717,Product B,Product B
-4,140.95339794692364,Product B,Product B
-4,132.46599501159514,Product B,Product B
-4,132.9924121572106,Product B,Product B
-5,153.47719159298828,Product B,Product B
-5,144.3477300337986,Product B,Product B
-5,142.11080794346663,Product B,Product B
-5,151.7995032640132,Product B,Product B
-5,126.55254323959846,Product B,Product B
-6,171.4440859612549,Product B,Product B
-6,151.55906266978917,Product B,Product B
-6,137.26444802574704,Product B,Product B
-6,150.8760560399544,Product B,Product B
-6,146.29898058787342,Product B,Product B
-7,182.85777085743422,Product B,Product B
-7,154.10970282439416,Product B,Product B
-7,184.30543075831707,Product B,Product B
-7,144.14728265053193,Product B,Product B
-7,158.39683815883245,Product B,Product B
-8,185.56172374334466,Product B,Product B
-8,144.40317678002432,Product B,Product B
-8,146.91298602254847,Product B,Product B
-8,179.92841168753887,Product B,Product B
-8,163.89934146568422,Product B,Product B
-9,167.57307629713344,Product B,Product B
-9,175.92314946547694,Product B,Product B
-9,163.99034464845968,Product B,Product B
-9,165.46170943966683,Product B,Product B
-9,179.90479412356854,Product B,Product B
-10,169.3241711139548,Product B,Product B
-10,198.0827022334792,Product B,Product B
-10,164.169847892297,Product B,Product B
-10,156.63810254032046,Product B,Product B
-10,172.0065349728467,Product B,Product B
-11,175.203693940075,Product B,Product B
-11,170.52538246228482,Product B,Product B
-11,184.8338020720614,Product B,Product B
-11,161.50528948158066,Product B,Product B
-11,203.86360593032873,Product B,Product B
-12,175.14869994565578,Product B,Product B
-12,206.17660104017656,Product B,Product B
-12,161.39972239932928,Product B,Product B
-12,160.8160092024419,Product B,Product B
-12,206.71750170023512,Product B,Product B
-
-</script><script type="text/plain" id="facet_grid_data" data-format="csv_embedded" data-src="">
-Month,Sales,Product,Region,Year,color
-1,123.54097962383582,Product A,North,2023,2023
-2,113.9111444248085,Product A,North,2023,2023
-3,137.43894309253866,Product A,North,2023,2023
-4,146.39350470399876,Product A,North,2023,2023
-5,155.57739940290807,Product A,North,2023,2023
-6,168.0329177595181,Product A,North,2023,2023
-7,164.59575344105235,Product A,North,2023,2023
-8,160.21515383449855,Product A,North,2023,2023
-9,184.60944801848441,Product A,North,2023,2023
-10,145.37693287524115,Product A,North,2023,2023
-11,155.730692256923,Product A,North,2023,2023
-12,198.5169268240565,Product A,North,2023,2023
-1,130.50377540995373,Product A,North,2024,2024
-2,133.4885246744077,Product A,North,2024,2024
-3,118.02901971441605,Product A,North,2024,2024
-4,118.46594074561364,Product A,North,2024,2024
-5,149.5753389073098,Product A,North,2024,2024
-6,164.89959321513237,Product A,North,2024,2024
-7,161.12070547421334,Product A,North,2024,2024
-8,180.4385710460029,Product A,North,2024,2024
-9,178.53160002054852,Product A,North,2024,2024
-10,186.20951486831223,Product A,North,2024,2024
-11,163.9555191125449,Product A,North,2024,2024
-12,173.0917866123226,Product A,North,2024,2024
-1,105.98408885053837,Product A,South,2023,2023
-2,149.01635234059188,Product A,South,2023,2023
-3,146.20264933787308,Product A,South,2023,2023
-4,137.5135107804935,Product A,South,2023,2023
-5,139.05067464888356,Product A,South,2023,2023
-6,151.4814582710106,Product A,South,2023,2023
-7,153.62683446027776,Product A,South,2023,2023
-8,164.27288941733875,Product A,South,2023,2023
-9,148.19073944498638,Product A,South,2023,2023
-10,160.55997227314097,Product A,South,2023,2023
-11,174.64075401432945,Product A,South,2023,2023
-12,157.9104584916542,Product A,South,2023,2023
-1,129.1590781200147,Product A,South,2024,2024
-2,144.99587913011663,Product A,South,2024,2024
-3,138.5103468134281,Product A,South,2024,2024
-4,149.49755536945673,Product A,South,2024,2024
-5,141.44469399468173,Product A,South,2024,2024
-6,148.04430164046101,Product A,South,2024,2024
-7,135.23002783500883,Product A,South,2024,2024
-8,154.67548668675335,Product A,South,2024,2024
-9,188.01746670655683,Product A,South,2024,2024
-10,153.9453451782911,Product A,South,2024,2024
-11,189.74083424515985,Product A,South,2024,2024
-12,156.13570368366015,Product A,South,2024,2024
-1,139.46042270530168,Product B,North,2023,2023
-2,123.98347490355405,Product B,North,2023,2023
-3,133.41370730332403,Product B,North,2023,2023
-4,131.37324030767212,Product B,North,2023,2023
-5,146.09612373423434,Product B,North,2023,2023
-6,132.60399231955805,Product B,North,2023,2023
-7,154.53421671949732,Product B,North,2023,2023
-8,160.24990522893643,Product B,North,2023,2023
-9,177.4156035477484,Product B,North,2023,2023
-10,178.38277386619677,Product B,North,2023,2023
-11,191.7668557873213,Product B,North,2023,2023
-12,173.07457249476823,Product B,North,2023,2023
-1,123.69402811584563,Product B,North,2024,2024
-2,146.8260743219084,Product B,North,2024,2024
-3,134.03268883356986,Product B,North,2024,2024
-4,124.43477469739273,Product B,North,2024,2024
-5,130.27347578774067,Product B,North,2024,2024
-6,125.03943388936906,Product B,North,2024,2024
-7,153.71973111903898,Product B,North,2024,2024
-8,174.64305667005408,Product B,North,2024,2024
-9,174.45546781191587,Product B,North,2024,2024
-10,178.03215393445828,Product B,North,2024,2024
-11,164.10190218763302,Product B,North,2024,2024
-12,204.2963719820493,Product B,North,2024,2024
-1,132.69204026550642,Product B,South,2023,2023
-2,120.4236319760607,Product B,South,2023,2023
-3,125.89404859210289,Product B,South,2023,2023
-4,131.76427049690244,Product B,South,2023,2023
-5,124.21423792665506,Product B,South,2023,2023
-6,147.22962592292976,Product B,South,2023,2023
-7,154.24543281721347,Product B,South,2023,2023
-8,184.9076125190728,Product B,South,2023,2023
-9,188.23009821076823,Product B,South,2023,2023
-10,152.08674789356354,Product B,South,2023,2023
-11,178.97368022590354,Product B,South,2023,2023
-12,167.30013646271576,Product B,South,2023,2023
-1,107.66523204286646,Product B,South,2024,2024
-2,140.0860860995795,Product B,South,2024,2024
-3,127.40282802204106,Product B,South,2024,2024
-4,143.3620583519149,Product B,South,2024,2024
-5,126.30740302474916,Product B,South,2024,2024
-6,163.38707013542995,Product B,South,2024,2024
-7,134.56724702351642,Product B,South,2024,2024
-8,174.72911201657044,Product B,South,2024,2024
-9,140.22534099762765,Product B,South,2024,2024
-10,193.60957020697788,Product B,South,2024,2024
-11,183.12908200850478,Product B,South,2024,2024
-12,159.17340511918755,Product B,South,2024,2024
 
 </script>
 
@@ -7634,6 +8530,90 @@ Month,Sales,Product,Region,Year,color
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Struct Data Source Example</h2>
+<p>JSPlots supports using custom structs containing DataFrames as data sources. This is useful when:</p>
+<ul>
+    <li>You have related DataFrames that belong together (e.g., prices and volumes)</li>
+    <li>You want to pass complex data structures without unpacking them</li>
+    <li>Multiple charts need to reference different parts of the same data</li>
+</ul>
+<p>Pass the struct to JSPlotPage and reference fields using dot notation: <code>Symbol("struct_name.field_name")</code></p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Stock Prices from Struct Data Source</h2>
+<p>This chart demonstrates using a struct as a data source. The FinancialData struct contains both prices and volumes DataFrames. Charts reference struct fields using dot notation in the data_label (e.g., Symbol("financial.prices")).</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_struct_prices">Aggregator: </label>
+                <select id="aggregator_select_struct_prices" onchange="updateChart_struct_prices()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+                <option value="sum">sum</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_struct_prices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Date</span>
+    </div>
+    <div>
+        <label for="x_transform_select_struct_prices">X Transform: </label>
+        <select id="x_transform_select_struct_prices" style="padding: 5px 10px;" onchange="updateChart_struct_prices()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Price</span>
+    </div>
+    <div>
+        <label for="y_transform_select_struct_prices">Y Transform: </label>
+        <select id="y_transform_select_struct_prices" style="padding: 5px 10px;" onchange="updateChart_struct_prices()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="struct_prices_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="struct_prices_aspect_ratio_label">0.4</span>
+    <input type="range" id="struct_prices_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="struct_prices"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: financial.prices</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Dynamic X and Y dimensions:</strong> Choose which variables to plot on X and Y axes from dropdowns</li>
@@ -7651,6 +8631,6 @@ Month,Sales,Product,Region,Year,color
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.5.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -8952,6 +8953,556 @@ $(function(){
         console.error('Error loading data for chart stack_comparison:', error);
     });
 })();
+(function() {
+    // Configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const X_COLS = ['Month'];
+    const Y_COLS = ['Sales', 'Units'];
+    const COLOR_COLS = ['Region'];
+    const COLOR_MAPS = {'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
+    const GROUP_ORDER = {'Region': ['North', 'South', 'East', 'West']};
+    const DEFAULT_X_COL = 'Month';
+    const DEFAULT_Y_COL = 'Sales';
+    const DEFAULT_COLOR_COL = 'Region';
+    const FILL_OPACITY = 0.6;
+
+    let allData = [];
+
+    // Detect if x values are discrete or continuous
+    function isDiscrete(values) {
+        // Consider discrete if we have strings, or if numeric with small number of unique values
+        const sample = values[0];
+        if (typeof sample === 'string') return true;
+
+        const uniqueVals = [...new Set(values)];
+        // If less than 20 unique values and they look like categories, treat as discrete
+        return uniqueVals.length < 20 && uniqueVals.every(v => Number.isInteger(v) || typeof v === 'string');
+    }
+
+    // Make it global so inline onchange can see it
+    window.updatePlot_struct_area = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_struct_area');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_struct_area');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_struct_area');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_struct_area');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_struct_area');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_struct_area' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current group column
+        const groupColSelect = document.getElementById('color_col_select_struct_area');
+        const GROUP_COL = groupColSelect ? groupColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current stack mode
+        const stackModeSelect = document.getElementById('stack_mode_select_struct_area');
+        const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_struct_area');
+        const facet2Select = document.getElementById('facet2_select_struct_area');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map and group order for current selection
+        const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
+        const GROUP_ORDER_ARRAY = GROUP_ORDER[GROUP_COL] || [];
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'struct_area',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - create area chart
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                if (!groupedData[groupVal]) {
+                    groupedData[groupVal] = [];
+                }
+                groupedData[groupVal].push(row);
+            });
+
+            // Get groups in order of appearance
+            const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                Object.keys(groupedData);
+
+            const traces = [];
+            const discrete = isDiscrete(filteredData.map(row => row[X_COL]));
+
+            for (let groupKey of orderedGroups) {
+                const groupData = groupedData[groupKey];
+                groupData.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                    return aVal - bVal;
+                });
+
+                let xValues = groupData.map(row => row[X_COL]);
+                let yValues = groupData.map(row => row[Y_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                const color = COLOR_MAP[groupKey] || '#636efa';
+                const trace = {
+                    x: xValues,
+                    y: yValues,
+                    name: groupKey,
+                    type: discrete ? 'bar' : 'scatter'
+                };
+
+                if (discrete) {
+                    // Bar chart style
+                    trace.marker = {color: color};
+                } else {
+                    // Area chart style
+                    trace.mode = 'lines';
+                    trace.line = {color: color, width: 0};
+                }
+
+                // Apply stacking mode
+                if (STACK_MODE === 'unstack') {
+                    if (!discrete) {
+                        trace.fill = 'tozeroy';
+                        // Convert hex to rgba
+                        if (color.startsWith('#')) {
+                            const r = parseInt(color.substr(1,2), 16);
+                            const g = parseInt(color.substr(3,2), 16);
+                            const b = parseInt(color.substr(5,2), 16);
+                            trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                        }
+                    } else {
+                        trace.opacity = FILL_OPACITY;
+                    }
+                } else if (STACK_MODE === 'stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                    }
+                } else if (STACK_MODE === 'normalised_stack') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    } else {
+                        trace.fill = 'tonexty';
+                        trace.stackgroup = 'one';
+                        trace.groupnorm = 'percent';
+                    }
+                } else if (STACK_MODE === 'dodge') {
+                    if (discrete) {
+                        trace.type = 'bar';
+                    }
+                    // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                    if (!discrete) {
+                        trace.fill = 'tozeroy';
+                        if (color.startsWith('#')) {
+                            const r = parseInt(color.substr(1,2), 16);
+                            const g = parseInt(color.substr(3,2), 16);
+                            const b = parseInt(color.substr(5,2), 16);
+                            trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                        }
+                    }
+                }
+
+                traces.push(trace);
+            }
+
+            const layout = {
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: {
+                    title: STACK_MODE === 'normalised_stack' ?
+                        getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                        getAxisLabel(Y_COL, Y_TRANSFORM)
+                },
+                hovermode: 'closest',
+                showlegend: true,
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            Plotly.newPlot('struct_area', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by group column within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                    if (!groupedData[groupVal]) {
+                        groupedData[groupVal] = [];
+                    }
+                    groupedData[groupVal].push(row);
+                });
+
+                const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                    GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                    Object.keys(groupedData);
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                for (let groupKey of orderedGroups) {
+                    const groupData = groupedData[groupKey];
+                    groupData.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+                        if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                        return aVal - bVal;
+                    });
+
+                    let xValues = groupData.map(row => row[X_COL]);
+                    let yValues = groupData.map(row => row[Y_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    const color = COLOR_MAP[groupKey] || '#636efa';
+                    const legendGroup = groupKey;
+
+                    const trace = {
+                        x: xValues,
+                        y: yValues,
+                        name: groupKey,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        type: discrete ? 'bar' : 'scatter'
+                    };
+
+                    if (discrete) {
+                        trace.marker = {color: color};
+                    } else {
+                        trace.mode = 'lines';
+                        trace.line = {color: color, width: 0};
+                    }
+
+                    // Apply stacking mode
+                    if (STACK_MODE === 'unstack') {
+                        if (!discrete) {
+                            trace.fill = 'tozeroy';
+                            if (color.startsWith('#')) {
+                                const r = parseInt(color.substr(1,2), 16);
+                                const g = parseInt(color.substr(3,2), 16);
+                                const b = parseInt(color.substr(5,2), 16);
+                                trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                            }
+                        } else {
+                            trace.opacity = FILL_OPACITY;
+                        }
+                    } else if (STACK_MODE === 'stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                        }
+                    } else if (STACK_MODE === 'normalised_stack') {
+                        if (!discrete) {
+                            trace.fill = 'tonexty';
+                            trace.stackgroup = 'one' + idx;
+                            trace.groupnorm = 'percent';
+                        }
+                    } else if (STACK_MODE === 'dodge') {
+                        // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                        if (!discrete) {
+                            trace.fill = 'tozeroy';
+                            if (color.startsWith('#')) {
+                                const r = parseInt(color.substr(1,2), 16);
+                                const g = parseInt(color.substr(3,2), 16);
+                                const b = parseInt(color.substr(5,2), 16);
+                                trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                            }
+                        }
+                    }
+
+                    traces.push(trace);
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ?
+                        (STACK_MODE === 'normalised_stack' ?
+                            getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                            getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('struct_area', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                barmode: STACK_MODE === 'stack' || STACK_MODE === 'normalised_stack' ? 'stack' :
+                         STACK_MODE === 'dodge' ? 'group' : 'overlay',
+                barnorm: STACK_MODE === 'normalised_stack' ? 'percent' : undefined
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by group column within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const groupVal = (GROUP_COL === '__no_group__') ? 'all' : String(row[GROUP_COL]);
+                        if (!groupedData[groupVal]) {
+                            groupedData[groupVal] = [];
+                        }
+                        groupedData[groupVal].push(row);
+                    });
+
+                    const orderedGroups = GROUP_ORDER_ARRAY.length > 0 ?
+                        GROUP_ORDER_ARRAY.filter(g => groupedData[g]) :
+                        Object.keys(groupedData);
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    const discrete = isDiscrete(facetData.map(row => row[X_COL]));
+
+                    for (let groupKey of orderedGroups) {
+                        const groupData = groupedData[groupKey];
+                        groupData.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+                            if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                            return aVal - bVal;
+                        });
+
+                        let xValues = groupData.map(row => row[X_COL]);
+                        let yValues = groupData.map(row => row[Y_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                        const color = COLOR_MAP[groupKey] || '#636efa';
+                        const legendGroup = groupKey;
+
+                        const trace = {
+                            x: xValues,
+                            y: yValues,
+                            name: groupKey,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            type: discrete ? 'bar' : 'scatter'
+                        };
+
+                        if (discrete) {
+                            trace.marker = {color: color};
+                        } else {
+                            trace.mode = 'lines';
+                            trace.line = {color: color, width: 0};
+                        }
+
+                        // Apply stacking mode
+                        if (STACK_MODE === 'unstack') {
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                                }
+                            } else {
+                                trace.opacity = FILL_OPACITY;
+                            }
+                        } else if (STACK_MODE === 'stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                            }
+                        } else if (STACK_MODE === 'normalised_stack') {
+                            if (!discrete) {
+                                trace.fill = 'tonexty';
+                                trace.stackgroup = 'one' + idx;
+                                trace.groupnorm = 'percent';
+                            }
+                        } else if (STACK_MODE === 'dodge') {
+                            // For continuous x, dodge doesn't make sense, so we treat it like unstack
+                            if (!discrete) {
+                                trace.fill = 'tozeroy';
+                                if (color.startsWith('#')) {
+                                    const r = parseInt(color.substr(1,2), 16);
+                                    const g = parseInt(color.substr(3,2), 16);
+                                    const b = parseInt(color.substr(5,2), 16);
+                                    trace.fillcolor = `rgba(${r}, ${g}, ${b}, ${FILL_OPACITY})`;
+                                }
+                            }
+                        }
+
+                        traces.push(trace);
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ?
+                            (STACK_MODE === 'normalised_stack' ?
+                                getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
+                                getAxisLabel(Y_COL, Y_TRANSFORM)) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('struct_area', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('regional.monthly_sales').then(function(data) {
+        allData = data;
+        window.updatePlot_struct_area();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('struct_area');
+    }).catch(function(error) {
+        console.error('Error loading data for chart struct_area:', error);
+    });
+})();
 
 
 });
@@ -8959,7 +9510,233 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="channel_revenue" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="regional.quarterly_summary" data-format="csv_embedded" data-src="">
+Quarter,Region,TotalSales
+1,North,185360.55657410153
+2,North,225739.17964640696
+3,North,224145.17920287498
+4,North,198924.49514146257
+1,South,228609.39671662037
+2,South,218890.78942568146
+3,South,184939.95801778106
+4,South,200854.01674042165
+1,East,198897.3987281234
+2,East,175582.69095588382
+3,East,185613.1580389635
+4,East,215573.0589595665
+1,West,177607.62808972405
+2,West,206434.78752637652
+3,West,190969.3425529161
+4,West,196390.50090969558
+
+</script><script type="text/plain" id="market_share" data-format="csv_embedded" data-src="">
+Month,MarketShare,Category
+1,39.02064270720871,Category A
+2,9.248901645855234,Category A
+3,12.246826539476935,Category A
+4,22.221354721980745,Category A
+5,32.384576662156846,Category A
+6,20.225005375864143,Category A
+7,9.393863202702216,Category A
+8,19.894765207997533,Category A
+9,17.351447003849838,Category A
+10,22.1700341707795,Category A
+11,21.528631978788532,Category A
+12,17.969429972726093,Category A
+1,21.99796766713936,Category B
+2,25.91626024880205,Category B
+3,24.697360801916293,Category B
+4,23.834454377986255,Category B
+5,19.15530360971624,Category B
+6,12.550437978157682,Category B
+7,25.077893009555886,Category B
+8,22.88495863085199,Category B
+9,26.03955293109264,Category B
+10,17.869961663832207,Category B
+11,20.136478018274044,Category B
+12,17.428761366594387,Category B
+1,22.858601132023896,Category C
+2,12.61446721268236,Category C
+3,20.939999954289394,Category C
+4,28.08081537833038,Category C
+5,24.99084696474636,Category C
+6,20.117667657216842,Category C
+7,17.17398931857713,Category C
+8,20.763594908312,Category C
+9,15.718303070997486,Category C
+10,11.815183236177424,Category C
+11,21.402817995926437,Category C
+12,27.30310521647552,Category C
+1,28.715326074519453,Category D
+2,15.585518740946867,Category D
+3,26.709430027159534,Category D
+4,13.039412885382134,Category D
+5,24.783183394286944,Category D
+6,20.794707281184373,Category D
+7,23.556691795745664,Category D
+8,26.935978180495354,Category D
+9,23.6724429288465,Category D
+10,21.789528800563325,Category D
+11,26.753220455318047,Category D
+12,20.508544409174068,Category D
+
+</script><script type="text/plain" id="regional.monthly_sales" data-format="csv_embedded" data-src="">
+Month,Sales,Units,Region
+1,46264.149103069736,363.1607565505013,North
+2,56338.172536777085,394.3235347046134,North
+3,42476.62026755331,591.4196742597608,North
+4,51948.02326697896,555.3220808195462,North
+5,72996.3077743215,759.8276984284191,North
+6,61528.85150718177,640.5972665545538,North
+7,49511.81596243146,602.4631123446859,North
+8,56323.625213131716,577.3209913456991,North
+9,91023.39139116008,671.9194741456413,North
+10,71631.47117589117,667.4245495956891,North
+11,74329.85491977523,763.9330782513822,North
+12,78441.07549485969,704.7894351253622,North
+1,51967.87310401742,568.7752548551276,South
+2,42616.41827872475,346.9788412047584,South
+3,64753.71062937932,549.7973735328407,South
+4,58670.4272783113,446.62687704557965,South
+5,46946.873387069514,551.6458052568178,South
+6,57475.924059816054,789.1393062961457,South
+7,47295.69300614908,490.4086079055412,South
+8,61205.209682299705,568.2194691567244,South
+9,69806.91469039005,662.2863479286145,South
+10,63087.7645324036,761.0852399423491,South
+11,65410.92914136656,726.7694233368088,South
+12,68523.01167578627,661.6823130569595,South
+1,49550.015955391376,546.2462104656996,East
+2,58258.877852074795,430.4109425760307,East
+3,37508.51661613518,549.1130588394346,East
+4,66033.21976018597,653.4163667753728,East
+5,60803.80351362964,489.865025853175,East
+6,33021.68140572104,747.0353355264741,East
+7,79110.00900073607,618.0242125400765,East
+8,58272.192430272604,664.8389415068968,East
+9,63601.81277048067,751.4525116166445,East
+10,71511.67782986433,665.0929795066324,East
+11,73755.50892772005,769.6425403080243,East
+12,74920.6890291103,722.2438042739752,East
+1,41955.47314297644,559.0716065683704,West
+2,40584.691203108654,684.4250571626834,West
+3,56024.06860604508,560.4137918170796,West
+4,56204.0344298636,713.0101029083302,West
+5,48794.44644133108,721.5311411237813,West
+6,55542.38176217271,691.7897014481075,West
+7,77579.3275673936,757.586061824845,West
+8,70910.63601792621,589.0212492694425,West
+9,74857.71182702066,630.2164223806698,West
+10,69046.97219867664,746.8631253062472,West
+11,39387.238919614305,709.8490231963076,West
+12,76894.3490100334,690.9220701926721,West
+
+</script><script type="text/plain" id="grid_sales" data-format="csv_embedded" data-src="">
+Month,Sales,Product,Region,Segment
+1,36046.976772548085,Product X,East,Segment 1
+2,43541.33537345861,Product X,East,Segment 1
+3,58580.89655533582,Product X,East,Segment 1
+4,51468.400820755,Product X,East,Segment 1
+5,59289.52567556935,Product X,East,Segment 1
+6,69208.3536964361,Product X,East,Segment 1
+1,71869.84571508516,Product X,East,Segment 2
+2,46388.52635340507,Product X,East,Segment 2
+3,58444.88326698679,Product X,East,Segment 2
+4,51956.284591547796,Product X,East,Segment 2
+5,68141.57213315114,Product X,East,Segment 2
+6,61919.36251149604,Product X,East,Segment 2
+1,55748.995842683675,Product X,West,Segment 1
+2,35321.01550580826,Product X,West,Segment 1
+3,64414.1553385911,Product X,West,Segment 1
+4,62587.74167968533,Product X,West,Segment 1
+5,77896.23585152616,Product X,West,Segment 1
+6,78670.96274043791,Product X,West,Segment 1
+1,51956.11127592655,Product X,West,Segment 2
+2,48152.29292833831,Product X,West,Segment 2
+3,55829.53715383615,Product X,West,Segment 2
+4,56771.43307594346,Product X,West,Segment 2
+5,54893.50240074937,Product X,West,Segment 2
+6,65275.71286574617,Product X,West,Segment 2
+1,46256.404462341656,Product Y,East,Segment 1
+2,69788.40337960642,Product Y,East,Segment 1
+3,53488.70015146034,Product Y,East,Segment 1
+4,42879.64410189974,Product Y,East,Segment 1
+5,52271.709132160606,Product Y,East,Segment 1
+6,63225.14276802736,Product Y,East,Segment 1
+1,50056.48670285362,Product Y,East,Segment 2
+2,62056.84845610755,Product Y,East,Segment 2
+3,48157.33613999103,Product Y,East,Segment 2
+4,66066.37222462526,Product Y,East,Segment 2
+5,55167.615796277816,Product Y,East,Segment 2
+6,52407.09261073251,Product Y,East,Segment 2
+1,57820.41639164868,Product Y,West,Segment 1
+2,65729.48045628268,Product Y,West,Segment 1
+3,37736.25685862609,Product Y,West,Segment 1
+4,50595.13784420311,Product Y,West,Segment 1
+5,66875.77948911171,Product Y,West,Segment 1
+6,65383.46287132241,Product Y,West,Segment 1
+1,60788.90027413891,Product Y,West,Segment 2
+2,59605.51008548443,Product Y,West,Segment 2
+3,68734.84883067798,Product Y,West,Segment 2
+4,71476.92239665272,Product Y,West,Segment 2
+5,57129.56067873115,Product Y,West,Segment 2
+6,55966.25248784129,Product Y,West,Segment 2
+
+</script><script type="text/plain" id="business_metrics" data-format="csv_embedded" data-src="">
+Quarter,Revenue,Profit,Growth,Industry,CompanySize
+1,63.09250860062127,31.85523725839545,9.95526882073147,Tech,Small
+2,76.96260057165777,17.82933725901385,3.419069411901583,Tech,Small
+3,116.09604165401353,18.457996648699805,2.4283484316630477,Tech,Small
+4,73.23164661702516,22.35805308611482,5.67302307702384,Tech,Small
+1,107.40487762991198,23.61576312391867,8.114219066974542,Tech,Medium
+2,115.42554886556368,16.49752703813218,7.0813937269182885,Tech,Medium
+3,112.1285354234116,13.701193375107454,8.906300546649197,Tech,Medium
+4,94.60297024782831,21.51259877271616,0.4354986477848177,Tech,Medium
+1,110.10214946287172,21.184445931220218,4.96293124164624,Tech,Large
+2,104.53538331565466,17.45601436258706,0.012284491104631812,Tech,Large
+3,116.0655769549202,14.33943101055916,5.615136784211084,Tech,Large
+4,115.14292994185928,19.76761770451545,1.7060790828287749,Tech,Large
+1,109.173946879095,17.58129383270881,6.5594840284263425,Finance,Small
+2,101.22742922587115,18.401336654669706,5.080293357281874,Finance,Small
+3,80.7459284295812,14.764624106567569,10.537015557566582,Finance,Small
+4,111.15807194803334,23.42659465025648,5.927361343261945,Finance,Small
+1,75.3007738829186,20.14616259513904,6.105153917879229,Finance,Medium
+2,129.0134864671695,18.812044172497952,1.4699756153915757,Finance,Medium
+3,89.27047933355365,26.888407681090758,3.430516435221289,Finance,Medium
+4,157.43387251201506,17.76401944970274,5.478986055299444,Finance,Medium
+1,105.74597288227176,20.660129810742625,0.9485993815285418,Finance,Large
+2,97.19739917391914,21.636897945782987,5.701639094885234,Finance,Large
+3,96.68478223173342,32.21815870030392,4.392828316040838,Finance,Large
+4,77.74844425480137,16.372653234719053,4.744862870911971,Finance,Large
+1,106.991738874415,17.579298166483593,0.9130292958723203,Healthcare,Small
+2,94.85198770196237,26.30157269955874,2.7552018647959837,Healthcare,Small
+3,112.51174835128639,11.44709125031366,3.876287330715441,Healthcare,Small
+4,63.48423765990957,22.117571511969324,7.794239233712055,Healthcare,Small
+1,103.81369082367875,26.31500592984836,1.2926970000437477,Healthcare,Medium
+2,95.02759709160647,26.449692990925044,4.218722429115536,Healthcare,Medium
+3,82.89393270136291,18.56961288532291,7.442278706047402,Healthcare,Medium
+4,110.48141798083726,22.946249147933397,6.576411836031838,Healthcare,Medium
+1,87.95814108484187,17.15918751452318,5.910308235732036,Healthcare,Large
+2,96.11631700583264,17.412375671014875,5.9270427103635885,Healthcare,Large
+3,99.73218744484261,26.331809229723568,0.45047938932926446,Healthcare,Large
+4,105.72769853575487,19.563160032629,6.3866361240305265,Healthcare,Large
+
+</script><script type="text/plain" id="comparison_data" data-format="csv_embedded" data-src="">
+Category,Value,Segment
+Category A,53.95007814346774,Segment 1
+Category A,46.02952527014863,Segment 2
+Category A,50.79909102084737,Segment 3
+Category B,40.870772336906924,Segment 1
+Category B,29.578841214527284,Segment 2
+Category B,63.24100584564107,Segment 3
+Category C,54.94983188319765,Segment 1
+Category C,34.64180240692802,Segment 2
+Category C,51.70865913330984,Segment 3
+Category D,54.20106300104339,Segment 1
+Category D,51.79942862920912,Segment 2
+Category D,43.2005941081019,Segment 3
+
+</script><script type="text/plain" id="channel_revenue" data-format="csv_embedded" data-src="">
 Date,Revenue,Channel,Region,Year
 2024-01-01,128898.19162286987,Online,North,2022
 2024-01-08,110260.82341098026,Online,North,2022
@@ -10063,57 +10840,6 @@ Week,Value,Metric,Source
 11,131.9580008662773,Metric D,Source 3
 12,157.83583841545737,Metric D,Source 3
 
-</script><script type="text/plain" id="market_share" data-format="csv_embedded" data-src="">
-Month,MarketShare,Category
-1,39.02064270720871,Category A
-2,9.248901645855234,Category A
-3,12.246826539476935,Category A
-4,22.221354721980745,Category A
-5,32.384576662156846,Category A
-6,20.225005375864143,Category A
-7,9.393863202702216,Category A
-8,19.894765207997533,Category A
-9,17.351447003849838,Category A
-10,22.1700341707795,Category A
-11,21.528631978788532,Category A
-12,17.969429972726093,Category A
-1,21.99796766713936,Category B
-2,25.91626024880205,Category B
-3,24.697360801916293,Category B
-4,23.834454377986255,Category B
-5,19.15530360971624,Category B
-6,12.550437978157682,Category B
-7,25.077893009555886,Category B
-8,22.88495863085199,Category B
-9,26.03955293109264,Category B
-10,17.869961663832207,Category B
-11,20.136478018274044,Category B
-12,17.428761366594387,Category B
-1,22.858601132023896,Category C
-2,12.61446721268236,Category C
-3,20.939999954289394,Category C
-4,28.08081537833038,Category C
-5,24.99084696474636,Category C
-6,20.117667657216842,Category C
-7,17.17398931857713,Category C
-8,20.763594908312,Category C
-9,15.718303070997486,Category C
-10,11.815183236177424,Category C
-11,21.402817995926437,Category C
-12,27.30310521647552,Category C
-1,28.715326074519453,Category D
-2,15.585518740946867,Category D
-3,26.709430027159534,Category D
-4,13.039412885382134,Category D
-5,24.783183394286944,Category D
-6,20.794707281184373,Category D
-7,23.556691795745664,Category D
-8,26.935978180495354,Category D
-9,23.6724429288465,Category D
-10,21.789528800563325,Category D
-11,26.753220455318047,Category D
-12,20.508544409174068,Category D
-
 </script><script type="text/plain" id="sales_by_store" data-format="csv_embedded" data-src="">
 Store,Sales,Product
 Store 1,10900.432966386328,Product A
@@ -11163,57 +11889,6 @@ Time,Value,Product
 19.5,60.679333416071536,Product C
 20.0,56.41554881364987,Product C
 
-</script><script type="text/plain" id="grid_sales" data-format="csv_embedded" data-src="">
-Month,Sales,Product,Region,Segment
-1,36046.976772548085,Product X,East,Segment 1
-2,43541.33537345861,Product X,East,Segment 1
-3,58580.89655533582,Product X,East,Segment 1
-4,51468.400820755,Product X,East,Segment 1
-5,59289.52567556935,Product X,East,Segment 1
-6,69208.3536964361,Product X,East,Segment 1
-1,71869.84571508516,Product X,East,Segment 2
-2,46388.52635340507,Product X,East,Segment 2
-3,58444.88326698679,Product X,East,Segment 2
-4,51956.284591547796,Product X,East,Segment 2
-5,68141.57213315114,Product X,East,Segment 2
-6,61919.36251149604,Product X,East,Segment 2
-1,55748.995842683675,Product X,West,Segment 1
-2,35321.01550580826,Product X,West,Segment 1
-3,64414.1553385911,Product X,West,Segment 1
-4,62587.74167968533,Product X,West,Segment 1
-5,77896.23585152616,Product X,West,Segment 1
-6,78670.96274043791,Product X,West,Segment 1
-1,51956.11127592655,Product X,West,Segment 2
-2,48152.29292833831,Product X,West,Segment 2
-3,55829.53715383615,Product X,West,Segment 2
-4,56771.43307594346,Product X,West,Segment 2
-5,54893.50240074937,Product X,West,Segment 2
-6,65275.71286574617,Product X,West,Segment 2
-1,46256.404462341656,Product Y,East,Segment 1
-2,69788.40337960642,Product Y,East,Segment 1
-3,53488.70015146034,Product Y,East,Segment 1
-4,42879.64410189974,Product Y,East,Segment 1
-5,52271.709132160606,Product Y,East,Segment 1
-6,63225.14276802736,Product Y,East,Segment 1
-1,50056.48670285362,Product Y,East,Segment 2
-2,62056.84845610755,Product Y,East,Segment 2
-3,48157.33613999103,Product Y,East,Segment 2
-4,66066.37222462526,Product Y,East,Segment 2
-5,55167.615796277816,Product Y,East,Segment 2
-6,52407.09261073251,Product Y,East,Segment 2
-1,57820.41639164868,Product Y,West,Segment 1
-2,65729.48045628268,Product Y,West,Segment 1
-3,37736.25685862609,Product Y,West,Segment 1
-4,50595.13784420311,Product Y,West,Segment 1
-5,66875.77948911171,Product Y,West,Segment 1
-6,65383.46287132241,Product Y,West,Segment 1
-1,60788.90027413891,Product Y,West,Segment 2
-2,59605.51008548443,Product Y,West,Segment 2
-3,68734.84883067798,Product Y,West,Segment 2
-4,71476.92239665272,Product Y,West,Segment 2
-5,57129.56067873115,Product Y,West,Segment 2
-6,55966.25248784129,Product Y,West,Segment 2
-
 </script><script type="text/plain" id="headcount_data" data-format="csv_embedded" data-src="">
 Department,Headcount,Team
 Engineering,23,Team A
@@ -11231,60 +11906,6 @@ Operations,17,Team C
 HR,14,Team A
 HR,5,Team B
 HR,6,Team C
-
-</script><script type="text/plain" id="business_metrics" data-format="csv_embedded" data-src="">
-Quarter,Revenue,Profit,Growth,Industry,CompanySize
-1,63.09250860062127,31.85523725839545,9.95526882073147,Tech,Small
-2,76.96260057165777,17.82933725901385,3.419069411901583,Tech,Small
-3,116.09604165401353,18.457996648699805,2.4283484316630477,Tech,Small
-4,73.23164661702516,22.35805308611482,5.67302307702384,Tech,Small
-1,107.40487762991198,23.61576312391867,8.114219066974542,Tech,Medium
-2,115.42554886556368,16.49752703813218,7.0813937269182885,Tech,Medium
-3,112.1285354234116,13.701193375107454,8.906300546649197,Tech,Medium
-4,94.60297024782831,21.51259877271616,0.4354986477848177,Tech,Medium
-1,110.10214946287172,21.184445931220218,4.96293124164624,Tech,Large
-2,104.53538331565466,17.45601436258706,0.012284491104631812,Tech,Large
-3,116.0655769549202,14.33943101055916,5.615136784211084,Tech,Large
-4,115.14292994185928,19.76761770451545,1.7060790828287749,Tech,Large
-1,109.173946879095,17.58129383270881,6.5594840284263425,Finance,Small
-2,101.22742922587115,18.401336654669706,5.080293357281874,Finance,Small
-3,80.7459284295812,14.764624106567569,10.537015557566582,Finance,Small
-4,111.15807194803334,23.42659465025648,5.927361343261945,Finance,Small
-1,75.3007738829186,20.14616259513904,6.105153917879229,Finance,Medium
-2,129.0134864671695,18.812044172497952,1.4699756153915757,Finance,Medium
-3,89.27047933355365,26.888407681090758,3.430516435221289,Finance,Medium
-4,157.43387251201506,17.76401944970274,5.478986055299444,Finance,Medium
-1,105.74597288227176,20.660129810742625,0.9485993815285418,Finance,Large
-2,97.19739917391914,21.636897945782987,5.701639094885234,Finance,Large
-3,96.68478223173342,32.21815870030392,4.392828316040838,Finance,Large
-4,77.74844425480137,16.372653234719053,4.744862870911971,Finance,Large
-1,106.991738874415,17.579298166483593,0.9130292958723203,Healthcare,Small
-2,94.85198770196237,26.30157269955874,2.7552018647959837,Healthcare,Small
-3,112.51174835128639,11.44709125031366,3.876287330715441,Healthcare,Small
-4,63.48423765990957,22.117571511969324,7.794239233712055,Healthcare,Small
-1,103.81369082367875,26.31500592984836,1.2926970000437477,Healthcare,Medium
-2,95.02759709160647,26.449692990925044,4.218722429115536,Healthcare,Medium
-3,82.89393270136291,18.56961288532291,7.442278706047402,Healthcare,Medium
-4,110.48141798083726,22.946249147933397,6.576411836031838,Healthcare,Medium
-1,87.95814108484187,17.15918751452318,5.910308235732036,Healthcare,Large
-2,96.11631700583264,17.412375671014875,5.9270427103635885,Healthcare,Large
-3,99.73218744484261,26.331809229723568,0.45047938932926446,Healthcare,Large
-4,105.72769853575487,19.563160032629,6.3866361240305265,Healthcare,Large
-
-</script><script type="text/plain" id="comparison_data" data-format="csv_embedded" data-src="">
-Category,Value,Segment
-Category A,53.95007814346774,Segment 1
-Category A,46.02952527014863,Segment 2
-Category A,50.79909102084737,Segment 3
-Category B,40.870772336906924,Segment 1
-Category B,29.578841214527284,Segment 2
-Category B,63.24100584564107,Segment 3
-Category C,54.94983188319765,Segment 1
-Category C,34.64180240692802,Segment 2
-Category C,51.70865913330984,Segment 3
-Category D,54.20106300104339,Segment 1
-Category D,51.79942862920912,Segment 2
-Category D,43.2005941081019,Segment 3
 
 </script>
 
@@ -12501,6 +13122,86 @@ Category D,43.2005941081019,Segment 3
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Struct Data Source Example</h2>
+<p>This area chart uses data from a struct containing multiple DataFrames.
+The <code>RegionalSalesData</code> struct holds both monthly_sales and quarterly_summary.
+Charts reference the monthly sales using <code>Symbol("regional.monthly_sales")</code>.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Example 13: Regional Sales from Struct Data Source</h2>
+<p>This chart references a DataFrame field within a struct. The RegionalSalesData struct contains monthly_sales and quarterly_summary DataFrames.</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="stack_mode_select_struct_area">Stack mode: </label>
+                <select id="stack_mode_select_struct_area" onchange="updatePlot_struct_area()">
+                <option value="unstack">unstack</option>
+                <option value="stack" selected>stack</option>
+                <option value="normalised_stack">normalised_stack</option>
+                <option value="dodge">dodge</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="stack_mode_select_struct_area_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Month</span>
+    </div>
+    <div>
+        <label for="x_transform_select_struct_area">X Transform: </label>
+        <select id="x_transform_select_struct_area" style="padding: 5px 10px;" onchange="updatePlot_struct_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_struct_area">Y: </label>
+        <select id="y_col_select_struct_area" style="padding: 5px 10px;" onchange="updatePlot_struct_area()">
+            <option value="Sales" selected>Sales</option>
+<option value="Units">Units</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_struct_area">Y Transform: </label>
+        <select id="y_transform_select_struct_area" style="padding: 5px 10px;" onchange="updatePlot_struct_area()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="struct_area_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="struct_area_aspect_ratio_label">0.4</span>
+    <input type="range" id="struct_area_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="struct_area"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: regional.monthly_sales</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Automatic discrete/continuous detection:</strong> Continuous x values (dates, numeric) create smooth areas; discrete x values (categories) create stacked bars</li>
@@ -12524,6 +13225,6 @@ Category D,43.2005941081019,Segment 3
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.5.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>
