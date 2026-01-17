@@ -1579,6 +1579,78 @@ financial_slides = Slides(
 )
 
 
+# =============================================================================
+# GeoPlot - Geographic Maps
+# =============================================================================
+println("Creating GeoPlot examples...")
+
+# GeoPlot section introduction
+geoplot_section = TextBlock("""
+<h2>Geographic Maps (GeoPlot)</h2>
+<p>GeoPlot creates interactive geographic visualizations using Leaflet.js with OpenStreetMap tiles.
+It supports two modes:</p>
+<ul>
+    <li><strong>Points Mode:</strong> Display markers at latitude/longitude coordinates with optional color and size encoding</li>
+    <li><strong>Choropleth Mode:</strong> Shade geographic regions (countries, states) by value</li>
+</ul>
+<p>Built-in region types include <code>:world_countries</code>, <code>:us_states</code>, and <code>:us_counties</code>.
+Custom GeoJSON can also be provided via URL.</p>
+<p><strong>Note:</strong> Maps require an internet connection to load tiles and boundary data.</p>
+<p><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/geoplot_examples.html" style="color: blue; font-weight: bold;">See here for GeoPlot examples</a></p>
+""")
+
+# Create sample city data for points mode
+cities_geo_df = DataFrame(
+    city = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
+            "London", "Paris", "Tokyo", "Sydney", "São Paulo"],
+    latitude = [40.7128, 34.0522, 41.8781, 29.7604, 33.4484,
+                51.5074, 48.8566, 35.6762, -33.8688, -23.5505],
+    longitude = [-74.0060, -118.2437, -87.6298, -95.3698, -112.0740,
+                 -0.1278, 2.3522, 139.6503, 151.2093, -46.6333],
+    population_millions = [8.34, 3.98, 2.69, 2.32, 1.68,
+                          8.98, 2.16, 13.96, 5.31, 12.33],
+    continent = ["North America", "North America", "North America", "North America", "North America",
+                 "Europe", "Europe", "Asia", "Oceania", "South America"]
+)
+
+# Points mode example - Global cities
+geoplot_points = GeoPlot(:global_cities_geo, cities_geo_df, :cities_geo_data;
+    lat = :latitude,
+    lon = :longitude,
+    color = :population_millions,
+    popup_cols = [:city, :continent],
+    filters = [:continent],
+    color_scale = :viridis,
+    zoom = 2,
+    height = 450,
+    title = "Global Major Cities - Points Mode",
+    notes = "Markers colored by population (millions). Click markers for details. Filter by continent."
+)
+
+# Create sample country GDP data for choropleth mode
+countries_geo_df = DataFrame(
+    country = ["United States", "China", "Germany", "Japan", "India",
+               "United Kingdom", "France", "Italy", "Brazil", "Canada",
+               "Russia", "Australia", "Spain", "Mexico", "Indonesia"],
+    gdp_trillion = [25.46, 17.96, 4.07, 4.23, 3.39,
+                    3.07, 2.78, 2.01, 1.92, 2.14,
+                    1.78, 1.68, 1.42, 1.32, 1.32]
+)
+
+# Choropleth mode example - World GDP
+geoplot_choropleth = GeoPlot(:world_gdp_geo, countries_geo_df, :countries_geo_data;
+    region = :country,
+    value = :gdp_trillion,
+    region_type = :world_countries,
+    region_key = "name",
+    color_scale = :turbo,
+    zoom = 2,
+    height = 450,
+    title = "World GDP by Country - Choropleth Mode",
+    notes = "Countries shaded by GDP (trillion USD). Hover over countries for values. Gray indicates no data."
+)
+
+
 # Collect all data
 all_data = Dict{Symbol, Any}(
     :sales_data => df,
@@ -1593,7 +1665,9 @@ all_data = Dict{Symbol, Any}(
     :radar_data => radar_df,
     :boxwhiskers_data => boxwhiskers_data,
     :stock_corr_data => stock_corr_data,
-    :tsne_stock_data => tsne_stock_data
+    :tsne_stock_data => tsne_stock_data,
+    :cities_geo_data => cities_geo_df,
+    :countries_geo_data => countries_geo_df
 )
 
 # Merge execution data into all_data
@@ -1678,9 +1752,17 @@ financial_plot_page =  JSPlotPage(
     dataformat = :parquet
 )
 
+gis_plot_page = JSPlotPage(
+    all_data,
+    [geoplot_section, geoplot_points, geoplot_choropleth],
+    tab_title="GIS / Geographic Charts",
+    page_header = "GIS / Geographic Charts",
+    notes = "This shows examples of GeoPlot for geographic data visualization. GeoPlot supports both points mode (markers at coordinates) and choropleth mode (shaded regions). Maps use Leaflet.js with OpenStreetMap tiles and require an internet connection.",
+    dataformat = :parquet
+)
 
 subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page],
-    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page, financial_plot_page])
+    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page, financial_plot_page, gis_plot_page])
 
 
 # Create final Pages object with all pages including the new theoretical ones

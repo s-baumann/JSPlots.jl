@@ -118,6 +118,10 @@ using Random
         include("chart_tests/test_executionplot.jl")
     end
 
+    @testset "GeoPlot Tests" begin
+        include("chart_tests/test_geoplot.jl")
+    end
+
     @testset "Pages Tests" begin
         include("chart_tests/test_pages.jl")
     end

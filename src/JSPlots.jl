@@ -4,6 +4,22 @@ module JSPlots
 
     abstract type JSPlotsType end
 
+    """
+        js_dependencies(plot::JSPlotsType)
+
+    Returns a vector of HTML script/link tags for JavaScript dependencies required by this plot type.
+    Default implementation returns an empty vector. Plot types with special dependencies should override this.
+
+    # Example
+    ```julia
+    js_dependencies(geo::GeoPlot)  # Returns Leaflet.js and TopoJSON scripts
+    js_dependencies(line::LineChart)  # Returns [] (uses base dependencies only)
+    ```
+    """
+    js_dependencies(::JSPlotsType) = String[]
+
+    export js_dependencies
+
     # Helper function to sanitize chart titles for use in JavaScript function names
     # Replaces spaces and other problematic characters with underscores
     function sanitize_chart_title(title::Symbol)
@@ -417,6 +433,9 @@ module JSPlots
 
     include("executionplot.jl")
     export ExecutionPlot, prepare_execution_data, get_execution_data_dict
+
+    include("geoplot.jl")
+    export GeoPlot, list_region_types
 
     include("Pages.jl")
     export JSPlotPage, Pages, sanitize_filename, extract_dataframes_from_struct, is_struct_with_dataframes

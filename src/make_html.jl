@@ -92,6 +92,9 @@ const FULL_PAGE_TEMPLATE = raw"""
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
 
+    <!-- Leaflet.js for geographic maps (only loaded if GeoPlot is used) -->
+    ___LEAFLET_SCRIPTS___
+
     <!-- Prism.js for code syntax highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
@@ -973,6 +976,11 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
               for lang in prism_languages], "\n")
     end
 
+    # Collect JavaScript dependencies from all plot types on this page
+    all_js_deps = reduce(vcat, js_dependencies.(pt.pivot_tables); init=String[])
+    unique_js_deps = unique(all_js_deps)
+    js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
+
     # Handle external formats (csv_external, json_external, parquet) differently
     if pt.dataformat in [:csv_external, :json_external, :parquet]
         # For external formats, create a subfolder structure
@@ -1071,6 +1079,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+        full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         # Save HTML file
@@ -1167,6 +1176,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+        full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         open(outfile_path, "w") do outfile
@@ -1255,6 +1265,11 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
               for lang in prism_languages], "\n")
     end
 
+    # Collect JavaScript dependencies from all plot types on this page
+    all_js_deps = reduce(vcat, js_dependencies.(page.pivot_tables); init=String[])
+    unique_js_deps = unique(all_js_deps)
+    js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
+
     # Generate datasets HTML
     data_set_bit = isempty(dataframes) ? "" : reduce(*, [dataset_to_html(k, v, dataformat) for (k,v) in dataframes])
 
@@ -1316,6 +1331,7 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
     full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
     full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+    full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
     full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
     return full_page_html
