@@ -3,7 +3,7 @@ using JSPlots, DataFrames, Dates
 # Example 1: Single stock with volume using Date type
 println("Creating Example 1: Single stock with volume (Date type)...")
 
-# Generate sample OHLC data for a single stock
+# Generate sample Candlestick data for a single stock
 dates = Date(2024, 1, 1):Day(1):Date(2024, 3, 31)
 n = length(dates)
 
@@ -25,8 +25,8 @@ for i in 1:nrow(df1)
     df1.low[i] = minimum(vals)
 end
 
-chart1 = OHLCChart(
-    :example1_ohlc,
+chart1 = CandlestickChart(
+    :example1_candlestick,
     df1,
     :stock_data_1,
     time_from_col=:time_from,
@@ -77,8 +77,8 @@ end
 
 df2 = vcat(df2_parts...)
 
-chart2 = OHLCChart(
-    :example2_ohlc,
+chart2 = CandlestickChart(
+    :example2_candlestick,
     df2,
     :stock_data_2,
     time_from_col=:time_from,
@@ -127,8 +127,8 @@ end
 
 df3 = vcat(df3_parts...)
 
-chart3 = OHLCChart(
-    :example3_ohlc,
+chart3 = CandlestickChart(
+    :example3_candlestick,
     df3,
     :company_data,
     time_from_col=:quarter,
@@ -140,9 +140,9 @@ chart3 = OHLCChart(
     close_col=:close_price,
     volume_col=nothing,  # No volume for this example
     display_mode="Faceted",
-    chart_type="ohlc",  # Use OHLC bars instead of candlesticks
+    chart_type="candlestick",  # Use Candlestick bars instead of candlesticks
     title="Example 3: Quarterly Data Without Volume",
-    notes="Quarterly company performance using integer time periods. No volume data. Using OHLC bar style instead of candlesticks. Faceted display shows each company separately."
+    notes="Quarterly company performance using integer time periods. No volume data. Using Candlestick bar style instead of candlesticks. Faceted display shows each company separately."
 )
 
 # Create page with all examples
@@ -154,12 +154,12 @@ page = JSPlotPage(
         :company_data => df3
     ),
     [chart1, chart2, chart3];
-    page_header="OHLC Chart Examples"
+    page_header="Candlestick Chart Examples"
 )
 
 # Save to file
-output_path = "generated_html_examples/ohlcchart_examples.html"
+output_path = "generated_html_examples/candlestickchart_examples.html"
 create_html(page, output_path)
 
-println("✓ OHLCChart examples saved to: $output_path")
+println("✓ CandlestickChart examples saved to: $output_path")
 println("Open this file in a web browser to view the interactive examples.")

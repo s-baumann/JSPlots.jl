@@ -212,6 +212,45 @@ chart5 = Surface3D(:wave_interference, wave_df, :wave_data;
     notes = "Interference pattern from two wave sources - great for physics simulations"
 )
 
+# Example 6: Using a Struct as Data Source
+example6_text = TextBlock("""
+<h2>Example 6: Terrain Data from Struct Data Source</h2>
+<p>This 3D surface uses data from a struct containing multiple DataFrames.
+The <code>TerrainData</code> struct holds elevation and metadata information.</p>
+""")
+
+struct TerrainData
+    elevation::DataFrame
+    metadata::DataFrame
+end
+
+# Create terrain elevation data
+terrain_df = DataFrame()
+for x in -5:0.4:5
+    for y in -5:0.4:5
+        # Simulate hilly terrain with noise
+        z = 2 * exp(-((x-1)^2 + (y-1)^2)/4) + 1.5 * exp(-((x+2)^2 + (y+1)^2)/3) + 0.3 * sin(x*2) * cos(y*2)
+        push!(terrain_df, (x=x, y=y, elevation=z, group="Terrain"))
+    end
+end
+
+metadata_df = DataFrame(
+    property = ["Area", "Max Elevation", "Min Elevation"],
+    value = ["100 sq km", "2.5 m", "0.1 m"]
+)
+
+# Create the struct
+terrain_data = TerrainData(terrain_df, metadata_df)
+
+chart6 = Surface3D(:struct_terrain, terrain_data.elevation, Symbol("terrain.elevation");
+    x_col = :x,
+    y_col = :y,
+    z_col = :elevation,
+    group_col = :group,
+    title = "Terrain from Struct Data Source",
+    notes = "This surface references data from a TerrainData struct using Symbol(\"terrain.elevation\")."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -226,13 +265,15 @@ conclusion = TextBlock("""
 """)
 
 # Create single combined page
+# Note: terrain_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :surface_data => surface_df,
         :multi_data => multi_surface_df,
         :filtered_data => filtered_df,
         :shape_data => shape_df,
-        :wave_data => wave_df
+        :wave_data => wave_df,
+        :terrain => terrain_data  # Struct with elevation and metadata
     ),
     [header,
      example1_text, chart1,
@@ -240,6 +281,7 @@ page = JSPlotPage(
      example3_text, chart3,
      example4_text, chart4,
      example5_text, chart5,
+     example6_text, chart6,
      conclusion],
     tab_title = "3D Surface Chart Examples"
 )
@@ -256,4 +298,5 @@ println("  • Multiple surfaces with grouping")
 println("  • Filtering (continuous and categorical)")
 println("  • Shape family filtering example")
 println("  • Wave interference pattern")
+println("  • Struct data source (referencing struct fields via dot notation)")
 println("  • Integration with text blocks")

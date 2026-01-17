@@ -61,7 +61,8 @@ The plot types are below. For each you can click on the name of the chart and se
 
 #### Financial Time Series
 - **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
-- **[ExecutionPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html)** - Execution plots for transaction cost analhsis of buying or selling securities.
+- **[ExecutionChart]()** - Coming Soon
+
 
 
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 

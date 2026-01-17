@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JSPlots.jl</title>
+    <title>Dataset Selection (Parquet)</title>
     <meta charset="UTF-8">
     <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
@@ -28,7 +28,99 @@
             height: 600px;
         }
     </style>
-    
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
 
     <!-- external libs -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
@@ -507,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -610,495 +703,114 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
-(function() {
-    const scenarios = ["default"];
-    const hasScenarios = false;
-    let currentScenario = "default";
-    let selectedVars = ["A","B","C","D","E"];
-    let manualOrder = [];
-    let corrDataRaw = null;
-    let allVars = [];
+    // Store current data and settings for this pivot table
+    window.pivotTableDatadataset_selector_parquet = {};
+    window.pivotTableConfigdataset_selector_parquet = {"rendererName":"Heatmap","rows":["Category"],"aggregatorName":"Sum","rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}}};
 
-    // Helper function to wait for ml-hclust to be loaded
-    function waitForHclust() {
-        return new Promise(function(resolve) {
-            if (window.hclustReady && window.mlHclust) {
-                resolve();
-                return;
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTabledataset_selector_parquet(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table dataset_selector_parquet from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table dataset_selector_parquet');
             }
-            const checkInterval = setInterval(function() {
-                if (window.hclustReady && window.mlHclust) {
-                    clearInterval(checkInterval);
-                    resolve();
-                }
-            }, 50);
-            // Timeout after 5 seconds
+
+            // Store the data
+            window.pivotTableDatadataset_selector_parquet[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
+            });
+
+            console.log('Converted array data for dataset_selector_parquet:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigdataset_selector_parquet;
+            var pivotEl = $("#dataset_selector_parquet");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
             setTimeout(function() {
-                clearInterval(checkInterval);
-                console.warn('ml-hclust library failed to load within timeout');
-                resolve();
-            }, 5000);
+                if (window.toggleTotals_dataset_selector_parquet) {
+                    window.toggleTotals_dataset_selector_parquet();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table dataset_selector_parquet:', error);
+            $("#dataset_selector_parquet").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
         });
     }
 
-    // Load correlation data and wait for hclust
-    Promise.all([
-        loadDataset('test_data'),
-        waitForHclust()
-    ]).then(function(results) {
-        corrDataRaw = results[0];
-        allVars = [...new Set(corrDataRaw.map(d => d.node1).concat(corrDataRaw.map(d => d.node2)))].sort();
-        populateVarSelector_test();
-        updateChart_test();
-    }).catch(function(error) {
-        console.error('Failed to load correlation data:', error);
-        document.getElementById('corrmatrix_test').innerHTML =
-            '<p style="color: red;">Error loading correlation data: ' + error.message + '</p>';
-    });
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_dataset_selector_parquet = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_dataset_selector_parquet');
+        const showTotals = checkbox.checked;
 
-    function populateVarSelector_test() {
-        const select = document.getElementById('var_select_test');
-        select.innerHTML = '';
-        allVars.forEach(v => {
-            const option = document.createElement('option');
-            option.value = v;
-            option.text = v;
-            option.selected = selectedVars.includes(v);
-            select.appendChild(option);
-        });
-    }
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('dataset_selector_parquet');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
 
-    function initializeSortable_test() {
-        const container = document.getElementById('sortable_vars_test');
-        if (!container) return;
-
-        container.innerHTML = '';
-
-        // Only show currently selected variables in manual order
-        const varsToShow = manualOrder.length > 0 ?
-            manualOrder.filter(v => selectedVars.includes(v)) :
-            selectedVars;
-
-        varsToShow.forEach(v => {
-            const div = document.createElement('div');
-            div.className = 'sortable-item';
-            div.textContent = v;
-            div.setAttribute('data-var', v);
-            container.appendChild(div);
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        if (typeof Sortable !== 'undefined') {
-            Sortable.create(container, {
-                animation: 150,
-                onEnd: function() {
-                    manualOrder = Array.from(container.children).map(el => el.getAttribute('data-var'));
-                    updateChart_test();
-                }
-            });
-        }
-    }
-
-    window.updateChart_test = function() {
-        if (!corrDataRaw || corrDataRaw.length === 0) {
-            console.warn('Correlation data not loaded yet');
-            return;
-        }
-
-        // Update scenario (if applicable)
-        if (hasScenarios) {
-            const scenarioSelect = document.getElementById('scenario_select_test');
-            if (scenarioSelect) {
-                currentScenario = scenarioSelect.value;
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
             }
-        }
+        });
+    };
 
-        // Update selected variables
-        const varSelect = document.getElementById('var_select_test');
-        const newSelectedVars = Array.from(varSelect.selectedOptions).map(opt => opt.value);
-
-        // Check if new variables were added
-        const addedVars = newSelectedVars.filter(v => !selectedVars.includes(v));
-        if (addedVars.length > 0 && manualOrder.length > 0) {
-            // Add new variables to end of manual order
-            addedVars.forEach(v => {
-                if (!manualOrder.includes(v)) {
-                    manualOrder.push(v);
-                }
-            });
-        }
-
-        selectedVars = newSelectedVars;
-
-        if (selectedVars.length < 2) {
-            console.warn('Select at least 2 variables');
-            return;
-        }
-
-        // Get correlation method
-        const corrMethod = document.getElementById('corr_method_select_test').value;
-
-        // Get order mode
-        const orderModeSelect = document.getElementById('order_mode_test');
-        const orderMode = orderModeSelect ? orderModeSelect.value : 'dendrogram';
-
-        // Show/hide linkage selector
-        const linkageContainer = document.getElementById('linkage_container_test');
-        if (linkageContainer) {
-            linkageContainer.style.display = (orderMode === 'dendrogram') ? 'block' : 'none';
-        }
-
-        // Show/hide manual ordering UI
-        const manualDiv = document.getElementById('manual_order_test');
-        if (manualDiv) {
-            manualDiv.style.display = (orderMode === 'manual') ? 'block' : 'none';
-        }
-
-        if (orderMode === 'manual') {
-            initializeSortable_test();
-        }
-
-        // Get linkage method
-        const linkageMethod = document.getElementById('linkage_select_test').value;
-
-        // Build correlation matrix for selected variables
-        const n = selectedVars.length;
-        const corrMatrix = [];
-        for (let i = 0; i < n; i++) {
-            corrMatrix[i] = [];
-            for (let j = 0; j < n; j++) {
-                if (i === j) {
-                    corrMatrix[i][j] = 1.0;
-                } else {
-                    // Find correlation from data
-                    const item = corrDataRaw.find(d =>
-                        ((d.node1 === selectedVars[i] && d.node2 === selectedVars[j]) ||
-                         (d.node1 === selectedVars[j] && d.node2 === selectedVars[i])) &&
-                        d.correlation_method === corrMethod &&
-                        (!hasScenarios || d.scenario === currentScenario));
-                    corrMatrix[i][j] = item ? item.strength : 0;
-                }
-            }
-        }
-
-        // Determine variable order
-        let orderedVars;
-        if (orderMode === 'manual' && manualOrder.length > 0) {
-            // Use manual order, filtered to selected vars
-            orderedVars = manualOrder.filter(v => selectedVars.includes(v));
-            // Add any selected vars not in manual order to the end
-            selectedVars.forEach(v => {
-                if (!orderedVars.includes(v)) {
-                    orderedVars.push(v);
-                }
-            });
-        } else if (orderMode === 'alphabetical') {
-            orderedVars = selectedVars.slice().sort();
-        } else {
-            // Perform hierarchical clustering in browser
-            orderedVars = performClustering_test(selectedVars, corrMatrix, linkageMethod);
-        }
-
-        // Reorder correlation matrix according to ordering
-        const orderedIndices = orderedVars.map(v => selectedVars.indexOf(v));
-        const reorderedMatrix = [];
-        for (let i = 0; i < n; i++) {
-            reorderedMatrix[i] = [];
-            for (let j = 0; j < n; j++) {
-                reorderedMatrix[i][j] = corrMatrix[orderedIndices[i]][orderedIndices[j]];
-            }
-        }
-
-        // Draw heatmap
-        drawHeatmap_test(orderedVars, reorderedMatrix, corrMethod);
-
-        // Draw dendrogram (only if using dendrogram order)
-        if (orderMode === 'dendrogram') {
-            drawDendrogram_test(orderedVars, corrMatrix, linkageMethod);
-        } else {
-            document.getElementById('dendrogram_test').style.display = 'none';
+    // Make dataset change handler global
+    window.changeDataset_dataset_selector_parquet = function() {
+        var select = document.getElementById('dataset_select_dataset_selector_parquet');
+        if (select) {
+            loadPivotTabledataset_selector_parquet(select.value);
         }
     };
 
-    function performClustering_test(vars, corrMatrix, linkageMethod) {
-        if (vars.length < 2) return vars;
-        if (!window.mlHclust || !window.mlHclust.agnes) {
-            console.warn('ml-hclust library not loaded, using original order');
-            return vars;
-        }
-
-        try {
-            // Convert correlation to distance matrix
-            const n = vars.length;
-            const distMatrix = [];
-            for (let i = 0; i < n; i++) {
-                distMatrix[i] = [];
-                for (let j = 0; j < n; j++) {
-                    // dist = sqrt(0.5 * (1 - corr))
-                    const dist = Math.sqrt(Math.max(0, 0.5 * (1 - Math.abs(corrMatrix[i][j]))));
-                    distMatrix[i][j] = dist;
-                }
-            }
-
-            // Perform hierarchical clustering using AGNES
-            const tree = window.mlHclust.agnes(distMatrix, { method: linkageMethod });
-
-            // Extract leaf order
-            const leafOrder = [];
-            function getLeafOrder(node) {
-                if (node.isLeaf) {
-                    leafOrder.push(node.index);
-                } else {
-                    if (node.children) {
-                        node.children.forEach(child => getLeafOrder(child));
-                    }
-                }
-            }
-            getLeafOrder(tree);
-
-            // Return variables in dendrogram order
-            return leafOrder.map(idx => vars[idx]);
-        } catch (error) {
-            console.warn('Clustering failed:', error);
-            return vars;
-        }
-    }
-
-    function drawHeatmap_test(vars, corrMatrix, corrMethod) {
-        const n = vars.length;
-
-        // Build z-values and text
-        const zValues = [];
-        const textValues = [];
-        const hoverText = [];
-
-        for (let i = 0; i < n; i++) {
-            zValues[i] = [];
-            textValues[i] = [];
-            hoverText[i] = [];
-            for (let j = 0; j < n; j++) {
-                const corr = corrMatrix[i][j];
-                zValues[i][j] = corr;
-
-                if (i === j) {
-                    textValues[i][j] = '1.00';
-                    hoverText[i][j] = vars[i];
-                } else if (i < j) {
-                    // Upper triangle: Pearson
-                    textValues[i][j] = 'P: ' + corr.toFixed(2);
-                    hoverText[i][j] = vars[i] + ' vs ' + vars[j] + '<br>Pearson: ' + corr.toFixed(3);
-                } else {
-                    // Lower triangle: Spearman
-                    textValues[i][j] = 'S: ' + corr.toFixed(2);
-                    hoverText[i][j] = vars[i] + ' vs ' + vars[j] + '<br>Spearman: ' + corr.toFixed(3);
-                }
-            }
-        }
-
-        // Create heatmap
-        const heatmapTrace = {
-            z: zValues,
-            x: vars,
-            y: vars,
-            type: 'heatmap',
-            colorscale: [
-                [0, '#ff0000'],    // -1: red
-                [0.5, '#ffffff'],  //  0: white
-                [1, '#0000ff']     //  1: blue
-            ],
-            zmin: -1,
-            zmax: 1,
-            text: hoverText,
-            hovertemplate: '%{text}<extra></extra>',
-            colorbar: {
-                title: 'Correlation',
-                titleside: 'right'
-            }
-        };
-
-        const heatmapLayout = {
-            xaxis: { side: 'bottom', tickangle: -45 },
-            yaxis: { autorange: 'reversed' },
-            annotations: [],
-            margin: { l: 150, r: 50, b: 150, t: 50 }
-        };
-
-        // Add text annotations
-        for (let i = 0; i < n; i++) {
-            for (let j = 0; j < n; j++) {
-                heatmapLayout.annotations.push({
-                    x: vars[j],
-                    y: vars[i],
-                    text: textValues[i][j],
-                    showarrow: false,
-                    font: {
-                        size: 10,
-                        color: Math.abs(zValues[i][j]) > 0.5 ? 'white' : 'black'
-                    }
-                });
-            }
-        }
-
-        Plotly.newPlot('corrmatrix_test', [heatmapTrace], heatmapLayout, {responsive: true});
-    }
-
-    function drawDendrogram_test(vars, corrMatrix, linkageMethod) {
-        const dendroDiv = document.getElementById('dendrogram_test');
-        dendroDiv.style.display = 'block';
-
-        if (vars.length < 2) {
-            dendroDiv.innerHTML = '<p style="color: #666;">Select at least 2 variables to see dendrogram</p>';
-            return;
-        }
-
-        if (!window.mlHclust || !window.mlHclust.agnes) {
-            dendroDiv.innerHTML = '<p style="color: #666;">Loading clustering library...</p>';
-            return;
-        }
-
-        try {
-            // Convert correlation to distance matrix
-            const n = vars.length;
-            const distMatrix = [];
-            for (let i = 0; i < n; i++) {
-                distMatrix[i] = [];
-                for (let j = 0; j < n; j++) {
-                    const dist = Math.sqrt(Math.max(0, 0.5 * (1 - Math.abs(corrMatrix[i][j]))));
-                    distMatrix[i][j] = dist;
-                }
-            }
-
-            // Perform clustering using AGNES
-            const tree = window.mlHclust.agnes(distMatrix, { method: linkageMethod });
-
-            // Extract dendrogram structure
-            const dendroData = extractDendrogramStructure_test(tree, vars);
-
-            // Draw dendrogram
-            const leafTrace = {
-                x: dendroData.leafPositions,
-                y: Array(n).fill(0),
-                mode: 'text',
-                type: 'scatter',
-                text: dendroData.leafLabels,
-                textposition: 'bottom center',
-                textfont: { size: 10 },
-                hoverinfo: 'text',
-                showlegend: false
-            };
-
-            const dendroLayout = {
-                title: 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)',
-                xaxis: {
-                    visible: false,
-                    range: [-0.5, n - 0.5]
-                },
-                yaxis: {
-                    title: 'Height',
-                    range: [0, dendroData.maxHeight * 1.15]
-                },
-                margin: { l: 80, r: 50, b: 120, t: 50 },
-                showlegend: false,
-                shapes: dendroData.shapes
-            };
-
-            Plotly.newPlot('dendrogram_test', [leafTrace], dendroLayout, {responsive: true});
-        } catch (error) {
-            console.error('Failed to draw dendrogram:', error);
-            dendroDiv.innerHTML = '<p style="color: red;">Error drawing dendrogram</p>';
-        }
-    }
-
-    function extractDendrogramStructure_test(tree, vars) {
-        const n = vars.length;
-        const positions = {};
-        const heights = {};
-        const shapes = [];
-        let maxHeight = 0;
-        let nextPos = 0;
-
-        // Assign positions to leaves (in order they appear)
-        function assignPositions(node) {
-            if (node.isLeaf) {
-                positions[node.index] = nextPos;
-                heights[node.index] = 0;
-                nextPos++;
-                return node.index;
-            } else {
-                // Process children
-                const leftIdx = assignPositions(node.children[0]);
-                const rightIdx = assignPositions(node.children[1]);
-
-                // Calculate merge position
-                const leftPos = getClusterPos(leftIdx);
-                const rightPos = getClusterPos(rightIdx);
-                const leftHeight = getClusterHeight(leftIdx);
-                const rightHeight = getClusterHeight(rightIdx);
-                const mergePos = (leftPos + rightPos) / 2;
-                const mergeHeight = node.height || 0;
-
-                maxHeight = Math.max(maxHeight, mergeHeight);
-
-                // Store cluster info (use negative index to distinguish from leaves)
-                const clusterId = -(n + Object.keys(shapes).length / 3);
-                positions[clusterId] = mergePos;
-                heights[clusterId] = mergeHeight;
-
-                // Draw U-shaped connection
-                shapes.push({
-                    type: 'line',
-                    x0: leftPos, y0: leftHeight,
-                    x1: leftPos, y1: mergeHeight,
-                    line: { color: '#636efa', width: 2 }
-                });
-                shapes.push({
-                    type: 'line',
-                    x0: leftPos, y0: mergeHeight,
-                    x1: rightPos, y1: mergeHeight,
-                    line: { color: '#636efa', width: 2 }
-                });
-                shapes.push({
-                    type: 'line',
-                    x0: rightPos, y0: rightHeight,
-                    x1: rightPos, y1: mergeHeight,
-                    line: { color: '#636efa', width: 2 }
-                });
-
-                return clusterId;
-            }
-        }
-
-        function getClusterPos(id) {
-            return positions[id] !== undefined ? positions[id] : 0;
-        }
-
-        function getClusterHeight(id) {
-            return heights[id] !== undefined ? heights[id] : 0;
-        }
-
-        assignPositions(tree);
-
-        // Get leaf order and labels
-        const leafOrder = [];
-        function collectLeaves(node) {
-            if (node.isLeaf) {
-                leafOrder.push(node.index);
-            } else {
-                node.children.forEach(child => collectLeaves(child));
-            }
-        }
-        collectLeaves(tree);
-
-        const leafPositions = leafOrder.map((_, i) => i);
-        const leafLabels = leafOrder.map(idx => vars[idx]);
-
-        return {
-            shapes: shapes,
-            maxHeight: maxHeight || 1,
-            leafPositions: leafPositions,
-            leafLabels: leafLabels
-        };
-    }
-})();
+    // Load the initial dataset
+    loadPivotTabledataset_selector_parquet('struct_data.aa');
 
 
 });
@@ -1106,105 +818,58 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="test_data" data-format="csv_embedded" data-src="">
-node1,node2,strength,scenario,correlation_method
-A,B,-0.14740941576354155,default,pearson
-A,B,-0.16973297329732973,default,spearman
-A,C,0.12879007228913594,default,pearson
-A,C,0.12228022802280228,default,spearman
-A,D,0.037013339079501405,default,pearson
-A,D,0.05284128412841284,default,spearman
-A,E,-0.014546701458468581,default,pearson
-A,E,-0.06393039303930394,default,spearman
-B,C,0.09629451373665845,default,pearson
-B,C,0.1192079207920792,default,spearman
-B,D,0.03996446337609061,default,pearson
-B,D,0.032943294329432944,default,spearman
-B,E,0.08363933101092343,default,pearson
-B,E,0.056825682568256826,default,spearman
-C,D,-0.13234166378717063,default,pearson
-C,D,-0.10562256225622563,default,spearman
-C,E,0.19840544631277882,default,pearson
-C,E,0.12732073207320732,default,spearman
-D,E,-0.17324382366542154,default,pearson
-D,E,-0.15375937593759376,default,spearman
-
-</script>
+<script type="text/plain" id="struct_data.bb" data-format="parquet" data-src="data/struct_data/bb.parquet"></script><script type="text/plain" id="standalone_data" data-format="parquet" data-src="data/standalone_data.parquet"></script><script type="text/plain" id="struct_data.aa" data-format="parquet" data-src="data/struct_data/aa.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
-<h1></h1>
+<h1>Dataset Selection with Parquet Format</h1>
 <p></p>
 
-<script type="module">
-// Import ml-hclust as ESM module
-import * as hclust from 'https://cdn.jsdelivr.net/npm/ml-hclust@4.0.0/+esm';
-window.mlHclust = hclust;
-window.hclustReady = true;
-console.log('ml-hclust library loaded:', hclust);
-</script>
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-<div class="corrplot-container">
-    <h2>Test CorrPlot</h2>
-    <p></p>
-    
-    <div style="margin-bottom: 15px;">
-    <label for="var_select_test"><strong>Select Variables:</strong></label><br>
-    <select id="var_select_test" multiple size="8" style="width: 300px;" onchange="updateChart_test()">
-    </select>
-</div>
+    <div class="textblock-content">
+        <a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>Dataset Selection with Parquet Format</h1>
+<p>This example demonstrates the <strong>dataset selection</strong> feature combined with <strong>Parquet data format</strong>.</p>
 
-    <div style="margin-bottom: 15px;">
-    <label for="corr_method_select_test"><strong>Correlation method:</strong></label>
-    <select id="corr_method_select_test" onchange="updateChart_test()">
-        <option value="pearson" selected>Pearson</option>
-        <option value="spearman">Spearman</option>
-    </select>
-</div>
+<h2>Key Features Demonstrated:</h2>
+<ul>
+    <li><strong>Struct with DataFrames:</strong> A struct <code>ExampleFrame</code> with fields <code>aa::DataFrame</code> and <code>bb::Union{Missing,DataFrame}</code></li>
+    <li><strong>Automatic extraction:</strong> DataFrames are extracted with dot-prefixed names (<code>Symbol("struct_data.aa")</code>, <code>Symbol("struct_data.bb")</code>)</li>
+    <li><strong>Subfolder storage:</strong> Struct DataFrames are stored in subfolders (e.g., <code>data/struct_data/aa.parquet</code>)</li>
+    <li><strong>Dataset switching:</strong> Use the dropdown to switch between datasets - data is loaded on-demand</li>
+</ul>
 
-    <div style="margin-bottom: 15px;">
-    <label for="order_mode_test"><strong>Variable ordering:</strong></label>
-    <select id="order_mode_test" onchange="updateChart_test()">
-        <option value="dendrogram" selected>Order by dendrogram</option>
-        <option value="alphabetical">Order alphabetically</option>
-        <option value="manual">Order manually</option>
-    </select>
-</div>
+<h2>How Parquet Storage Works:</h2>
+<p>When using <code>dataformat = :parquet</code>, DataFrames from structs are saved in subfolders:</p>
+<ul>
+    <li><code>data/struct_data/aa.parquet</code> - from example_struct.aa</li>
+    <li><code>data/struct_data/bb.parquet</code> - from example_struct.bb</li>
+    <li><code>data/standalone_data.parquet</code> - standalone DataFrame (no subfolder)</li>
+</ul>
+<p>This is efficient for large datasets as data is loaded only when selected.</p>
 
-    <div id="linkage_container_test" style="margin-bottom: 15px;">
-    <label for="linkage_select_test"><strong>Clustering linkage:</strong></label>
-    <select id="linkage_select_test" onchange="updateChart_test()">
-        <option value="ward" selected>Ward</option>
-        <option value="average">Average</option>
-        <option value="single">Single</option>
-        <option value="complete">Complete</option>
-    </select>
-</div>
-
-    <div id="manual_order_test" style="margin-bottom: 15px; display: none;">
-    <label><strong>Drag to Reorder:</strong></label>
-    <div id="sortable_vars_test" style="padding: 10px; border: 1px solid #ccc; min-height: 50px;">
     </div>
-</div>
+<br>
+<hr>
+<br>
+    <h2>dataset_selector_parquet</h2>
+    <p>Dataset selection with Parquet format - switch between datasets stored in subfolders</p>
+        <div style="margin-bottom: 10px;">
+        <label for="dataset_select_dataset_selector_parquet"><strong>Dataset:</strong></label>
+        <select id="dataset_select_dataset_selector_parquet" onchange="changeDataset_dataset_selector_parquet()">
+            <option value="struct_data.aa">struct_data.aa</option>
+            <option value="struct_data.bb">struct_data.bb</option>
+            <option value="standalone_data">standalone_data</option>
+        </select>
+    </div>
 
-    <div id="dendrogram_test" style="width: 100%; height: 300px;"></div>
-    <div id="corrmatrix_test" style="width: 100%; height: 600px;"></div>
-</div>
-<style>
-#sortable_vars_test .sortable-item {
-    padding: 5px 10px;
-    margin: 2px;
-    background-color: #f0f0f0;
-    border: 1px solid #ccc;
-    cursor: move;
-    display: inline-block;
-}
-#sortable_vars_test .sortable-item:hover {
-    background-color: #e0e0e0;
-}
-</style>
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_dataset_selector_parquet"  onchange="toggleTotals_dataset_selector_parquet()" />
+            Show Totals
+        </label>
+    </div>
+    <div id="dataset_selector_parquet"></div>
 
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: test_data</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>

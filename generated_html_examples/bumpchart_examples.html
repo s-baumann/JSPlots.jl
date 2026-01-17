@@ -507,7 +507,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -731,26 +732,27 @@ $(function(){
         // Assign colors to entities in filtered data
         assignEntityColors(filteredData);
 
-        // Process data based on Y_MODE
-        let processedData;
-        if (Y_MODE === 'Ranking') {
-            processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
-        } else {
-            // Absolute mode - use performance values directly
-            processedData = filteredData.map(row => ({
-                ...row,
-                y_value: row[PERF_COL],
-                original_value: row[PERF_COL]
-            }));
-        }
-
         // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
         if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
             renderNoFacets(processedData, X_COL, Y_MODE);
         } else if (FACET_COLS.length === 1) {
-            renderOneFacet(processedData, X_COL, Y_MODE, FACET_COLS[0]);
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
         } else {
-            renderTwoFacets(processedData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1]);
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
         }
     };
 
@@ -808,7 +810,7 @@ $(function(){
     }
 
     // Render with one facet
-    function renderOneFacet(data, xCol, yMode, facetCol) {
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
         const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nFacets = facetValues.length;
 
@@ -824,7 +826,20 @@ $(function(){
         };
 
         facetValues.forEach((facetVal, idx) => {
-            const facetData = data.filter(row => row[facetCol] === facetVal);
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
             const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
             const row = Math.floor(idx / nCols) + 1;
@@ -874,11 +889,20 @@ $(function(){
                 title: row === nRows ? xCol : '',
                 anchor: yaxis
             };
-            layout[yaxis] = {
-                title: col === 1 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                anchor: xaxis,
-                autorange: yMode === 'Ranking' ? 'reversed' : true
-            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
 
             // Add annotation for facet label
             if (!layout.annotations) layout.annotations = [];
@@ -901,7 +925,7 @@ $(function(){
     }
 
     // Render with two facets
-    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol) {
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
         const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
         const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nRows = rowValues.length;
@@ -916,9 +940,22 @@ $(function(){
 
         rowValues.forEach((rowVal, rowIdx) => {
             colValues.forEach((colVal, colIdx) => {
-                const facetData = data.filter(row =>
+                const rawFacetData = data.filter(row =>
                     row[facetRow] === rowVal && row[facetCol] === colVal
                 );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
                 const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                 const idx = rowIdx * nCols + colIdx;
@@ -967,11 +1004,20 @@ $(function(){
                     title: rowIdx === nRows - 1 ? xCol : '',
                     anchor: yaxis
                 };
-                layout[yaxis] = {
-                    title: colIdx === 0 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                    anchor: xaxis,
-                    autorange: yMode === 'Ranking' ? 'reversed' : true
-                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
 
                 // Add annotations for facet labels
                 if (!layout.annotations) layout.annotations = [];
@@ -1174,26 +1220,27 @@ $(function(){
         // Assign colors to entities in filtered data
         assignEntityColors(filteredData);
 
-        // Process data based on Y_MODE
-        let processedData;
-        if (Y_MODE === 'Ranking') {
-            processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
-        } else {
-            // Absolute mode - use performance values directly
-            processedData = filteredData.map(row => ({
-                ...row,
-                y_value: row[PERF_COL],
-                original_value: row[PERF_COL]
-            }));
-        }
-
         // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
         if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
             renderNoFacets(processedData, X_COL, Y_MODE);
         } else if (FACET_COLS.length === 1) {
-            renderOneFacet(processedData, X_COL, Y_MODE, FACET_COLS[0]);
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
         } else {
-            renderTwoFacets(processedData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1]);
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
         }
     };
 
@@ -1251,7 +1298,7 @@ $(function(){
     }
 
     // Render with one facet
-    function renderOneFacet(data, xCol, yMode, facetCol) {
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
         const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nFacets = facetValues.length;
 
@@ -1267,7 +1314,20 @@ $(function(){
         };
 
         facetValues.forEach((facetVal, idx) => {
-            const facetData = data.filter(row => row[facetCol] === facetVal);
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
             const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
             const row = Math.floor(idx / nCols) + 1;
@@ -1317,11 +1377,20 @@ $(function(){
                 title: row === nRows ? xCol : '',
                 anchor: yaxis
             };
-            layout[yaxis] = {
-                title: col === 1 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                anchor: xaxis,
-                autorange: yMode === 'Ranking' ? 'reversed' : true
-            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
 
             // Add annotation for facet label
             if (!layout.annotations) layout.annotations = [];
@@ -1344,7 +1413,7 @@ $(function(){
     }
 
     // Render with two facets
-    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol) {
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
         const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
         const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nRows = rowValues.length;
@@ -1359,9 +1428,22 @@ $(function(){
 
         rowValues.forEach((rowVal, rowIdx) => {
             colValues.forEach((colVal, colIdx) => {
-                const facetData = data.filter(row =>
+                const rawFacetData = data.filter(row =>
                     row[facetRow] === rowVal && row[facetCol] === colVal
                 );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
                 const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                 const idx = rowIdx * nCols + colIdx;
@@ -1410,11 +1492,20 @@ $(function(){
                     title: rowIdx === nRows - 1 ? xCol : '',
                     anchor: yaxis
                 };
-                layout[yaxis] = {
-                    title: colIdx === 0 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                    anchor: xaxis,
-                    autorange: yMode === 'Ranking' ? 'reversed' : true
-                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
 
                 // Add annotations for facet labels
                 if (!layout.annotations) layout.annotations = [];
@@ -1617,26 +1708,27 @@ $(function(){
         // Assign colors to entities in filtered data
         assignEntityColors(filteredData);
 
-        // Process data based on Y_MODE
-        let processedData;
-        if (Y_MODE === 'Ranking') {
-            processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
-        } else {
-            // Absolute mode - use performance values directly
-            processedData = filteredData.map(row => ({
-                ...row,
-                y_value: row[PERF_COL],
-                original_value: row[PERF_COL]
-            }));
-        }
-
         // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
         if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
             renderNoFacets(processedData, X_COL, Y_MODE);
         } else if (FACET_COLS.length === 1) {
-            renderOneFacet(processedData, X_COL, Y_MODE, FACET_COLS[0]);
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
         } else {
-            renderTwoFacets(processedData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1]);
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
         }
     };
 
@@ -1694,7 +1786,7 @@ $(function(){
     }
 
     // Render with one facet
-    function renderOneFacet(data, xCol, yMode, facetCol) {
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
         const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nFacets = facetValues.length;
 
@@ -1710,7 +1802,20 @@ $(function(){
         };
 
         facetValues.forEach((facetVal, idx) => {
-            const facetData = data.filter(row => row[facetCol] === facetVal);
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
             const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
             const row = Math.floor(idx / nCols) + 1;
@@ -1760,11 +1865,20 @@ $(function(){
                 title: row === nRows ? xCol : '',
                 anchor: yaxis
             };
-            layout[yaxis] = {
-                title: col === 1 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                anchor: xaxis,
-                autorange: yMode === 'Ranking' ? 'reversed' : true
-            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
 
             // Add annotation for facet label
             if (!layout.annotations) layout.annotations = [];
@@ -1787,7 +1901,7 @@ $(function(){
     }
 
     // Render with two facets
-    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol) {
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
         const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
         const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nRows = rowValues.length;
@@ -1802,9 +1916,22 @@ $(function(){
 
         rowValues.forEach((rowVal, rowIdx) => {
             colValues.forEach((colVal, colIdx) => {
-                const facetData = data.filter(row =>
+                const rawFacetData = data.filter(row =>
                     row[facetRow] === rowVal && row[facetCol] === colVal
                 );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
                 const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                 const idx = rowIdx * nCols + colIdx;
@@ -1853,11 +1980,20 @@ $(function(){
                     title: rowIdx === nRows - 1 ? xCol : '',
                     anchor: yaxis
                 };
-                layout[yaxis] = {
-                    title: colIdx === 0 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                    anchor: xaxis,
-                    autorange: yMode === 'Ranking' ? 'reversed' : true
-                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
 
                 // Add annotations for facet labels
                 if (!layout.annotations) layout.annotations = [];
@@ -1939,6 +2075,494 @@ $(function(){
         console.error('Error loading data for chart example3_bump:', error);
     });
 })();
+(function() {
+    // Configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const X_COL = 'week';
+    const PERFORMANCE_COLS = ['points'];
+    const ENTITY_COL = 'team';
+    const COLOR_MAP = {'Blue Tigers': '#EF553B', 'Red Bulls': '#636efa', 'Green Eagles': '#00cc96', 'Yellow Lions': '#ab63fa'};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+    const DEFAULT_PERF_COL = 'points';
+
+    let allData = [];
+    let entityColors = {};  // Store entity color assignments
+
+    // Calculate dense ranks for data
+    function calculateDenseRanks(data, xCol, perfCol) {
+        const xGroups = {};
+        data.forEach(row => {
+            const xVal = row[xCol];
+            const xKey = String(xVal);
+            if (!xGroups[xKey]) {
+                xGroups[xKey] = [];
+            }
+            xGroups[xKey].push(row);
+        });
+
+        const rankedData = [];
+        for (let xKey in xGroups) {
+            const group = xGroups[xKey];
+
+            // Sort by performance descending (best first)
+            const sorted = group.sort((a, b) => b[perfCol] - a[perfCol]);
+
+            // Get unique performance values
+            const uniqueValues = [...new Set(sorted.map(r => r[perfCol]))].sort((a, b) => b - a);
+
+            // Assign dense ranks (ties get same rank, next rank = current + 1)
+            const valueToRank = {};
+            uniqueValues.forEach((val, idx) => {
+                valueToRank[val] = idx + 1;  // Dense rank: 1, 2, 3, ... (no gaps)
+            });
+
+            sorted.forEach(row => {
+                rankedData.push({
+                    ...row,
+                    y_value: valueToRank[row[perfCol]],
+                    original_value: row[perfCol]
+                });
+            });
+        }
+
+        return rankedData;
+    }
+
+    // Assign colors to entities from filtered data
+    function assignEntityColors(data) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        entityColors = {};
+        entities.forEach((entity, idx) => {
+            entityColors[entity] = COLOR_MAP[entity] || COLOR_PALETTE[idx % COLOR_PALETTE.length];
+        });
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example4_bump = function() {
+        // Get current performance column
+        const perfColSelect = document.getElementById('perf_col_select_example4_bump');
+        const PERF_COL = perfColSelect ? perfColSelect.value : DEFAULT_PERF_COL;
+
+        // Get Y-axis mode
+        const yModeSelect = document.getElementById('y_mode_select_example4_bump');
+        const Y_MODE = yModeSelect ? yModeSelect.value : 'Ranking';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example4_bump');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example4_bump' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_example4_bump');
+        const facet2Select = document.getElementById('facet2_select_example4_bump');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example4_bump',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Assign colors to entities in filtered data
+        assignEntityColors(filteredData);
+
+        // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
+        if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
+            renderNoFacets(processedData, X_COL, Y_MODE);
+        } else if (FACET_COLS.length === 1) {
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
+        } else {
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
+        }
+    };
+
+    // Render without facets
+    function renderNoFacets(data, xCol, yMode) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        const traces = [];
+
+        entities.forEach(entity => {
+            const entityData = data.filter(row => String(row[ENTITY_COL]) === entity);
+            entityData.sort((a, b) => {
+                const aVal = a[xCol];
+                const bVal = b[xCol];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const xValues = entityData.map(row => row[xCol]);
+            const yValues = entityData.map(row => row.y_value);
+            const origValues = entityData.map(row => row.original_value);
+
+            traces.push({
+                x: xValues,
+                y: yValues,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: entity,
+                line: {
+                    color: entityColors[entity],
+                    width: 3
+                },
+                marker: {size: 6},
+                customdata: origValues,
+                hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                              (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                              '<extra></extra>'
+            });
+        });
+
+        const layout = {
+            xaxis: {title: xCol},
+            yaxis: {
+                title: yMode === 'Ranking' ? 'Rank' : 'Performance',
+                autorange: yMode === 'Ranking' ? 'reversed' : true  // Rank 1 at top
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        Plotly.newPlot('example4_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example4_bump', traces);
+        });
+    }
+
+    // Render with one facet
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
+        const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nFacets = facetValues.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+        const nRows = Math.ceil(nFacets / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        facetValues.forEach((facetVal, idx) => {
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
+            const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            entities.forEach(entity => {
+                const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                entityData.sort((a, b) => {
+                    const aVal = a[xCol];
+                    const bVal = b[xCol];
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+                    return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                });
+
+                const xValues = entityData.map(row => row[xCol]);
+                const yValues = entityData.map(row => row.y_value);
+                const origValues = entityData.map(row => row.original_value);
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: entity,
+                    legendgroup: entity,
+                    showlegend: idx === 0,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    line: {
+                        color: entityColors[entity],
+                        width: 3
+                    },
+                    marker: {size: 6},
+                    customdata: origValues,
+                    hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                  (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                  '<extra></extra>'
+                });
+            });
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? xCol : '',
+                anchor: yaxis
+            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
+
+            // Add annotation for facet label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: facetCol + ': ' + facetVal,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example4_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example4_bump', traces);
+        });
+    }
+
+    // Render with two facets
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
+        const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
+        const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nRows = rowValues.length;
+        const nCols = colValues.length;
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        rowValues.forEach((rowVal, rowIdx) => {
+            colValues.forEach((colVal, colIdx) => {
+                const rawFacetData = data.filter(row =>
+                    row[facetRow] === rowVal && row[facetCol] === colVal
+                );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
+                const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+                const idx = rowIdx * nCols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                entities.forEach(entity => {
+                    const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                    entityData.sort((a, b) => {
+                        const aVal = a[xCol];
+                        const bVal = b[xCol];
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+                        return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                    });
+
+                    const xValues = entityData.map(row => row[xCol]);
+                    const yValues = entityData.map(row => row.y_value);
+                    const origValues = entityData.map(row => row.original_value);
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: entity,
+                        legendgroup: entity,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: entityColors[entity],
+                            width: 3
+                        },
+                        marker: {size: 6},
+                        customdata: origValues,
+                        hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                      (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                      '<extra></extra>'
+                    });
+                });
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: rowIdx === nRows - 1 ? xCol : '',
+                    anchor: yaxis
+                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
+
+                // Add annotations for facet labels
+                if (!layout.annotations) layout.annotations = [];
+
+                // Column header
+                if (rowIdx === 0) {
+                    layout.annotations.push({
+                        text: facetCol + ': ' + colVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 0.5,
+                        y: 1.1,
+                        xanchor: 'center',
+                        yanchor: 'bottom',
+                        font: {size: 10}
+                    });
+                }
+
+                // Row label
+                if (colIdx === nCols - 1) {
+                    layout.annotations.push({
+                        text: facetRow + ': ' + rowVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 1.05,
+                        y: 0.5,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        textangle: -90,
+                        font: {size: 10}
+                    });
+                }
+            });
+        });
+
+        Plotly.newPlot('example4_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example4_bump', traces);
+        });
+    }
+
+    // Setup cross-facet highlighting (hover over one line greys out all others)
+    function setupCrossFacetHighlighting(chartId, allTraces) {
+        const chartDiv = document.getElementById(chartId);
+        const originalColors = allTraces.map(t => t.line.color);
+
+        chartDiv.on('plotly_hover', function(data) {
+            if (!data.points || data.points.length === 0) return;
+
+            const hoveredEntity = data.points[0].data.name;
+
+            // Update all traces: hovered stays colored, others turn grey
+            const updates = allTraces.map((trace, idx) => {
+                if (trace.name === hoveredEntity) {
+                    return originalColors[idx];  // Keep original color
+                } else {
+                    return 'rgba(200, 200, 200, 0.3)';  // Grey out
+                }
+            });
+
+            Plotly.restyle(chartId, {'line.color': updates});
+        });
+
+        chartDiv.on('plotly_unhover', function() {
+            // Restore all original colors
+            Plotly.restyle(chartId, {'line.color': originalColors});
+        });
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('league.rankings').then(function(data) {
+        allData = data;
+        window.updateChart_example4_bump();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example4_bump');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example4_bump:', error);
+    });
+})();
 
 
 });
@@ -1948,184 +2572,234 @@ $(function(){
 
 <script type="text/plain" id="strategy_data" data-format="csv_embedded" data-src="">
 period,strategy,performance,volatility
-1,Growth,100.11890655977456,13.0
-2,Growth,101.61635948673083,13.0
-3,Growth,86.00802024636788,5.0
-4,Growth,81.33564398301071,8.0
-5,Growth,76.13991854075132,12.0
-6,Growth,73.89276106047953,5.0
-7,Growth,76.43129887671975,7.0
-8,Growth,73.76687033743012,14.0
-9,Growth,79.31175006049963,16.0
-10,Growth,78.70297068664722,7.0
-11,Growth,78.89980098731883,8.0
-12,Growth,85.41257378719659,7.0
-1,Value,67.1350507973446,16.0
-2,Value,67.51401206401958,8.0
-3,Value,63.58493787974047,19.0
-4,Value,68.10706841726964,6.0
-5,Value,75.91107657983125,12.0
-6,Value,72.7539595840242,17.0
-7,Value,78.3807753291762,11.0
-8,Value,78.68218949228998,12.0
-9,Value,83.08359540913659,6.0
-10,Value,75.956673436758,15.0
-11,Value,74.93742508245118,11.0
-12,Value,76.61932110529693,5.0
-1,Momentum,81.88114284949962,5.0
-2,Momentum,85.2486364802818,13.0
-3,Momentum,89.06256246704972,19.0
-4,Momentum,83.25783040570651,6.0
-5,Momentum,83.34460281086513,14.0
-6,Momentum,78.80209536599617,10.0
-7,Momentum,85.43181864337348,13.0
-8,Momentum,83.93160341543783,6.0
-9,Momentum,87.0203501888322,14.0
-10,Momentum,90.31428004010792,13.0
-11,Momentum,96.58636419834622,13.0
-12,Momentum,103.59237167211985,11.0
-1,Quality,63.36121103244695,7.0
-2,Quality,65.98885572282637,5.0
-3,Quality,66.47196514669118,12.0
-4,Quality,67.99329116387872,17.0
-5,Quality,68.16217513613205,5.0
-6,Quality,60.32022086532996,8.0
-7,Quality,68.96290091178808,17.0
-8,Quality,70.14114075994226,11.0
-9,Quality,62.742235410364444,8.0
-10,Quality,72.67130826100043,7.0
-11,Quality,70.51132131525654,11.0
-12,Quality,58.27065533276786,12.0
-1,Income,69.77536791929371,8.0
-2,Income,69.6675630594855,11.0
-3,Income,80.36299217863517,9.0
-4,Income,83.76893724043151,7.0
-5,Income,85.66018638911754,6.0
-6,Income,83.64061592402868,6.0
-7,Income,83.6375589830275,12.0
-8,Income,88.59220239699096,19.0
-9,Income,87.20723705183349,19.0
-10,Income,90.58587653571624,6.0
-11,Income,89.90048996550652,14.0
-12,Income,93.09802609925248,7.0
+1,Growth,69.01635575142528,7.0
+2,Growth,74.5722600520778,8.0
+3,Growth,78.4224039061839,14.0
+4,Growth,83.45089574494467,7.0
+5,Growth,87.3285067593529,15.0
+6,Growth,87.03490681532955,13.0
+7,Growth,83.62542524296566,10.0
+8,Growth,82.46861725239621,19.0
+9,Growth,77.43669906117333,8.0
+10,Growth,67.36250683171887,17.0
+11,Growth,62.757403976089364,18.0
+12,Growth,56.210772825353644,17.0
+1,Value,67.80779765201628,7.0
+2,Value,71.93754321850389,11.0
+3,Value,68.55327247802951,17.0
+4,Value,72.51199963807007,6.0
+5,Value,63.57002443928656,10.0
+6,Value,59.710715775822415,16.0
+7,Value,61.803876649395875,17.0
+8,Value,60.37931289947612,11.0
+9,Value,67.38547114001611,13.0
+10,Value,59.22163190696412,13.0
+11,Value,62.105543154156045,7.0
+12,Value,59.06290603973719,10.0
+1,Momentum,49.77985222723332,16.0
+2,Momentum,48.14012270221227,15.0
+3,Momentum,43.03368282228612,9.0
+4,Momentum,44.5094819599307,15.0
+5,Momentum,50.81723996330829,16.0
+6,Momentum,46.22702682313252,15.0
+7,Momentum,46.73601707509732,18.0
+8,Momentum,45.782150896279795,12.0
+9,Momentum,41.92897132026037,15.0
+10,Momentum,43.52338254286349,16.0
+11,Momentum,42.61752070068264,16.0
+12,Momentum,45.01736386939758,17.0
+1,Quality,82.76833383008304,18.0
+2,Quality,83.41619284143042,15.0
+3,Quality,74.98369122819774,16.0
+4,Quality,71.43803175024657,13.0
+5,Quality,74.33361566973804,14.0
+6,Quality,79.06168097724874,5.0
+7,Quality,80.82941227990823,9.0
+8,Quality,83.2358675504648,12.0
+9,Quality,73.60463344681557,5.0
+10,Quality,78.69674990873439,10.0
+11,Quality,79.2021398330601,17.0
+12,Quality,80.72636576466599,15.0
+1,Income,49.801251364502015,17.0
+2,Income,49.03141445670409,14.0
+3,Income,35.239782831607904,7.0
+4,Income,39.643474537545515,18.0
+5,Income,35.08020859342079,15.0
+6,Income,38.793937869880246,16.0
+7,Income,38.438572100848845,5.0
+8,Income,40.883263621376955,11.0
+9,Income,39.56576028578239,11.0
+10,Income,41.942503011259156,15.0
+11,Income,32.19972039085714,5.0
+12,Income,34.47271099671788,16.0
 
 </script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
 quarter,product,region,sales,market_share
-Q1,Product A,North,105,35.0
-Q2,Product A,North,120,31.0
-Q3,Product A,North,151,19.0
-Q4,Product A,North,88,34.0
-Q1,Product B,North,141,18.0
-Q2,Product B,North,117,32.0
-Q3,Product B,North,175,14.0
-Q4,Product B,North,188,18.0
-Q1,Product C,North,117,29.0
-Q2,Product C,North,109,20.0
-Q3,Product C,North,57,28.0
-Q4,Product C,North,143,17.0
-Q1,Product D,North,519,22.0
-Q2,Product D,North,439,28.0
-Q3,Product D,North,482,29.0
-Q4,Product D,North,433,22.0
-Q1,Product A,South,162,33.0
-Q2,Product A,South,176,37.0
-Q3,Product A,South,229,29.0
-Q4,Product A,South,210,14.0
-Q1,Product B,South,109,19.0
-Q2,Product B,South,122,17.0
-Q3,Product B,South,166,14.0
-Q4,Product B,South,86,16.0
-Q1,Product C,South,332,36.0
-Q2,Product C,South,296,25.0
-Q3,Product C,South,336,18.0
-Q4,Product C,South,304,13.0
-Q1,Product D,South,201,31.0
-Q2,Product D,South,270,15.0
-Q3,Product D,South,229,20.0
-Q4,Product D,South,291,27.0
-Q1,Product A,East,304,16.0
-Q2,Product A,East,347,22.0
-Q3,Product A,East,314,11.0
-Q4,Product A,East,322,39.0
-Q1,Product B,East,225,28.0
-Q2,Product B,East,235,22.0
-Q3,Product B,East,207,20.0
-Q4,Product B,East,228,34.0
-Q1,Product C,East,59,34.0
-Q2,Product C,East,114,27.0
-Q3,Product C,East,134,19.0
-Q4,Product C,East,143,26.0
-Q1,Product D,East,242,25.0
-Q2,Product D,East,165,10.0
-Q3,Product D,East,224,39.0
-Q4,Product D,East,235,19.0
-Q1,Product A,West,403,11.0
-Q2,Product A,West,449,30.0
-Q3,Product A,West,433,24.0
-Q4,Product A,West,435,27.0
-Q1,Product B,West,246,11.0
-Q2,Product B,West,327,20.0
-Q3,Product B,West,337,13.0
-Q4,Product B,West,252,19.0
-Q1,Product C,West,158,38.0
-Q2,Product C,West,171,28.0
-Q3,Product C,West,238,35.0
-Q4,Product C,West,161,27.0
-Q1,Product D,West,92,13.0
-Q2,Product D,West,72,27.0
-Q3,Product D,West,70,11.0
-Q4,Product D,West,96,33.0
+Q1,Product A,North,242,30.0
+Q2,Product A,North,159,30.0
+Q3,Product A,North,178,27.0
+Q4,Product A,North,221,36.0
+Q1,Product B,North,240,30.0
+Q2,Product B,North,247,18.0
+Q3,Product B,North,256,34.0
+Q4,Product B,North,237,26.0
+Q1,Product C,North,234,15.0
+Q2,Product C,North,312,12.0
+Q3,Product C,North,325,15.0
+Q4,Product C,North,235,35.0
+Q1,Product D,North,386,35.0
+Q2,Product D,North,419,39.0
+Q3,Product D,North,433,11.0
+Q4,Product D,North,459,39.0
+Q1,Product A,South,412,19.0
+Q2,Product A,South,458,27.0
+Q3,Product A,South,402,24.0
+Q4,Product A,South,444,22.0
+Q1,Product B,South,140,33.0
+Q2,Product B,South,114,11.0
+Q3,Product B,South,146,33.0
+Q4,Product B,South,162,25.0
+Q1,Product C,South,378,15.0
+Q2,Product C,South,291,23.0
+Q3,Product C,South,287,31.0
+Q4,Product C,South,374,11.0
+Q1,Product D,South,134,30.0
+Q2,Product D,South,85,33.0
+Q3,Product D,South,152,16.0
+Q4,Product D,South,86,34.0
+Q1,Product A,East,132,39.0
+Q2,Product A,East,153,23.0
+Q3,Product A,East,169,19.0
+Q4,Product A,East,100,22.0
+Q1,Product B,East,196,10.0
+Q2,Product B,East,205,40.0
+Q3,Product B,East,164,32.0
+Q4,Product B,East,148,25.0
+Q1,Product C,East,379,40.0
+Q2,Product C,East,317,21.0
+Q3,Product C,East,300,13.0
+Q4,Product C,East,376,32.0
+Q1,Product D,East,415,23.0
+Q2,Product D,East,447,34.0
+Q3,Product D,East,461,37.0
+Q4,Product D,East,456,30.0
+Q1,Product A,West,319,33.0
+Q2,Product A,West,248,17.0
+Q3,Product A,West,258,12.0
+Q4,Product A,West,283,13.0
+Q1,Product B,West,395,25.0
+Q2,Product B,West,455,15.0
+Q3,Product B,West,445,40.0
+Q4,Product B,West,433,39.0
+Q1,Product C,West,125,25.0
+Q2,Product C,West,160,22.0
+Q3,Product C,West,113,13.0
+Q4,Product C,West,147,35.0
+Q1,Product D,West,409,15.0
+Q2,Product D,West,372,18.0
+Q3,Product D,West,350,19.0
+Q4,Product D,West,394,32.0
+
+</script><script type="text/plain" id="league.team_info" data-format="csv_embedded" data-src="">
+team,founded
+Red Bulls,1995
+Blue Tigers,1988
+Green Eagles,2001
+Yellow Lions,1972
+
+</script><script type="text/plain" id="league.rankings" data-format="csv_embedded" data-src="">
+week,team,points
+1,Red Bulls,68.77642916897044
+2,Red Bulls,68.53179704553176
+3,Red Bulls,70.2676820685818
+4,Red Bulls,69.3105717132688
+5,Red Bulls,67.16776499482415
+6,Red Bulls,65.04638736626703
+7,Red Bulls,69.18040106057964
+8,Red Bulls,66.22647966033898
+9,Red Bulls,66.43709209592305
+10,Red Bulls,66.46423239255431
+1,Blue Tigers,68.36480475736334
+2,Blue Tigers,72.25403170155427
+3,Blue Tigers,72.0746745973372
+4,Blue Tigers,73.42643577764152
+5,Blue Tigers,72.80670155313916
+6,Blue Tigers,75.71849399589978
+7,Blue Tigers,73.22225870819508
+8,Blue Tigers,72.55408548071249
+9,Blue Tigers,75.33691667013589
+10,Blue Tigers,74.0664485606661
+1,Green Eagles,63.04272812436158
+2,Green Eagles,67.0165616587014
+3,Green Eagles,69.84001777041122
+4,Green Eagles,61.648977717488144
+5,Green Eagles,62.14108787511729
+6,Green Eagles,60.558399044835014
+7,Green Eagles,58.87161954359144
+8,Green Eagles,58.66167770077569
+9,Green Eagles,54.65482349891067
+10,Green Eagles,53.362715139162475
+1,Yellow Lions,53.15916964694334
+2,Yellow Lions,54.17726879588842
+3,Yellow Lions,50.47927749883534
+4,Yellow Lions,48.45714945340414
+5,Yellow Lions,45.96280864481456
+6,Yellow Lions,46.21854766618942
+7,Yellow Lions,47.75645005301847
+8,Yellow Lions,46.11906916387032
+9,Yellow Lions,45.549820500237445
+10,Yellow Lions,47.39618496221646
 
 </script><script type="text/plain" id="company_performance" data-format="csv_embedded" data-src="">
 month,company,revenue,profit_margin
-2024-01-01,Alpha Corp,113.84893683117319,11.0
-2024-02-01,Alpha Corp,124.25827971753269,5.0
-2024-03-01,Alpha Corp,132.14656173834064,11.0
-2024-04-01,Alpha Corp,132.05970162721434,17.0
-2024-05-01,Alpha Corp,115.36240535774864,8.0
-2024-06-01,Alpha Corp,91.67749237895583,19.0
-2024-07-01,Alpha Corp,86.6862778451912,17.0
-2024-08-01,Alpha Corp,72.44922875720016,7.0
-2024-09-01,Alpha Corp,74.75775037078549,16.0
-2024-10-01,Alpha Corp,71.542783135415,15.0
-2024-11-01,Alpha Corp,85.05350077797871,10.0
-2024-12-01,Alpha Corp,74.2639153764762,24.0
-2024-01-01,Beta Inc,154.01413237371858,11.0
-2024-02-01,Beta Inc,150.2909989836598,5.0
-2024-03-01,Beta Inc,143.44756767954172,18.0
-2024-04-01,Beta Inc,134.32887164212974,6.0
-2024-05-01,Beta Inc,139.9557727375615,16.0
-2024-06-01,Beta Inc,135.4954428409965,8.0
-2024-07-01,Beta Inc,122.67707079206963,15.0
-2024-08-01,Beta Inc,121.07681000991475,14.0
-2024-09-01,Beta Inc,126.86395973227266,9.0
-2024-10-01,Beta Inc,151.59477239757751,14.0
-2024-11-01,Beta Inc,157.4292823099323,5.0
-2024-12-01,Beta Inc,161.7423207793852,25.0
-2024-01-01,Gamma LLC,148.1936185169024,5.0
-2024-02-01,Gamma LLC,144.88716231939964,10.0
-2024-03-01,Gamma LLC,141.9971351416751,13.0
-2024-04-01,Gamma LLC,130.91192101996634,20.0
-2024-05-01,Gamma LLC,128.82004006434013,7.0
-2024-06-01,Gamma LLC,122.74236320142458,21.0
-2024-07-01,Gamma LLC,119.27958507573847,11.0
-2024-08-01,Gamma LLC,112.9766729530656,6.0
-2024-09-01,Gamma LLC,116.8896489076316,15.0
-2024-10-01,Gamma LLC,124.71280146242049,11.0
-2024-11-01,Gamma LLC,119.02010474193068,14.0
-2024-12-01,Gamma LLC,121.22815492319135,20.0
-2024-01-01,Delta Co,119.89977247977224,13.0
-2024-02-01,Delta Co,123.53278641860834,24.0
-2024-03-01,Delta Co,147.0544533153602,17.0
-2024-04-01,Delta Co,136.6419391295691,19.0
-2024-05-01,Delta Co,124.05563482654208,18.0
-2024-06-01,Delta Co,135.4620734370349,23.0
-2024-07-01,Delta Co,140.61415462954713,12.0
-2024-08-01,Delta Co,139.573820917292,13.0
-2024-09-01,Delta Co,143.6170113343867,23.0
-2024-10-01,Delta Co,135.5542590189695,11.0
-2024-11-01,Delta Co,138.8573815084448,7.0
-2024-12-01,Delta Co,130.2860673657287,10.0
+2024-01-01,Alpha Corp,156.94585348898897,14.0
+2024-02-01,Alpha Corp,169.48400240754586,22.0
+2024-03-01,Alpha Corp,163.49455401343334,8.0
+2024-04-01,Alpha Corp,191.99699606664143,25.0
+2024-05-01,Alpha Corp,197.92741360213668,23.0
+2024-06-01,Alpha Corp,212.96831331923758,19.0
+2024-07-01,Alpha Corp,218.57077017429083,20.0
+2024-08-01,Alpha Corp,218.0470928539181,20.0
+2024-09-01,Alpha Corp,215.2700211756662,17.0
+2024-10-01,Alpha Corp,226.48227874575335,14.0
+2024-11-01,Alpha Corp,208.63276934063987,23.0
+2024-12-01,Alpha Corp,215.245641037467,19.0
+2024-01-01,Beta Inc,217.8825691108731,20.0
+2024-02-01,Beta Inc,235.33369931802906,16.0
+2024-03-01,Beta Inc,246.4191599795677,11.0
+2024-04-01,Beta Inc,254.7465750347118,18.0
+2024-05-01,Beta Inc,248.09956885710963,23.0
+2024-06-01,Beta Inc,260.40278833615,17.0
+2024-07-01,Beta Inc,259.9891467618894,24.0
+2024-08-01,Beta Inc,291.23608254881356,15.0
+2024-09-01,Beta Inc,294.5701436751611,6.0
+2024-10-01,Beta Inc,312.5724399303949,20.0
+2024-11-01,Beta Inc,313.43122345465565,20.0
+2024-12-01,Beta Inc,300.3076554231441,19.0
+2024-01-01,Gamma LLC,133.39949870207215,16.0
+2024-02-01,Gamma LLC,141.63210439498332,17.0
+2024-03-01,Gamma LLC,138.7005151498582,15.0
+2024-04-01,Gamma LLC,138.5298932845348,5.0
+2024-05-01,Gamma LLC,142.70934353049486,11.0
+2024-06-01,Gamma LLC,145.37034827418495,7.0
+2024-07-01,Gamma LLC,135.01332581976214,24.0
+2024-08-01,Gamma LLC,128.92554197295829,9.0
+2024-09-01,Gamma LLC,121.54999472402503,25.0
+2024-10-01,Gamma LLC,107.10342206077877,18.0
+2024-11-01,Gamma LLC,100.66493070307655,19.0
+2024-12-01,Gamma LLC,101.44787076547786,20.0
+2024-01-01,Delta Co,277.5817134286445,8.0
+2024-02-01,Delta Co,279.21600511461975,20.0
+2024-03-01,Delta Co,263.0070893094632,10.0
+2024-04-01,Delta Co,259.8191752017433,16.0
+2024-05-01,Delta Co,253.6838237942496,10.0
+2024-06-01,Delta Co,225.53152057272243,24.0
+2024-07-01,Delta Co,234.5922329826589,16.0
+2024-08-01,Delta Co,244.42605927287195,25.0
+2024-09-01,Delta Co,246.15227086383433,8.0
+2024-10-01,Delta Co,258.1204989591548,15.0
+2024-11-01,Delta Co,270.7218909079879,13.0
+2024-12-01,Delta Co,281.4911822588756,19.0
 
 </script>
 
@@ -2166,9 +2840,9 @@ month,company,revenue,profit_margin
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="example1_bump_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example1_bump_aspect_ratio_label">0.6</span>
+    <span id="example1_bump_aspect_ratio_label">0.3</span>
     <input type="range" id="example1_bump_aspect_ratio_slider"
-           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
@@ -2242,9 +2916,9 @@ month,company,revenue,profit_margin
 
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="example2_bump_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example2_bump_aspect_ratio_label">0.6</span>
+    <span id="example2_bump_aspect_ratio_label">0.3</span>
     <input type="range" id="example2_bump_aspect_ratio_slider"
-           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
@@ -2309,9 +2983,9 @@ month,company,revenue,profit_margin
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="example3_bump_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example3_bump_aspect_ratio_label">0.6</span>
+    <span id="example3_bump_aspect_ratio_label">0.3</span>
     <input type="range" id="example3_bump_aspect_ratio_slider"
-           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>
@@ -2320,7 +2994,52 @@ month,company,revenue,profit_margin
 
 <!-- Chart -->
 <div id="example3_bump"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company_performance</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company_performance</p><br>
+<hr>
+<br>
+<h2>Example 4: League Rankings from Struct Data Source</h2>
+<p>This bump chart references data from a LeagueData struct using Symbol("league.rankings").</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_mode_select_example4_bump">Y-axis Mode: </label>
+                <select id="y_mode_select_example4_bump" onchange="updateChart_example4_bump()">
+                <option value="Ranking" selected>Ranking</option>
+                <option value="Absolute">Absolute</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_mode_select_example4_bump_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-radius: 5px;">
+        <h4 style="margin: 0 0 10px 0;">Performance Metric</h4>
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="perf_col_select_example4_bump">Metric: </label>
+                <select id="perf_col_select_example4_bump" onchange="updateChart_example4_bump()">
+                    <option value="points" selected>points</option>
+                </select>
+            </div>
+        </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example4_bump_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example4_bump_aspect_ratio_label">0.3</span>
+    <input type="range" id="example4_bump_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example4_bump"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: league.rankings</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>

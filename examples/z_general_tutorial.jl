@@ -83,7 +83,26 @@ coding_practices_theory_page = JSPlotPage(
 dataformat_theory = TextBlock("""
 <h2>Data Storage Formats in JSPlots.jl</h2>
 
-<h3>Overview</h3>
+<h3>Specifying datasets</h3>
+<p> For most charttypes you have some dataset that they should comsume.
+As part of the constructor you give a symbol that identifies the dataset to be used. Then at the point when you construct a page you input a dict mapping these symbols to an object holding the data.
+</p>
+
+<p> These symbols can have a period in it in which case you are describing a subfield. For instance you might have an object like that below:</p>
+
+<pre><code>struct ExampleStruct
+    aa::DataFrame
+    bb::DataFrame
+end
+example_struct = ExampleStruct(df1, df2)
+</code></pre>
+<p> Then if you have a chart that wants to use the aa dataset from this object then you can specify it with Symbol("example_struct.aa") and then later on you give the data in the dict as  Dict{Symbol,Any}(:example_struct => example_struct).</p>
+
+<p> The point of this system is twofold. For one certain charts may require datasets and so it is easier in this case to have a struct to hold everything together (Currently this is only ExecutionChart but maybe in the future).
+So if you wanted to put in a pivottable in the same page to show only the fills data you could do that without putting in the data twice.
+The second reason is that using structs in this way will bunch the data in different subfolders in cases where an external data format is used (:parquet, :json_external or :csv_external as described below).</p>
+
+<h3>Data Format</h3>
 <p>JSPlots.jl supports multiple data storage formats for embedding data in HTML pages.
 The format affects file size, loading speed, and browser compatibility.</p>
 
@@ -510,8 +529,8 @@ dataset_code = CodeBlock(generate_comprehensive_data,
 
 df = dataset_code()
 
-# PivotTable
-pivot_chart = PivotTable(:PivotTable, :sales_data,
+# PivotTable - with dataset selection to switch between multiple tables
+pivot_chart = PivotTable(:PivotTable, [:sales_data, :product_summary],
     rows=[:product],
     cols=[:region],
     vals=:customers,
@@ -520,7 +539,7 @@ pivot_chart = PivotTable(:PivotTable, :sales_data,
     colour_map = Dict{Float64,String}([0.0, 50.0, 100.0, 150.0] .=>
                                       ["#ffffff", "#ccccff", "#99ccff", "#3366ff"]),
     extrapolate_colours = false,
-    notes="PivotTables can do quite alot. Indeed many of the charttypes of this package would alternatively be doable just using a PivotTable so you might prefer doing that in some cases.Now we have example data generated (from the above function) we will shoow this in a pivottable (and it will be used throughout the rest of the examples). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html\" style=\"color: blue; font-weight: bold;\">See here for PivotTable examples</a>")
+    notes="PivotTables can do quite alot. Indeed many of the charttypes of this package would alternatively be doable just using a PivotTable so you might prefer doing that in some cases. <strong>Dataset Selection:</strong> This PivotTable demonstrates the ability to switch between multiple datasets - use the dropdown above the table to switch between 'sales_data' (detailed sales records) and 'product_summary' (aggregated product statistics). This is useful when you want to explore the same data at different levels of aggregation. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html\" style=\"color: blue; font-weight: bold;\">See here for PivotTable examples</a>")
 
 # Table
 
@@ -571,8 +590,7 @@ od["Situational Charts"] = [
     ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
     ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves.")]
 od["Financial Charts"] = [
-    ("OHLCChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcchart_examples.html", "OHLC candlestick charts with volume, renormalization, and time range controls"),
-    ("ExecutionPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html", "Trade execution analysis with implementation shortfall, VWAP comparison, and spread crossing metrics")]
+    ("CandlestickChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html", "Candlestick candlestick charts with volume, renormalization, and time range controls")]
 
 
 linklist_chart = LinkList(od, chart_title=:links, notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
@@ -800,35 +818,35 @@ graph_stock = Graph(:stock_network,
 # ===== Financial Charts =====
 financial_section = TextBlock("<h1>Financial Charts</h1>")
 
-# Generate OHLC data for multiple stocks
+# Generate Candlestick data for multiple stocks
 using Random
-rng_ohlc = Random.MersenneTwister(789)
+rng_candlestick = Random.MersenneTwister(789)
 trading_dates = Date(2024, 1, 1):Day(1):Date(2024, 3, 31)  # Q1 2024
 trading_dates = filter(d -> dayofweek(d) < 6, collect(trading_dates))  # Remove weekends
 
-ohlc_symbols = ["AAPL", "MSFT", "GOOGL"]
-ohlc_data_parts = []
+candlestick_symbols = ["AAPL", "MSFT", "GOOGL"]
+candlestick_data_parts = []
 
-for symbol in ohlc_symbols
+for symbol in candlestick_symbols
     # Different base prices for each stock
     base_price = Dict("AAPL" => 175.0, "MSFT" => 380.0, "GOOGL" => 140.0)[symbol]
     price = base_price
 
     for date in trading_dates
         # Simulate daily price movement
-        daily_return = randn(rng_ohlc) * 0.02  # 2% daily volatility
+        daily_return = randn(rng_candlestick) * 0.02  # 2% daily volatility
 
         open_price = price
         close_price = price * (1 + daily_return)
 
         # High and low with some randomness
-        high_price = max(open_price, close_price) * (1 + abs(randn(rng_ohlc)) * 0.01)
-        low_price = min(open_price, close_price) * (1 - abs(randn(rng_ohlc)) * 0.01)
+        high_price = max(open_price, close_price) * (1 + abs(randn(rng_candlestick)) * 0.01)
+        low_price = min(open_price, close_price) * (1 - abs(randn(rng_candlestick)) * 0.01)
 
         # Volume varies with volatility
-        volume = round(Int, 50_000_000 * (1 + abs(daily_return) * 2 + rand(rng_ohlc) * 0.5))
+        volume = round(Int, 50_000_000 * (1 + abs(daily_return) * 2 + rand(rng_candlestick) * 0.5))
 
-        push!(ohlc_data_parts, (
+        push!(candlestick_data_parts, (
             time_from = date,
             time_to = date,
             symbol = symbol,
@@ -844,9 +862,9 @@ for symbol in ohlc_symbols
     end
 end
 
-ohlc_df = DataFrame(ohlc_data_parts)
+candlestick_df = DataFrame(candlestick_data_parts)
 
-ohlc_chart = OHLCChart(:financial_ohlc, ohlc_df, :ohlc_data;
+candlestick_chart = CandlestickChart(:financial_candlestick, candlestick_df, :candlestick_data;
     time_from_col=:time_from,
     time_to_col=:time_to,
     symbol_col=:symbol,
@@ -859,84 +877,7 @@ ohlc_chart = OHLCChart(:financial_ohlc, ohlc_df, :ohlc_data;
     display_mode="Overlay",
     show_volume=true,
     title="Stock Price Analysis - Q1 2024",
-    notes="An OHLC (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and OHLC (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the OHLC bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for OHLCChart examples</a>")
-
-# Generate ExecutionPlot data for trade execution analysis
-rng_exec = Random.MersenneTwister(456)
-exec_start_time = DateTime(2024, 1, 15, 10, 0, 0)
-exec_time_points = [exec_start_time + Second(i*20) for i in 0:180]  # Every 20 seconds for 1 hour
-
-# Simulate realistic stock price with bid-ask spread
-exec_base_price = 125.0
-exec_prices = exec_base_price .+ cumsum(randn(rng_exec, length(exec_time_points)) .* 0.04)
-exec_spread = 0.02
-
-exec_tob_df = DataFrame(
-    time = exec_time_points,
-    bid = exec_prices .- exec_spread/2,
-    ask = exec_prices .+ exec_spread/2
-)
-
-# Volume data in 5-minute buckets
-exec_volume_times = [exec_start_time + Minute(i*5) for i in 0:11]
-exec_volume_df = DataFrame(
-    time_from = exec_volume_times[1:end-1],
-    time_to = exec_volume_times[2:end],
-    volume = rand(rng_exec, 80000:200000, length(exec_volume_times)-1)
-)
-
-# Generate two different execution strategies for comparison
-# Strategy 1: Aggressive (buys quickly, higher implementation shortfall)
-aggr_fill_times = sort(exec_start_time .+ Second.(rand(rng_exec, 180:1200, 18)))
-aggr_quantities = rand(rng_exec, 400:600, 18)
-aggr_venues = rand(rng_exec, ["NYSE", "NASDAQ", "ARCA"], 18)
-
-fills_aggressive = DataFrame(
-    time = aggr_fill_times,
-    quantity = aggr_quantities,
-    price = [exec_tob_df[findfirst(t -> t >= ft, exec_tob_df.time), :ask] + rand(rng_exec, 0:0.001:0.015)
-             for ft in aggr_fill_times],
-    execution_name = fill("Aggressive Strategy", 18),
-    venue = aggr_venues,
-    urgency = fill("High", 18)
-)
-
-# Strategy 2: Patient (takes more time, better prices)
-patient_fill_times = sort(exec_start_time .+ Second.(rand(rng_exec, 600:3300, 28)))
-patient_quantities = rand(rng_exec, 250:450, 28)
-patient_venues = rand(rng_exec, ["NYSE", "NASDAQ", "ARCA", "BATS"], 28)
-
-fills_patient = DataFrame(
-    time = patient_fill_times,
-    quantity = patient_quantities,
-    price = [exec_tob_df[findfirst(t -> t >= ft, exec_tob_df.time), :ask] - rand(rng_exec, 0:0.001:0.01)
-             for ft in patient_fill_times],
-    execution_name = fill("Patient Strategy", 28),
-    venue = patient_venues,
-    urgency = fill("Low", 28)
-)
-
-# Combine all fills
-exec_fills_df = vcat(fills_aggressive, fills_patient)
-
-# Metadata for both executions
-exec_metadata_df = DataFrame(
-    execution_name = ["Aggressive Strategy", "Patient Strategy"],
-    arrival_price = [125.0, 125.0],
-    side = ["buy", "buy"],
-    desired_quantity = [9000, 12000]
-)
-
-executionplot_chart = ExecutionPlot(
-    :tutorial_execution,
-    exec_tob_df,
-    exec_volume_df,
-    exec_fills_df,
-    exec_metadata_df,
-    (:exec_tob_data, :exec_volume_data, :exec_fills_data, :exec_metadata);
-    color_cols=[:venue, :urgency],
-    title="Trade Execution Analysis - Comparing Strategies",
-    notes="An ExecutionPlot chart analyzes trade execution quality by comparing fill prices against benchmarks. This example compares two strategies for buying the same stock. <strong>Key Features:</strong> Execution selector dropdown to switch between different executions (Aggressive vs Patient strategy), Benchmark selector to choose between Arrival Price (price when order started) and First Fill Mid (mid-price at first fill), Show Volume checkbox to toggle market volume bars at the bottom of the chart, Bid/Ask lines showing the top of book prices over time, Fill points sized by quantity (larger circles = larger fills) and colored by category (venue or urgency), Interactive fills table with Time, Price, Quantity, and category columns, Running Implementation Shortfall showing cumulative cost vs benchmark (negative is worse), VWAP Shortfall showing cost vs volume-weighted average price of execution, Spread Crossing percentage showing how aggressive each fill was (0%=bought at bid, 100%=bought at ask), Remaining percentage showing how much of desired quantity is left to execute, Summary table aggregating metrics by category (e.g., by venue or urgency level), showing total implementation shortfall, VWAP shortfall, and average spread crossing for each category. Users can click fills in the table to exclude them from calculations, and hover over table rows to highlight corresponding points in the chart. This visualization is essential for transaction cost analysis (TCA) and evaluating execution algorithms. The aggressive strategy completes faster but typically has higher implementation shortfall, while the patient strategy takes longer but may achieve better prices. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ExecutionPlot examples</a>")
+    notes="An Candlestick (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and Candlestick (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the Candlestick bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CandlestickChart examples</a>")
 
 # Waterfall
 # Create waterfall data showing profit breakdown
@@ -1498,18 +1439,14 @@ financial_slides = Slides(
 
 
 # Collect all data
-all_data = Dict{Symbol, DataFrame}(
+all_data = Dict{Symbol, Any}(
     :sales_data => df,
     :product_summary => product_summary,
     :daily_product => daily_product,
     :surface_df => surface_df,
     :business_path_data => df_business_path,
     :rankings_data => df_rankings,
-    :ohlc_data => ohlc_df,
-    :exec_tob_data => exec_tob_df,
-    :exec_volume_data => exec_volume_df,
-    :exec_fills_data => exec_fills_df,
-    :exec_metadata => exec_metadata_df,
+    :candlestick_data => candlestick_df,
     :waterfall_data => waterfall_data,
     :sankey_data => sankey_df,
     :radar_data => radar_df,
@@ -1589,10 +1526,10 @@ situational_plot_page =  JSPlotPage(
 
 financial_plot_page =  JSPlotPage(
     all_data,
-    [financial_section, ohlc_chart, executionplot_chart],
+    [financial_section, candlestick_chart],
     tab_title="Financial Charts",
     page_header = "Financial Charts",
-    notes = "This shows examples of financial market visualization charts. OHLCChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls. ExecutionPlot analyzes trade execution quality with implementation shortfall calculations, VWAP comparison, spread crossing metrics, and interactive fills table for transaction cost analysis.",
+    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls.",
     dataformat = :parquet
 )
 

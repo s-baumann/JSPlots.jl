@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -2832,6 +2833,432 @@ $(function(){
         container.appendChild(legendDiv);
     }
 })();
+(function() {
+    let radarData_cars_radar = null;
+    let selectedVariables_cars_radar = ["Performance","Efficiency","Interior_Quality","Technology","Safety","Value"];
+    let selectedLabels_cars_radar = [];
+    let selectedScenario_cars_radar = null;
+
+    const VALUE_COLS = ["Performance","Efficiency","Interior_Quality","Technology","Safety","Value"];
+    const LABEL_COL = "label";
+    const GROUP_MAPPING = {};
+    const VARIABLE_LIMITS = {};
+    const SCENARIO_COL = null;
+    const COLOR_COL = "category";
+    const DEFAULT_COLOR = "#1f77b4";
+    const MAX_VALUE = 100.0;
+    const MAX_VARIABLES = null;
+    const SHOW_LEGEND = true;
+    const SHOW_GRID_LABELS = true;
+    const VARIABLE_SELECTOR = false;
+
+    // Load data
+    loadDataset('cars.specifications').then(function(data) {
+        radarData_cars_radar = data;
+        initializeRadarChart_cars_radar();
+    }).catch(function(error) {
+        console.error('Error loading data:', error);
+        document.getElementById('radar_cars_radar').innerHTML =
+            '<p style="color: red;">Error loading data: ' + error.message + '</p>';
+    });
+
+    function initializeRadarChart_cars_radar() {
+        const data = radarData_cars_radar;
+        if (!data || data.length === 0) {
+            document.getElementById('radar_cars_radar').innerHTML = '<p>No data available</p>';
+            return;
+        }
+
+        // Populate scenario selector
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_cars_radar');
+            if (scenarioSelect) {
+                const uniqueScenarios = [...new Set(data.map(d => d[SCENARIO_COL]))].filter(s => s);
+                scenarioSelect.innerHTML = '';
+                uniqueScenarios.forEach(function(scenario, idx) {
+                    const option = document.createElement('option');
+                    option.value = scenario;
+                    option.text = scenario;
+                    if (idx === 0) {
+                        option.selected = true;
+                        selectedScenario_cars_radar = scenario;
+                    }
+                    scenarioSelect.appendChild(option);
+                });
+            }
+        }
+
+        // Populate variable selector
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_cars_radar');
+            if (varSelect) {
+                varSelect.innerHTML = '';
+                VALUE_COLS.forEach(function(col) {
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.text = col.replace(/_/g, ' ');
+                    option.selected = selectedVariables_cars_radar.includes(col);
+                    varSelect.appendChild(option);
+                });
+            }
+        } else {
+            selectedVariables_cars_radar = VALUE_COLS;
+        }
+
+        // Populate label selector
+        const labelSelect = document.getElementById('label_select_cars_radar');
+        if (labelSelect) {
+            // Filter by scenario if applicable
+            let scenarioData = data;
+            if (SCENARIO_COL && selectedScenario_cars_radar) {
+                scenarioData = data.filter(d => d[SCENARIO_COL] === selectedScenario_cars_radar);
+            }
+
+            const uniqueLabels = [...new Set(scenarioData.map(d => d[LABEL_COL]))].filter(l => l);
+            labelSelect.innerHTML = '';
+            uniqueLabels.forEach(function(label) {
+                const option = document.createElement('option');
+                option.value = label;
+                option.text = label;
+                option.selected = true;
+                labelSelect.appendChild(option);
+            });
+            const maxToSelect = MAX_VARIABLES || uniqueLabels.length;
+            selectedLabels_cars_radar = uniqueLabels.slice(0, maxToSelect);
+
+            // Set selected options
+            Array.from(labelSelect.options).forEach(function(opt) {
+                opt.selected = selectedLabels_cars_radar.includes(opt.value);
+            });
+        }
+
+        updateRadarChart_cars_radar();
+    }
+
+    window.updateRadarChart_cars_radar = function() {
+        // Get selected scenario
+        if (SCENARIO_COL) {
+            const scenarioSelect = document.getElementById('scenario_select_cars_radar');
+            if (scenarioSelect) {
+                selectedScenario_cars_radar = scenarioSelect.value;
+            }
+        }
+
+        // Get selected variables
+        if (VARIABLE_SELECTOR) {
+            const varSelect = document.getElementById('var_select_cars_radar');
+            if (varSelect) {
+                selectedVariables_cars_radar = Array.from(varSelect.selectedOptions).map(opt => opt.value);
+
+                if (selectedVariables_cars_radar.length < 3) {
+                    document.getElementById('radar_cars_radar').innerHTML =
+                        '<p style="color: orange;">Please select at least 3 variables to display a radar chart.</p>';
+                    return;
+                }
+            }
+        }
+
+        // Get selected labels
+        const labelSelect = document.getElementById('label_select_cars_radar');
+        if (labelSelect) {
+            selectedLabels_cars_radar = Array.from(labelSelect.selectedOptions).map(opt => opt.value);
+
+            if (selectedLabels_cars_radar.length === 0) {
+                document.getElementById('radar_cars_radar').innerHTML =
+                    '<p style="color: orange;">Please select at least one item to display.</p>';
+                return;
+            }
+        }
+
+        renderRadarChart_cars_radar(selectedVariables_cars_radar, selectedLabels_cars_radar, selectedScenario_cars_radar);
+    }
+
+    function renderRadarChart_cars_radar(variables, labels, scenario) {
+        const data = radarData_cars_radar;
+        const container = document.getElementById('radar_cars_radar');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        // Filter data by labels and scenario
+        let filteredData = data.filter(d => labels.includes(d[LABEL_COL]));
+
+        if (SCENARIO_COL && scenario) {
+            filteredData = filteredData.filter(d => d[SCENARIO_COL] === scenario);
+        }
+
+        if (filteredData.length === 0) {
+            container.innerHTML = '<p>No data matches the selected filters.</p>';
+            return;
+        }
+
+        // Calculate max value per variable (respecting variable_limits)
+        const maxValues = {};
+        variables.forEach(function(v) {
+            if (VARIABLE_LIMITS.hasOwnProperty(v)) {
+                maxValues[v] = VARIABLE_LIMITS[v];
+            } else if (MAX_VALUE) {
+                maxValues[v] = MAX_VALUE;
+            } else {
+                // Auto-calculate from data
+                let maxVal = 0;
+                filteredData.forEach(function(d) {
+                    const val = parseFloat(d[v]);
+                    if (!isNaN(val) && val > maxVal) {
+                        maxVal = val;
+                    }
+                });
+                maxValues[v] = Math.ceil(maxVal * 1.1);
+            }
+        });
+
+        // Group variables by group_mapping
+        const groupedVars = {};
+        const ungroupedVars = [];
+
+        variables.forEach(function(v) {
+            if (GROUP_MAPPING.hasOwnProperty(v)) {
+                const group = GROUP_MAPPING[v];
+                if (!groupedVars[group]) {
+                    groupedVars[group] = [];
+                }
+                groupedVars[group].push(v);
+            } else {
+                ungroupedVars.push(v);
+            }
+        });
+
+        // Create ordered list of axes with groups
+        const axes = [];
+        const groupBoundaries = [];  // Track where each group starts and ends
+        let currentIndex = 0;
+
+        // Sort groups for consistent ordering
+        const sortedGroups = Object.keys(groupedVars).sort();
+
+        sortedGroups.forEach(function(group) {
+            const startIdx = currentIndex;
+            groupedVars[group].forEach(function(v) {
+                axes.push({ name: v, group: group, maxValue: maxValues[v] });
+                currentIndex++;
+            });
+            const endIdx = currentIndex - 1;
+            groupBoundaries.push({ group: group, startIdx: startIdx, endIdx: endIdx });
+        });
+
+        ungroupedVars.forEach(function(v) {
+            axes.push({ name: v, group: null, maxValue: maxValues[v] });
+            currentIndex++;
+        });
+
+        // Create color mapping
+        const colorMap = {};
+        if (COLOR_COL) {
+            const uniqueColors = [...new Set(filteredData.map(d => d[COLOR_COL]))];
+            // D3 v3 API: use d3.scale.category10()
+            const colorScale = d3.scale.category10();
+            uniqueColors.forEach(function(c, i) {
+                colorMap[c] = colorScale(i);
+            });
+        }
+
+        // Calculate layout
+        const numCharts = filteredData.length;
+        const chartsPerRow = Math.ceil(Math.sqrt(numCharts));
+        const chartSize = Math.min(450, Math.max(350, Math.floor((container.offsetWidth || 800) / chartsPerRow)));
+
+        // Create SVG container
+        const svg = d3.select(container)
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', Math.ceil(numCharts / chartsPerRow) * chartSize);
+
+        // Draw each radar chart
+        filteredData.forEach(function(d, idx) {
+            const row = Math.floor(idx / chartsPerRow);
+            const col = idx % chartsPerRow;
+            const x = col * chartSize;
+            const y = row * chartSize;
+
+            const color = COLOR_COL ? (colorMap[d[COLOR_COL]] || DEFAULT_COLOR) : DEFAULT_COLOR;
+
+            drawSingleRadar_cars_radar(svg, d, axes, groupBoundaries, x, y, chartSize, color);
+        });
+
+        // Add legend
+        if (SHOW_LEGEND && COLOR_COL) {
+            addLegend_cars_radar(container, colorMap);
+        }
+    }
+
+    function drawSingleRadar_cars_radar(svg, dataPoint, axes, groupBoundaries, offsetX, offsetY, size, color) {
+        const margin = 60;
+        const radius = (size - 2 * margin) / 2;
+        const centerX = offsetX + size / 2;
+        const centerY = offsetY + size / 2;
+
+        const g = svg.append('g')
+            .attr('transform', 'translate(' + centerX + ',' + centerY + ')');
+
+        // Determine overall max for grid (use the max of all variable maxes for consistent grid)
+        let gridMax = 0;
+        axes.forEach(function(axis) {
+            if (axis.maxValue > gridMax) gridMax = axis.maxValue;
+        });
+
+        // Draw grid circles
+        const levels = 5;
+        for (let i = 1; i <= levels; i++) {
+            const r = radius * i / levels;
+            g.append('circle')
+                .attr('r', r)
+                .attr('fill', 'none')
+                .attr('stroke', '#ddd')
+                .attr('stroke-width', 1);
+
+            if (SHOW_GRID_LABELS && i === levels) {
+                g.append('text')
+                    .attr('x', 5)
+                    .attr('y', -r)
+                    .attr('font-size', '10px')
+                    .attr('fill', '#666')
+                    .text(gridMax.toFixed(1));
+            }
+        }
+
+        // Draw axes
+        const angleSlice = Math.PI * 2 / axes.length;
+
+        axes.forEach(function(axis, i) {
+            const angle = angleSlice * i - Math.PI / 2;
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle);
+
+            // Draw axis line
+            g.append('line')
+                .attr('x1', 0)
+                .attr('y1', 0)
+                .attr('x2', x)
+                .attr('y2', y)
+                .attr('stroke', '#999')
+                .attr('stroke-width', 1);
+
+            // Draw axis label
+            const labelRadius = radius + 15;
+            const labelX = labelRadius * Math.cos(angle);
+            const labelY = labelRadius * Math.sin(angle);
+
+            g.append('text')
+                .attr('x', labelX)
+                .attr('y', labelY)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '10px')
+                .attr('fill', '#333')
+                .text(axis.name.replace(/_/g, ' '));
+        });
+
+        // Draw group labels using boundaries
+        groupBoundaries.forEach(function(boundary) {
+            const startAngle = angleSlice * boundary.startIdx - Math.PI / 2;
+            const endAngle = angleSlice * (boundary.endIdx + 1) - Math.PI / 2;
+            const midAngle = (startAngle + endAngle) / 2;
+            const labelRadius = radius + 40;
+            const x = labelRadius * Math.cos(midAngle);
+            const y = labelRadius * Math.sin(midAngle);
+
+            g.append('text')
+                .attr('x', x)
+                .attr('y', y)
+                .attr('text-anchor', 'middle')
+                .attr('dominant-baseline', 'middle')
+                .attr('font-size', '12px')
+                .attr('font-weight', 'bold')
+                .attr('fill', '#0066cc')
+                .text(boundary.group);
+        });
+
+        // Draw data polygon
+        const points = [];
+        axes.forEach(function(axis, i) {
+            const value = parseFloat(dataPoint[axis.name]) || 0;
+            // Clamp value to axis max, then normalize by grid max for consistent display
+            const clampedValue = Math.min(value, axis.maxValue);
+            const normalizedValue = Math.min(Math.max(clampedValue / gridMax, 0), 1);
+            const angle = angleSlice * i - Math.PI / 2;
+            const r = radius * normalizedValue;
+            const x = r * Math.cos(angle);
+            const y = r * Math.sin(angle);
+            points.push([x, y]);
+        });
+
+        // Close the polygon
+        if (points.length > 0) {
+            const pathData = 'M' + points.map(p => p.join(',')).join('L') + 'Z';
+
+            g.append('path')
+                .attr('d', pathData)
+                .attr('fill', color)
+                .attr('fill-opacity', 0.3)
+                .attr('stroke', color)
+                .attr('stroke-width', 2);
+
+            // Draw points
+            points.forEach(function(p) {
+                g.append('circle')
+                    .attr('cx', p[0])
+                    .attr('cy', p[1])
+                    .attr('r', 3)
+                    .attr('fill', color);
+            });
+        }
+
+        // Add title
+        g.append('text')
+            .attr('x', 0)
+            .attr('y', -radius - 45)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', '12px')
+            .attr('font-weight', 'bold')
+            .attr('fill', '#333')
+            .text(dataPoint[LABEL_COL]);
+    }
+
+    function addLegend_cars_radar(container, colorMap) {
+        const legendDiv = document.createElement('div');
+        legendDiv.style.marginTop = '20px';
+        legendDiv.innerHTML = '<strong>Legend:</strong>';
+
+        const legendItems = document.createElement('div');
+        legendItems.style.display = 'flex';
+        legendItems.style.flexWrap = 'wrap';
+        legendItems.style.gap = '15px';
+        legendItems.style.marginTop = '10px';
+
+        Object.keys(colorMap).forEach(function(key) {
+            const item = document.createElement('div');
+            item.style.display = 'flex';
+            item.style.alignItems = 'center';
+            item.style.gap = '5px';
+
+            const colorBox = document.createElement('div');
+            colorBox.style.width = '20px';
+            colorBox.style.height = '20px';
+            colorBox.style.backgroundColor = colorMap[key];
+            colorBox.style.border = '1px solid #ccc';
+
+            const label = document.createElement('span');
+            label.textContent = key;
+
+            item.appendChild(colorBox);
+            item.appendChild(label);
+            legendItems.appendChild(item);
+        });
+
+        legendDiv.appendChild(legendItems);
+        container.appendChild(legendDiv);
+    }
+})();
 
 
 });
@@ -2857,26 +3284,40 @@ OnePlus 12,90.0,88.0,94.0,95.0,90.0,90.0
 
 </script><script type="text/plain" id="universities_data" data-format="csv_embedded" data-src="">
 label,region,scenario,Academic_Reputation,Research_Output,Faculty_Quality,Industry_Connections,International_Outlook,Student_Satisfaction
-MIT,North America,Overall Rankings,96.0,93.0,92.0,89.0,83.0,96.0
-Stanford,North America,Overall Rankings,93.0,97.0,94.0,88.0,86.0,93.0
-Harvard,North America,Overall Rankings,92.0,95.0,95.0,89.0,79.0,93.0
-Berkeley,North America,Overall Rankings,92.0,89.0,88.0,88.0,79.0,85.0
-Caltech,North America,Overall Rankings,94.0,95.0,92.0,87.0,88.0,89.0
-Oxford,Europe,Overall Rankings,95.0,91.0,95.0,87.0,82.0,93.0
-Cambridge,Europe,Overall Rankings,92.0,93.0,93.0,90.0,80.0,91.0
-ETH Zurich,Europe,Overall Rankings,88.0,89.0,89.0,79.0,84.0,89.0
-Tokyo,Asia,Overall Rankings,85.0,84.0,84.0,84.0,95.0,80.0
-NUS,Asia,Overall Rankings,85.0,83.0,83.0,77.0,95.0,82.0
-MIT,North America,Research Focus,98.0,101.0,96.0,90.0,86.0,96.0
-Stanford,North America,Research Focus,95.0,97.0,95.0,84.0,83.0,84.0
-Harvard,North America,Research Focus,88.0,90.0,85.0,73.0,78.0,84.0
-Berkeley,North America,Research Focus,93.0,96.0,93.0,80.0,89.0,86.0
-Caltech,North America,Research Focus,97.0,101.0,97.0,90.0,92.0,95.0
-Oxford,Europe,Research Focus,93.0,94.0,91.0,78.0,80.0,86.0
-Cambridge,Europe,Research Focus,94.0,94.0,92.0,78.0,82.0,89.0
-ETH Zurich,Europe,Research Focus,92.0,96.0,93.0,89.0,85.0,84.0
-Tokyo,Asia,Research Focus,86.0,89.0,88.0,76.0,95.0,85.0
-NUS,Asia,Research Focus,85.0,90.0,85.0,80.0,95.0,82.0
+MIT,North America,Overall Rankings,92.0,97.0,97.0,93.0,86.0,90.0
+Stanford,North America,Overall Rankings,93.0,96.0,95.0,86.0,87.0,90.0
+Harvard,North America,Overall Rankings,91.0,91.0,91.0,88.0,81.0,86.0
+Berkeley,North America,Overall Rankings,94.0,90.0,89.0,86.0,85.0,89.0
+Caltech,North America,Overall Rankings,94.0,93.0,91.0,85.0,85.0,92.0
+Oxford,Europe,Overall Rankings,90.0,90.0,89.0,91.0,83.0,90.0
+Cambridge,Europe,Overall Rankings,95.0,94.0,93.0,82.0,85.0,92.0
+ETH Zurich,Europe,Overall Rankings,87.0,90.0,92.0,79.0,82.0,84.0
+Tokyo,Asia,Overall Rankings,84.0,84.0,85.0,84.0,95.0,85.0
+NUS,Asia,Overall Rankings,86.0,84.0,85.0,76.0,95.0,83.0
+MIT,North America,Research Focus,96.0,102.0,100.0,90.0,89.0,93.0
+Stanford,North America,Research Focus,94.0,97.0,92.0,86.0,89.0,85.0
+Harvard,North America,Research Focus,86.0,91.0,89.0,82.0,79.0,84.0
+Berkeley,North America,Research Focus,91.0,93.0,91.0,81.0,87.0,86.0
+Caltech,North America,Research Focus,97.0,98.0,95.0,84.0,85.0,97.0
+Oxford,Europe,Research Focus,93.0,93.0,90.0,78.0,88.0,86.0
+Cambridge,Europe,Research Focus,94.0,93.0,92.0,84.0,88.0,89.0
+ETH Zurich,Europe,Research Focus,92.0,96.0,94.0,80.0,88.0,84.0
+Tokyo,Asia,Research Focus,87.0,91.0,85.0,78.0,95.0,79.0
+NUS,Asia,Research Focus,86.0,90.0,86.0,80.0,95.0,79.0
+
+</script><script type="text/plain" id="cars.specifications" data-format="csv_embedded" data-src="">
+label,category,Performance,Efficiency,Interior_Quality,Technology,Safety,Value
+Tesla Model 3,Electric,92.0,95.0,78.0,95.0,92.0,85.0
+BMW 3 Series,Gasoline,85.0,65.0,90.0,85.0,88.0,72.0
+Mercedes C-Class,Gasoline,82.0,62.0,92.0,88.0,90.0,70.0
+Audi A4,Gasoline,84.0,68.0,88.0,86.0,87.0,75.0
+
+</script><script type="text/plain" id="cars.pricing" data-format="csv_embedded" data-src="">
+model,base_price,as_tested
+Tesla Model 3,42000,52000
+BMW 3 Series,45000,58000
+Mercedes C-Class,47000,62000
+Audi A4,44000,56000
 
 </script><script type="text/plain" id="foods_data" data-format="csv_embedded" data-src="">
 label,category,Vitamin_C,Fiber,Antioxidants,Sweetness,Aroma,Acidity,Juiciness,Firmness,Smoothness,Affordability,Price,Yield,CO2e,Water_use,Pesticides,Biodiversity
@@ -3143,6 +3584,45 @@ Each axis represents a different variable, and values are plotted as a polygon.<
     </div>
 </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: investments_data</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Example 6: Car Comparison from Struct Data Source</h2>
+<p>Compare different car models using data stored in a struct.</p>
+<p><strong>Features demonstrated:</strong></p>
+<ul>
+    <li>Using a struct containing DataFrames as data source</li>
+    <li>Referencing struct fields via dot notation</li>
+    <li>Multiple DataFrames in one struct (specs and pricing)</li>
+</ul>
+
+    </div>
+<br>
+<hr>
+<br>
+<div class="chart-container" id="container_cars_radar">
+    <h3>Car Comparison from Struct Data Source</h3>
+    <p>This radar chart references data from a CarData struct containing specifications and pricing DataFrames. Charts access struct fields via Symbol("cars.specifications").</p>
+    <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+        <div style="flex: 0 0 auto; min-width: 200px;">
+
+<div style="margin-bottom: 15px;">
+    <label for="label_select_cars_radar"><strong>Select items to display:</strong></label>
+    <select id="label_select_cars_radar" multiple size="6" style="width: 100%; max-width: 300px;" onchange="updateRadarChart_cars_radar()">
+        <!-- Options will be populated dynamically -->
+    </select>
+    <div style="margin-top: 5px; font-size: 0.9em; color: #666;">
+        Hold Ctrl (Cmd on Mac) to select multiple
+    </div>
+</div>
+
+        </div>
+        <div style="flex: 1 1 auto; min-width: 400px;">
+            <div id="radar_cars_radar" style="width: 100%;"></div>
+        </div>
+    </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: cars.specifications</p><br>
 <hr>
 <br>
     <div class="textblock-content">

@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -709,7 +710,7 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="ohlc_data" data-format="parquet" data-src="data/ohlc_data.parquet"></script><script type="text/plain" id="exec_tob_data" data-format="parquet" data-src="data/exec_tob_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="exec_fills_data" data-format="parquet" data-src="data/exec_fills_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_volume_data" data-format="parquet" data-src="data/exec_volume_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="exec_metadata" data-format="parquet" data-src="data/exec_metadata.parquet"></script>
+<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
@@ -719,7 +720,26 @@ $(function(){
     <div class="textblock-content">
         <h2>Data Storage Formats in JSPlots.jl</h2>
 
-<h3>Overview</h3>
+<h3>Specifying datasets</h3>
+<p> For most charttypes you have some dataset that they should comsume.
+As part of the constructor you give a symbol that identifies the dataset to be used. Then at the point when you construct a page you input a dict mapping these symbols to an object holding the data.
+</p>
+
+<p> These symbols can have a period in it in which case you are describing a subfield. For instance you might have an object like that below:</p>
+
+<pre><code>struct ExampleStruct
+    aa::DataFrame
+    bb::DataFrame
+end
+example_struct = ExampleStruct(df1, df2)
+</code></pre>
+<p> Then if you have a chart that wants to use the aa dataset from this object then you can specify it with Symbol("example_struct.aa") and then later on you give the data in the dict as  Dict{Symbol,Any}(:example_struct => example_struct).</p>
+
+<p> The point of this system is twofold. For one certain charts may require datasets and so it is easier in this case to have a struct to hold everything together (Currently this is only ExecutionChart but maybe in the future).
+So if you wanted to put in a pivottable in the same page to show only the fills data you could do that without putting in the data twice.
+The second reason is that using structs in this way will bunch the data in different subfolders in cases where an external data format is used (:parquet, :json_external or :csv_external as described below).</p>
+
+<h3>Data Format</h3>
 <p>JSPlots.jl supports multiple data storage formats for embedding data in HTML pages.
 The format affects file size, loading speed, and browser compatibility.</p>
 

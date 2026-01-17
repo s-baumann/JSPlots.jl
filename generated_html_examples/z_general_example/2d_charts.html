@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -2833,26 +2834,27 @@ $(function(){
         // Assign colors to entities in filtered data
         assignEntityColors(filteredData);
 
-        // Process data based on Y_MODE
-        let processedData;
-        if (Y_MODE === 'Ranking') {
-            processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
-        } else {
-            // Absolute mode - use performance values directly
-            processedData = filteredData.map(row => ({
-                ...row,
-                y_value: row[PERF_COL],
-                original_value: row[PERF_COL]
-            }));
-        }
-
         // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
         if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
             renderNoFacets(processedData, X_COL, Y_MODE);
         } else if (FACET_COLS.length === 1) {
-            renderOneFacet(processedData, X_COL, Y_MODE, FACET_COLS[0]);
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
         } else {
-            renderTwoFacets(processedData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1]);
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
         }
     };
 
@@ -2910,7 +2912,7 @@ $(function(){
     }
 
     // Render with one facet
-    function renderOneFacet(data, xCol, yMode, facetCol) {
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
         const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nFacets = facetValues.length;
 
@@ -2926,7 +2928,20 @@ $(function(){
         };
 
         facetValues.forEach((facetVal, idx) => {
-            const facetData = data.filter(row => row[facetCol] === facetVal);
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
             const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
             const row = Math.floor(idx / nCols) + 1;
@@ -2976,11 +2991,20 @@ $(function(){
                 title: row === nRows ? xCol : '',
                 anchor: yaxis
             };
-            layout[yaxis] = {
-                title: col === 1 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                anchor: xaxis,
-                autorange: yMode === 'Ranking' ? 'reversed' : true
-            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
 
             // Add annotation for facet label
             if (!layout.annotations) layout.annotations = [];
@@ -3003,7 +3027,7 @@ $(function(){
     }
 
     // Render with two facets
-    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol) {
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
         const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
         const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
         const nRows = rowValues.length;
@@ -3018,9 +3042,22 @@ $(function(){
 
         rowValues.forEach((rowVal, rowIdx) => {
             colValues.forEach((colVal, colIdx) => {
-                const facetData = data.filter(row =>
+                const rawFacetData = data.filter(row =>
                     row[facetRow] === rowVal && row[facetCol] === colVal
                 );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
                 const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                 const idx = rowIdx * nCols + colIdx;
@@ -3069,11 +3106,20 @@ $(function(){
                     title: rowIdx === nRows - 1 ? xCol : '',
                     anchor: yaxis
                 };
-                layout[yaxis] = {
-                    title: colIdx === 0 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                    anchor: xaxis,
-                    autorange: yMode === 'Ranking' ? 'reversed' : true
-                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
 
                 // Add annotations for facet labels
                 if (!layout.annotations) layout.annotations = [];
@@ -3162,7 +3208,7 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="ohlc_data" data-format="parquet" data-src="data/ohlc_data.parquet"></script><script type="text/plain" id="exec_tob_data" data-format="parquet" data-src="data/exec_tob_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="exec_fills_data" data-format="parquet" data-src="data/exec_fills_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_volume_data" data-format="parquet" data-src="data/exec_volume_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="exec_metadata" data-format="parquet" data-src="data/exec_metadata.parquet"></script>
+<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
@@ -3674,7 +3720,7 @@ $(function(){
 <hr>
 <br>
 <h2>Product Rankings Over Time</h2>
-<p>A BumpChart shows how entities rank over time based on different performance metrics. This chart displays product rankings (Laptop, Tablet, Phone) across quarters. Use the Performance Metric dropdown to switch between sales, profit, quantity, or satisfaction metrics. Filter by region and segment to focus on specific market areas. Toggle between 'Ranking' mode (shows relative position with dense ranking) and 'Absolute' mode (shows actual metric values). Enable faceting to see rankings broken down by region or segment. Hover over a line to highlight it - all other lines turn grey to emphasize the selected product across all facets. Dense ranking is used: if two products tie for rank 1, both get rank 1, and the next product gets rank 2 (no gaps). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html" style="color: blue; font-weight: bold;">See here for BumpChart examples</a></p>
+<p>A BumpChart shows how entities rank over time based on different performance metrics. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html" style="color: blue; font-weight: bold;">See here for BumpChart examples</a></p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
@@ -3743,26 +3789,26 @@ $(function(){
     <div>
         <label for="facet1_select_bump_rankings">Facet 1: </label>
         <select id="facet1_select_bump_rankings" style="padding: 5px 10px;" onchange="updateChart_bump_rankings()">
-            <option value="None" selected>None</option>
-<option value="region">region</option>
+            <option value="None">None</option>
+<option value="region" selected>region</option>
 <option value="segment">segment</option>
         </select>
     </div>
     <div>
         <label for="facet2_select_bump_rankings">Facet 2: </label>
         <select id="facet2_select_bump_rankings" style="padding: 5px 10px;" onchange="updateChart_bump_rankings()">
-            <option value="None" selected>None</option>
+            <option value="None">None</option>
 <option value="region">region</option>
-<option value="segment">segment</option>
+<option value="segment" selected>segment</option>
         </select>
     </div>
 </div>
 
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="bump_rankings_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="bump_rankings_aspect_ratio_label">0.6</span>
+    <span id="bump_rankings_aspect_ratio_label">0.3</span>
     <input type="range" id="bump_rankings_aspect_ratio_slider"
-           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
 </div>

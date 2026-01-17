@@ -169,6 +169,48 @@ distplot7 = DistPlot(:datetime_sliders, df7, :df7;
     notes = "This example tests range slider filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders regardless of the number of unique values, providing a consistent filtering experience."
 )
 
+# Example 8: Using a Struct as Data Source
+# Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
+
+struct SurveyData
+    responses::DataFrame
+    demographics::DataFrame
+end
+
+# Create survey response data
+n_responses = 400
+survey_responses = DataFrame(
+    satisfaction_score = randn(rng, n_responses) .* 15 .+ 70,
+    recommendation_score = randn(rng, n_responses) .* 20 .+ 60,
+    response_time = abs.(randn(rng, n_responses) .* 30 .+ 60),
+    survey_type = rand(rng, ["Online", "Phone", "In-Person"], n_responses),
+    age_group = rand(rng, ["18-25", "26-40", "41-60", "60+"], n_responses)
+)
+
+demographics_summary = DataFrame(
+    age_group = ["18-25", "26-40", "41-60", "60+"],
+    count = [120, 150, 90, 40]
+)
+
+# Create the struct
+survey_data = SurveyData(survey_responses, demographics_summary)
+
+struct_intro = TextBlock("""
+<h2>Struct Data Source Example</h2>
+<p>This distribution plot uses data from a struct containing multiple DataFrames.
+The <code>SurveyData</code> struct holds both responses and demographics.
+Charts reference the responses DataFrame using <code>Symbol("survey.responses")</code>.</p>
+""")
+
+distplot8 = DistPlot(:struct_dist, survey_data.responses, Symbol("survey.responses");
+    value_cols = [:satisfaction_score, :recommendation_score, :response_time],
+    color_cols = [:survey_type, :age_group],
+    show_controls = true,
+    title = "Survey Results from Struct Data Source",
+    notes = "This example shows how to use a struct as a data source. The SurveyData struct " *
+           "contains responses and demographics DataFrames. Access struct fields via dot notation."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -182,17 +224,19 @@ conclusion = TextBlock("""
 """)
 
 # Create single combined page
+# Note: survey_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :df1 => df1,
         :df2 => df2,
         :df3 => df3,
         :df4 => df4,
         :df5 => df5,
         :df6 => df6,
-        :df7 => df7
+        :df7 => df7,
+        :survey => survey_data  # Struct with responses and demographics
     ),
-    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6, distplot7, conclusion],
+    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6, distplot7, struct_intro, distplot8, conclusion],
     tab_title = "DistPlot Examples"
 )
 
@@ -210,3 +254,4 @@ println("  • Multiple value and group columns with dropdowns")
 println("  • Customized appearance options")
 println("  • Date/Time filtering with range sliders (>20 unique values)")
 println("  • Date/Time filtering with dropdown lists (<20 unique values)")
+println("  • Struct data source (referencing struct fields via dot notation)")

@@ -617,6 +617,312 @@ graph5 = Graph(:product_network, graph_data5, :product_graph_data;
 )
 
 # =============================================================================
+# Example 6: Trading Strategies with Continuous Coloring (Global Gradient)
+# =============================================================================
+
+example6_text = TextBlock("""
+<h2>Example 6: Trading Strategy Network with Sharpe Ratio Coloring (Global Gradient)</h2>
+<p>This example demonstrates <strong>continuous color mapping</strong> with a global gradient.</p>
+<p><strong>Features demonstrated:</strong></p>
+<ul>
+    <li><strong>Continuous color mapping:</strong> Nodes colored by Sharpe Ratio using a continuous gradient</li>
+    <li><strong>Global gradient specification:</strong> Single color gradient applied to all continuous variables</li>
+    <li><strong>No extrapolation (default):</strong> Extreme values clamp to min/max gradient colors instead of getting darker</li>
+    <li>Gradient stops: -2.5 (red) → -1 (light red) → 0 (white) → 1 (light green) → 2.5 (blue)</li>
+</ul>
+<p><strong>Use case:</strong> Trading strategies are nodes, connected by correlation in returns.
+Sharpe Ratio is visualized with a continuous color gradient to show performance at a glance.</p>
+<p><strong>Color extrapolation:</strong> By default, <code>extrapolate_colors=false</code>, which means values beyond the gradient stops
+(e.g., Sharpe Ratio < -2.5 or > 2.5) will use the min/max gradient color. This prevents colors from becoming too dark
+for extreme values. Set <code>extrapolate_colors=true</code> to continue the gradient beyond the stops.</p>
+<p><strong>Try this:</strong>
+<ul>
+    <li>Select "sharpe_ratio (continuous)" from the color dropdown to see the gradient</li>
+    <li>Compare with "strategy_type (discrete)" to see the difference</li>
+    <li>Notice how strategies with extreme Sharpe ratios use the min/max gradient colors (no extrapolation)</li>
+</ul>
+</p>
+""")
+
+# Trading strategies
+strategies = [
+    ("Momentum", "STRAT_001", "Equity", 1.8),
+    ("Mean Reversion", "STRAT_002", "Equity", 1.2),
+    ("Trend Following", "STRAT_003", "Equity", 0.9),
+    ("Pairs Trading", "STRAT_004", "Equity", 1.5),
+    ("Statistical Arbitrage", "STRAT_005", "Equity", 2.1),
+    ("Market Making", "STRAT_006", "Options", -0.3),
+    ("Volatility Arbitrage", "STRAT_007", "Options", 1.1),
+    ("Delta Hedging", "STRAT_008", "Options", 0.5),
+    ("Credit Spread", "STRAT_009", "Fixed Income", 1.6),
+    ("Yield Curve", "STRAT_010", "Fixed Income", 0.8),
+    ("Carry Trade", "STRAT_011", "FX", 1.3),
+    ("Breakout", "STRAT_012", "Futures", -0.5)
+]
+
+strategy_names = [s[1] for s in strategies]
+strategy_codes = [s[2] for s in strategies]
+strategy_types = [s[3] for s in strategies]
+sharpe_ratios = [s[4] for s in strategies]
+n_strategies = length(strategies)
+
+# Generate correlation matrix based on strategy type
+rng_strat = StableRNG(321)
+strat_corr_matrix = zeros(n_strategies, n_strategies)
+for i in 1:n_strategies
+    strat_corr_matrix[i, i] = 1.0
+    for j in (i+1):n_strategies
+        # Base correlation
+        corr = -0.2 + rand(rng_strat) * 0.4
+
+        # Higher correlation if same strategy type
+        if strategy_types[i] == strategy_types[j]
+            corr += 0.5
+        end
+
+        strat_corr_matrix[i, j] = strat_corr_matrix[j, i] = clamp(corr, -1.0, 1.0)
+    end
+end
+
+# Create graph data with sharpe ratios
+graph_data6_rows = []
+for i in 1:n_strategies
+    for j in (i+1):n_strategies
+        push!(graph_data6_rows, (
+            node1 = strategy_names[i],
+            node2 = strategy_names[j],
+            strength = strat_corr_matrix[i, j],
+            strategy_type = strategy_types[i],  # Discrete column
+            sharpe_ratio = sharpe_ratios[i],    # Continuous column
+            scenario = "Strategy Correlations",
+            correlation_method = "pearson"
+        ))
+    end
+end
+
+graph_data6 = DataFrame(graph_data6_rows)
+
+# Create global color gradient (applies to all continuous variables)
+global_gradient = Dict{Float64,String}(
+    -2.5 => "#FF9999",  # Light red for very low Sharpe
+    -1.0 => "#FFFF99",  # Light yellow for low Sharpe
+    0.0 => "#FFFFFF",   # White for neutral
+    1.0 => "#99FF99",   # Light green for good Sharpe
+    2.5 => "#99CCFF"    # Light blue for excellent Sharpe
+)
+
+graph6 = Graph(:strategy_network_global, graph_data6, :strategy_graph_data_global;
+    title = "Trading Strategy Network - Continuous Color (Global Gradient)",
+    cutoff = 0.3,
+    color_cols = [:strategy_type, :sharpe_ratio],  # Both discrete and continuous columns
+    colour_map = global_gradient,  # Global gradient
+    extrapolate_colors = false,  # Default: clamp to min/max colors (prevents too-dark colors for extreme values)
+                                 # Set to true to extrapolate beyond gradient stops
+    show_edge_labels = false,
+    layout = :cose,
+    scenario_col = :scenario,
+    default_scenario = "Strategy Correlations"
+)
+
+# =============================================================================
+# Example 7: Trading Strategies with Per-Variable Gradients
+# =============================================================================
+
+example7_text = TextBlock("""
+<h2>Example 7: Strategy Network with Per-Variable Gradients and Tooltips</h2>
+<p>This example demonstrates <strong>per-variable color gradients</strong> with multiple continuous metrics and <strong>interactive tooltips</strong>.</p>
+<p><strong>Features demonstrated:</strong></p>
+<ul>
+    <li><strong>Multiple continuous variables:</strong> Sharpe Ratio, Return (%), Volatility (%)</li>
+    <li><strong>Per-variable gradients:</strong> Each continuous variable has its own color scale</li>
+    <li><strong>Interactive tooltips:</strong> Hover over nodes to see all metrics</li>
+    <li><strong>Sharpe:</strong> Red-white-green-blue scale (performance-based)</li>
+    <li><strong>Return:</strong> Red-white-blue scale (negative-neutral-positive)</li>
+    <li><strong>Volatility:</strong> Green-yellow-red scale (low-medium-high risk)</li>
+</ul>
+<p><strong>Use case:</strong> When analyzing strategies with multiple metrics, each metric can have
+its own intuitive color scale. Low volatility is green (good), high volatility is red (risky).
+Tooltips show all metric values at once for easy comparison.</p>
+<p><strong>Try this:</strong>
+<ul>
+    <li>Switch between different continuous variables in the color dropdown</li>
+    <li>Notice how each uses a different, contextually appropriate color gradient</li>
+    <li><strong>Hover over any node</strong> to see a tooltip with all metrics (strategy type, Sharpe ratio, return %, volatility %)</li>
+</ul>
+</p>
+""")
+
+# Add more metrics to strategies
+strategy_returns = [12.5, 8.3, 6.1, 10.2, 15.8, -2.1, 7.5, 3.8, 11.0, 5.5, 9.2, -3.5]
+strategy_volatility = [15.0, 12.5, 18.0, 14.5, 11.2, 22.0, 16.5, 19.0, 13.5, 17.5, 14.0, 25.0]
+
+# Create graph data with multiple continuous metrics
+graph_data7_rows = []
+for i in 1:n_strategies
+    for j in (i+1):n_strategies
+        push!(graph_data7_rows, (
+            node1 = strategy_names[i],
+            node2 = strategy_names[j],
+            strength = strat_corr_matrix[i, j],
+            strategy_type = strategy_types[i],
+            sharpe_ratio = sharpe_ratios[i],
+            return_pct = strategy_returns[i],
+            volatility_pct = strategy_volatility[i],
+            scenario = "Multi-Metric Analysis",
+            correlation_method = "pearson"
+        ))
+    end
+end
+
+graph_data7 = DataFrame(graph_data7_rows)
+
+# Create per-variable gradients
+per_variable_gradients = Dict{String,Dict{Float64,String}}(
+    "sharpe_ratio" => Dict{Float64,String}(
+        -2.5 => "#FF9999",  # Light red
+        -1.0 => "#FFFF99",  # Light yellow
+        0.0 => "#FFFFFF",   # White
+        1.0 => "#99FF99",   # Light green
+        2.5 => "#99CCFF"    # Light blue
+    ),
+    "return_pct" => Dict{Float64,String}(
+        -5.0 => "#FF6666",   # Red for negative returns
+        0.0 => "#FFFFFF",    # White for zero
+        5.0 => "#6666FF",    # Blue for positive returns (different from Sharpe)
+        20.0 => "#0000AA"    # Dark blue for very high returns
+    ),
+    "volatility_pct" => Dict{Float64,String}(
+        10.0 => "#00FF00",   # Green for low volatility (good)
+        15.0 => "#FFFF00",   # Yellow for medium volatility
+        20.0 => "#FF8800",   # Orange for high volatility
+        30.0 => "#FF0000"    # Red for very high volatility (risky)
+    )
+)
+
+graph7 = Graph(:strategy_network_pervariable, graph_data7, :strategy_graph_data_pervariable;
+    title = "Trading Strategy Network - Per-Variable Gradients",
+    cutoff = 0.3,
+    color_cols = [:strategy_type, :sharpe_ratio, :return_pct, :volatility_pct],
+    colour_map = per_variable_gradients,
+    extrapolate_colors = false,  # Clamp to gradient boundaries (prevents too-dark colors)
+    show_edge_labels = false,
+    layout = :cose,
+    scenario_col = :scenario,
+    default_scenario = "Multi-Metric Analysis"
+)
+
+# =============================================================================
+# Example 8: Graph with Additional Tooltip Information
+# =============================================================================
+
+example8_text = TextBlock("""
+<h2>Example 8: Market Network with Rich Tooltips</h2>
+<p>This example demonstrates the <strong>tooltip_cols parameter</strong> for adding extra information to node tooltips.</p>
+<p><strong>Features demonstrated:</strong></p>
+<ul>
+    <li><strong>color_cols:</strong> Variables shown in color dropdown AND tooltips (Industry, Returns %)</li>
+    <li><strong>tooltip_cols:</strong> Additional variables shown ONLY in tooltips (GDP Growth, Population, Market Cap)</li>
+    <li><strong>Information separation:</strong> Keep color dropdown clean while showing rich details on hover</li>
+</ul>
+<p><strong>How it works:</strong></p>
+<ul>
+    <li>The color dropdown only shows <code>color_cols</code> options (Industry and Returns %)</li>
+    <li>Hovering over a node shows ALL information from <code>union(color_cols, tooltip_cols)</code></li>
+    <li>This keeps the UI clean while providing detailed context on demand</li>
+</ul>
+<p><strong>Try this:</strong> Hover over any market node to see:
+<ul>
+    <li>Market name (node label)</li>
+    <li>Industry (from color_cols)</li>
+    <li>Returns % (from color_cols)</li>
+    <li>GDP Growth % (from tooltip_cols - not in color dropdown)</li>
+    <li>Population millions (from tooltip_cols - not in color dropdown)</li>
+    <li>Market Cap billions (from tooltip_cols - not in color dropdown)</li>
+</ul>
+</p>
+<p><strong>Use case:</strong> When you have many attributes but only want to color by a few key ones,
+use tooltip_cols to provide additional context without cluttering the color selection dropdown.</p>
+""")
+
+# African markets example with detailed attributes
+markets = [
+    ("Kenya", "Mixed Economy", 7.2, 6.1, 54.0, 115.0),
+    ("Rwanda", "Tourism & Services", 5.8, 8.2, 13.0, 12.5),
+    ("Tanzania", "Agriculture & Mining", 6.5, 6.8, 60.0, 75.0),
+    ("Uganda", "Agriculture", 4.9, 6.2, 46.0, 45.0),
+    ("Ethiopia", "Agriculture & Manufacturing", 8.1, 7.5, 120.0, 95.0),
+    ("Nigeria", "Oil & Services", 3.2, 5.8, 220.0, 440.0),
+    ("South Africa", "Diversified", 4.5, 4.2, 60.0, 380.0),
+    ("Ghana", "Mining & Agriculture", 5.4, 5.9, 32.0, 75.0)
+]
+
+market_names = [m[1] for m in markets]
+industries = [m[2] for m in markets]
+returns = [m[3] for m in markets]
+gdp_growth = [m[4] for m in markets]
+populations = [m[5] for m in markets]
+market_caps = [m[6] for m in markets]
+n_markets = length(markets)
+
+# Generate economic correlation matrix (markets with similar returns correlate)
+rng_markets = StableRNG(888)
+market_corr_matrix = zeros(n_markets, n_markets)
+for i in 1:n_markets
+    market_corr_matrix[i, i] = 1.0
+    for j in (i+1):n_markets
+        # Base correlation
+        corr = 0.2 + rand(rng_markets) * 0.3
+
+        # Higher correlation if similar returns
+        return_diff = abs(returns[i] - returns[j])
+        if return_diff < 1.5
+            corr += 0.3
+        elseif return_diff < 3.0
+            corr += 0.15
+        end
+
+        # Higher correlation if same industry type
+        if industries[i] == industries[j]
+            corr += 0.2
+        end
+
+        market_corr_matrix[i, j] = market_corr_matrix[j, i] = min(corr, 1.0)
+    end
+end
+
+# Create graph data with all attributes
+graph_data8_rows = []
+for i in 1:n_markets
+    for j in (i+1):n_markets
+        push!(graph_data8_rows, (
+            node1 = market_names[i],
+            node2 = market_names[j],
+            strength = market_corr_matrix[i, j],
+            industry = industries[i],           # color_cols - shown in dropdown AND tooltips
+            returns = returns[i],               # color_cols - shown in dropdown AND tooltips
+            gdp_growth = gdp_growth[i],        # tooltip_cols - ONLY in tooltips
+            population = populations[i],        # tooltip_cols - ONLY in tooltips
+            market_cap = market_caps[i],       # tooltip_cols - ONLY in tooltips
+            scenario = "African Markets 2025",
+            correlation_method = "economic"
+        ))
+    end
+end
+
+graph_data8 = DataFrame(graph_data8_rows)
+
+graph8 = Graph(:market_network_tooltips, graph_data8, :market_graph_data;
+    title = "African Markets Network - Rich Tooltips Example",
+    cutoff = 0.4,
+    color_cols = [:industry, :returns],  # These appear in color dropdown AND tooltips
+    tooltip_cols = [:gdp_growth, :population, :market_cap],  # These appear ONLY in tooltips
+    show_edge_labels = false,
+    layout = :cose,
+    scenario_col = :scenario,
+    default_scenario = "African Markets 2025"
+)
+
+# =============================================================================
 # Summary
 # =============================================================================
 
@@ -644,10 +950,38 @@ summary = TextBlock("""
 <ul>
     <li><strong>Cutoff slider:</strong> Filter connections by strength</li>
     <li><strong>Edge labels:</strong> Show/hide connection strengths</li>
-    <li><strong>Node coloring:</strong> Color by categorical attributes</li>
+    <li><strong>Node coloring:</strong> Color by categorical (discrete) or numeric (continuous) attributes</li>
+    <li><strong>Continuous coloring:</strong> Use custom color gradients for numeric variables</li>
+    <li><strong>Interactive tooltips:</strong> Hover over nodes to see detailed information</li>
     <li><strong>Layout selection:</strong> Switch between different layouts</li>
     <li><strong>Drag nodes:</strong> Manually rearrange network</li>
     <li><strong>Zoom & pan:</strong> Explore large networks</li>
+</ul>
+
+<h3>Advanced Coloring</h3>
+<ul>
+    <li><strong>Discrete coloring:</strong> Categorical attributes (sector, department, etc.)</li>
+    <li><strong>Continuous coloring:</strong> Numeric variables with gradient interpolation</li>
+    <li><strong>Global gradient:</strong> Single gradient for all continuous variables</li>
+    <li><strong>Per-variable gradients:</strong> Different color scales for each metric</li>
+    <li><strong>Gradient customization:</strong> Define custom color stops for intuitive visualization</li>
+    <li><strong>Color extrapolation control:</strong> Choose whether extreme values clamp to gradient boundaries (default) or extrapolate beyond them</li>
+</ul>
+
+<h3>Color Gradient Options</h3>
+<ul>
+    <li><strong>extrapolate_colors=false (default):</strong> Values beyond gradient stops use min/max colors (prevents too-dark colors)</li>
+    <li><strong>extrapolate_colors=true:</strong> Colors continue to extrapolate beyond gradient stops for extreme values</li>
+    <li><strong>Example:</strong> With gradient -2.5→2.5 and value=5.0, clamping uses the 2.5 color, extrapolation continues the trend</li>
+</ul>
+
+<h3>Tooltips</h3>
+<ul>
+    <li><strong>color_cols:</strong> Variables shown in color dropdown AND in tooltips when hovering over nodes</li>
+    <li><strong>tooltip_cols:</strong> Additional variables shown ONLY in tooltips (not in color dropdown)</li>
+    <li><strong>Automatic formatting:</strong> Numbers formatted with appropriate precision, column names capitalized</li>
+    <li><strong>Use case:</strong> Keep color selection UI clean while providing rich contextual information on hover</li>
+    <li><strong>Display:</strong> Tooltips show union(color_cols, tooltip_cols) for comprehensive node information</li>
 </ul>
 
 <h3>Use Cases</h3>
@@ -671,7 +1005,10 @@ data_dict = Dict{Symbol, DataFrame}(
     :city_graph_data => graph_data2,
     :social_graph_data => graph_data3,
     :research_graph_data => graph_data4,
-    :product_graph_data => graph_data5
+    :product_graph_data => graph_data5,
+    :strategy_graph_data_global => graph_data6,
+    :strategy_graph_data_pervariable => graph_data7,
+    :market_graph_data => graph_data8
 )
 
 # Create page
@@ -683,6 +1020,9 @@ page = JSPlotPage(
      example3_text, graph3,
      example4_text, graph4,
      example5_text, graph5,
+     example6_text, graph6,
+     example7_text, graph7,
+     example8_text, graph8,
      summary];
     dataformat = :csv_embedded
 )

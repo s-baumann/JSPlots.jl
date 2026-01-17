@@ -555,7 +555,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -686,17 +687,28 @@ function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_
     data_string = ""
     data_src = ""
 
+    # Generate path - struct-extracted DataFrames (containing '.') use subfolder structure
+    label_str = string(data_label)
+    if contains(label_str, ".")
+        parts = split(label_str, ".")
+        parent_folder = parts[1]
+        field_name = join(parts[2:end], ".")
+        path_base = "data/$(parent_folder)/$(field_name)"
+    else
+        path_base = "data/$(label_str)"
+    end
+
     if format == :csv_external
         # For external CSV, we just reference the file
-        data_src = "data/$(string(data_label)).csv"
+        data_src = "$(path_base).csv"
         # No data content needed for external format
     elseif format == :json_external
         # For external JSON, we just reference the file
-        data_src = "data/$(string(data_label)).json"
+        data_src = "$(path_base).json"
         # No data content needed for external format
     elseif format == :parquet
         # For external Parquet, we just reference the file
-        data_src = "data/$(string(data_label)).parquet"
+        data_src = "$(path_base).parquet"
         # No data content needed for external format
     elseif format == :csv_embedded
         io_buffer = IOBuffer()
@@ -991,50 +1003,10 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         # If no charts reference any data, save all dataframes; otherwise only save referenced ones
         files_to_do = isempty(referenced_data) ? collect(keys(pt.dataframes)) : intersect(collect(keys(pt.dataframes)), referenced_data)
         # Save all dataframes as separate files based on format
+        # Uses save_dataframe helper which handles subfolder structure for struct-extracted DataFrames
         for data_label in files_to_do
             df = pt.dataframes[data_label]
-            # Convert ZonedDateTime columns to DateTime for proper display
-            df = convert_zoneddatetime_to_datetime(df)
-
-            if pt.dataformat == :csv_external
-                file_path = joinpath(data_dir, "$(string(data_label)).csv")
-                CSV.write(file_path, df)
-                println("  Data saved to $file_path")
-            elseif pt.dataformat == :json_external
-                file_path = joinpath(data_dir, "$(string(data_label)).json")
-                # Convert DataFrame to array of dictionaries
-                rows = []
-                for row in eachrow(df)
-                    row_dict = Dict(String(col) => row[col] for col in names(df))
-                    push!(rows, row_dict)
-                end
-                open(file_path, "w") do f
-                    write(f, JSON.json(rows, 2))
-                end
-                println("  Data saved to $file_path")
-            elseif pt.dataformat == :parquet
-                file_path = joinpath(data_dir, "$(string(data_label)).parquet")
-                # Use DuckDB to write Parquet file
-                con = DBInterface.connect(DuckDB.DB)
-
-                # Convert Symbol columns to String (DuckDB doesn't support Symbol type)
-                # ZonedDateTime already converted above
-                df_converted = copy(df)
-                for col in names(df_converted)
-                    col_type = eltype(df_converted[!, col])
-                    # Check if the column type is Symbol or Union{Missing, Symbol} or similar
-                    if col_type <: Symbol || (col_type isa Union && Symbol in Base.uniontypes(col_type))
-                        df_converted[!, col] = string.(df_converted[!, col])
-                    end
-                end
-
-                # Register the DataFrame with DuckDB
-                DuckDB.register_data_frame(con, df_converted, "temp_table")
-                # Write to Parquet file
-                DBInterface.execute(con, "COPY temp_table TO '$file_path' (FORMAT PARQUET)")
-                DBInterface.close!(con)
-                println("  Data saved to $file_path")
-            end
+            save_dataframe(data_label, df, data_dir, pt.dataformat)
         end
 
         # Generate HTML content - handle Picture types specially
@@ -1353,17 +1325,41 @@ end
     save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
 
 Helper function to save a single DataFrame in the specified format.
+Supports subfolder storage for struct-extracted DataFrames (labels containing '.').
+For example, `Symbol("my_struct.field")` saves to `data/my_struct/field.parquet`.
 """
 function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
     # Convert ZonedDateTime columns to DateTime for proper display
     df = convert_zoneddatetime_to_datetime(df)
 
+    # Check if this is a struct-extracted DataFrame (contains '.')
+    # Struct-extracted DataFrames use subfolder structure: data/struct_name/field.parquet
+    label_str = string(data_label)
+    if contains(label_str, ".")
+        # Split on '.' to get parent folder and field name
+        parts = split(label_str, ".")
+        parent_folder = parts[1]
+        field_name = join(parts[2:end], ".")  # Handle unlikely case of multiple dots
+
+        # Create subfolder
+        subfolder = joinpath(data_dir, parent_folder)
+        if !isdir(subfolder)
+            mkpath(subfolder)
+        end
+
+        file_base = field_name
+        target_dir = subfolder
+    else
+        file_base = label_str
+        target_dir = data_dir
+    end
+
     if dataformat == :csv_external
-        file_path = joinpath(data_dir, "$(string(data_label)).csv")
+        file_path = joinpath(target_dir, "$(file_base).csv")
         CSV.write(file_path, df)
         println("  Data saved to $file_path")
     elseif dataformat == :json_external
-        file_path = joinpath(data_dir, "$(string(data_label)).json")
+        file_path = joinpath(target_dir, "$(file_base).json")
         rows = []
         for row in eachrow(df)
             row_dict = Dict(String(col) => row[col] for col in names(df))
@@ -1374,7 +1370,7 @@ function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dat
         end
         println("  Data saved to $file_path")
     elseif dataformat == :parquet
-        file_path = joinpath(data_dir, "$(string(data_label)).parquet")
+        file_path = joinpath(target_dir, "$(file_base).parquet")
         con = DBInterface.connect(DuckDB.DB)
 
         # Convert Symbol columns to String (ZonedDateTime already converted above)

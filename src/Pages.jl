@@ -1,4 +1,94 @@
 """
+    extract_dataframes_from_struct(obj, label::Symbol) -> Dict{Symbol, DataFrame}
+
+Extract all DataFrame fields from a struct, handling Union{Missing, DataFrame} types.
+Returns a dictionary mapping `label.fieldname` to the DataFrame.
+
+Uses `.` as separator since Julia doesn't allow dots in identifiers, ensuring unique splitting.
+
+This enables generic support for structs containing multiple DataFrames
+without hardcoding specific struct types.
+
+# Arguments
+- `obj`: Any struct that may contain DataFrame fields
+- `label::Symbol`: The label prefix to use for the extracted DataFrames
+
+# Returns
+- `Dict{Symbol, DataFrame}`: Dictionary mapping `Symbol("label.fieldname")` to DataFrame
+
+# Example
+```julia
+struct MyData
+    prices::DataFrame
+    volumes::Union{Missing, DataFrame}
+    name::String  # Non-DataFrame fields are ignored
+end
+
+data = MyData(prices_df, volumes_df, "test")
+result = extract_dataframes_from_struct(data, :my_data)
+# Returns Dict(Symbol("my_data.prices") => prices_df, Symbol("my_data.volumes") => volumes_df)
+```
+"""
+function extract_dataframes_from_struct(obj, label::Symbol)::Dict{Symbol, DataFrame}
+    result = Dict{Symbol, DataFrame}()
+
+    # Get all field names for this struct type
+    T = typeof(obj)
+    field_names = fieldnames(T)
+
+    for field_name in field_names
+        field_value = getfield(obj, field_name)
+        field_type = fieldtype(T, field_name)
+
+        # Check if this field is a DataFrame or Union{Missing, DataFrame}
+        is_df_field = field_type <: DataFrame ||
+                      (field_type isa Union && DataFrame in Base.uniontypes(field_type))
+
+        if is_df_field && !ismissing(field_value) && field_value isa DataFrame
+            # Only include if it has rows
+            if nrow(field_value) > 0
+                # Use . as separator - Julia doesn't allow dots in identifiers so this is unique
+                result[Symbol(string(label, ".", field_name))] = field_value
+            end
+        end
+    end
+
+    return result
+end
+
+"""
+    is_struct_with_dataframes(obj) -> Bool
+
+Check if an object is a struct that contains DataFrame fields.
+Returns true if the object has at least one field of type DataFrame or Union{Missing, DataFrame}.
+"""
+function is_struct_with_dataframes(obj)::Bool
+    T = typeof(obj)
+
+    # Skip basic types and DataFrames themselves
+    if obj isa DataFrame || obj isa AbstractDict || obj isa AbstractArray ||
+       obj isa Number || obj isa AbstractString || obj isa Symbol
+        return false
+    end
+
+    # Check if it's a concrete type with fields
+    if !isconcretetype(T)
+        return false
+    end
+
+    # Check if any field is a DataFrame type
+    for field_name in fieldnames(T)
+        field_type = fieldtype(T, field_name)
+        if field_type <: DataFrame ||
+           (field_type isa Union && DataFrame in Base.uniontypes(field_type))
+            return true
+        end
+    end
+
+    return false
+end
+
+"""
     sanitize_filename(title::String)
 
 Convert a page title to a safe filename suitable for HTML files.
@@ -41,12 +131,16 @@ function sanitize_filename(title::String)
 end
 
 """
-    JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; kwargs...)
+    JSPlotPage(dataframes::Dict{Symbol,Any}, pivot_tables::Vector; kwargs...)
 
 A container for a single HTML page with plots and data.
 
 # Arguments
-- `dataframes::Dict{Symbol,DataFrame}`: Dictionary mapping data labels to DataFrames
+- `dataframes::Dict{Symbol,Any}`: Dictionary mapping data labels to DataFrames or structs containing DataFrames.
+  When a struct is provided, all DataFrame fields are automatically extracted and stored with dot-prefixed names
+  (e.g., `:my_data` with fields `fills` and `metadata` becomes `Symbol("my_data.fills")` and `Symbol("my_data.metadata")`).
+  For external formats (parquet/csv_external), struct DataFrames are stored in subfolders (e.g., `data/my_data/fills.parquet`).
+  Supports `Union{Missing, DataFrame}` fields - missing DataFrames are skipped.
 - `pivot_tables::Vector`: Vector of plot objects (charts, tables, text blocks, etc.)
 
 # Keyword Arguments
@@ -54,6 +148,28 @@ A container for a single HTML page with plots and data.
 - `page_header::String`: Main page heading (default: `""`)
 - `notes::String`: Page description or notes (default: `""`)
 - `dataformat::Symbol`: Data storage format - `:csv_embedded`, `:json_embedded`, `:csv_external`, `:json_external`, or `:parquet` (default: `:csv_embedded`)
+
+# Examples
+```julia
+# With DataFrames
+page = JSPlotPage(Dict(:data1 => df1, :data2 => df2), [chart1, chart2])
+
+# With a struct containing DataFrames
+struct MyData
+    prices::DataFrame
+    volumes::DataFrame
+end
+my_data = MyData(prices_df, volumes_df)
+page = JSPlotPage(Dict(:my_data => my_data), [chart1])
+# The my_data.prices becomes Symbol("my_data.prices"), stored as data/my_data/prices.parquet
+# Charts can reference Symbol("my_data.prices") as their data_label
+
+# Mixing DataFrames and structs
+page = JSPlotPage(
+    Dict(:struct_data => my_struct, :other => some_df),
+    [pivot_table]
+)
+```
 """
 struct JSPlotPage
     dataframes::Dict{Symbol,DataFrame}
@@ -62,11 +178,29 @@ struct JSPlotPage
     page_header::String
     notes::String
     dataformat::Symbol
-    function JSPlotPage(dataframes::Dict{Symbol,DataFrame}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
+    function JSPlotPage(dataframes::AbstractDict{Symbol}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
         if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
             error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
         end
-        new(dataframes, pivot_tables, tab_title, page_header, notes, dataformat)
+
+        # Process input dictionary - expand structs containing DataFrames
+        enhanced_dataframes = Dict{Symbol,DataFrame}()
+
+        for (label, data) in dataframes
+            if data isa DataFrame
+                # Direct DataFrame - add as-is
+                enhanced_dataframes[label] = data
+            elseif is_struct_with_dataframes(data)
+                # Struct with DataFrame fields - extract all DataFrames
+                # Charts can then reference individual DataFrames via Symbol("label.fieldname")
+                extracted = extract_dataframes_from_struct(data, label)
+                merge!(enhanced_dataframes, extracted)
+            else
+                error("Data dictionary must contain DataFrame or struct with DataFrame fields, got $(typeof(data)) for key :$label")
+            end
+        end
+
+        new(enhanced_dataframes, pivot_tables, tab_title, page_header, notes, dataformat)
     end
 end
 

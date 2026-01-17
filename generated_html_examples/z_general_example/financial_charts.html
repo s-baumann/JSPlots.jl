@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -720,21 +721,21 @@ $(function(){
     let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
 
     // Make it global so inline onchange can see it
-    window.updateChart_financial_ohlc = function() {
+    window.updateChart_financial_candlestick = function() {
         // Get current control values
-        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_financial_ohlc');
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_financial_candlestick');
         const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
 
-        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_financial_ohlc');
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_financial_candlestick');
         const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
 
-        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_financial_ohlc');
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_financial_candlestick');
         const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
 
-        const chartTypeSelect = document.getElementById('chart_type_select_financial_ohlc');
+        const chartTypeSelect = document.getElementById('chart_type_select_financial_candlestick');
         const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
 
-        const displayModeSelect = document.getElementById('display_mode_select_financial_ohlc');
+        const displayModeSelect = document.getElementById('display_mode_select_financial_candlestick');
         const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
 
         // Get current filter values
@@ -743,7 +744,7 @@ $(function(){
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_financial_ohlc');
+            const select = document.getElementById(col + '_select_financial_candlestick');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
@@ -751,7 +752,7 @@ $(function(){
 
         // Read continuous filters (range sliders)
         CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_financial_ohlc' + '_slider');
+            const slider = $('#' + col + '_range_financial_candlestick' + '_slider');
             if (slider.length > 0) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
@@ -763,7 +764,7 @@ $(function(){
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
             allData,
-            'financial_ohlc',
+            'financial_candlestick',
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
@@ -821,7 +822,7 @@ $(function(){
             const data = symbolData[symbol];
             const color = colorPalette[idx % colorPalette.length];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -837,8 +838,8 @@ $(function(){
                 close = close.map(v => v / base);
             }
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -851,7 +852,7 @@ $(function(){
                 increasing: {line: {color: color}},
                 decreasing: {line: {color: color}}
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -885,7 +886,7 @@ $(function(){
         };
 
         if (showVolume && HAS_VOLUME) {
-            // Two subplots: OHLC on top, volume on bottom
+            // Two subplots: Candlestick on top, volume on bottom
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price',
                 domain: [0.3, 1]
@@ -897,13 +898,13 @@ $(function(){
             };
             layout.barmode = 'group';  // Dodge volume bars
         } else {
-            // Single plot: OHLC only
+            // Single plot: Candlestick only
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price'
             };
         }
 
-        Plotly.newPlot('financial_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('financial_candlestick', traces, layout, {responsive: true});
     }
 
     // Render faceted mode (one subplot per symbol)
@@ -929,7 +930,7 @@ $(function(){
         symbols.forEach((symbol, idx) => {
             const data = symbolData[symbol];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -950,8 +951,8 @@ $(function(){
             const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
             const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -962,7 +963,7 @@ $(function(){
                 xaxis: xaxis,
                 yaxis: yaxis
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -1016,587 +1017,18 @@ $(function(){
             });
         });
 
-        Plotly.newPlot('financial_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('financial_candlestick', traces, layout, {responsive: true});
     }
 
     // Load and parse CSV data using centralized parser
-    loadDataset('ohlc_data').then(function(data) {
+    loadDataset('candlestick_data').then(function(data) {
         allData = data;
-        window.updateChart_financial_ohlc();
+        window.updateChart_financial_candlestick();
 
         // Setup aspect ratio control after initial render
-        setupAspectRatioControl('financial_ohlc');
+        setupAspectRatioControl('financial_candlestick');
     }).catch(function(error) {
-        console.error('Error loading data for chart financial_ohlc:', error);
-    });
-})();
-(function() {
-    // Configuration
-    const TIME_COL = 'time';
-    const BID_COL = 'bid';
-    const ASK_COL = 'ask';
-    const TIME_FROM_COL = 'time_from';
-    const TIME_TO_COL = 'time_to';
-    const VOLUME_COL = 'volume';
-    const FILL_TIME_COL = 'time';
-    const QUANTITY_COL = 'quantity';
-    const PRICE_COL = 'price';
-    const EXECUTION_NAME_COL = 'execution_name';
-    const ARRIVAL_PRICE_COL = 'arrival_price';
-    const HAS_ARRIVAL = true;
-    const SIDE_COL = 'side';
-    const DESIRED_QUANTITY_COL = 'desired_quantity';
-    const COLOR_COLS = ['venue', 'urgency'];
-    const COLOR_MAPS = {'venue': {'NYSE': '#EF553B', 'ARCA': '#00cc96', 'BATS': '#ab63fa', 'NASDAQ': '#636efa'}, 'urgency': {'Low': '#EF553B', 'High': '#636efa'}};
-    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
-                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
-
-    let tobData = [];
-    let volumeData = [];
-    let fillsData = [];
-    let metadataData = [];
-    let deselectedFills = new Set();  // Track manually deselected fills
-
-    window.updateChart_tutorial_execution = function() {
-        // Get current controls
-        const execSelect = document.getElementById('execution_select_tutorial_execution');
-        const currentExecution = execSelect ? execSelect.value : 'Aggressive Strategy';
-
-        const benchmarkSelect = document.getElementById('benchmark_select_tutorial_execution');
-        const benchmark = benchmarkSelect ? benchmarkSelect.value : (HAS_ARRIVAL ? 'arrival' : 'first');
-
-        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_tutorial_execution');
-        const showVolume = showVolumeCheckbox ? showVolumeCheckbox.checked : true;
-
-        // Get data for current execution
-        const execMetadata = metadataData.find(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
-        if (!execMetadata) {
-            console.error('No metadata found for execution:', currentExecution);
-            return;
-        }
-
-        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
-        const side = execMetadata[SIDE_COL];
-        const desiredQty = execMetadata[DESIRED_QUANTITY_COL];
-
-        // Calculate benchmark price
-        let benchmarkPrice;
-        if (benchmark === 'arrival' && HAS_ARRIVAL) {
-            benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL];
-        } else {
-            // Use mid price right before first fill
-            if (execFills.length > 0) {
-                const firstFillTime = execFills[0][FILL_TIME_COL];
-                const tobBeforeFirst = tobData.filter(row => row[TIME_COL] <= firstFillTime);
-                if (tobBeforeFirst.length > 0) {
-                    const lastTob = tobBeforeFirst[tobBeforeFirst.length - 1];
-                    benchmarkPrice = (lastTob[BID_COL] + lastTob[ASK_COL]) / 2;
-                } else {
-                    benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
-                }
-            } else {
-                benchmarkPrice = execMetadata[ARRIVAL_PRICE_COL] || 0;
-            }
-        }
-
-        // Render chart
-        renderChart(execFills, benchmarkPrice, side, desiredQty, showVolume);
-
-        // Render tables
-        renderFillsTable(execFills, benchmarkPrice, side, desiredQty);
-        renderSummaryTable(execFills, benchmarkPrice, side, desiredQty);
-    };
-
-    function renderChart(fills, benchmarkPrice, side, desiredQty, showVolume) {
-        const traces = [];
-
-        // Bid and ask lines
-        const tobTimes = tobData.map(row => row[TIME_COL]);
-        const bids = tobData.map(row => row[BID_COL]);
-        const asks = tobData.map(row => row[ASK_COL]);
-
-        traces.push({
-            x: tobTimes,
-            y: bids,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Bid',
-            line: {color: '#EF553B', width: 2},
-            xaxis: 'x',
-            yaxis: 'y'
-        });
-
-        traces.push({
-            x: tobTimes,
-            y: asks,
-            type: 'scatter',
-            mode: 'lines',
-            name: 'Ask',
-            line: {color: '#00cc96', width: 2},
-            xaxis: 'x',
-            yaxis: 'y'
-        });
-
-        // Volume bars if enabled
-        if (showVolume) {
-            const volTimes = volumeData.map(row => row[TIME_FROM_COL]);
-            const volumes = volumeData.map(row => row[VOLUME_COL]);
-
-            traces.push({
-                x: volTimes,
-                y: volumes,
-                type: 'bar',
-                name: 'Volume',
-                marker: {color: '#636efa'},
-                xaxis: 'x',
-                yaxis: 'y2'
-            });
-        }
-
-        // Fill points
-        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-
-        if (COLOR_COLS.length > 0) {
-            // Group by first color column
-            const colorCol = COLOR_COLS[0];
-            const fillsByColor = {};
-            activeFills.forEach((fill, idx) => {
-                const colorValue = String(fill[colorCol]);
-                if (!fillsByColor[colorValue]) fillsByColor[colorValue] = [];
-                fillsByColor[colorValue].push({fill, originalIdx: idx});
-            });
-
-            for (let colorValue in fillsByColor) {
-                const items = fillsByColor[colorValue];
-                const fillGroup = items.map(item => item.fill);
-                const color = COLOR_MAPS[colorCol] && COLOR_MAPS[colorCol][colorValue] ?
-                             COLOR_MAPS[colorCol][colorValue] :
-                             COLOR_PALETTE[0];
-
-                traces.push({
-                    x: fillGroup.map(f => f[FILL_TIME_COL]),
-                    y: fillGroup.map(f => f[PRICE_COL]),
-                    type: 'scatter',
-                    mode: 'markers',
-                    name: colorValue,
-                    marker: {
-                        size: fillGroup.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
-                        color: color
-                    },
-                    xaxis: 'x',
-                    yaxis: 'y'
-                });
-            }
-        } else {
-            // No color grouping
-            traces.push({
-                x: activeFills.map(f => f[FILL_TIME_COL]),
-                y: activeFills.map(f => f[PRICE_COL]),
-                type: 'scatter',
-                mode: 'markers',
-                name: 'Fills',
-                marker: {
-                    size: activeFills.map(f => Math.max(5, 5 + Math.log(f[QUANTITY_COL] + 1) * 2)),
-                    color: '#636efa'
-                },
-                xaxis: 'x',
-                yaxis: 'y'
-            });
-        }
-
-        // Calculate shortfall timeline
-        const sideMultiplier = side === 'buy' ? 1 : -1;
-        const shortfallTimes = [];
-        const cumImpShortfalls = [];
-        const cumVwapShortfalls = [];
-
-        let cumImpShortfall = 0;
-        let cumVwapShortfall = 0;
-
-        fills.forEach((fill, idx) => {
-            if (deselectedFills.has(idx)) return;
-
-            const qty = fill[QUANTITY_COL];
-            const price = fill[PRICE_COL];
-            const rollingVWAP = calculateRollingVWAP(fills, idx);
-
-            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
-
-            cumImpShortfall += impShortfall;
-            cumVwapShortfall += vwapShortfall;
-
-            shortfallTimes.push(fill[FILL_TIME_COL]);
-            cumImpShortfalls.push(cumImpShortfall);
-            cumVwapShortfalls.push(cumVwapShortfall);
-        });
-
-        // Add shortfall timeline traces
-        traces.push({
-            x: shortfallTimes,
-            y: cumImpShortfalls,
-            type: 'scatter',
-            mode: 'lines+markers',
-            name: 'Imp. Shortfall',
-            line: {color: '#FFA15A', width: 2},
-            marker: {size: 6},
-            xaxis: 'x',
-            yaxis: 'y3',
-            hovertemplate: 'Time: %{x}<br>Imp. Shortfall: %{y:.2f}<extra></extra>'
-        });
-
-        traces.push({
-            x: shortfallTimes,
-            y: cumVwapShortfalls,
-            type: 'scatter',
-            mode: 'lines+markers',
-            name: 'VWAP Shortfall',
-            line: {color: '#ab63fa', width: 2},
-            marker: {size: 6},
-            xaxis: 'x',
-            yaxis: 'y3',
-            hovertemplate: 'Time: %{x}<br>VWAP Shortfall: %{y:.2f}<extra></extra>'
-        });
-
-        // Add zero reference line for shortfall chart
-        if (shortfallTimes.length > 0) {
-            traces.push({
-                x: [shortfallTimes[0], shortfallTimes[shortfallTimes.length - 1]],
-                y: [0, 0],
-                type: 'scatter',
-                mode: 'lines',
-                name: 'Zero',
-                line: {color: 'gray', width: 1, dash: 'dash'},
-                xaxis: 'x',
-                yaxis: 'y3',
-                showlegend: false,
-                hoverinfo: 'skip'
-            });
-        }
-
-        // Adjust layout for three subplots
-        const layout = {
-            xaxis: {title: 'Time', anchor: showVolume ? 'y3' : 'y3'},
-            yaxis: {
-                title: 'Price',
-                domain: showVolume ? [0.45, 1] : [0.35, 1]
-            },
-            yaxis3: {
-                title: 'Cumulative Shortfall',
-                domain: [0, showVolume ? 0.25 : 0.3],
-                anchor: 'x'
-            },
-            hovermode: 'closest',
-            showlegend: true
-        };
-
-        if (showVolume) {
-            layout.yaxis2 = {
-                title: 'Volume',
-                domain: [0.3, 0.4],
-                anchor: 'x'
-            };
-        }
-
-        Plotly.newPlot('tutorial_execution', traces, layout, {responsive: true});
-    }
-
-    function calculateRollingVWAP(fills, upToIndex) {
-        // Calculate VWAP for active fills up to and including upToIndex
-        let totalValue = 0;
-        let totalQty = 0;
-        for (let i = 0; i <= upToIndex; i++) {
-            if (!deselectedFills.has(i)) {
-                const fill = fills[i];
-                totalValue += fill[PRICE_COL] * fill[QUANTITY_COL];
-                totalQty += fill[QUANTITY_COL];
-            }
-        }
-        return totalQty > 0 ? totalValue / totalQty : 0;
-    }
-
-    function getSpreadCrossing(fill, side) {
-        // Find the bid/ask at the fill time
-        const fillTime = fill[FILL_TIME_COL];
-        const tobAtFill = tobData.filter(row => row[TIME_COL] <= fillTime);
-        if (tobAtFill.length === 0) return null;
-
-        const lastTob = tobAtFill[tobAtFill.length - 1];
-        const bid = lastTob[BID_COL];
-        const ask = lastTob[ASK_COL];
-        const spread = ask - bid;
-
-        if (spread <= 0) return null;
-
-        const fillPrice = fill[PRICE_COL];
-        if (side === 'buy') {
-            // 0 = bought at bid (neartouch), 1 = bought at ask (fartouch)
-            return Math.max(0, Math.min(1, (fillPrice - bid) / spread));
-        } else {
-            // 0 = sold at ask (neartouch), 1 = sold at bid (fartouch)
-            return Math.max(0, Math.min(1, (ask - fillPrice) / spread));
-        }
-    }
-
-    function renderFillsTable(fills, benchmarkPrice, side, desiredQty) {
-        const container = document.getElementById('fills_table_tutorial_execution');
-        if (!container) return;
-
-        let html = '<h4>Fill Details</h4>';
-        html += '<table id="fills_table_content_tutorial_execution" style="width:100%; border-collapse: collapse;">';
-        html += '<thead><tr>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Time</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Price</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
-        COLOR_COLS.forEach(col => {
-            html += `<th style="border: 1px solid #ddd; padding: 8px;">${col}</th>`;
-        });
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Spread Cross %</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Remaining %</th>';
-        html += '</tr></thead><tbody>';
-
-        let cumQty = 0;
-        let cumImpShortfall = 0;
-        let cumVwapShortfall = 0;
-
-        fills.forEach((fill, idx) => {
-            const isDeselected = deselectedFills.has(idx);
-            const qty = fill[QUANTITY_COL];
-            const price = fill[PRICE_COL];
-            const sideMultiplier = side === 'buy' ? 1 : -1;
-
-            if (!isDeselected) {
-                cumQty += qty;
-            }
-
-            const remaining = Math.max(0, (desiredQty - cumQty) / desiredQty * 100);
-
-            // Calculate rolling VWAP up to this fill
-            const rollingVWAP = calculateRollingVWAP(fills, idx);
-
-            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
-            const spreadCrossing = getSpreadCrossing(fill, side);
-
-            if (!isDeselected) {
-                cumImpShortfall += impShortfall;
-                cumVwapShortfall += vwapShortfall;
-            }
-
-            const bgColor = isDeselected ? '#f0f0f0' : 'white';
-
-            html += `<tr id="fill_row_${idx}_tutorial_execution"
-                         style="background-color: ${bgColor}; cursor: pointer; transition: background-color 0.2s;"
-                         onclick="toggleFill_tutorial_execution(${idx})"
-                         onmouseover="highlightFill_tutorial_execution(${idx}, true)"
-                         onmouseout="highlightFill_tutorial_execution(${idx}, false)">`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[FILL_TIME_COL]}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${price.toFixed(2)}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${qty}</td>`;
-            COLOR_COLS.forEach(col => {
-                html += `<td style="border: 1px solid #ddd; padding: 8px;">${fill[col]}</td>`;
-            });
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumImpShortfall.toFixed(2)}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${cumVwapShortfall.toFixed(2)}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${spreadCrossing !== null ? (spreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${remaining.toFixed(1)}%</td>`;
-            html += '</tr>';
-        });
-
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    }
-
-    function renderSummaryTable(fills, benchmarkPrice, side, desiredQty) {
-        const container = document.getElementById('summary_table_tutorial_execution');
-        if (!container) return;
-
-        // Get active fills only
-        const activeFills = fills.filter((_, idx) => !deselectedFills.has(idx));
-
-        let html = '<h4>Summary by Category</h4>';
-
-        if (COLOR_COLS.length === 0) {
-            // No color columns, just show overall summary
-            html += '<p>No categories to aggregate by. Add color_cols for detailed breakdown.</p>';
-            container.innerHTML = html;
-            return;
-        }
-
-        // Use first color column for aggregation
-        const colorCol = COLOR_COLS[0];
-        const categories = {};
-
-        const sideMultiplier = side === 'buy' ? 1 : -1;
-
-        // Need to iterate through all fills (not just active) to get correct indices for rolling VWAP
-        fills.forEach((fill, idx) => {
-            if (deselectedFills.has(idx)) return; // Skip deselected fills
-
-            const category = String(fill[colorCol]);
-            if (!categories[category]) {
-                categories[category] = {
-                    totalImpShortfall: 0,
-                    totalVwapShortfall: 0,
-                    spreadCrossings: [],
-                    count: 0,
-                    totalQty: 0
-                };
-            }
-
-            const qty = fill[QUANTITY_COL];
-            const price = fill[PRICE_COL];
-
-            // Use rolling VWAP up to this fill
-            const rollingVWAP = calculateRollingVWAP(fills, idx);
-
-            const impShortfall = sideMultiplier * (price - benchmarkPrice) * qty;
-            const vwapShortfall = sideMultiplier * (price - rollingVWAP) * qty;
-            const spreadCrossing = getSpreadCrossing(fill, side);
-
-            categories[category].totalImpShortfall += impShortfall;
-            categories[category].totalVwapShortfall += vwapShortfall;
-            if (spreadCrossing !== null) {
-                categories[category].spreadCrossings.push(spreadCrossing);
-            }
-            categories[category].count += 1;
-            categories[category].totalQty += qty;
-        });
-
-        // Calculate overall totals
-        let overallImpShortfall = 0;
-        let overallVwapShortfall = 0;
-        let overallSpreadCrossings = [];
-        let overallCount = 0;
-        let overallQty = 0;
-
-        for (let cat in categories) {
-            overallImpShortfall += categories[cat].totalImpShortfall;
-            overallVwapShortfall += categories[cat].totalVwapShortfall;
-            overallSpreadCrossings.push(...categories[cat].spreadCrossings);
-            overallCount += categories[cat].count;
-            overallQty += categories[cat].totalQty;
-        }
-
-        html += '<table style="width:100%; border-collapse: collapse;">';
-        html += '<thead><tr>';
-        html += `<th style="border: 1px solid #ddd; padding: 8px;">${colorCol}</th>`;
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Fills</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Quantity</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Imp. Shortfall</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">VWAP Shortfall</th>';
-        html += '<th style="border: 1px solid #ddd; padding: 8px;">Avg Spread Cross %</th>';
-        html += '</tr></thead><tbody>';
-
-        // Sort categories alphabetically
-        const sortedCategories = Object.keys(categories).sort();
-
-        sortedCategories.forEach(category => {
-            const data = categories[category];
-            const avgSpreadCrossing = data.spreadCrossings.length > 0 ?
-                data.spreadCrossings.reduce((a, b) => a + b, 0) / data.spreadCrossings.length : null;
-
-            html += '<tr>';
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${category}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.count}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalQty}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalImpShortfall.toFixed(2)}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${data.totalVwapShortfall.toFixed(2)}</td>`;
-            html += `<td style="border: 1px solid #ddd; padding: 8px;">${avgSpreadCrossing !== null ? (avgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
-            html += '</tr>';
-        });
-
-        // Add overall row
-        const overallAvgSpreadCrossing = overallSpreadCrossings.length > 0 ?
-            overallSpreadCrossings.reduce((a, b) => a + b, 0) / overallSpreadCrossings.length : null;
-
-        html += '<tr style="font-weight: bold; background-color: #f9f9f9;">';
-        html += '<td style="border: 1px solid #ddd; padding: 8px;">Overall</td>';
-        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallCount}</td>`;
-        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallQty}</td>`;
-        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallImpShortfall.toFixed(2)}</td>`;
-        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallVwapShortfall.toFixed(2)}</td>`;
-        html += `<td style="border: 1px solid #ddd; padding: 8px;">${overallAvgSpreadCrossing !== null ? (overallAvgSpreadCrossing * 100).toFixed(1) + '%' : 'N/A'}</td>`;
-        html += '</tr>';
-
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    }
-
-    window.toggleFill_tutorial_execution = function(idx) {
-        if (deselectedFills.has(idx)) {
-            deselectedFills.delete(idx);
-        } else {
-            deselectedFills.add(idx);
-        }
-        updateChart_tutorial_execution();
-    };
-
-    window.highlightFill_tutorial_execution = function(idx, isHighlighted) {
-        // Get the chart element
-        const chartDiv = document.getElementById('tutorial_execution');
-        if (!chartDiv || !chartDiv.data) return;
-
-        // Find which trace contains this fill
-        const execSelect = document.getElementById('execution_select_tutorial_execution');
-        const currentExecution = execSelect ? execSelect.value : 'Aggressive Strategy';
-        const execFills = fillsData.filter(row => String(row[EXECUTION_NAME_COL]) === currentExecution);
-        const fill = execFills[idx];
-        if (!fill) return;
-
-        // Find the trace and point index
-        const fillTime = fill[FILL_TIME_COL];
-        const fillPrice = fill[PRICE_COL];
-
-        // Iterate through traces to find the matching fill point
-        chartDiv.data.forEach((trace, traceIdx) => {
-            if (trace.mode === 'markers' || trace.mode === 'markers+lines') {
-                trace.x.forEach((x, pointIdx) => {
-                    if (x === fillTime && Math.abs(trace.y[pointIdx] - fillPrice) < 0.01) {
-                        // Found the point, update its marker
-                        const update = {};
-                        if (isHighlighted) {
-                            // Increase size and add border
-                            const currentSize = trace.marker.size[pointIdx] || trace.marker.size || 8;
-                            update['marker.size'] = trace.marker.size.map((s, i) =>
-                                i === pointIdx ? s * 1.5 : s
-                            );
-                            update['marker.line'] = {
-                                color: 'black',
-                                width: trace.marker.size.map((s, i) => i === pointIdx ? 2 : 0)
-                            };
-                        } else {
-                            // Reset to original size
-                            const originalSize = Math.max(5, 5 + Math.log(fill[QUANTITY_COL] + 1) * 2);
-                            update['marker.size'] = trace.marker.size.map((s, i) =>
-                                i === pointIdx ? originalSize : s
-                            );
-                            update['marker.line'] = {width: 0};
-                        }
-                        Plotly.restyle(chartDiv, update, [traceIdx]);
-                    }
-                });
-            }
-        });
-    };
-
-    // Load data
-    Promise.all([
-        loadDataset('exec_tob_data'),
-        loadDataset('exec_volume_data'),
-        loadDataset('exec_fills_data'),
-        loadDataset('exec_metadata')
-    ]).then(function([tob, vol, fills, metadata]) {
-        tobData = tob;
-        volumeData = vol;
-        fillsData = fills;
-        metadataData = metadata;
-
-        updateChart_tutorial_execution();
-    }).catch(function(error) {
-        console.error('Error loading data for chart tutorial_execution:', error);
+        console.error('Error loading data for chart financial_candlestick:', error);
     });
 })();
 
@@ -1606,12 +1038,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="ohlc_data" data-format="parquet" data-src="data/ohlc_data.parquet"></script><script type="text/plain" id="exec_tob_data" data-format="parquet" data-src="data/exec_tob_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="exec_fills_data" data-format="parquet" data-src="data/exec_fills_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_volume_data" data-format="parquet" data-src="data/exec_volume_data.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="exec_metadata" data-format="parquet" data-src="data/exec_metadata.parquet"></script>
+<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Financial Charts</h1>
-<p>This shows examples of financial market visualization charts. OHLCChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls. ExecutionPlot analyzes trade execution quality with implementation shortfall calculations, VWAP comparison, spread crossing metrics, and interactive fills table for transaction cost analysis.</p>
+<p>This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls.</p>
 
     <div class="textblock-content">
         <h1>Financial Charts</h1>
@@ -1620,22 +1052,22 @@ $(function(){
 <hr>
 <br>
 <h2>Stock Price Analysis - Q1 2024</h2>
-<p>An OHLC (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and OHLC (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the OHLC bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/ohlcchart_examples.html" style="color: blue; font-weight: bold;">See here for OHLCChart examples</a></p>
+<p>An Candlestick (Open-High-Low-Close) chart displays financial market data with candlesticks showing price movements. This example tracks AAPL, MSFT, and GOOGL through Q1 2024. <strong>Key Features:</strong> Time range sliders to zoom into specific date ranges (drag the handles to adjust), Renormalize toggle to compare stocks at different price levels (divides all prices by first bar's open price, setting it to 1.0), Display mode dropdown to switch between Overlay (all symbols on same chart) and Faceted (one subplot per symbol), Volume bars at bottom with Show/Hide toggle and Log scale option (useful when volume varies greatly), Chart type selector to switch between candlestick (filled bars) and Candlestick (line bars) styles, Filter controls to select which stocks and sectors to display. The volume bars use a dodged (grouped) layout and align perfectly with the Candlestick bars above. This visualization is essential for technical analysis, allowing traders to identify patterns, trends, and volume spikes. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html" style="color: blue; font-weight: bold;">See here for CandlestickChart examples</a></p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
         <span>Filters</span>
-        <span id="financial_ohlc_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+        <span id="financial_candlestick_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
     </h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="sector_select_financial_ohlc">sector: </label>
-                <select id="sector_select_financial_ohlc" multiple onchange="updateChart_financial_ohlc()">
+                <label for="sector_select_financial_candlestick">sector: </label>
+                <select id="sector_select_financial_candlestick" multiple onchange="updateChart_financial_candlestick()">
                 <option value="Technology" selected>Technology</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="sector_select_financial_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="sector_select_financial_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
         
@@ -1645,46 +1077,46 @@ $(function(){
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="chart_type_select_financial_ohlc">Chart Type: </label>
-                <select id="chart_type_select_financial_ohlc" onchange="updateChart_financial_ohlc()">
+                <label for="chart_type_select_financial_candlestick">Chart Type: </label>
+                <select id="chart_type_select_financial_candlestick" onchange="updateChart_financial_candlestick()">
                 <option value="candlestick" selected>candlestick</option>
                 <option value="ohlc">ohlc</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="chart_type_select_financial_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="chart_type_select_financial_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
                 <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="display_mode_select_financial_ohlc">Display Mode: </label>
-                <select id="display_mode_select_financial_ohlc" onchange="updateChart_financial_ohlc()">
+                <label for="display_mode_select_financial_candlestick">Display Mode: </label>
+                <select id="display_mode_select_financial_candlestick" onchange="updateChart_financial_candlestick()">
                 <option value="Overlay" selected>Overlay</option>
                 <option value="Faceted">Faceted</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="display_mode_select_financial_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="display_mode_select_financial_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
             <div style="margin: 10px; display: flex; flex-direction: column;">
         <div style="margin: 5px 0;">
-            <input type="checkbox" id="renormalize_checkbox_financial_ohlc" onchange="updateChart_financial_ohlc()">
-            <label for="renormalize_checkbox_financial_ohlc">Renormalize (first bar open = 1)</label>
+            <input type="checkbox" id="renormalize_checkbox_financial_candlestick" onchange="updateChart_financial_candlestick()">
+            <label for="renormalize_checkbox_financial_candlestick">Renormalize (first bar open = 1)</label>
         </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="show_volume_checkbox_financial_ohlc" checked onchange="updateChart_financial_ohlc()">
-        <label for="show_volume_checkbox_financial_ohlc">Show Volume</label>
+        <input type="checkbox" id="show_volume_checkbox_financial_candlestick" checked onchange="updateChart_financial_candlestick()">
+        <label for="show_volume_checkbox_financial_candlestick">Show Volume</label>
     </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="log_volume_checkbox_financial_ohlc" onchange="updateChart_financial_ohlc()">
-        <label for="log_volume_checkbox_financial_ohlc">Log Volume</label>
+        <input type="checkbox" id="log_volume_checkbox_financial_candlestick" onchange="updateChart_financial_candlestick()">
+        <label for="log_volume_checkbox_financial_candlestick">Log Volume</label>
     </div>
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
-    <label for="financial_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="financial_ohlc_aspect_ratio_label">0.6</span>
-    <input type="range" id="financial_ohlc_aspect_ratio_slider"
+    <label for="financial_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="financial_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="financial_candlestick_aspect_ratio_slider"
            min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
@@ -1693,41 +1125,8 @@ $(function(){
 </div>
 
 <!-- Chart -->
-<div id="financial_ohlc"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: ohlc_data.parquet</p><br>
-<hr>
-<br>
-<div style="padding: 20px;">
-    <h2>Trade Execution Analysis - Comparing Strategies</h2>
-    <p>An ExecutionPlot chart analyzes trade execution quality by comparing fill prices against benchmarks. This example compares two strategies for buying the same stock. <strong>Key Features:</strong> Execution selector dropdown to switch between different executions (Aggressive vs Patient strategy), Benchmark selector to choose between Arrival Price (price when order started) and First Fill Mid (mid-price at first fill), Show Volume checkbox to toggle market volume bars at the bottom of the chart, Bid/Ask lines showing the top of book prices over time, Fill points sized by quantity (larger circles = larger fills) and colored by category (venue or urgency), Interactive fills table with Time, Price, Quantity, and category columns, Running Implementation Shortfall showing cumulative cost vs benchmark (negative is worse), VWAP Shortfall showing cost vs volume-weighted average price of execution, Spread Crossing percentage showing how aggressive each fill was (0%=bought at bid, 100%=bought at ask), Remaining percentage showing how much of desired quantity is left to execute, Summary table aggregating metrics by category (e.g., by venue or urgency level), showing total implementation shortfall, VWAP shortfall, and average spread crossing for each category. Users can click fills in the table to exclude them from calculations, and hover over table rows to highlight corresponding points in the chart. This visualization is essential for transaction cost analysis (TCA) and evaluating execution algorithms. The aggressive strategy completes faster but typically has higher implementation shortfall, while the patient strategy takes longer but may achieve better prices. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html" style="color: blue; font-weight: bold;">See here for ExecutionPlot examples</a></p>
-
-    <div style="margin: 20px 0;">
-        <label for="execution_select_tutorial_execution">Execution: </label>
-        <select id="execution_select_tutorial_execution" onchange="updateChart_tutorial_execution()">
-                    <option value="Aggressive Strategy" selected>Aggressive Strategy</option>
-                    <option value="Patient Strategy">Patient Strategy</option>
-        </select>
-
-        <label for="benchmark_select_tutorial_execution" style="margin-left: 20px;">Benchmark: </label>
-        <select id="benchmark_select_tutorial_execution" onchange="updateChart_tutorial_execution()">
-        <option value="arrival" selected>Arrival</option>
-        <option value="first">First Fill Mid</option>
-        </select>
-
-        <label style="margin-left: 20px;">
-            <input type="checkbox" id="show_volume_checkbox_tutorial_execution" checked onchange="updateChart_tutorial_execution()">
-            Show Volume
-        </label>
-    </div>
-
-    <div id="tutorial_execution" style="width: 100%; height: 800px;"></div>
-
-    <div style="display: flex; margin-top: 20px;">
-        <div id="fills_table_tutorial_execution" style="flex: 1; margin-right: 20px;"></div>
-        <div id="summary_table_tutorial_execution" style="flex: 1;"></div>
-    </div>
-</div>
-
+<div id="financial_candlestick"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: candlestick_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>

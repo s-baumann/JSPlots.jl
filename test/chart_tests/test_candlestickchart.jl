@@ -3,7 +3,7 @@ using JSPlots
 using DataFrames
 using Dates
 
-@testset "OHLCChart" begin
+@testset "CandlestickChart" begin
     # Test data with all required columns
     dates = Date(2024, 1, 1):Day(1):Date(2024, 1, 31)
     n = length(dates)
@@ -20,7 +20,7 @@ using Dates
     )
 
     @testset "Basic creation with all columns" begin
-        chart = OHLCChart(:test_ohlc, test_df, :test_data;
+        chart = CandlestickChart(:test_candlestick, test_df, :test_data;
             time_from_col=:time_from,
             time_to_col=:time_to,
             symbol_col=:symbol,
@@ -29,18 +29,18 @@ using Dates
             low_col=:low,
             close_col=:close,
             volume_col=:volume,
-            title="Test OHLC Chart"
+            title="Test Candlestick Chart"
         )
-        @test chart.chart_title == :test_ohlc
+        @test chart.chart_title == :test_candlestick
         @test chart.data_label == :test_data
-        @test occursin("test_ohlc", chart.functional_html)
+        @test occursin("test_candlestick", chart.functional_html)
         @test occursin("TIME_FROM_COL", chart.functional_html)
         @test occursin("OPEN_COL", chart.functional_html)
         @test occursin("candlestick", chart.functional_html)
     end
 
     @testset "Construction without volume (volume_col=nothing)" begin
-        chart = OHLCChart(:no_volume, test_df, :test_data;
+        chart = CandlestickChart(:no_volume, test_df, :test_data;
             time_from_col=:time_from,
             time_to_col=:time_to,
             symbol_col=:symbol,
@@ -49,10 +49,10 @@ using Dates
             low_col=:low,
             close_col=:close,
             volume_col=nothing,
-            title="OHLC Without Volume"
+            title="Candlestick Without Volume"
         )
         @test occursin("HAS_VOLUME = false", chart.functional_html)
-        @test occursin("OHLC Without Volume", chart.appearance_html)
+        @test occursin("Candlestick Without Volume", chart.appearance_html)
         @test !occursin("show_volume_checkbox", chart.appearance_html)
     end
 
@@ -80,7 +80,7 @@ using Dates
             )
         )
 
-        chart = OHLCChart(:multi_overlay, multi_df, :multi_data;
+        chart = CandlestickChart(:multi_overlay, multi_df, :multi_data;
             display_mode="Overlay",
             title="Multiple Symbols Overlay"
         )
@@ -112,7 +112,7 @@ using Dates
             )
         )
 
-        chart = OHLCChart(:multi_faceted, multi_df, :multi_data;
+        chart = CandlestickChart(:multi_faceted, multi_df, :multi_data;
             display_mode="Faceted",
             title="Multiple Symbols Faceted"
         )
@@ -120,12 +120,12 @@ using Dates
         @test occursin("renderFaceted", chart.functional_html)
     end
 
-    @testset "OHLC bar type instead of candlestick" begin
-        chart = OHLCChart(:ohlc_bars, test_df, :test_data;
-            chart_type="ohlc",
-            title="OHLC Bars"
+    @testset "Candlestick bar type instead of candlestick" begin
+        chart = CandlestickChart(:candlestick_bars, test_df, :test_data;
+            chart_type="candlestick",
+            title="Candlestick Bars"
         )
-        @test occursin("ohlc", chart.functional_html)
+        @test occursin("candlestick", chart.functional_html)
         @test occursin("CHART_TYPE", chart.functional_html)
     end
 
@@ -142,7 +142,7 @@ using Dates
             vol = rand(100000:500000, length(quarters))
         )
 
-        chart = OHLCChart(:quarters, quarter_df, :quarter_data;
+        chart = CandlestickChart(:quarters, quarter_df, :quarter_data;
             time_from_col=:quarter,
             time_to_col=:quarter_end,
             symbol_col=:ticker,
@@ -166,7 +166,7 @@ using Dates
             low = rand(n),
             close = rand(n)
         )
-        @test_throws ErrorException OHLCChart(:bad, bad_df, :bad_data)
+        @test_throws ErrorException CandlestickChart(:bad, bad_df, :bad_data)
     end
 
     @testset "Invalid column error - missing open" begin
@@ -178,22 +178,22 @@ using Dates
             low = rand(n),
             close = rand(n)
         )
-        @test_throws ErrorException OHLCChart(:bad, bad_df, :bad_data)
+        @test_throws ErrorException CandlestickChart(:bad, bad_df, :bad_data)
     end
 
     @testset "Invalid display_mode error" begin
-        @test_throws ErrorException OHLCChart(:bad_mode, test_df, :test_data;
+        @test_throws ErrorException CandlestickChart(:bad_mode, test_df, :test_data;
             display_mode="InvalidMode"
         )
     end
 
     @testset "Invalid chart_type error" begin
-        @test_throws ErrorException OHLCChart(:bad_type, test_df, :test_data;
+        @test_throws ErrorException CandlestickChart(:bad_type, test_df, :test_data;
             chart_type="bar"
         )
     end
 
-    @testset "Non-numeric OHLC column error" begin
+    @testset "Non-numeric Candlestick column error" begin
         bad_df = DataFrame(
             time_from = dates,
             time_to = dates,
@@ -203,26 +203,26 @@ using Dates
             low = rand(n),
             close = rand(n)
         )
-        @test_throws ErrorException OHLCChart(:bad_numeric, bad_df, :bad_data)
+        @test_throws ErrorException CandlestickChart(:bad_numeric, bad_df, :bad_data)
     end
 
     @testset "Dependencies method" begin
-        chart = OHLCChart(:dep_test, test_df, :my_ohlc_data)
+        chart = CandlestickChart(:dep_test, test_df, :my_candlestick_data)
         deps = JSPlots.dependencies(chart)
-        @test deps == [:my_ohlc_data]
+        @test deps == [:my_candlestick_data]
         @test length(deps) == 1
     end
 
     @testset "With notes" begin
-        notes = "This chart shows OHLC candlestick data with volume bars."
-        chart = OHLCChart(:with_notes, test_df, :test_data;
+        notes = "This chart shows Candlestick candlestick data with volume bars."
+        chart = CandlestickChart(:with_notes, test_df, :test_data;
             notes=notes
         )
         @test occursin(notes, chart.appearance_html)
     end
 
     @testset "Checkboxes in appearance HTML" begin
-        chart = OHLCChart(:checkboxes, test_df, :test_data;
+        chart = CandlestickChart(:checkboxes, test_df, :test_data;
             show_volume=true
         )
         @test occursin("renormalize_checkbox", chart.appearance_html)
@@ -231,14 +231,14 @@ using Dates
     end
 
     @testset "Renormalization logic in JavaScript" begin
-        chart = OHLCChart(:renorm, test_df, :test_data)
+        chart = CandlestickChart(:renorm, test_df, :test_data)
         @test occursin("firstBarOpenPrices", chart.functional_html)
         @test occursin("RENORMALIZE", chart.functional_html)
         @test occursin("/ base", chart.functional_html)
     end
 
     @testset "Volume subplot configuration" begin
-        chart = OHLCChart(:volume_subplot, test_df, :test_data;
+        chart = CandlestickChart(:volume_subplot, test_df, :test_data;
             show_volume=true
         )
         @test occursin("yaxis2", chart.functional_html)
@@ -249,18 +249,18 @@ using Dates
 
     @testset "Integration with JSPlotPage" begin
         mktempdir() do tmpdir
-            chart = OHLCChart(:page_ohlc, test_df, :stock_data;
-                title="OHLC Test"
+            chart = CandlestickChart(:page_candlestick, test_df, :stock_data;
+                title="Candlestick Test"
             )
 
             page = JSPlotPage(Dict(:stock_data => test_df), [chart])
-            outfile = joinpath(tmpdir, "ohlcchart_test.html")
+            outfile = joinpath(tmpdir, "candlestickchart_test.html")
             create_html(page, outfile)
 
             @test isfile(outfile)
             content = read(outfile, String)
-            @test occursin("OHLC Test", content)
-            @test occursin("page_ohlc", content)
+            @test occursin("Candlestick Test", content)
+            @test occursin("page_candlestick", content)
         end
     end
 end

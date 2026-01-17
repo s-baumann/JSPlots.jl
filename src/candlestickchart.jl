@@ -1,7 +1,7 @@
 """
-    OHLCChart(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
+    CandlestickChart(chart_title::Symbol, df::DataFrame, data_label::Symbol; kwargs...)
 
-OHLC (Open-High-Low-Close) candlestick chart with volume bars for financial time series visualization.
+Candlestick (Open-High-Low-Close) candlestick chart with volume bars for financial time series visualization.
 
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this chart
@@ -23,12 +23,12 @@ OHLC (Open-High-Low-Close) candlestick chart with volume bars for financial time
 - `display_mode::String`: Display mode - "Overlay" or "Faceted" (default: `"Overlay"`)
 - `show_volume::Bool`: Show volume subplot (default: `true`)
 - `chart_type::String`: Chart type - "candlestick" or "ohlc" (default: `"candlestick"`)
-- `title::String`: Chart title (default: `"OHLC Chart"`)
+- `title::String`: Chart title (default: `"Candlestick Chart"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
 
 # Examples
 ```julia
-ohlc = OHLCChart(:stock_chart, df, :stock_data,
+candlestick = CandlestickChart(:stock_chart, df, :stock_data,
     time_from_col=:date,
     time_to_col=:date,
     symbol_col=:ticker,
@@ -41,12 +41,12 @@ ohlc = OHLCChart(:stock_chart, df, :stock_data,
 )
 ```
 """
-struct OHLCChart <: JSPlotsType
+struct CandlestickChart <: JSPlotsType
     chart_title::Symbol
     data_label::Symbol
     functional_html::String
     appearance_html::String
-    function OHLCChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
+    function CandlestickChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             time_from_col::Symbol=:time_from,
                             time_to_col::Symbol=:time_to,
                             symbol_col::Symbol=:symbol,
@@ -59,7 +59,7 @@ struct OHLCChart <: JSPlotsType
                             display_mode::String="Overlay",
                             show_volume::Bool=true,
                             chart_type::String="candlestick",
-                            title::String="OHLC Chart",
+                            title::String="Candlestick Chart",
                             notes::String="")
 
         # Normalize filters to standard Dict{Symbol, Any} format
@@ -83,7 +83,7 @@ struct OHLCChart <: JSPlotsType
             validate_column(df, volume_col, "volume_col")
         end
 
-        # Validate OHLC columns are numeric
+        # Validate Candlestick columns are numeric
         for col in [open_col, high_col, low_col, close_col]
             if !isa(df[!, col], AbstractVector{<:Union{Missing, Number}})
                 error("Column $col must be numeric")
@@ -248,7 +248,7 @@ struct OHLCChart <: JSPlotsType
                     const data = symbolData[symbol];
                     const color = colorPalette[idx % colorPalette.length];
 
-                    // Prepare OHLC data
+                    // Prepare Candlestick data
                     const x = data.map(row => row[TIME_FROM_COL]);
                     let open = data.map(row => row[OPEN_COL]);
                     let high = data.map(row => row[HIGH_COL]);
@@ -264,8 +264,8 @@ struct OHLCChart <: JSPlotsType
                         close = close.map(v => v / base);
                     }
 
-                    // OHLC trace
-                    const ohlcTrace = {
+                    // Candlestick trace
+                    const candlestickTrace = {
                         x: x,
                         open: open,
                         high: high,
@@ -278,7 +278,7 @@ struct OHLCChart <: JSPlotsType
                         increasing: {line: {color: color}},
                         decreasing: {line: {color: color}}
                     };
-                    traces.push(ohlcTrace);
+                    traces.push(candlestickTrace);
 
                     // Volume trace if enabled
                     if (showVolume && HAS_VOLUME) {
@@ -312,7 +312,7 @@ struct OHLCChart <: JSPlotsType
                 };
 
                 if (showVolume && HAS_VOLUME) {
-                    // Two subplots: OHLC on top, volume on bottom
+                    // Two subplots: Candlestick on top, volume on bottom
                     layout.yaxis = {
                         title: renormalize ? 'Normalized Price' : 'Price',
                         domain: [0.3, 1]
@@ -324,7 +324,7 @@ struct OHLCChart <: JSPlotsType
                     };
                     layout.barmode = 'group';  // Dodge volume bars
                 } else {
-                    // Single plot: OHLC only
+                    // Single plot: Candlestick only
                     layout.yaxis = {
                         title: renormalize ? 'Normalized Price' : 'Price'
                     };
@@ -356,7 +356,7 @@ struct OHLCChart <: JSPlotsType
                 symbols.forEach((symbol, idx) => {
                     const data = symbolData[symbol];
 
-                    // Prepare OHLC data
+                    // Prepare Candlestick data
                     const x = data.map(row => row[TIME_FROM_COL]);
                     let open = data.map(row => row[OPEN_COL]);
                     let high = data.map(row => row[HIGH_COL]);
@@ -377,8 +377,8 @@ struct OHLCChart <: JSPlotsType
                     const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
                     const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
 
-                    // OHLC trace
-                    const ohlcTrace = {
+                    // Candlestick trace
+                    const candlestickTrace = {
                         x: x,
                         open: open,
                         high: high,
@@ -389,7 +389,7 @@ struct OHLCChart <: JSPlotsType
                         xaxis: xaxis,
                         yaxis: yaxis
                     };
-                    traces.push(ohlcTrace);
+                    traces.push(candlestickTrace);
 
                     // Volume trace if enabled
                     if (showVolume && HAS_VOLUME) {
@@ -466,7 +466,7 @@ struct OHLCChart <: JSPlotsType
         push!(attribute_dropdowns, DropdownControl(
             "chart_type_select_$chart_title_safe",
             "Chart Type",
-            ["candlestick", "ohlc"],
+            valid_chart_types,
             chart_type,
             update_function
         ))
@@ -506,7 +506,7 @@ struct OHLCChart <: JSPlotsType
             </div>
         """
 
-        # Build axes HTML (empty for OHLC chart - we don't have axis selectors)
+        # Build axes HTML (empty for Candlestick chart - we don't have axis selectors)
         axes_html = checkbox_html
 
         # Build appearance HTML using html_controls abstraction
@@ -518,7 +518,7 @@ struct OHLCChart <: JSPlotsType
             filter_sliders,
             attribute_dropdowns,
             axes_html,
-            DropdownControl[],  # No faceting for OHLC
+            DropdownControl[],  # No faceting for Candlestick
             title,
             notes
         )
@@ -528,4 +528,4 @@ struct OHLCChart <: JSPlotsType
     end
 end
 
-dependencies(a::OHLCChart) = [a.data_label]
+dependencies(a::CandlestickChart) = [a.data_label]

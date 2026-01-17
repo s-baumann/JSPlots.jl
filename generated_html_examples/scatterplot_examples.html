@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -2328,6 +2329,277 @@ $(function(){
         });
     }).catch(error => console.error('Error loading data for chart timeseries:', error));
     })();
+    (function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    window.showDensity_struct_scatter = true;
+    const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+    const DEFAULT_X_COL = 'x_position';
+    const DEFAULT_Y_COL = 'y_position';
+    const DEFAULT_COLOR_COL = 'experiment';
+
+    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+    const buildSymbolMap = (data, col) => {
+        const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+        return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+    };
+
+    function createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
+        const symbolMap = buildSymbolMap(data, COLOR_COL);
+        const groups = {};
+        data.forEach(row => {
+            const key = row[COLOR_COL];
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(row);
+        });
+
+        return Object.entries(groups).map(([key, groupData]) => {
+            let xValues = groupData.map(d => d[X_COL]);
+            let yValues = groupData.map(d => d[Y_COL]);
+
+            // Apply axis transformations
+            xValues = applyAxisTransform(xValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+            return {
+            x: xValues,
+            y: yValues,
+            mode: 'markers',
+            name: key,
+            legendgroup: key,
+            showlegend: showlegend,
+            xaxis: xaxis,
+            yaxis: yaxis,
+            marker: {
+                size: 4,
+                opacity: 0.6,
+                symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+            },
+            type: 'scatter'
+            };
+        });
+    }
+
+    function renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM) {
+        const traces = createTraces(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
+
+        if (window.showDensity_struct_scatter) {
+            let xDensityValues = data.map(d => d[X_COL]);
+            let yDensityValues = data.map(d => d[Y_COL]);
+            xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+            yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
+            traces.push({
+                x: xDensityValues, y: yDensityValues,
+                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                showscale: false, type: 'histogram2dcontour', showlegend: false
+            });
+        }
+
+        let xHistValues = data.map(d => d[X_COL]);
+        let yHistValues = data.map(d => d[Y_COL]);
+        xHistValues = applyAxisTransform(xHistValues, X_TRANSFORM);
+        yHistValues = applyAxisTransform(yHistValues, Y_TRANSFORM);
+
+        traces.push(
+            { x: xHistValues, name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+            { y: yHistValues, name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+        );
+
+        Plotly.newPlot('struct_scatter', traces, {
+            title: 'Experiment Measurements from Struct Data Source', showlegend: true, autosize: true, hovermode: 'closest',
+            xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+            yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+            xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            margin: {t: 100, r: 100, b: 100, l: 100}
+        }, {responsive: true});
+    }
+
+    function renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET_COL, X_TRANSFORM, Y_TRANSFORM) {
+        const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+        const nFacets = facetValues.length, cols = Math.ceil(Math.sqrt(nFacets)), rows = Math.ceil(nFacets / cols);
+        const traces = [];
+
+        facetValues.forEach((facetVal, idx) => {
+            const facetData = data.filter(row => row[FACET_COL] === facetVal);
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+            traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
+
+            if (window.showDensity_struct_scatter) {
+                let xDensityValues = facetData.map(d => d[X_COL]);
+                let yDensityValues = facetData.map(d => d[Y_COL]);
+                xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
+                traces.push({
+                    x: xDensityValues, y: yDensityValues,
+                    name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                    showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                });
+            }
+        });
+
+        const layout = {
+            title: 'Experiment Measurements from Struct Data Source', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: facetValues.map((val, idx) => ({
+                text: FACET_COL + ': ' + val, showarrow: false,
+                xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+            })),
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+        facetValues.forEach((val, idx) => {
+            const ax = idx === 0 ? '' : (idx + 1);
+            layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+            layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
+        });
+        Plotly.newPlot('struct_scatter', traces, layout, {responsive: true});
+    }
+
+    function renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM) {
+        const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+        const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+        const rows = facet1Values.length, cols = facet2Values.length;
+        const traces = [];
+
+        facet1Values.forEach((facet1Val, rowIdx) => {
+            facet2Values.forEach((facet2Val, colIdx) => {
+                const facetData = data.filter(row => row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val);
+                if (facetData.length === 0) return;
+
+                const idx = rowIdx * cols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                traces.push(...createTraces(facetData, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis, yaxis, idx === 0));
+
+                if (window.showDensity_struct_scatter) {
+                    let xDensityValues = facetData.map(d => d[X_COL]);
+                    let yDensityValues = facetData.map(d => d[Y_COL]);
+                    xDensityValues = applyAxisTransform(xDensityValues, X_TRANSFORM);
+                    yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
+                    traces.push({
+                        x: xDensityValues, y: yDensityValues,
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false, xaxis: xaxis, yaxis: yaxis
+                    });
+                }
+            });
+        });
+
+        const layout = {
+            title: 'Experiment Measurements from Struct Data Source', showlegend: true, grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: [
+                ...facet2Values.map((val, colIdx) => ({
+                    text: FACET2_COL + ': ' + val, showarrow: false,
+                    xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                    yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                    x: 0.5, y: 1.1, xanchor: 'center', yanchor: 'bottom'
+                })),
+                ...facet1Values.map((val, rowIdx) => ({
+                    text: FACET1_COL + ': ' + val, showarrow: false,
+                    xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                    yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                    x: -0.15, y: 0.5, xanchor: 'center', yanchor: 'middle', textangle: -90
+                }))
+            ],
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+        facet1Values.forEach((v1, rowIdx) => {
+            facet2Values.forEach((v2, colIdx) => {
+                const idx = rowIdx * cols + colIdx, ax = idx === 0 ? '' : (idx + 1);
+                layout['xaxis' + ax] = {title: getAxisLabel(X_COL, X_TRANSFORM)};
+                layout['yaxis' + ax] = {title: getAxisLabel(Y_COL, Y_TRANSFORM)};
+            });
+        });
+        Plotly.newPlot('struct_scatter', traces, layout, {responsive: true});
+    }
+
+    function updatePlot_struct_scatter(data) {
+        const X_COL = getCol('x_col_select_struct_scatter', DEFAULT_X_COL);
+        const Y_COL = getCol('y_col_select_struct_scatter', DEFAULT_Y_COL);
+        const COLOR_COL = getCol('color_col_select_struct_scatter', DEFAULT_COLOR_COL);
+
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_struct_scatter', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_struct_scatter', 'identity');
+
+        let FACET1 = getCol('facet1_select_struct_scatter', null);
+        let FACET2 = getCol('facet2_select_struct_scatter', null);
+        if (FACET1 === 'None') FACET1 = null;
+        if (FACET2 === 'None') FACET2 = null;
+
+        if (FACET1 && FACET2) {
+            renderFacetGrid(data, X_COL, Y_COL, COLOR_COL, FACET1, FACET2, X_TRANSFORM, Y_TRANSFORM);
+        } else if (FACET1) {
+            renderFacetWrap(data, X_COL, Y_COL, COLOR_COL, FACET1, X_TRANSFORM, Y_TRANSFORM);
+        } else {
+            renderNoFacets(data, X_COL, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
+        }
+    }
+
+    window.updateChart_struct_scatter = () => updatePlotWithFilters_struct_scatter();
+
+    // Filter and update function
+    window.updatePlotWithFilters_struct_scatter = function() {
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_struct_scatter');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_struct_scatter' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_struct_scatter,
+            'struct_scatter',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Update plot with filtered data
+        updatePlot_struct_scatter(filteredData);
+    };
+
+    loadDataset('experiment.measurements').then(data => {
+        window.allData_struct_scatter = data;
+        $(function() {
+            const densityBtn = document.getElementById('struct_scatter_density_toggle');
+            if (densityBtn) {
+                densityBtn.addEventListener('click', function() {
+                    window.showDensity_struct_scatter = !window.showDensity_struct_scatter;
+                    this.textContent = window.showDensity_struct_scatter ? 'Hide Density Contours' : 'Show Density Contours';
+                    updatePlotWithFilters_struct_scatter();
+                });
+            }
+            updatePlotWithFilters_struct_scatter();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('struct_scatter');
+        });
+    }).catch(error => console.error('Error loading data for chart struct_scatter:', error));
+    })();
 
 
 });
@@ -3789,6 +4061,12 @@ temperature,humidity,season,location,color
 11.818745976856256,59.244839482187636,Fall,Coastal,Measurement
 16.013510912064312,66.33451112472703,Fall,Rural,Measurement
 24.189862400101106,58.88140949300595,Winter,Coastal,Measurement
+
+</script><script type="text/plain" id="experiment.metadata" data-format="csv_embedded" data-src="">
+experiment,researcher,date
+Exp A,Dr. Smith,2024-01-15
+Exp B,Dr. Jones,2024-02-20
+Exp C,Dr. Lee,2024-03-10
 
 </script><script type="text/plain" id="df4" data-format="csv_embedded" data-src="">
 score1,score2,grade,major,semester,performance,color
@@ -5499,6 +5777,209 @@ var1,var2,var3,var4,group_A,group_B,group_C,intensity
 -34.464108239450624,56.32316340906065,32.86352654148826,150.68788418845537,Group1,TypeX,Class1,Medium
 3.96876692052896,3.7455083559636684,70.98669314279638,106.26644814836143,Group2,TypeX,Class2,High
 
+</script><script type="text/plain" id="experiment.measurements" data-format="csv_embedded" data-src="">
+x_position,y_position,z_position,intensity,experiment,batch
+7.430262316778666,6.560849437075883,3.509062200471103,131.6400089388399,Exp C,Batch 2
+-6.665218061102585,-27.21168603627216,-1.0877876483753892,137.70925436953056,Exp C,Batch 2
+-6.553147554200026,-8.717017451864029,7.302103621358227,26.975429742870933,Exp B,Batch 1
+-1.6053566682626477,1.862450707291816,-4.239061002000432,45.73285024981131,Exp B,Batch 2
+-19.298866571187645,-14.172305223523036,2.15598975998515,164.09124724454142,Exp C,Batch 1
+5.431284945853733,-13.71322185221084,-3.082920287010295,44.08937577788071,Exp C,Batch 2
+3.8230954609704155,6.812276944484516,2.3130602421921673,101.26435774832004,Exp C,Batch 1
+1.9258080724037432,19.879176633820194,-0.27282659887500504,29.3900338839191,Exp C,Batch 2
+9.090481182281136,-3.5392676723647747,-4.098075665304625,22.355937307747443,Exp A,Batch 1
+-9.651095168323597,0.9354518002338799,0.4553416652227927,71.33698544794758,Exp C,Batch 2
+11.28931136273909,9.920540264320714,-3.6916139261125087,39.73891733369907,Exp B,Batch 2
+-5.455240812614623,2.9604019857579167,0.5634551814571268,19.47505889925269,Exp C,Batch 2
+-24.149145993692787,15.988096557719915,10.46708393924439,35.531309846512045,Exp A,Batch 1
+-13.002786246302731,3.2491616834711454,-4.7850239215419785,110.22090458448585,Exp B,Batch 2
+4.026640792623257,1.0550169460380838,-1.1863555554450707,50.951563486240225,Exp B,Batch 1
+-0.28886942666059184,1.428081216440328,-6.940392117802751,15.621576841714841,Exp B,Batch 2
+-2.013953718995357,-4.263831046325251,6.778655120442785,104.47250064507377,Exp B,Batch 2
+-7.939753889978116,-11.875935767812935,-6.1610608221732335,48.28435675380906,Exp C,Batch 2
+0.35542511674640387,-7.238109762630098,3.9317691771911516,55.942557129404946,Exp C,Batch 2
+-0.008619773257916989,-8.826525261001414,-1.3126464961070285,73.51226725788626,Exp C,Batch 2
+14.56188934639384,21.27084739217007,-5.984739580139728,88.3830387975817,Exp C,Batch 1
+-0.1717413125745062,0.1522525554643105,-3.061820436804499,101.40557346149843,Exp C,Batch 1
+6.798250362767561,-18.710568608072194,1.6258658452687091,73.35625000483624,Exp A,Batch 2
+27.75423504816018,-9.69607908274623,-1.9923068567613555,81.94866643069317,Exp A,Batch 1
+14.482475591657408,-1.049476935370139,-7.144657896843151,148.84125764897067,Exp C,Batch 2
+0.44513597663771576,-7.610093698679751,-1.2134032430275608,6.8195079133690575,Exp C,Batch 2
+-0.1478184388023891,12.199459642419015,1.405563171405517,96.00171147738064,Exp A,Batch 1
+-1.8262695167564669,17.284941769469995,5.4844466658311495,104.73263244927531,Exp C,Batch 1
+-4.8515448318835475,2.998495343928849,-2.6442328915406743,90.30907825087813,Exp A,Batch 1
+8.554626378307063,7.251538420522463,3.9064742825528445,200.28566886798896,Exp B,Batch 1
+-1.6650402683747805,2.8104217487177734,-1.9387736768481798,92.23204725023717,Exp B,Batch 1
+-3.5494698832594747,11.469773236855366,9.846155320874349,0.5191401568063811,Exp A,Batch 1
+1.5565960561824954,-7.357591357101817,-5.0798054833601425,9.268788882294103,Exp C,Batch 2
+14.49961944585931,-15.568704901863267,2.121385003961191,75.88039732778125,Exp B,Batch 2
+-9.052756782880781,-7.114549351212575,5.8793626281923075,86.2966406105014,Exp C,Batch 2
+-0.6353671114977116,10.400866742176634,-4.22652240588487,79.88278014399893,Exp B,Batch 1
+9.297251433722092,-7.464577296724272,-1.6733193759144194,6.194236522475456,Exp C,Batch 2
+10.843039986852558,31.529253447376302,1.7728841317953052,2.62962534467902,Exp C,Batch 2
+-9.66748092875138,8.239949475079516,-4.713429845021996,134.54838860949667,Exp A,Batch 2
+5.484306496949863,6.302258201360539,-1.8174424147436588,36.7736593480038,Exp B,Batch 2
+-10.044443514613777,-14.290995873432566,3.7678942895038734,192.4843037138215,Exp A,Batch 1
+-6.804886813331695,-0.41127636143847845,-5.486714716615557,113.17614588844572,Exp B,Batch 1
+-10.926341975687365,5.008442795332732,0.7653265490238303,19.12532902256534,Exp A,Batch 2
+8.81147503308919,3.7273978087916797,5.394076142686629,106.62056645519628,Exp A,Batch 1
+1.9730454896266123,-3.770807144986192,-2.1717245310629525,30.788605575168553,Exp B,Batch 2
+-6.877326726570985,3.6639888667926668,5.114631258588519,144.3039297545822,Exp B,Batch 1
+-7.354710038304645,6.307453197856089,1.0943939642455558,74.84063214409376,Exp C,Batch 1
+3.4038012763226138,1.8310877940010661,-1.3020587451694863,88.31505475179699,Exp A,Batch 2
+-9.234074968719877,-0.12052312694285737,4.948225337514018,110.63909029606927,Exp B,Batch 1
+-15.028292391080454,4.236327709690034,0.16298120103523012,76.72643018044873,Exp C,Batch 1
+-16.839778393083566,-13.086835970616931,-8.975520163574322,136.1925466127727,Exp C,Batch 2
+4.868948958142353,15.165971622695146,4.322223632420779,9.785968345305351,Exp A,Batch 2
+-4.0566069453135425,-1.02093717143087,-7.336389246895131,179.36890186602304,Exp B,Batch 1
+20.55072947252517,-16.47552740261805,-7.977404660787235,64.61542332451306,Exp B,Batch 2
+10.977798665141847,-0.7630788386929356,2.1297737621578676,136.21106724110962,Exp C,Batch 1
+-4.162274197408359,4.409691969478736,4.3797121091227496,29.598646846970915,Exp C,Batch 1
+-14.790720028162445,9.538516033058452,-1.4747338064061608,25.442560145292063,Exp B,Batch 2
+0.052321223292304944,-3.8593577272302806,4.361018291659987,126.67563164706368,Exp C,Batch 1
+15.182352874693501,9.663727557754578,-1.7859146930717729,164.09668023921594,Exp C,Batch 2
+-11.873988235369609,20.45293532105077,4.39435183514709,13.099189986174917,Exp A,Batch 1
+-1.2898314224076401,-1.5430729019084188,-2.420694614609751,180.91891054292512,Exp A,Batch 1
+18.133046162741778,-0.43970295478240984,-2.7394879965146,141.1698029648776,Exp A,Batch 1
+8.86230546628088,-2.3911943866239307,0.9001354580443216,98.03712313180533,Exp B,Batch 1
+-4.174617084319197,-9.529236307351013,1.9484467236206071,162.17063709855418,Exp A,Batch 2
+-8.375752799421864,-11.809888690175702,-7.169963594255759,132.95152838031146,Exp A,Batch 1
+-8.303403772083435,-3.305688228790522,20.7760776825075,17.398783403080543,Exp A,Batch 2
+-13.787074061832477,2.955791579308803,-5.716055862113068,172.76180838999633,Exp A,Batch 1
+3.7841894439523194,-2.941052664658119,-4.206151511959375,155.7991485100725,Exp B,Batch 1
+16.483137922694038,-0.6383402621385992,-4.425230958163232,108.49457471574739,Exp C,Batch 2
+1.8668178092283025,-6.8529358813401835,4.589934055482285,140.14495066727514,Exp B,Batch 1
+8.107446467857134,1.8684499147269638,-4.173400569502652,82.52744663089867,Exp C,Batch 2
+-6.718979631523067,20.012238112889477,-1.7230992886250514,157.52555825142193,Exp A,Batch 1
+0.370787664146346,18.12626356665273,4.306975402184056,106.6230826045454,Exp A,Batch 1
+-5.431314023855601,5.023105276506255,-10.88911093184555,1.792954691408191,Exp C,Batch 2
+-17.030104331251202,-0.17095117872839624,1.9832139018841521,3.574350105452469,Exp B,Batch 2
+-8.59399229831974,0.6472586984791378,-4.506841807455758,127.34953210142925,Exp B,Batch 1
+-6.2174981849440165,8.302268181395839,-0.9399675736013304,210.36506331457056,Exp B,Batch 1
+8.818216437722109,-4.872722365943314,-1.7600945570361546,74.71786925630404,Exp B,Batch 2
+20.21293565248807,-1.1844624965043145,0.8933199507349614,44.26114928188674,Exp C,Batch 2
+9.180973861399899,7.043853778919379,-1.8318479076962644,184.02397889037877,Exp C,Batch 1
+-5.258849526367752,0.8537979910973746,3.616491570071645,201.72892041795117,Exp B,Batch 1
+9.721734378083372,1.1958136602719076,3.8545939793679445,91.14203423446004,Exp A,Batch 1
+7.019439719487489,-4.251545093187099,-6.151257071794901,72.1808960317672,Exp A,Batch 1
+-5.614937152210083,15.558240066950315,0.7818840435239826,181.72417140224297,Exp A,Batch 1
+-6.055282887964828,12.422255413647074,3.441855775922968,29.970499206295877,Exp A,Batch 2
+2.7118373624185637,19.363210159150203,0.7517781494190451,78.6084049925814,Exp A,Batch 1
+1.042130694209395,2.377198909772145,2.173453912561876,19.750568988958644,Exp C,Batch 1
+-12.4420678184919,-5.603497028479892,0.6647898690016302,72.37615516107128,Exp C,Batch 2
+4.4555881833064035,16.34808175842103,5.520322914911802,40.147861396179756,Exp C,Batch 1
+19.921950572627388,-11.495118821858155,-4.357477644649371,136.15604577657513,Exp B,Batch 1
+-10.416486840541664,-4.161365997344001,10.85392340690008,108.18031865069338,Exp C,Batch 2
+5.4475887030987735,-7.329315502119391,5.889275901323465,45.36116581263148,Exp A,Batch 1
+-2.811933032375626,-3.2283971982445565,2.5317959765882287,23.336911733486907,Exp B,Batch 2
+-5.964832173849731,0.14978003719918884,-8.58448780795404,122.66600992215774,Exp A,Batch 2
+14.170695410335426,5.8609155448436026,5.483288229702593,46.90453843388912,Exp A,Batch 1
+-10.000608805435679,14.586138811983105,-1.5073990623010125,153.62957857367948,Exp A,Batch 2
+-5.874290585388049,5.225197092857127,-8.263657464999886,185.960568094983,Exp A,Batch 1
+-5.060642639569336,10.936063930471612,-5.443638427066869,108.97243860255091,Exp B,Batch 1
+16.82344094962835,-8.947166329291688,-1.9573733341109048,35.97540375277358,Exp C,Batch 2
+14.203980931262612,-6.1574946501225565,0.4750875665592168,194.85149118787265,Exp C,Batch 2
+-6.682713447271647,18.156740190474917,0.20042761743111598,92.0445401821968,Exp C,Batch 2
+-12.753999650670067,-4.193308407944731,-1.8443895392576883,112.65776247776577,Exp B,Batch 2
+-9.510280580913014,10.38526224793387,-5.485148445664518,68.04430770961415,Exp B,Batch 1
+-3.2888934105980034,13.266075508659508,-1.095992063848788,32.43242285053679,Exp A,Batch 2
+-9.08685591920135,-6.434608765077098,4.291833119140085,61.42873487308662,Exp C,Batch 1
+-12.03421551479779,16.537710900099537,12.6106543092554,106.5489004732479,Exp C,Batch 1
+-6.807582902392585,8.52630404875574,-2.542515672449266,25.05629066984889,Exp B,Batch 1
+-14.407804478482301,-1.5082724574673725,-6.674622814583154,43.67544747420109,Exp A,Batch 2
+-13.540282555836722,6.9712105259669075,8.755502715829138,45.21706289104316,Exp B,Batch 1
+6.347044706672957,1.719835319824956,0.9980099975933223,23.781566636304046,Exp A,Batch 1
+-6.142509389396689,9.636410944409494,1.345518604811957,19.563663107409038,Exp A,Batch 1
+-6.103618862814889,21.533428886262445,-9.200908100746565,12.405671891200697,Exp B,Batch 2
+6.977290484949881,1.3730770102602983,-2.7315730596615895,27.690621016562478,Exp C,Batch 2
+-11.324192141969169,-6.256941858476621,2.5829032055857204,70.50260276889752,Exp B,Batch 2
+4.909161055250101,-5.649608297921958,0.40757276890039973,58.598902175497194,Exp B,Batch 2
+-3.885470357928451,-5.802319842448904,-3.334773985260237,22.628403270053436,Exp A,Batch 2
+1.3064193385624825,-2.223126931659896,-3.122014083177012,62.35928471407035,Exp C,Batch 2
+-10.677953978375674,12.436165100636948,2.9150581745645647,114.21066038465466,Exp B,Batch 1
+-2.1500933690990203,-20.85065363768226,-2.677366309640701,131.1052804119345,Exp C,Batch 1
+6.670111822744017,11.107257055808674,-1.3724899181447463,247.8451605908829,Exp B,Batch 1
+15.122064564226186,-18.31555448113071,-0.2533176227497962,12.7860363236911,Exp C,Batch 1
+-1.336405375070233,10.810879276424208,-13.413294600804742,133.60907407331365,Exp A,Batch 2
+-9.512748830443932,1.1334950294374613,-3.918066038163598,59.95173606714928,Exp A,Batch 1
+-10.09206474460126,7.501222503499044,-2.298662195213696,95.99588621865774,Exp B,Batch 2
+-7.150443793001752,-6.504621714336353,1.2825501546615854,22.394987388573163,Exp A,Batch 2
+4.151752655859225,2.662376867948501,-1.1751650001431053,115.90552517393999,Exp A,Batch 1
+9.151307942381544,2.020893647473216,2.429621562524823,6.12275384108533,Exp A,Batch 1
+2.800625386921092,-5.717436249466945,5.278631406643037,54.7739061824673,Exp C,Batch 1
+5.612871749994415,-8.481362537024408,9.439037219791159,18.24359255852298,Exp B,Batch 2
+-5.929027282435943,4.825258123612995,1.673368431662646,219.92581513455377,Exp C,Batch 2
+-4.678042608763518,5.8768749965985645,6.113770854300679,54.188304798719486,Exp C,Batch 2
+10.004085877820215,-7.51256633304347,-2.3068147602737,56.38660739043577,Exp C,Batch 1
+2.6976301301204044,6.611513630685105,-5.0579491515034825,170.91225973668537,Exp C,Batch 2
+8.412211513698795,-22.941205094590508,-11.307329555051517,61.52581391379076,Exp C,Batch 1
+-9.821268360234738,0.9402203083915962,1.7665732702418935,41.83346366523901,Exp A,Batch 1
+-0.6558435011210184,14.790057806273873,3.1962056468618187,103.56623497831615,Exp C,Batch 2
+-3.4609777938059025,1.694025168457688,-2.1040757151830656,61.244589752969326,Exp B,Batch 1
+11.93460316086044,11.820953162551358,2.5538930283491466,14.408643660181342,Exp C,Batch 1
+0.6286750020371418,3.5794569838320727,0.25147630895451745,97.58100554432156,Exp B,Batch 1
+-10.281497962178047,3.3577302564616773,7.983242715400905,69.96278498786143,Exp B,Batch 2
+3.5433177414600285,7.958299697389606,7.974309018271618,94.06688869490276,Exp B,Batch 2
+-1.2146278704629991,-2.1074860256367,4.75198542659339,93.4387648332721,Exp C,Batch 2
+-10.290102304684224,1.0652368901810263,3.0925646504803512,55.38737342809845,Exp B,Batch 2
+-2.8812161372696306,2.8846643214171275,5.37493116967241,35.5302005275545,Exp A,Batch 1
+-10.8600003293871,-8.796712684308849,2.602646470510253,59.16947528685017,Exp A,Batch 2
+6.959470210178505,-3.433314930433406,5.546002162744527,135.67488657980346,Exp C,Batch 2
+-6.682497281864011,4.524121606820533,-4.410153213517011,60.55332056733652,Exp A,Batch 2
+4.642494448195274,2.5452549690609287,9.525404059512141,237.04811872638834,Exp C,Batch 1
+-5.940173485471504,1.0431846529896616,1.1494858605446303,184.88873753712897,Exp C,Batch 1
+8.054805159167442,0.8388657489024166,0.8737929992416009,6.868697954958182,Exp C,Batch 1
+6.668764479492283,5.338806369139992,2.5731594695182887,69.28741301702539,Exp B,Batch 2
+-13.100866979445332,-13.432462081584259,-1.6200435717033865,92.33710079184581,Exp C,Batch 2
+-9.354705519203367,1.5967489309181944,-0.16154173498382884,4.539623910979077,Exp B,Batch 1
+-0.022223805249756784,-9.546763604268307,-0.8432043253944905,8.50930287099225,Exp A,Batch 1
+12.073851498938842,7.424527107441232,-2.89904446924666,210.59194628502706,Exp B,Batch 1
+-10.803569025832333,8.608036391100708,-6.101603448288237,218.8362222239495,Exp C,Batch 1
+0.5841763885504461,13.214363631374953,1.0062790490787046,120.82438807013656,Exp B,Batch 1
+1.8526862931242458,-9.574191579268701,9.470283045405525,124.67892103733602,Exp C,Batch 1
+-14.15463553784448,6.599446668512956,5.533655601701782,81.60972876310272,Exp A,Batch 2
+-1.339672008996184,19.46356743995253,8.626139760559326,48.528111413835454,Exp C,Batch 1
+-8.848838402933803,-3.0541342786907006,-3.9033739274671286,158.73312276170074,Exp A,Batch 2
+-6.4638407860608265,-7.105761744208908,1.2073442412844295,131.21674760551662,Exp A,Batch 2
+-3.58092176995483,-5.257334171783958,-3.603155515719582,99.33399643828689,Exp B,Batch 2
+-5.244517017093103,9.263520604468244,3.2628464732069737,90.2882647122777,Exp B,Batch 1
+6.700449542380448,15.754133237595065,2.749801613498839,50.80009584945007,Exp C,Batch 2
+-10.658505820546754,2.9965455168300577,0.4955483279295856,20.759324978370984,Exp A,Batch 1
+-2.928095851534322,-8.51453487525782,-10.892990419958279,87.95597945778994,Exp A,Batch 2
+11.780594686518892,18.41565725720487,0.8105699130089505,115.25924828314513,Exp A,Batch 1
+-2.7453918712789536,-29.28903372716028,-1.6183506628266084,37.37516365947569,Exp C,Batch 1
+11.829443262944299,8.505144395884718,2.1320401404090816,29.12773092592297,Exp A,Batch 2
+13.758126150683998,6.807576107929986,-0.8825654172340264,3.526769146336819,Exp A,Batch 1
+2.38726867137157,-0.3721489177839844,1.3218714097602446,243.5673820585243,Exp A,Batch 1
+9.88637309055747,-7.871475979946169,-0.44513527375727346,167.04151892459456,Exp B,Batch 1
+2.176485456551026,2.0106608985592693,-5.487832167071702,21.309101779931858,Exp C,Batch 2
+19.885753302928915,-17.74712342814443,-8.713024971273928,135.92411778639536,Exp C,Batch 2
+-6.2818107237387855,2.0437472668040395,5.067366734547306,27.165920439524566,Exp C,Batch 1
+-10.759015065599215,1.0898982494719323,6.796994234940929,56.000773328713,Exp A,Batch 2
+2.3960073398962174,1.3659180990731643,6.365948312947519,57.608244881420134,Exp A,Batch 2
+10.460405194168441,12.094290718160579,-3.6503657235889437,142.2038288819338,Exp C,Batch 1
+6.013146873502045,16.39684639647863,-4.693521167813255,51.91737072290953,Exp B,Batch 1
+5.426590950068499,-4.748124497846934,-2.8601475051656418,80.13409188122425,Exp C,Batch 1
+14.546911593056764,9.79624957645462,-8.830285452522496,244.33901037811782,Exp A,Batch 1
+12.53269667492715,6.144847112399004,-9.271661615058948,104.49294295680924,Exp C,Batch 1
+-1.6998912360722986,-0.9000385080002105,3.2247317265777182,74.48180562218762,Exp C,Batch 2
+-2.469399073630611,14.461981099932043,3.885568484799711,31.5392056954154,Exp A,Batch 1
+6.733030042194478,-0.5024471483397821,3.7696598816879034,133.86124060183644,Exp A,Batch 2
+-0.11025240125642116,6.4663939650505045,-0.031747781059985485,9.175816606409885,Exp C,Batch 1
+1.5377718635969038,6.724318372581555,-2.0391837774527097,43.514011936656956,Exp A,Batch 2
+6.61274039677917,-8.300707794792835,-6.605425229759783,20.54246137804035,Exp C,Batch 2
+6.596337556518137,-10.992213267751643,-1.2197115574754733,76.94720040031481,Exp B,Batch 1
+-1.2632102343713656,-0.15727965545005898,1.6663793593795648,97.67433533114388,Exp A,Batch 1
+17.167211165507947,-6.425516508225377,6.990184785018569,95.1097326674312,Exp C,Batch 2
+16.437346695011723,-7.098769778071087,-7.6965001277041125,98.69975326101961,Exp A,Batch 1
+-1.7526855325406836,5.698204449638091,0.8572882223072247,79.69722166147443,Exp C,Batch 1
+-6.608897379952282,-4.102967067684068,-0.3419300524731662,39.593532443027264,Exp C,Batch 1
+-3.848402554304755,10.233572505745531,7.697320643777888,68.45406161922722,Exp A,Batch 1
+-7.242811207711213,4.576449781636937,-7.664018026005427,58.81954478197876,Exp B,Batch 2
+-9.859893835639621,6.431282900687946,-3.9792194487371564,99.8114396686664,Exp B,Batch 1
+-1.71873469934943,13.913416950308273,3.5937909261634142,176.90272267049636,Exp B,Batch 2
+9.161166980917626,0.06741457618433268,1.1147107591459329,33.54953128241257,Exp A,Batch 2
+
 </script>
 
 <!-- ACTUAL CONTENT -->
@@ -6056,8 +6537,96 @@ var1,var2,var3,var4,group_A,group_B,group_C,intensity
 
 <!-- Chart -->
 <div id="timeseries"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df6</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Struct Data Source Example</h2>
+<p>This scatter plot uses data from a struct containing multiple DataFrames.
+The <code>ExperimentData</code> struct holds both measurements and metadata.
+Charts reference the measurements DataFrame using <code>Symbol("experiment.measurements")</code>.</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+    </div>
+<br>
+<hr>
+<br>
+<h2>Experiment Measurements from Struct Data Source</h2>
+<p>This example shows how to use a struct as a data source. The ExperimentData struct contains measurements and metadata DataFrames. Access struct fields via dot notation.</p>
+
+<!-- Filters (for data filtering) -->
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <div style="margin: 10px 0;">
+    <button id="struct_scatter_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="color_col_select_struct_scatter">Color/Point type:</label>
+                    <select id="color_col_select_struct_scatter" onchange="updateChart_struct_scatter()">
+                    <option value="experiment" selected>experiment</option>
+                    <option value="batch">batch</option>                </select>
+                </div>
+                    </div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="x_col_select_struct_scatter">X: </label>
+        <select id="x_col_select_struct_scatter" style="padding: 5px 10px;" onchange="updateChart_struct_scatter()">
+            <option value="x_position" selected>x_position</option>
+<option value="y_position">y_position</option>
+<option value="z_position">z_position</option>
+<option value="intensity">intensity</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_struct_scatter">X Transform: </label>
+        <select id="x_transform_select_struct_scatter" style="padding: 5px 10px;" onchange="updateChart_struct_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_struct_scatter">Y: </label>
+        <select id="y_col_select_struct_scatter" style="padding: 5px 10px;" onchange="updateChart_struct_scatter()">
+            <option value="x_position">x_position</option>
+<option value="y_position" selected>y_position</option>
+<option value="z_position">z_position</option>
+<option value="intensity">intensity</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_struct_scatter">Y Transform: </label>
+        <select id="y_transform_select_struct_scatter" style="padding: 5px 10px;" onchange="updateChart_struct_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="struct_scatter_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="struct_scatter_aspect_ratio_label">1.0</span>
+    <input type="range" id="struct_scatter_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="struct_scatter"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: experiment.measurements</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

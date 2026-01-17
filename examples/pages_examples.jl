@@ -288,10 +288,100 @@ println("  - easy_report.html (coverpage with auto-generated links)")
 println("  - revenue_analysis.html (Revenue Analysis)")
 println("  - metrics_dashboard.html (Metrics Dashboard)")
 
+# ==============================================================================
+# Example 3: Dataset Selection with Parquet Format
+# ==============================================================================
+println("\n=== Example 3: Dataset Selection with Parquet Format ===")
+
+# Define a struct with DataFrame fields (including Union{Missing, DataFrame})
+struct ExampleFrame
+    aa::DataFrame
+    bb::Union{Missing, DataFrame}
+end
+
+# Create the struct with two DataFrames
+struct_df_aa = DataFrame(
+    Category = repeat(["Electronics", "Clothing", "Food", "Sports"], 3),
+    Quarter = repeat(["Q1", "Q2", "Q3"], inner=4),
+    Sales = rand(rng, 5000:20000, 12),
+    Units = rand(rng, 100:500, 12)
+)
+
+struct_df_bb = DataFrame(
+    Department = repeat(["HR", "Engineering", "Sales", "Marketing"], 3),
+    Month = repeat(["Jan", "Feb", "Mar"], inner=4),
+    Headcount = rand(rng, 10:100, 12),
+    Budget = rand(rng, 50000:200000, 12)
+)
+
+example_struct = ExampleFrame(struct_df_aa, struct_df_bb)
+
+# Create a third standalone DataFrame
+standalone_df = DataFrame(
+    Region = repeat(["North", "South", "East", "West"], 4),
+    Product = repeat(["Widget", "Gadget", "Gizmo", "Thingamajig"], inner=4),
+    Revenue = rand(rng, 10000:50000, 16),
+    Profit = rand(rng, 1000:10000, 16)
+)
+
+# Create PivotTable with dataset selection dropdown
+pivot_with_selection = PivotTable(:dataset_selector_parquet, [Symbol("struct_data.aa"), Symbol("struct_data.bb"), :standalone_data];
+    rows = [:Category],
+    aggregatorName = :Sum,
+    rendererName = :Heatmap,
+    notes = "Dataset selection with Parquet format - switch between datasets stored in subfolders"
+)
+
+dataset_text = TextBlock("""
+<a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>Dataset Selection with Parquet Format</h1>
+<p>This example demonstrates the <strong>dataset selection</strong> feature combined with <strong>Parquet data format</strong>.</p>
+
+<h2>Key Features Demonstrated:</h2>
+<ul>
+    <li><strong>Struct with DataFrames:</strong> A struct <code>ExampleFrame</code> with fields <code>aa::DataFrame</code> and <code>bb::Union{Missing,DataFrame}</code></li>
+    <li><strong>Automatic extraction:</strong> DataFrames are extracted with dot-prefixed names (<code>Symbol("struct_data.aa")</code>, <code>Symbol("struct_data.bb")</code>)</li>
+    <li><strong>Subfolder storage:</strong> Struct DataFrames are stored in subfolders (e.g., <code>data/struct_data/aa.parquet</code>)</li>
+    <li><strong>Dataset switching:</strong> Use the dropdown to switch between datasets - data is loaded on-demand</li>
+</ul>
+
+<h2>How Parquet Storage Works:</h2>
+<p>When using <code>dataformat = :parquet</code>, DataFrames from structs are saved in subfolders:</p>
+<ul>
+    <li><code>data/struct_data/aa.parquet</code> - from example_struct.aa</li>
+    <li><code>data/struct_data/bb.parquet</code> - from example_struct.bb</li>
+    <li><code>data/standalone_data.parquet</code> - standalone DataFrame (no subfolder)</li>
+</ul>
+<p>This is efficient for large datasets as data is loaded only when selected.</p>
+""")
+
+println("  Creating dataset selection page...")
+page_dataset = JSPlotPage(
+    Dict{Symbol,Any}(
+        :struct_data => example_struct,  # Struct - extracted as :struct_data_aa, :struct_data_bb
+        :standalone_data => standalone_df
+    ),
+    [dataset_text, pivot_with_selection],
+    tab_title = "Dataset Selection (Parquet)",
+    page_header = "Dataset Selection with Parquet Format",
+    dataformat = :parquet
+)
+
+create_html(page_dataset, joinpath("generated_html_examples", "dataset_selection_parquet.html"))
+
+println("\n" * "="^60)
+println("Dataset selection (Parquet) example complete!")
+println("="^60)
+println("Output location: generated_html_examples/dataset_selection_parquet/")
+println("  - dataset_selection_parquet.html (main page)")
+println("  - data/struct_data/aa.parquet")
+println("  - data/struct_data/bb.parquet")
+println("  - data/standalone_data.parquet")
+
 println("\n" * "="^70)
 println("Pages examples complete!")
 println("="^70)
-println("\nTwo examples created:")
+println("\nThree examples created:")
 println("\n1. Manual LinkList Construction:")
 println("   - generated_html_examples/annual_report/annual_report.html")
 println("   - Full control over link descriptions")
@@ -300,5 +390,10 @@ println("\n2. Easy Constructor:")
 println("   - generated_html_examples/easy_report/easy_report.html")
 println("   - Auto-generates LinkList from page metadata")
 println("   - 2 pages with simpler H1 2024 business metrics")
+println("\n3. Dataset Selection with Parquet:")
+println("   - generated_html_examples/dataset_selection_parquet/dataset_selection_parquet.html")
+println("   - Struct with DataFrames automatically extracted")
+println("   - Dataset dropdown to switch between parquet files")
 println("\nOpen with: cd generated_html_examples/annual_report && ./open.sh (Linux/Mac)")
 println("       or: cd generated_html_examples/easy_report && ./open.sh (Linux/Mac)")
+println("       or: cd generated_html_examples/dataset_selection_parquet && ./open.sh (Linux/Mac)")

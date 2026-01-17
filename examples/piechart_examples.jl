@@ -247,6 +247,44 @@ pie10 = PieChart(:comprehensive_sales, comprehensive_df, :comprehensive_data;
     notes = "This example demonstrates ALL PieChart features: (1) Multiple slice size options (revenue, units, profit, customers), (2) Multiple grouping options (by product, channel, or region), (3) Flexible faceting (choose 0, 1, or 2 facet variables), (4) Interactive filters (select quarters). Try different combinations!"
 )
 
+# Example 11: Using a Struct as Data Source
+# Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
+
+struct CompanyData
+    revenue::DataFrame
+    employees::DataFrame
+end
+
+# Create revenue breakdown data
+revenue_breakdown = DataFrame(
+    source = ["Subscriptions", "Licensing", "Services", "Hardware", "Other"],
+    amount = [45000, 28000, 18000, 7000, 2000]
+)
+
+employee_breakdown = DataFrame(
+    department = ["Engineering", "Sales", "Marketing", "Support", "Admin"],
+    headcount = [120, 80, 45, 60, 25]
+)
+
+# Create the struct
+company_data = CompanyData(revenue_breakdown, employee_breakdown)
+
+struct_intro = TextBlock("""
+<h2>Struct Data Source Example</h2>
+<p>This pie chart uses data from a struct containing multiple DataFrames.
+The <code>CompanyData</code> struct holds both revenue and employees data.
+Charts reference the revenue DataFrame using <code>Symbol("company.revenue")</code>.</p>
+""")
+
+pie11 = PieChart(:struct_pie, company_data.revenue, Symbol("company.revenue");
+    value_cols = [:amount],
+    color_cols = [:source],
+    hole = 0.35,
+    title = "Example 11: Revenue Sources from Struct Data Source",
+    notes = "This example shows how to use a struct as a data source. The CompanyData struct " *
+           "contains revenue and employees DataFrames. Access struct fields via dot notation."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -264,8 +302,9 @@ conclusion = TextBlock("""
 """)
 
 # Create single combined page
+# Note: company_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :market_data => market_share_df,
         :budget_data => budget_df,
         :sales_data => sales_df,
@@ -274,9 +313,10 @@ page = JSPlotPage(
         :segment_data => segment_df,
         :store_data => store_df,
         :traffic_data => traffic_df,
-        :comprehensive_data => comprehensive_df
+        :comprehensive_data => comprehensive_df,
+        :company => company_data  # Struct with revenue and employees
     ),
-    [header, pie1, pie2, pie3, pie4, pie5, pie6, pie7, pie8, pie9, pie10, conclusion],
+    [header, pie1, pie2, pie3, pie4, pie5, pie6, pie7, pie8, pie9, pie10, struct_intro, pie11, conclusion],
     tab_title = "PieChart Examples"
 )
 
@@ -296,3 +336,4 @@ println("  • Multiple value and label column selection")
 println("  • Dynamic faceting controls")
 println("  • Consistent formatting with other chart types")
 println("  • COMPREHENSIVE EXAMPLE with all features combined!")
+println("  • Struct data source (referencing struct fields via dot notation)")

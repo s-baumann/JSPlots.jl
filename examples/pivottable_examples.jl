@@ -167,6 +167,62 @@ pivot8 = PivotTable(:Correlation_Matrix, :correlations;
     notes = "Correlation matrix with custom red-white-blue color scale"
 )
 
+# Example 9: Dataset Selection with Struct containing DataFrames
+# This demonstrates the new feature where PivotTable can switch between multiple datasets
+
+# Define a struct with DataFrame fields (including Union{Missing, DataFrame})
+struct ExampleFrame
+    aa::DataFrame
+    bb::Union{Missing, DataFrame}
+end
+
+# Create the struct with two DataFrames
+struct_df_aa = DataFrame(
+    Category = repeat(["Electronics", "Clothing", "Food", "Sports"], 3),
+    Quarter = repeat(["Q1", "Q2", "Q3"], inner=4),
+    Sales = rand(rng, 5000:20000, 12),
+    Units = rand(rng, 100:500, 12)
+)
+
+struct_df_bb = DataFrame(
+    Department = repeat(["HR", "Engineering", "Sales", "Marketing"], 3),
+    Month = repeat(["Jan", "Feb", "Mar"], inner=4),
+    Headcount = rand(rng, 10:100, 12),
+    Budget = rand(rng, 50000:200000, 12)
+)
+
+example_struct = ExampleFrame(struct_df_aa, struct_df_bb)
+
+# Create a third standalone DataFrame
+standalone_df = DataFrame(
+    Region = repeat(["North", "South", "East", "West"], 4),
+    Product = repeat(["Widget", "Gadget", "Gizmo", "Thingamajig"], inner=4),
+    Revenue = rand(rng, 10000:50000, 16),
+    Profit = rand(rng, 1000:10000, 16)
+)
+
+# Create PivotTable with dataset selection dropdown
+# The three datasets are: example_struct.aa (→ Symbol("multi_data.aa")), example_struct.bb (→ Symbol("multi_data.bb")), and standalone_df
+pivot9 = PivotTable(:dataset_selector_demo, [Symbol("multi_data.aa"), Symbol("multi_data.bb"), :standalone_data];
+    rows = [:Category],  # Will work with first dataset only.
+    aggregatorName = :Sum,
+    rendererName = :Heatmap,
+    notes = "Dataset selection demo - use the dropdown above to switch between three different datasets. The pivot table will reload with the new data while preserving your row/column selections where possible."
+)
+
+dataset_selection_text = TextBlock("""
+<h2>Dataset Selection Feature</h2>
+<p>This example demonstrates the new <strong>dataset selection</strong> feature in PivotTable. When multiple datasets are provided, a dropdown appears allowing you to switch between them dynamically.</p>
+<h3>How it works:</h3>
+<ul>
+    <li><strong>Struct with DataFrames:</strong> We defined a struct <code>ExampleFrame</code> with fields <code>aa::DataFrame</code> and <code>bb::Union{Missing,DataFrame}</code></li>
+    <li><strong>Automatic extraction:</strong> When you pass the struct to JSPlotPage, the DataFrames are automatically extracted with dot-prefixed names (e.g., <code>Symbol("multi_data.aa")</code>, <code>Symbol("multi_data.bb")</code>)</li>
+    <li><strong>Multiple datasets:</strong> The PivotTable accepts a <code>Vector{Symbol}</code> of dataset labels instead of a single Symbol</li>
+    <li><strong>Dynamic switching:</strong> Changing the dataset reloads the pivot table while preserving your current configuration</li>
+</ul>
+<p><em>Try switching between the three datasets using the dropdown above the pivot table!</em></p>
+""")
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -176,14 +232,18 @@ conclusion = TextBlock("""
     <li><strong>Aggregation functions:</strong> Sum, Average, Count, Median, Min, Max, etc.</li>
     <li><strong>Data filtering:</strong> Include or exclude specific values</li>
     <li><strong>Multi-level grouping:</strong> Use multiple row or column dimensions</li>
+    <li><strong>Dataset selection:</strong> Switch between multiple datasets with a dropdown</li>
+    <li><strong>Struct support:</strong> Automatically extract DataFrames from structs</li>
     <li><strong>Integration:</strong> Combine PivotTables with LineCharts, 3D plots, and more</li>
 </ul>
 <p><strong>Tip:</strong> Try dragging unused fields from the top into Rows or Columns!</p>
 """)
 
 # Create single combined page
+# Note: example_struct is passed directly - its DataFrames are automatically extracted
+# as :multi_data_aa and :multi_data_bb
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :sales_data => sales_df,
         :performance_data => performance_df,
         :product_data => product_data,
@@ -191,9 +251,11 @@ page = JSPlotPage(
         :survey_data => survey_df,
         :transaction_data => transactions_df,
         :stockReturns => stockReturns,
-        :correlations => correlations
+        :correlations => correlations,
+        :multi_data => example_struct,  # Struct with DataFrames - extracted as :multi_data_aa, :multi_data_bb
+        :standalone_data => standalone_df
     ),
-    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, conclusion],
+    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, dataset_selection_text, pivot9, conclusion],
     tab_title = "PivotTable Examples",
     dataformat = :csv_embedded
 )
@@ -211,4 +273,4 @@ println("  • Different renderers (Table, Bar Chart)")
 println("  • Data filtering with exclusions and inclusions")
 println("  • Count aggregation")
 println("  • Stock returns and correlation matrices")
-println("  • Combined with LineChart and 3D Surface plots")
+println("  • Dataset selection with struct containing DataFrames")

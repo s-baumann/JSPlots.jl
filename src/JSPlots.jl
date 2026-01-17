@@ -406,17 +406,14 @@ module JSPlots
     include("LinkList.jl")
     export LinkList
 
-    include("ohlcchart.jl")
-    export OHLCChart
+    include("candlestickchart.jl")
+    export CandlestickChart
 
     include("bumpchart.jl")
     export BumpChart
 
-    include("executionplot.jl")
-    export ExecutionPlot
-
     include("Pages.jl")
-    export JSPlotPage, Pages, sanitize_filename
+    export JSPlotPage, Pages, sanitize_filename, extract_dataframes_from_struct, is_struct_with_dataframes
 
     include("make_html.jl")
     export create_html

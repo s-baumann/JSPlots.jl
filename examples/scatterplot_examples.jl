@@ -141,19 +141,61 @@ scatter6 = ScatterPlot(:timeseries, df6, :df6, [:value1, :value2];
            "Points are colored by portfolio to show different investment trajectories."
 )
 
+# Example 7: Using a Struct as Data Source
+# Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
+
+struct ExperimentData
+    measurements::DataFrame
+    metadata::DataFrame
+end
+
+# Create measurement data for the struct
+measurement_df = DataFrame(
+    x_position = randn(rng, 200) .* 10,
+    y_position = randn(rng, 200) .* 10,
+    z_position = randn(rng, 200) .* 5,
+    intensity = abs.(randn(rng, 200)) .* 100,
+    experiment = rand(rng, ["Exp A", "Exp B", "Exp C"], 200),
+    batch = rand(rng, ["Batch 1", "Batch 2"], 200)
+)
+
+metadata_df = DataFrame(
+    experiment = ["Exp A", "Exp B", "Exp C"],
+    researcher = ["Dr. Smith", "Dr. Jones", "Dr. Lee"],
+    date = [Date(2024, 1, 15), Date(2024, 2, 20), Date(2024, 3, 10)]
+)
+
+experiment_data = ExperimentData(measurement_df, metadata_df)
+
+struct_intro = TextBlock("""
+<h2>Struct Data Source Example</h2>
+<p>This scatter plot uses data from a struct containing multiple DataFrames.
+The <code>ExperimentData</code> struct holds both measurements and metadata.
+Charts reference the measurements DataFrame using <code>Symbol("experiment.measurements")</code>.</p>
+""")
+
+scatter7 = ScatterPlot(:struct_scatter, experiment_data.measurements, Symbol("experiment.measurements"),
+    [:x_position, :y_position, :z_position, :intensity];
+    color_cols = [:experiment, :batch],
+    title = "Experiment Measurements from Struct Data Source",
+    notes = "This example shows how to use a struct as a data source. The ExperimentData struct " *
+           "contains measurements and metadata DataFrames. Access struct fields via dot notation."
+)
+
 # Create the page
-data_dict = Dict{Symbol,DataFrame}(
+data_dict = Dict{Symbol,Any}(
     :df1 => df1,
     :df2 => df2,
     :df3 => df3,
     :df4 => df4,
     :df5 => df5,
-    :df6 => df6
+    :df6 => df6,
+    :experiment => experiment_data  # Struct data source
 )
 
 page = JSPlotPage(
     data_dict,
-    [header, scatter1, scatter2, scatter3, scatter4, scatter5, scatter6];
+    [header, scatter1, scatter2, scatter3, scatter4, scatter5, scatter6, struct_intro, scatter7];
     dataformat = :csv_embedded
 )
 
@@ -170,6 +212,7 @@ println("  • Single faceting (marginals disappear)")
 println("  • Two-dimensional faceting (grid layout)")
 println("  • Complex multi-feature example")
 println("  • Time series with date filters")
+println("  • Struct data source (referencing struct fields via dot notation)")
 println("\nKey features demonstrated:")
 println("  ✓ dimensions parameter for X/Y selection")
 println("  ✓ Multiple color options")

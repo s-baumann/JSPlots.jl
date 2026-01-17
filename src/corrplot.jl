@@ -479,7 +479,7 @@ function build_corrplot_appearance_html(chart_title_str, title, notes, scenarios
         $order_toggle_html
         $linkage_html
         $manual_order_html
-        <div id="dendrogram_$chart_title_str" style="width: 100%; height: 300px;"></div>
+        <div id="dendrogram_$chart_title_str" style="width: 100%; height: 400px;"></div>
         <div id="corrmatrix_$chart_title_str" style="width: 100%; height: 600px;"></div>
     </div>
     $manual_order_styles
@@ -905,13 +905,23 @@ function build_corrplot_functional_html(chart_title_str, data_label, scenarios,
                     showlegend: false
                 };
 
+                // Ensure minimum y-axis range to prevent dendrogram from being crushed
+                const minYRange = 0.1;  // Minimum height range
+                const yAxisMax = Math.max(maxHeight * 1.15, minYRange);
+
+                // Log warning if heights are very small (indicates highly correlated variables)
+                if (maxHeight < 0.01) {
+                    console.warn('Dendrogram heights are very small (maxHeight=' + maxHeight + '). This may indicate highly correlated variables.');
+                }
+
                 const dendroLayout = {
                     title: 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)',
                     xaxis: {visible: false, range: [-0.5, n - 0.5]},
-                    yaxis: {title: 'Height', range: [0, maxHeight * 1.15]},
+                    yaxis: {title: 'Height', range: [0, yAxisMax]},
                     margin: {l: 80, r: 50, b: 120, t: 50},
                     showlegend: false,
-                    shapes: shapes
+                    shapes: shapes,
+                    height: 400
                 };
 
                 Plotly.newPlot('dendrogram_$chart_title_str', [leafTrace], dendroLayout, {responsive: true});

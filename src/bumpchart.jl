@@ -229,26 +229,27 @@ struct BumpChart <: JSPlotsType
                 // Assign colors to entities in filtered data
                 assignEntityColors(filteredData);
 
-                // Process data based on Y_MODE
-                let processedData;
-                if (Y_MODE === 'Ranking') {
-                    processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
-                } else {
-                    // Absolute mode - use performance values directly
-                    processedData = filteredData.map(row => ({
-                        ...row,
-                        y_value: row[PERF_COL],
-                        original_value: row[PERF_COL]
-                    }));
-                }
-
                 // Route to appropriate rendering function
+                // For facets, rankings will be calculated within each facet
                 if (FACET_COLS.length === 0) {
+                    // No facets: calculate rankings globally
+                    let processedData;
+                    if (Y_MODE === 'Ranking') {
+                        processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+                    } else {
+                        processedData = filteredData.map(row => ({
+                            ...row,
+                            y_value: row[PERF_COL],
+                            original_value: row[PERF_COL]
+                        }));
+                    }
                     renderNoFacets(processedData, X_COL, Y_MODE);
                 } else if (FACET_COLS.length === 1) {
-                    renderOneFacet(processedData, X_COL, Y_MODE, FACET_COLS[0]);
+                    // One facet: pass raw data and PERF_COL, rankings calculated per facet
+                    renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
                 } else {
-                    renderTwoFacets(processedData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1]);
+                    // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+                    renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
                 }
             };
 
@@ -306,7 +307,7 @@ struct BumpChart <: JSPlotsType
             }
 
             // Render with one facet
-            function renderOneFacet(data, xCol, yMode, facetCol) {
+            function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
                 const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
                 const nFacets = facetValues.length;
 
@@ -322,7 +323,20 @@ struct BumpChart <: JSPlotsType
                 };
 
                 facetValues.forEach((facetVal, idx) => {
-                    const facetData = data.filter(row => row[facetCol] === facetVal);
+                    const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+                    // Calculate rankings within this facet
+                    let facetData;
+                    if (yMode === 'Ranking') {
+                        facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                    } else {
+                        facetData = rawFacetData.map(row => ({
+                            ...row,
+                            y_value: row[perfCol],
+                            original_value: row[perfCol]
+                        }));
+                    }
+
                     const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                     const row = Math.floor(idx / nCols) + 1;
@@ -372,11 +386,20 @@ struct BumpChart <: JSPlotsType
                         title: row === nRows ? xCol : '',
                         anchor: yaxis
                     };
-                    layout[yaxis] = {
-                        title: col === 1 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                        anchor: xaxis,
-                        autorange: yMode === 'Ranking' ? 'reversed' : true
-                    };
+
+                    if (yMode === 'Ranking') {
+                        layout[yaxis] = {
+                            title: col === 1 ? 'Rank' : '',
+                            anchor: xaxis,
+                            autorange: 'reversed'
+                        };
+                    } else {
+                        layout[yaxis] = {
+                            title: col === 1 ? 'Performance' : '',
+                            anchor: xaxis,
+                            autorange: true
+                        };
+                    }
 
                     // Add annotation for facet label
                     if (!layout.annotations) layout.annotations = [];
@@ -399,7 +422,7 @@ struct BumpChart <: JSPlotsType
             }
 
             // Render with two facets
-            function renderTwoFacets(data, xCol, yMode, facetRow, facetCol) {
+            function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
                 const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
                 const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
                 const nRows = rowValues.length;
@@ -414,9 +437,22 @@ struct BumpChart <: JSPlotsType
 
                 rowValues.forEach((rowVal, rowIdx) => {
                     colValues.forEach((colVal, colIdx) => {
-                        const facetData = data.filter(row =>
+                        const rawFacetData = data.filter(row =>
                             row[facetRow] === rowVal && row[facetCol] === colVal
                         );
+
+                        // Calculate rankings within this facet combination
+                        let facetData;
+                        if (yMode === 'Ranking') {
+                            facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                        } else {
+                            facetData = rawFacetData.map(row => ({
+                                ...row,
+                                y_value: row[perfCol],
+                                original_value: row[perfCol]
+                            }));
+                        }
+
                         const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
 
                         const idx = rowIdx * nCols + colIdx;
@@ -465,11 +501,20 @@ struct BumpChart <: JSPlotsType
                             title: rowIdx === nRows - 1 ? xCol : '',
                             anchor: yaxis
                         };
-                        layout[yaxis] = {
-                            title: colIdx === 0 ? (yMode === 'Ranking' ? 'Rank' : 'Performance') : '',
-                            anchor: xaxis,
-                            autorange: yMode === 'Ranking' ? 'reversed' : true
-                        };
+
+                        if (yMode === 'Ranking') {
+                            layout[yaxis] = {
+                                title: colIdx === 0 ? 'Rank' : '',
+                                anchor: xaxis,
+                                autorange: 'reversed'
+                            };
+                        } else {
+                            layout[yaxis] = {
+                                title: colIdx === 0 ? 'Performance' : '',
+                                anchor: xaxis,
+                                autorange: true
+                            };
+                        }
 
                         // Add annotations for facet labels
                         if (!layout.annotations) layout.annotations = [];
@@ -603,7 +648,7 @@ struct BumpChart <: JSPlotsType
             title,
             notes
         )
-        appearance_html = generate_appearance_html(controls; aspect_ratio_default=0.6)
+        appearance_html = generate_appearance_html(controls; aspect_ratio_default=0.3)
 
         new(chart_title, data_label, functional_html, appearance_html)
     end

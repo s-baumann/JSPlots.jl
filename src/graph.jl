@@ -15,6 +15,9 @@ Create an interactive network graph visualization with variable selection.
 - `notes::String`: Descriptive text (default: `""`)
 - `cutoff::Float64`: Connection strength cutoff (default: `0.5`)
 - `color_cols::Union{Vector{Symbol}, Nothing}`: Columns for node coloring (default: `nothing`)
+- `tooltip_cols::Union{Vector{Symbol}, Nothing}`: Additional columns to show in tooltips (default: `nothing`)
+- `colour_map::Union{Missing,Dict{Float64,String},Dict{String,Dict{Float64,String}}}`: Color gradient for continuous variables (default: `missing`)
+- `extrapolate_colors::Bool`: Whether to extrapolate colors beyond gradient stops (default: `false`, clamps to min/max colors)
 - `show_edge_labels::Bool`: Show edge strength labels by default (default: `false`)
 - `layout::Symbol`: Graph layout algorithm (default: `:cose`)
 - `scenario_col::Union{Symbol, Nothing}`: Column name for scenarios (default: `nothing`)
@@ -64,6 +67,9 @@ function Graph(chart_title::Symbol,
                notes::String = "",
                cutoff::Float64 = 0.5,
                color_cols::Union{Vector{Symbol}, Nothing} = nothing,
+               tooltip_cols::Union{Vector{Symbol}, Nothing} = nothing,
+               colour_map::Union{Missing,Dict{Float64,String},Dict{String,Dict{Float64,String}}} = missing,
+               extrapolate_colors::Bool = false,
                show_edge_labels::Bool = false,
                layout::Symbol = :cose,
                scenario_col::Union{Symbol, Nothing} = nothing,
@@ -117,10 +123,60 @@ function Graph(chart_title::Symbol,
 
     chart_title_str = string(chart_title)
 
+    # Validate tooltip_cols
+    if !isnothing(tooltip_cols)
+        for col in tooltip_cols
+            if !(col in df_col_names)
+                @warn "Tooltip column $col not found in DataFrame, it will be ignored"
+            end
+        end
+    end
+
     # Validate layout
     valid_layouts = [:cose, :circle, :grid, :concentric, :breadthfirst, :random]
     if !(layout in valid_layouts)
         error("Invalid layout: $layout. Must be one of: $valid_layouts")
+    end
+
+    # Detect continuous vs discrete color columns
+    continuous_cols = Symbol[]
+    discrete_cols = Symbol[]
+    if !isnothing(color_cols) && !isempty(color_cols)
+        for col in color_cols
+            if col in df_col_names
+                # Check if column values are numeric
+                col_values = corr_df[!, col]
+                # Filter out missing values
+                non_missing = filter(x -> !ismissing(x), col_values)
+                if !isempty(non_missing) && all(x -> x isa Number, non_missing)
+                    push!(continuous_cols, col)
+                else
+                    push!(discrete_cols, col)
+                end
+            else
+                # If column not in DataFrame (e.g., old API), treat as discrete
+                push!(discrete_cols, col)
+            end
+        end
+    end
+
+    # Validate colour_map structure if provided
+    if !ismissing(colour_map)
+        if colour_map isa Dict{Float64,String}
+            # Global gradient - check we have at least 2 stops
+            if length(colour_map) < 2
+                error("colour_map must have at least 2 gradient stops")
+            end
+        elseif colour_map isa Dict{String,Dict{Float64,String}}
+            # Per-variable gradients - check each has at least 2 stops
+            for (var_name, gradient) in colour_map
+                if length(gradient) < 2
+                    error("colour_map gradient for variable '$var_name' must have at least 2 stops")
+                end
+            end
+        else
+            error("colour_map must be Dict{Float64,String} or Dict{String,Dict{Float64,String}}")
+        end
     end
 
     # Determine default color column (first from color_cols if provided)
@@ -130,17 +186,35 @@ function Graph(chart_title::Symbol,
         nothing
     end
 
+    # Combine color_cols and tooltip_cols for tooltip display
+    # Use union to avoid duplicates, and filter out columns not in DataFrame
+    all_tooltip_cols = Symbol[]
+    if !isnothing(color_cols)
+        append!(all_tooltip_cols, color_cols)
+    end
+    if !isnothing(tooltip_cols)
+        for col in tooltip_cols
+            if !(col in all_tooltip_cols) && (col in df_col_names)
+                push!(all_tooltip_cols, col)
+            end
+        end
+    end
+    # Reassign to tooltip_cols for simplicity
+    tooltip_cols = all_tooltip_cols
+
     # Build appearance HTML
     appearance_html = build_graph_appearance_html(
         chart_title_str, title, notes, scenarios, scenario_col,
-        cutoff, color_cols, default_color, show_edge_labels, layout, valid_layouts
+        cutoff, color_cols, default_color, show_edge_labels, layout, valid_layouts,
+        continuous_cols, discrete_cols, tooltip_cols
     )
 
     # Build functional HTML
     functional_html = build_graph_functional_html(
         chart_title_str, data_label, scenarios, scenario_col,
         default_scenario_name, cutoff, color_cols, default_color,
-        show_edge_labels, layout, default_vars
+        show_edge_labels, layout, default_vars,
+        continuous_cols, discrete_cols, colour_map, extrapolate_colors, tooltip_cols
     )
 
     return GraphChart(chart_title, data_label, functional_html, appearance_html)
@@ -148,7 +222,8 @@ end
 
 function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
                                      scenario_col, cutoff, color_cols, default_color,
-                                     show_edge_labels, layout, valid_layouts)
+                                     show_edge_labels, layout, valid_layouts,
+                                     continuous_cols, discrete_cols, tooltip_cols)
 
     # Scenario selector (if scenarios exist)
     scenario_selector_html = if !isnothing(scenario_col) && length(scenarios) > 1
@@ -198,16 +273,28 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
     </div>
     """
 
-    # Color selector
+    # Color selector with continuous/discrete indicators
     color_selector_html = if !isnothing(color_cols) && !isempty(color_cols)
-        options = join(["""<option value="$col" $(col == default_color ? "selected" : "")>$col</option>"""
-                       for col in color_cols], "\n                ")
+        # Group options by type
+        discrete_options = join(["""<option value="$col" $(col == default_color ? "selected" : "")>$col (discrete)</option>"""
+                                for col in discrete_cols], "\n                ")
+        continuous_options = join(["""<option value="$col" $(col == default_color ? "selected" : "")>$col (continuous)</option>"""
+                                   for col in continuous_cols], "\n                ")
+
+        all_options = if !isempty(discrete_options) && !isempty(continuous_options)
+            discrete_options * "\n                " * continuous_options
+        elseif !isempty(discrete_options)
+            discrete_options
+        else
+            continuous_options
+        end
+
         """
         <div style="margin-bottom: 10px;">
             <label for="color_select_$chart_title_str"><strong>Color nodes by:</strong></label>
             <select id="color_select_$chart_title_str" onchange="updateColors_$chart_title_str()">
                 <option value="none">None</option>
-                $options
+                $all_options
             </select>
         </div>
         """
@@ -270,6 +357,22 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
 
     return """
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <style>
+        .graph-tooltip-$chart_title_str {
+            position: absolute;
+            display: none;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 1000;
+            max-width: 300px;
+            white-space: pre-line;
+            line-height: 1.4;
+        }
+    </style>
     <div class="graph-container">
         <h2>$title</h2>
         <p>$notes</p>
@@ -283,6 +386,7 @@ function build_graph_appearance_html(chart_title_str, title, notes, scenarios,
         $cutoff_slider
         $aspect_ratio_slider
         <div id="graph_$chart_title_str" style="width: 100%; border: 1px solid #ccc;"></div>
+        <div id="tooltip_$chart_title_str" class="graph-tooltip-$chart_title_str"></div>
         <div style="margin-top: 10px; font-size: 12px; color: #666;">
             <strong>Tip:</strong> Deselected variables become translucent. Click "Recalculate Graph" to remove them and reorganize.
             Switching scenarios updates edges but keeps node positions.
@@ -294,13 +398,32 @@ end
 function build_graph_functional_html(chart_title_str, data_label, scenarios,
                                      scenario_col, default_scenario_name, cutoff,
                                      color_cols, default_color, show_edge_labels,
-                                     layout, default_vars)
+                                     layout, default_vars,
+                                     continuous_cols, discrete_cols, colour_map, extrapolate_colors, tooltip_cols)
 
     has_scenarios = !isnothing(scenario_col) && length(scenarios) > 1
     has_colors = !isnothing(color_cols) && !isempty(color_cols)
     default_color_str = isnothing(default_color) ? "none" : string(default_color)
     scenarios_json = JSON.json(scenarios)
     default_vars_json = JSON.json(default_vars)
+
+    # Color configuration
+    continuous_cols_json = JSON.json([String(c) for c in continuous_cols])
+    discrete_cols_json = JSON.json([String(c) for c in discrete_cols])
+
+    # Tooltip configuration
+    tooltip_cols_json = JSON.json([String(c) for c in tooltip_cols])
+
+    # Convert colour_map to JSON
+    colour_map_json = if ismissing(colour_map)
+        "null"
+    elseif colour_map isa Dict{Float64,String}
+        # Global gradient: convert to JSON object
+        JSON.json(colour_map)
+    else  # Dict{String,Dict{Float64,String}}
+        # Per-variable gradients: convert to JSON
+        JSON.json(colour_map)
+    end
 
     return """
     (function() {
@@ -312,6 +435,16 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
         let cy = null;
         let nodePositions = {};
         let allVars = [];
+
+        // Color configuration
+        const continuousCols = $continuous_cols_json;
+        const discreteCols = $discrete_cols_json;
+        const colourMap = $colour_map_json;
+        const extrapolateColors = $extrapolate_colors;
+
+        // Tooltip configuration
+        const tooltipCols = $tooltip_cols_json;
+        const tooltipDiv = document.getElementById('tooltip_$chart_title_str');
 
         // Load graph data
         loadDataset('$(data_label)').then(function(data) {
@@ -448,6 +581,63 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
 
             // Setup aspect ratio control for Cytoscape
             setupGraphAspectRatio_$chart_title_str();
+
+            // Setup tooltips
+            setupTooltips_$chart_title_str();
+        }
+
+        function setupTooltips_$chart_title_str() {
+            if (!cy || !tooltipDiv || tooltipCols.length === 0) return;
+
+            // Show tooltip on mouseover
+            cy.on('mouseover', 'node', function(event) {
+                const node = event.target;
+                const nodeData = node.data();
+
+                // Build tooltip content
+                let content = nodeData.label || nodeData.id;
+
+                // Add all tooltip columns
+                tooltipCols.forEach(col => {
+                    if (nodeData[col] !== undefined && nodeData[col] !== null) {
+                        const value = nodeData[col];
+                        // Format the column name (capitalize first letter, replace underscores)
+                        const colName = col.charAt(0).toUpperCase() + col.slice(1).replace(/_/g, ' ');
+
+                        // Format value (handle numbers with reasonable precision)
+                        let formattedValue;
+                        if (typeof value === 'number') {
+                            // If it's a small number (likely a percentage or ratio), show more decimals
+                            if (Math.abs(value) < 10) {
+                                formattedValue = value.toFixed(2);
+                            } else {
+                                formattedValue = value.toFixed(1);
+                            }
+                        } else {
+                            formattedValue = value;
+                        }
+
+                        content += '\\n' + colName + ': ' + formattedValue;
+                    }
+                });
+
+                tooltipDiv.innerHTML = content;
+                tooltipDiv.style.display = 'block';
+            });
+
+            // Update tooltip position on mousemove
+            cy.on('mousemove', 'node', function(event) {
+                const container = document.getElementById('graph_$chart_title_str');
+                const containerRect = container.getBoundingClientRect();
+
+                tooltipDiv.style.left = (event.originalEvent.pageX - containerRect.left + 15) + 'px';
+                tooltipDiv.style.top = (event.originalEvent.pageY - containerRect.top + 15) + 'px';
+            });
+
+            // Hide tooltip on mouseout
+            cy.on('mouseout', 'node', function(event) {
+                tooltipDiv.style.display = 'none';
+            });
         }
 
         function setupGraphAspectRatio_$chart_title_str() {
@@ -566,24 +756,32 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
             if (colorBy === 'none') {
                 cy.nodes().style('background-color', '#3498db');
             } else {
-                // Apply colors based on attribute
-                const uniqueValues = new Set();
-                cy.nodes().forEach(node => {
-                    const val = node.data(colorBy);
-                    if (val) uniqueValues.add(val);
-                });
+                // Check if this is a continuous or discrete column
+                const isContinuous = continuousCols.includes(colorBy);
 
-                const colors = generateColors_$chart_title_str(uniqueValues.size);
-                const colorMap = {};
-                Array.from(uniqueValues).forEach((val, idx) => {
-                    colorMap[val] = colors[idx];
-                });
+                if (isContinuous) {
+                    // Continuous coloring with gradient interpolation
+                    applyContinuousColoring_$chart_title_str(colorBy);
+                } else {
+                    // Discrete coloring (existing behavior)
+                    const uniqueValues = new Set();
+                    cy.nodes().forEach(node => {
+                        const val = node.data(colorBy);
+                        if (val) uniqueValues.add(val);
+                    });
 
-                cy.nodes().forEach(node => {
-                    const val = node.data(colorBy);
-                    const color = val ? (colorMap[val] || '#3498db') : '#3498db';
-                    node.style('background-color', color);
-                });
+                    const colors = generateColors_$chart_title_str(uniqueValues.size);
+                    const colorMap = {};
+                    Array.from(uniqueValues).forEach((val, idx) => {
+                        colorMap[val] = colors[idx];
+                    });
+
+                    cy.nodes().forEach(node => {
+                        const val = node.data(colorBy);
+                        const color = val ? (colorMap[val] || '#3498db') : '#3498db';
+                        node.style('background-color', color);
+                    });
+                }
             }
         };
 
@@ -598,6 +796,149 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
                 }
             });
         };
+
+        // Apply continuous coloring with gradient interpolation
+        function applyContinuousColoring_$chart_title_str(colorBy) {
+            // Get gradient for this variable
+            let gradient = null;
+            if (colourMap) {
+                // Check if we have per-variable or global gradient
+                if (typeof colourMap === 'object' && !Array.isArray(colourMap)) {
+                    // Check if keys are numbers (global gradient) or strings (per-variable)
+                    const keys = Object.keys(colourMap);
+                    if (keys.length > 0) {
+                        // Try to parse first key as number
+                        if (!isNaN(parseFloat(keys[0]))) {
+                            // Global gradient: {-2.5: "#FF9999", ...}
+                            gradient = colourMap;
+                        } else {
+                            // Per-variable: {sharpe_ratio: {-2.5: "#FF9999", ...}, ...}
+                            gradient = colourMap[colorBy];
+                        }
+                    }
+                }
+            }
+
+            if (!gradient) {
+                // Default gradient if none specified
+                gradient = {
+                    "-2": "#FF0000",
+                    "0": "#FFFFFF",
+                    "2": "#0000FF"
+                };
+            }
+
+            // Convert gradient object to sorted array of stops
+            // Create array of {stop, color} pairs to avoid string conversion issues
+            const stopPairs = Object.keys(gradient)
+                .map(k => ({stop: parseFloat(k), color: gradient[k]}))
+                .sort((a, b) => a.stop - b.stop);
+            const stops = stopPairs.map(p => p.stop);
+            const stopColors = stopPairs.map(p => p.color);
+
+            // Get all values to determine range
+            const values = [];
+            cy.nodes().forEach(node => {
+                const val = node.data(colorBy);
+                if (typeof val === 'number' && !isNaN(val)) {
+                    values.push(val);
+                }
+            });
+
+            if (values.length === 0) {
+                console.warn('No numeric values found for column:', colorBy);
+                return;
+            }
+
+            // Log gradient info for debugging
+            console.log('Applying continuous coloring for:', colorBy);
+            console.log('Gradient stops:', stops);
+            console.log('Gradient colors:', stopColors);
+            console.log('Extrapolate colors:', extrapolateColors);
+            console.log('Value range:', Math.min(...values), 'to', Math.max(...values));
+
+            // Apply colors
+            cy.nodes().forEach(node => {
+                const val = node.data(colorBy);
+                if (typeof val === 'number' && !isNaN(val)) {
+                    const color = interpolateColor_$chart_title_str(val, stops, stopColors);
+                    node.style('background-color', color);
+                } else {
+                    node.style('background-color', '#CCCCCC');  // Gray for missing values
+                }
+            });
+        }
+
+        // Interpolate color based on value and gradient stops
+        function interpolateColor_$chart_title_str(value, stops, colors) {
+            // Handle values below minimum stop
+            if (value < stops[0]) {
+                if (!extrapolateColors) {
+                    // Clamp to minimum color (default behavior)
+                    console.log('Clamping value', value, 'to min stop', stops[0], '=> color', colors[0]);
+                    return colors[0];
+                } else {
+                    // Extrapolate below minimum using first gradient segment
+                    if (stops.length > 1) {
+                        const t = (value - stops[0]) / (stops[1] - stops[0]);
+                        return interpolateBetweenColors_$chart_title_str(colors[0], colors[1], t);
+                    }
+                    return colors[0];
+                }
+            }
+
+            // Handle values above maximum stop
+            if (value > stops[stops.length - 1]) {
+                if (!extrapolateColors) {
+                    // Clamp to maximum color (default behavior)
+                    console.log('Clamping value', value, 'to max stop', stops[stops.length - 1], '=> color', colors[colors.length - 1]);
+                    return colors[colors.length - 1];
+                } else {
+                    // Extrapolate above maximum using last gradient segment
+                    if (stops.length > 1) {
+                        const n = stops.length - 1;
+                        const t = (value - stops[n]) / (stops[n] - stops[n - 1]);
+                        return interpolateBetweenColors_$chart_title_str(colors[n], colors[n - 1], -t);
+                    }
+                    return colors[colors.length - 1];
+                }
+            }
+
+            // Find surrounding stops for values within range
+            for (let i = 0; i < stops.length - 1; i++) {
+                if (value >= stops[i] && value <= stops[i + 1]) {
+                    const t = (value - stops[i]) / (stops[i + 1] - stops[i]);
+                    return interpolateBetweenColors_$chart_title_str(colors[i], colors[i + 1], t);
+                }
+            }
+
+            return colors[0];  // Fallback
+        }
+
+        // Linear interpolation between two hex colors
+        function interpolateBetweenColors_$chart_title_str(color1, color2, t) {
+            // Parse hex colors
+            const c1 = parseHexColor_$chart_title_str(color1);
+            const c2 = parseHexColor_$chart_title_str(color2);
+
+            // Interpolate each channel
+            const r = Math.round(c1.r + (c2.r - c1.r) * t);
+            const g = Math.round(c1.g + (c2.g - c1.g) * t);
+            const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+            // Convert back to hex
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+        }
+
+        // Parse hex color to RGB
+        function parseHexColor_$chart_title_str(hex) {
+            const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})\$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : {r: 0, g: 0, b: 0};
+        }
 
         function buildGraph_$chart_title_str(varsToShow, layoutType) {
             const cutoffValue = parseFloat(document.getElementById('cutoff_slider_$chart_title_str').value);
@@ -674,9 +1015,16 @@ function build_graph_functional_html(chart_title_str, data_label, scenarios,
 
             // Apply colors
             if (colorBy !== 'none') {
-                cy.nodes().forEach(node => {
-                    node.style('background-color', node.data('color'));
-                });
+                const isContinuous = continuousCols.includes(colorBy);
+                if (isContinuous) {
+                    // Use continuous coloring
+                    applyContinuousColoring_$chart_title_str(colorBy);
+                } else {
+                    // Use discrete coloring
+                    cy.nodes().forEach(node => {
+                        node.style('background-color', node.data('color'));
+                    });
+                }
             }
 
             // Apply layout only if no positions stored

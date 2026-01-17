@@ -282,6 +282,62 @@ chart10 = LineChart(:continuous_filters, continuous_filter_df, :continuous_filte
            "to filter by numeric ranges. Each slider has two handles for min/max values."
 )
 
+# Example 11: Using a Struct as Data Source
+# This demonstrates how to pass a struct containing DataFrames to JSPlotPage
+# and reference specific fields in charts using dot notation.
+
+# Define a struct containing related DataFrames
+struct FinancialData
+    prices::DataFrame
+    volumes::DataFrame
+end
+
+# Create DataFrames for the struct
+prices_df = DataFrame(
+    Date = Date(2024, 1, 1):Day(1):Date(2024, 3, 31),
+    AAPL = cumsum(randn(rng, 91)) .+ 180,
+    GOOGL = cumsum(randn(rng, 91)) .+ 140,
+    MSFT = cumsum(randn(rng, 91)) .+ 400,
+    color = repeat(["Price"], 91)
+)
+# Reshape to long format for plotting
+prices_long = stack(prices_df, [:AAPL, :GOOGL, :MSFT], :Date, variable_name=:Stock, value_name=:Price)
+prices_long.color = string.(prices_long.Stock)
+
+volumes_df = DataFrame(
+    Date = Date(2024, 1, 1):Day(1):Date(2024, 3, 31),
+    AAPL = rand(rng, 1_000_000:10_000_000, 91),
+    GOOGL = rand(rng, 500_000:5_000_000, 91),
+    MSFT = rand(rng, 800_000:8_000_000, 91),
+    color = repeat(["Volume"], 91)
+)
+
+# Create the struct instance
+financial_data = FinancialData(prices_long, volumes_df)
+
+# Create a chart that references the struct's prices field
+# Note: The data_label uses dot notation to access struct fields
+struct_chart = LineChart(:struct_prices, financial_data.prices, Symbol("financial.prices");
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:color],
+    title = "Stock Prices from Struct Data Source",
+    notes = "This chart demonstrates using a struct as a data source. The FinancialData struct " *
+           "contains both prices and volumes DataFrames. Charts reference struct fields using " *
+           "dot notation in the data_label (e.g., Symbol(\"financial.prices\"))."
+)
+
+struct_intro = TextBlock("""
+<h2>Struct Data Source Example</h2>
+<p>JSPlots supports using custom structs containing DataFrames as data sources. This is useful when:</p>
+<ul>
+    <li>You have related DataFrames that belong together (e.g., prices and volumes)</li>
+    <li>You want to pass complex data structures without unpacking them</li>
+    <li>Multiple charts need to reference different parts of the same data</li>
+</ul>
+<p>Pass the struct to JSPlotPage and reference fields using dot notation: <code>Symbol("struct_name.field_name")</code></p>
+""")
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -299,8 +355,9 @@ conclusion = TextBlock("""
 """)
 
 # Create single combined page
+# Note: The financial_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :revenue_data => df1,
         :sales_data => df2,
         :metrics => metrics_df,
@@ -309,9 +366,10 @@ page = JSPlotPage(
         :dynamic_data => dynamic_df,
         :agg_data => agg_df,
         :multi_data => df_multi,
-        :continuous_filter_data => continuous_filter_df
+        :continuous_filter_data => continuous_filter_df,
+        :financial => financial_data  # Struct with prices and volumes DataFrames
     ),
-    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, chart10, conclusion],
+    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, chart10, struct_intro, struct_chart, conclusion],
     tab_title = "LineChart Examples"
 )
 
@@ -331,4 +389,5 @@ println("  • Dynamic controls (color, faceting)")
 println("  • Aggregation demo (mean, median, count, min, max)")
 println("  • Dynamic X and Y dimension selection")
 println("  • Continuous range filters with jQuery UI sliders")
+println("  • Struct data source (referencing struct fields via dot notation)")
 println("  • Integration with images and text")

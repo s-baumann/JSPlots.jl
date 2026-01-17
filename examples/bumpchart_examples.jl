@@ -119,15 +119,65 @@ chart3 = BumpChart(
     line_width=2
 )
 
+# Example 4: Using a Struct as Data Source
+println("Creating Example 4: Struct data source...")
+
+# Define a struct with sports data
+struct LeagueData
+    rankings::DataFrame
+    team_info::DataFrame
+end
+
+# Create team ranking data
+teams = ["Red Bulls", "Blue Tigers", "Green Eagles", "Yellow Lions"]
+weeks = 1:10
+
+df4_parts = []
+for team in teams
+    base_score = rand(40:70)
+    scores = base_score .+ cumsum(randn(length(weeks)) .* 3)
+
+    df_part = DataFrame(
+        week = weeks,
+        team = fill(team, length(weeks)),
+        points = scores
+    )
+    push!(df4_parts, df_part)
+end
+
+rankings_df = vcat(df4_parts...)
+team_info_df = DataFrame(
+    team = teams,
+    founded = [1995, 1988, 2001, 1972]
+)
+
+# Create the struct
+league_data = LeagueData(rankings_df, team_info_df)
+
+chart4 = BumpChart(
+    :example4_bump,
+    league_data.rankings,
+    Symbol("league.rankings"),
+    x_col=:week,
+    performance_cols=[:points],
+    entity_col=:team,
+    y_mode="Ranking",
+    title="Example 4: League Rankings from Struct Data Source",
+    notes="This bump chart references data from a LeagueData struct using Symbol(\"league.rankings\").",
+    line_width=3
+)
+
 # Create page with all examples
+# Note: league_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 println("Creating HTML page...")
 page = JSPlotPage(
-    Dict(
+    Dict{Symbol,Any}(
         :strategy_data => df1,
         :product_data => df2,
-        :company_performance => df3
+        :company_performance => df3,
+        :league => league_data  # Struct with rankings and team_info
     ),
-    [chart1, chart2, chart3];
+    [chart1, chart2, chart3, chart4];
     page_header="Bump Chart Examples"
 )
 

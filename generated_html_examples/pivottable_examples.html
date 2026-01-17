@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -702,318 +703,978 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
-    loadDataset('sales_data').then(function(data) {
-        console.log('Loaded data for pivot table sales_pivot:', data);
+    // Store current data and settings for this pivot table
+    window.pivotTableDatasales_pivot = {};
+    window.pivotTableConfigsales_pivot = {"rendererName":"Table","rows":["Region"],"aggregatorName":"Sum","vals":["Sales"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Month"]};
 
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table sales_pivot');
-        }
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTablesales_pivot(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table sales_pivot from dataset:', datasetName, data);
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table sales_pivot');
+            }
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+            // Store the data
+            window.pivotTableDatasales_pivot[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for sales_pivot:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigsales_pivot;
+            var pivotEl = $("#sales_pivot");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_sales_pivot) {
+                    window.toggleTotals_sales_pivot();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table sales_pivot:', error);
+            $("#sales_pivot").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_sales_pivot = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_sales_pivot');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('sales_pivot');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for sales_pivot:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#sales_pivot").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Table","rows":["Region"],"aggregatorName":"Sum","vals":["Sales"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Month"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table sales_pivot:', error);
-        $("#sales_pivot").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('performance_data').then(function(data) {
-        console.log('Loaded data for pivot table performance_heatmap:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table performance_heatmap');
+    // Make dataset change handler global
+    window.changeDataset_sales_pivot = function() {
+        var select = document.getElementById('dataset_select_sales_pivot');
+        if (select) {
+            loadPivotTablesales_pivot(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTablesales_pivot('sales_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDataperformance_heatmap = {};
+    window.pivotTableConfigperformance_heatmap = {"rendererName":"Heatmap","rows":["Employee"],"aggregatorName":"Average","vals":["Score"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([50.0, 65.0, 75.0, 85.0, 100.0]).range(["#d73027", "#fee08b", "#ffffbf", "#d9ef8b", "#1a9850"]).clamp(true)}}},"cols":["Quarter"]};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTableperformance_heatmap(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table performance_heatmap from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table performance_heatmap');
+            }
+
+            // Store the data
+            window.pivotTableDataperformance_heatmap[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for performance_heatmap:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigperformance_heatmap;
+            var pivotEl = $("#performance_heatmap");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_performance_heatmap) {
+                    window.toggleTotals_performance_heatmap();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table performance_heatmap:', error);
+            $("#performance_heatmap").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_performance_heatmap = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_performance_heatmap');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('performance_heatmap');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for performance_heatmap:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#performance_heatmap").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["Employee"],"aggregatorName":"Average","vals":["Score"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([50.0, 65.0, 75.0, 85.0, 100.0]).range(["#d73027", "#fee08b", "#ffffbf", "#d9ef8b", "#1a9850"]).clamp(true)}}},"cols":["Quarter"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table performance_heatmap:', error);
-        $("#performance_heatmap").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('product_data').then(function(data) {
-        console.log('Loaded data for pivot table revenue_by_category:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table revenue_by_category');
+    // Make dataset change handler global
+    window.changeDataset_performance_heatmap = function() {
+        var select = document.getElementById('dataset_select_performance_heatmap');
+        if (select) {
+            loadPivotTableperformance_heatmap(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTableperformance_heatmap('performance_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDatarevenue_by_category = {};
+    window.pivotTableConfigrevenue_by_category = {"rendererName":"Bar Chart","rows":["Category"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Quarter"]};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTablerevenue_by_category(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table revenue_by_category from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table revenue_by_category');
+            }
+
+            // Store the data
+            window.pivotTableDatarevenue_by_category[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for revenue_by_category:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigrevenue_by_category;
+            var pivotEl = $("#revenue_by_category");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_revenue_by_category) {
+                    window.toggleTotals_revenue_by_category();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table revenue_by_category:', error);
+            $("#revenue_by_category").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_revenue_by_category = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_revenue_by_category');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('revenue_by_category');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for revenue_by_category:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#revenue_by_category").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Bar Chart","rows":["Category"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Quarter"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table revenue_by_category:', error);
-        $("#revenue_by_category").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('customer_data').then(function(data) {
-        console.log('Loaded data for pivot table customer_revenue:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table customer_revenue');
+    // Make dataset change handler global
+    window.changeDataset_revenue_by_category = function() {
+        var select = document.getElementById('dataset_select_revenue_by_category');
+        if (select) {
+            loadPivotTablerevenue_by_category(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTablerevenue_by_category('product_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDatacustomer_revenue = {};
+    window.pivotTableConfigcustomer_revenue = {"rendererName":"Heatmap","rows":["Country"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["ProductType"],"exclusions":{"Country":["Test"]}};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTablecustomer_revenue(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table customer_revenue from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table customer_revenue');
+            }
+
+            // Store the data
+            window.pivotTableDatacustomer_revenue[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for customer_revenue:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigcustomer_revenue;
+            var pivotEl = $("#customer_revenue");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_customer_revenue) {
+                    window.toggleTotals_customer_revenue();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table customer_revenue:', error);
+            $("#customer_revenue").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_customer_revenue = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_customer_revenue');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('customer_revenue');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for customer_revenue:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#customer_revenue").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["Country"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["ProductType"],"exclusions":{"Country":["Test"]}})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table customer_revenue:', error);
-        $("#customer_revenue").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('survey_data').then(function(data) {
-        console.log('Loaded data for pivot table survey_results:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table survey_results');
+    // Make dataset change handler global
+    window.changeDataset_customer_revenue = function() {
+        var select = document.getElementById('dataset_select_customer_revenue');
+        if (select) {
+            loadPivotTablecustomer_revenue(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTablecustomer_revenue('customer_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDatasurvey_results = {};
+    window.pivotTableConfigsurvey_results = {"rendererName":"Table Barchart","rows":["Age_Group","Gender"],"aggregatorName":"Average","vals":["Satisfaction"],"inclusions":{"Age_Group":["18-25","26-35","36-45"]},"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Product"]};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTablesurvey_results(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table survey_results from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table survey_results');
+            }
+
+            // Store the data
+            window.pivotTableDatasurvey_results[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for survey_results:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigsurvey_results;
+            var pivotEl = $("#survey_results");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_survey_results) {
+                    window.toggleTotals_survey_results();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table survey_results:', error);
+            $("#survey_results").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_survey_results = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_survey_results');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('survey_results');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for survey_results:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#survey_results").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Table Barchart","rows":["Age_Group","Gender"],"aggregatorName":"Average","vals":["Satisfaction"],"inclusions":{"Age_Group":["18-25","26-35","36-45"]},"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Product"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table survey_results:', error);
-        $("#survey_results").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('transaction_data').then(function(data) {
-        console.log('Loaded data for pivot table transaction_analysis:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table transaction_analysis');
+    // Make dataset change handler global
+    window.changeDataset_survey_results = function() {
+        var select = document.getElementById('dataset_select_survey_results');
+        if (select) {
+            loadPivotTablesurvey_results(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTablesurvey_results('survey_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDatatransaction_analysis = {};
+    window.pivotTableConfigtransaction_analysis = {"rendererName":"Heatmap","rows":["Customer_Type"],"aggregatorName":"Count","vals":["Amount"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#f7fbff", "#9ecae1", "#4292c6", "#08519c"]).clamp(true)}}},"cols":["Transaction_Type"]};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTabletransaction_analysis(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table transaction_analysis from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table transaction_analysis');
+            }
+
+            // Store the data
+            window.pivotTableDatatransaction_analysis[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for transaction_analysis:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigtransaction_analysis;
+            var pivotEl = $("#transaction_analysis");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_transaction_analysis) {
+                    window.toggleTotals_transaction_analysis();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table transaction_analysis:', error);
+            $("#transaction_analysis").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_transaction_analysis = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_transaction_analysis');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('transaction_analysis');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for transaction_analysis:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#transaction_analysis").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["Customer_Type"],"aggregatorName":"Count","vals":["Amount"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#f7fbff", "#9ecae1", "#4292c6", "#08519c"]).clamp(true)}}},"cols":["Transaction_Type"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table transaction_analysis:', error);
-        $("#transaction_analysis").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('stockReturns').then(function(data) {
-        console.log('Loaded data for pivot table Returns_Over_Last_Few_Days:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table Returns_Over_Last_Few_Days');
+    // Make dataset change handler global
+    window.changeDataset_transaction_analysis = function() {
+        var select = document.getElementById('dataset_select_transaction_analysis');
+        if (select) {
+            loadPivotTabletransaction_analysis(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTabletransaction_analysis('transaction_data');
+    // Store current data and settings for this pivot table
+    window.pivotTableDataReturns_Over_Last_Few_Days = {};
+    window.pivotTableConfigReturns_Over_Last_Few_Days = {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTableReturns_Over_Last_Few_Days(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table Returns_Over_Last_Few_Days from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table Returns_Over_Last_Few_Days');
+            }
+
+            // Store the data
+            window.pivotTableDataReturns_Over_Last_Few_Days[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for Returns_Over_Last_Few_Days:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigReturns_Over_Last_Few_Days;
+            var pivotEl = $("#Returns_Over_Last_Few_Days");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_Returns_Over_Last_Few_Days) {
+                    window.toggleTotals_Returns_Over_Last_Few_Days();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table Returns_Over_Last_Few_Days:', error);
+            $("#Returns_Over_Last_Few_Days").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_Returns_Over_Last_Few_Days = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_Returns_Over_Last_Few_Days');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('Returns_Over_Last_Few_Days');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for Returns_Over_Last_Few_Days:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#Returns_Over_Last_Few_Days").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table Returns_Over_Last_Few_Days:', error);
-        $("#Returns_Over_Last_Few_Days").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
-    loadDataset('correlations').then(function(data) {
-        console.log('Loaded data for pivot table Correlation_Matrix:', data);
-
-        // Validate data
-        if (!data || data.length === 0) {
-            throw new Error('No data loaded for pivot table Correlation_Matrix');
+    // Make dataset change handler global
+    window.changeDataset_Returns_Over_Last_Few_Days = function() {
+        var select = document.getElementById('dataset_select_Returns_Over_Last_Few_Days');
+        if (select) {
+            loadPivotTableReturns_Over_Last_Few_Days(select.value);
         }
+    };
 
-        // Convert data to array format expected by pivotUI
-        // First row is headers
-        var headers = Object.keys(data[0]);
-        var arrayData = [headers];
+    // Load the initial dataset
+    loadPivotTableReturns_Over_Last_Few_Days('stockReturns');
+    // Store current data and settings for this pivot table
+    window.pivotTableDataCorrelation_Matrix = {};
+    window.pivotTableConfigCorrelation_Matrix = {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]};
 
-        // Add data rows
-        data.forEach(function(row) {
-            var rowArray = headers.map(function(header) {
-                return row[header];
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTableCorrelation_Matrix(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table Correlation_Matrix from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table Correlation_Matrix');
+            }
+
+            // Store the data
+            window.pivotTableDataCorrelation_Matrix[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
             });
-            arrayData.push(rowArray);
+
+            console.log('Converted array data for Correlation_Matrix:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigCorrelation_Matrix;
+            var pivotEl = $("#Correlation_Matrix");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_Correlation_Matrix) {
+                    window.toggleTotals_Correlation_Matrix();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table Correlation_Matrix:', error);
+            $("#Correlation_Matrix").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_Correlation_Matrix = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_Correlation_Matrix');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('Correlation_Matrix');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
         });
 
-        console.log('Converted array data for Correlation_Matrix:', arrayData.slice(0, 3));
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
 
-        $("#Correlation_Matrix").pivotUI(
-            arrayData,
-            $.extend({
-                renderers: $.extend(
-                    $.pivotUtilities.renderers,
-                    $.pivotUtilities.c3_renderers,
-                    $.pivotUtilities.d3_renderers,
-                    $.pivotUtilities.export_renderers
-                ),
-                hiddenAttributes: [""]
-            }, {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]})
-        );
-    }).catch(function(error) {
-        console.error('Error loading data for pivot table Correlation_Matrix:', error);
-        $("#Correlation_Matrix").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
-    });
+    // Make dataset change handler global
+    window.changeDataset_Correlation_Matrix = function() {
+        var select = document.getElementById('dataset_select_Correlation_Matrix');
+        if (select) {
+            loadPivotTableCorrelation_Matrix(select.value);
+        }
+    };
+
+    // Load the initial dataset
+    loadPivotTableCorrelation_Matrix('correlations');
+    // Store current data and settings for this pivot table
+    window.pivotTableDatadataset_selector_demo = {};
+    window.pivotTableConfigdataset_selector_demo = {"rendererName":"Heatmap","rows":["Category"],"aggregatorName":"Sum","rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}}};
+
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTabledataset_selector_demo(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table dataset_selector_demo from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table dataset_selector_demo');
+            }
+
+            // Store the data
+            window.pivotTableDatadataset_selector_demo[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return row[header];
+                });
+                arrayData.push(rowArray);
+            });
+
+            console.log('Converted array data for dataset_selector_demo:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigdataset_selector_demo;
+            var pivotEl = $("#dataset_selector_demo");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_dataset_selector_demo) {
+                    window.toggleTotals_dataset_selector_demo();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table dataset_selector_demo:', error);
+            $("#dataset_selector_demo").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_dataset_selector_demo = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_dataset_selector_demo');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('dataset_selector_demo');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
+        });
+
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
+
+    // Make dataset change handler global
+    window.changeDataset_dataset_selector_demo = function() {
+        var select = document.getElementById('dataset_select_dataset_selector_demo');
+        if (select) {
+            loadPivotTabledataset_selector_demo(select.value);
+        }
+    };
+
+    // Load the initial dataset
+    loadPivotTabledataset_selector_demo('multi_data.aa');
 
 
 });
@@ -1021,7 +1682,85 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="performance_data" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="stockReturns" data-format="csv_embedded" data-src="">
+Symbol,Date,Return
+RTX,2023-01-01,10.01
+RTX,2023-01-02,-10.005
+RTX,2023-01-03,-0.5
+GOOG,2023-01-01,1.0
+GOOG,2023-01-02,0.01
+GOOG,2023-01-03,-0.003
+MSFT,2023-01-01,0.008
+MSFT,2023-01-02,0.004
+MSFT,2023-01-03,-0.002
+
+</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
+Region,Month,Product,Sales,Units
+North,Jan,Gadget,13440,125
+North,Feb,Gizmo,13974,63
+North,Mar,Widget,21708,171
+North,Apr,Gadget,26155,159
+North,May,Gadget,20072,141
+North,Jun,Widget,36916,103
+North,Jul,Gizmo,14981,71
+North,Aug,Gadget,13179,99
+North,Sep,Gizmo,10670,55
+North,Oct,Widget,45452,103
+North,Nov,Widget,36199,79
+North,Dec,Widget,49056,102
+South,Jan,Widget,37192,131
+South,Feb,Gadget,26399,177
+South,Mar,Gizmo,39692,158
+South,Apr,Gadget,11463,157
+South,May,Gizmo,47417,154
+South,Jun,Gadget,47718,191
+South,Jul,Gadget,13803,137
+South,Aug,Widget,47885,56
+South,Sep,Gizmo,43812,200
+South,Oct,Gadget,31079,146
+South,Nov,Gizmo,22968,136
+South,Dec,Gizmo,30167,167
+East,Jan,Gizmo,14379,158
+East,Feb,Gadget,46661,113
+East,Mar,Widget,15487,135
+East,Apr,Gadget,49385,73
+East,May,Gizmo,16469,125
+East,Jun,Gizmo,16835,87
+East,Jul,Widget,39483,138
+East,Aug,Gizmo,42963,189
+East,Sep,Gizmo,32181,56
+East,Oct,Gadget,18796,79
+East,Nov,Gadget,22398,78
+East,Dec,Gizmo,44427,54
+West,Jan,Gadget,31035,87
+West,Feb,Gizmo,34873,168
+West,Mar,Widget,30939,188
+West,Apr,Gadget,10910,60
+West,May,Gizmo,48954,143
+West,Jun,Gadget,12884,105
+West,Jul,Gadget,24764,128
+West,Aug,Widget,32691,174
+West,Sep,Gadget,30228,103
+West,Oct,Gizmo,45956,178
+West,Nov,Gizmo,49998,140
+West,Dec,Widget,14319,115
+
+</script><script type="text/plain" id="multi_data.aa" data-format="csv_embedded" data-src="">
+Category,Quarter,Sales,Units
+Electronics,Q1,7006,471
+Clothing,Q1,15995,139
+Food,Q1,6832,199
+Sports,Q1,8070,379
+Electronics,Q2,15798,351
+Clothing,Q2,13305,484
+Food,Q2,6743,226
+Sports,Q2,17107,430
+Electronics,Q3,9180,393
+Clothing,Q3,8766,175
+Food,Q3,8243,357
+Sports,Q3,14856,388
+
+</script><script type="text/plain" id="performance_data" data-format="csv_embedded" data-src="">
 Employee,Quarter,Score,Department
 Alice,Q1,71.86597523842131,Sales
 Alice,Q2,82.1810789062282,Sales
@@ -1043,232 +1782,6 @@ Eve,Q1,64.74262558759463,Engineering
 Eve,Q2,59.14071212211398,Engineering
 Eve,Q3,91.44220987535252,Engineering
 Eve,Q4,70.46725862427758,Engineering
-
-</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
-Category,Brand,Revenue,Quarter
-Electronics,Brand A,2651,Q1
-Clothing,Brand B,9493,Q2
-Home,Brand B,3239,Q3
-Sports,Brand D,3577,Q4
-Books,Brand A,7374,Q1
-Electronics,Brand A,4649,Q2
-Clothing,Brand C,5920,Q3
-Home,Brand D,2313,Q4
-Sports,Brand C,9404,Q1
-Books,Brand C,7841,Q2
-Electronics,Brand D,8621,Q3
-Clothing,Brand D,9082,Q4
-Home,Brand B,2221,Q1
-Sports,Brand B,1191,Q2
-Books,Brand C,9831,Q3
-Electronics,Brand A,6608,Q4
-Clothing,Brand D,2099,Q1
-Home,Brand D,1504,Q2
-Sports,Brand B,4720,Q3
-Books,Brand A,5018,Q4
-Electronics,Brand A,4698,Q1
-Clothing,Brand A,8817,Q2
-Home,Brand B,2536,Q3
-Sports,Brand C,5289,Q4
-Books,Brand A,2553,Q1
-Electronics,Brand D,5372,Q2
-Clothing,Brand A,7229,Q3
-Home,Brand C,4613,Q4
-Sports,Brand A,5211,Q1
-Books,Brand A,6563,Q2
-Electronics,Brand A,5442,Q3
-Clothing,Brand C,5407,Q4
-Home,Brand A,8034,Q1
-Sports,Brand A,5512,Q2
-Books,Brand A,5033,Q3
-Electronics,Brand B,2214,Q4
-Clothing,Brand D,3787,Q1
-Home,Brand D,8915,Q2
-Sports,Brand B,5484,Q3
-Books,Brand C,7547,Q4
-Electronics,Brand C,3404,Q1
-Clothing,Brand A,7259,Q2
-Home,Brand C,4975,Q3
-Sports,Brand C,9476,Q4
-Books,Brand B,4896,Q1
-Electronics,Brand A,1070,Q2
-Clothing,Brand D,1269,Q3
-Home,Brand C,1543,Q4
-Sports,Brand D,8416,Q1
-Books,Brand B,1126,Q2
-Electronics,Brand A,3393,Q3
-Clothing,Brand C,6439,Q4
-Home,Brand C,1075,Q1
-Sports,Brand D,3957,Q2
-Books,Brand B,4930,Q3
-Electronics,Brand D,6540,Q4
-Clothing,Brand D,7221,Q1
-Home,Brand C,5124,Q2
-Sports,Brand D,7953,Q3
-Books,Brand C,9923,Q4
-Electronics,Brand A,4848,Q1
-Clothing,Brand A,6058,Q2
-Home,Brand A,1749,Q3
-Sports,Brand D,6560,Q4
-Books,Brand B,4484,Q1
-Electronics,Brand C,1519,Q2
-Clothing,Brand C,9671,Q3
-Home,Brand B,7695,Q4
-Sports,Brand B,6522,Q1
-Books,Brand C,4684,Q2
-Electronics,Brand D,5906,Q3
-Clothing,Brand B,5720,Q4
-Home,Brand C,5531,Q1
-Sports,Brand C,7384,Q2
-Books,Brand A,7136,Q3
-Electronics,Brand B,9734,Q4
-Clothing,Brand B,3682,Q1
-Home,Brand A,5534,Q2
-Sports,Brand B,4455,Q3
-Books,Brand A,5349,Q4
-Electronics,Brand C,3616,Q1
-Clothing,Brand C,6984,Q2
-Home,Brand C,6219,Q3
-Sports,Brand A,6586,Q4
-Books,Brand A,7668,Q1
-Electronics,Brand C,1298,Q2
-Clothing,Brand A,8187,Q3
-Home,Brand C,6649,Q4
-Sports,Brand A,1280,Q1
-Books,Brand A,9133,Q2
-Electronics,Brand D,5805,Q3
-Clothing,Brand A,8108,Q4
-Home,Brand C,3546,Q1
-Sports,Brand C,3699,Q2
-Books,Brand B,3265,Q3
-Electronics,Brand B,6347,Q4
-Clothing,Brand C,7867,Q1
-Home,Brand D,5449,Q2
-Sports,Brand B,1920,Q3
-Books,Brand A,3207,Q4
-
-</script><script type="text/plain" id="customer_data" data-format="csv_embedded" data-src="">
-Country,ProductType,Channel,Revenue,Year
-UK,Standard,Wholesale,2302,2022
-USA,Budget,Online,2832,2023
-USA,Budget,Online,1162,2024
-Japan,Premium,Wholesale,2455,2022
-Japan,Standard,Wholesale,1522,2023
-Test,Standard,Retail,3820,2024
-Japan,Budget,Wholesale,3481,2022
-Germany,Budget,Retail,4701,2023
-Japan,Premium,Wholesale,1388,2024
-USA,Budget,Retail,3625,2022
-USA,Standard,Wholesale,836,2023
-Test,Standard,Wholesale,805,2024
-Test,Premium,Retail,3239,2022
-Test,Budget,Wholesale,2722,2023
-USA,Standard,Wholesale,2943,2024
-Germany,Standard,Online,4505,2022
-France,Budget,Wholesale,784,2023
-France,Standard,Wholesale,2461,2024
-France,Premium,Online,4104,2022
-UK,Premium,Online,1367,2023
-Test,Premium,Wholesale,4907,2024
-France,Premium,Online,793,2022
-Japan,Premium,Online,2633,2023
-USA,Premium,Retail,1534,2024
-Germany,Budget,Online,1117,2022
-UK,Standard,Retail,1470,2023
-USA,Premium,Retail,2309,2024
-USA,Premium,Wholesale,2991,2022
-Germany,Budget,Wholesale,1898,2023
-Germany,Budget,Wholesale,4334,2024
-France,Premium,Wholesale,4446,2022
-UK,Standard,Online,2277,2023
-Japan,Standard,Retail,1508,2024
-UK,Premium,Wholesale,4839,2022
-Test,Premium,Wholesale,4903,2023
-Test,Premium,Retail,1359,2024
-Test,Standard,Online,2590,2022
-Japan,Budget,Wholesale,2973,2023
-USA,Premium,Retail,3685,2024
-USA,Standard,Retail,4106,2022
-Test,Budget,Online,3642,2023
-UK,Premium,Wholesale,1395,2024
-USA,Budget,Online,859,2022
-Japan,Premium,Wholesale,4641,2023
-UK,Budget,Retail,3226,2024
-USA,Budget,Retail,1109,2022
-France,Budget,Retail,3787,2023
-France,Premium,Online,2931,2024
-France,Standard,Retail,4433,2022
-USA,Premium,Wholesale,4670,2023
-France,Standard,Online,4295,2024
-France,Standard,Online,1804,2022
-USA,Budget,Online,628,2023
-UK,Premium,Online,590,2024
-USA,Budget,Wholesale,4070,2022
-USA,Standard,Wholesale,3464,2023
-Japan,Premium,Retail,2104,2024
-France,Budget,Online,2881,2022
-USA,Standard,Online,1001,2023
-UK,Budget,Online,3180,2024
-Germany,Budget,Retail,3198,2022
-UK,Standard,Retail,3372,2023
-Japan,Premium,Retail,960,2024
-USA,Budget,Retail,3353,2022
-France,Standard,Wholesale,2349,2023
-UK,Budget,Wholesale,1425,2024
-France,Premium,Wholesale,2434,2022
-USA,Premium,Wholesale,2042,2023
-France,Standard,Wholesale,4505,2024
-Test,Budget,Wholesale,809,2022
-France,Budget,Retail,1523,2023
-UK,Standard,Wholesale,2929,2024
-Japan,Standard,Online,2475,2022
-Japan,Budget,Retail,2417,2023
-Japan,Standard,Online,2739,2024
-Germany,Standard,Online,3643,2022
-USA,Budget,Retail,4903,2023
-USA,Standard,Online,4778,2024
-USA,Standard,Online,1796,2022
-Test,Premium,Online,1406,2023
-Japan,Standard,Retail,4188,2024
-Japan,Premium,Online,1087,2022
-Japan,Standard,Retail,3613,2023
-UK,Budget,Retail,4177,2024
-UK,Premium,Wholesale,928,2022
-UK,Premium,Online,1506,2023
-UK,Standard,Online,3027,2024
-France,Premium,Wholesale,2367,2022
-Japan,Budget,Retail,4741,2023
-UK,Standard,Retail,2896,2024
-Test,Premium,Wholesale,1165,2022
-Japan,Premium,Wholesale,3250,2023
-USA,Premium,Online,2840,2024
-Japan,Standard,Retail,572,2022
-Germany,Premium,Retail,2107,2023
-Test,Standard,Wholesale,3447,2024
-USA,Premium,Online,2054,2022
-Test,Premium,Wholesale,2444,2023
-Germany,Premium,Wholesale,2945,2024
-UK,Standard,Retail,2868,2022
-UK,Premium,Online,4518,2023
-UK,Standard,Online,4745,2024
-France,Premium,Online,1751,2022
-France,Premium,Wholesale,4147,2023
-France,Premium,Wholesale,3610,2024
-Test,Standard,Wholesale,3949,2022
-France,Budget,Wholesale,2274,2023
-France,Premium,Wholesale,1930,2024
-USA,Premium,Wholesale,4890,2022
-France,Premium,Online,2284,2023
-UK,Budget,Online,2300,2024
-Germany,Budget,Wholesale,2769,2022
-Germany,Budget,Wholesale,588,2023
-USA,Standard,Online,1325,2024
-USA,Standard,Wholesale,1579,2022
-Test,Standard,Wholesale,4361,2023
-USA,Budget,Wholesale,502,2024
-UK,Budget,Online,2986,2022
-Test,Budget,Retail,2749,2023
-Test,Premium,Wholesale,1340,2024
 
 </script><script type="text/plain" id="survey_data" data-format="csv_embedded" data-src="">
 Age_Group,Gender,Satisfaction,Product,Region
@@ -1472,81 +1985,6 @@ Age_Group,Gender,Satisfaction,Product,Region
 56+,Other,5,Product C,North
 18-25,Male,5,Product C,West
 26-35,Female,2,Product A,East
-
-</script><script type="text/plain" id="stockReturns" data-format="csv_embedded" data-src="">
-Symbol,Date,Return
-RTX,2023-01-01,10.01
-RTX,2023-01-02,-10.005
-RTX,2023-01-03,-0.5
-GOOG,2023-01-01,1.0
-GOOG,2023-01-02,0.01
-GOOG,2023-01-03,-0.003
-MSFT,2023-01-01,0.008
-MSFT,2023-01-02,0.004
-MSFT,2023-01-03,-0.002
-
-</script><script type="text/plain" id="correlations" data-format="csv_embedded" data-src="">
-Symbol1,Symbol2,Correlation
-RTX,GOOG,-0.85
-RTX,MSFT,-0.75
-GOOG,MSFT,0.8
-RTX,RTX,1.0
-GOOG,GOOG,1.0
-MSFT,MSFT,1.0
-GOOG,RTX,-0.85
-MSFT,RTX,-0.75
-MSFT,GOOG,0.8
-
-</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
-Region,Month,Product,Sales,Units
-North,Jan,Gadget,13440,125
-North,Feb,Gizmo,13974,63
-North,Mar,Widget,21708,171
-North,Apr,Gadget,26155,159
-North,May,Gadget,20072,141
-North,Jun,Widget,36916,103
-North,Jul,Gizmo,14981,71
-North,Aug,Gadget,13179,99
-North,Sep,Gizmo,10670,55
-North,Oct,Widget,45452,103
-North,Nov,Widget,36199,79
-North,Dec,Widget,49056,102
-South,Jan,Widget,37192,131
-South,Feb,Gadget,26399,177
-South,Mar,Gizmo,39692,158
-South,Apr,Gadget,11463,157
-South,May,Gizmo,47417,154
-South,Jun,Gadget,47718,191
-South,Jul,Gadget,13803,137
-South,Aug,Widget,47885,56
-South,Sep,Gizmo,43812,200
-South,Oct,Gadget,31079,146
-South,Nov,Gizmo,22968,136
-South,Dec,Gizmo,30167,167
-East,Jan,Gizmo,14379,158
-East,Feb,Gadget,46661,113
-East,Mar,Widget,15487,135
-East,Apr,Gadget,49385,73
-East,May,Gizmo,16469,125
-East,Jun,Gizmo,16835,87
-East,Jul,Widget,39483,138
-East,Aug,Gizmo,42963,189
-East,Sep,Gizmo,32181,56
-East,Oct,Gadget,18796,79
-East,Nov,Gadget,22398,78
-East,Dec,Gizmo,44427,54
-West,Jan,Gadget,31035,87
-West,Feb,Gizmo,34873,168
-West,Mar,Widget,30939,188
-West,Apr,Gadget,10910,60
-West,May,Gizmo,48954,143
-West,Jun,Gadget,12884,105
-West,Jul,Gadget,24764,128
-West,Aug,Widget,32691,174
-West,Sep,Gadget,30228,103
-West,Oct,Gizmo,45956,178
-West,Nov,Gizmo,49998,140
-West,Dec,Widget,14319,115
 
 </script><script type="text/plain" id="transaction_data" data-format="csv_embedded" data-src="">
 Transaction_Type,Customer_Type,Payment_Method,Store,Amount
@@ -2051,6 +2489,278 @@ Exchange,VIP,Credit Card,Store 2,329
 Exchange,VIP,Credit Card,Store 3,51
 Cancel,New,PayPal,Store 2,261
 
+</script><script type="text/plain" id="standalone_data" data-format="csv_embedded" data-src="">
+Region,Product,Revenue,Profit
+North,Widget,23165,9564
+South,Widget,48727,4977
+East,Widget,21807,3829
+West,Widget,32791,9520
+North,Gadget,45873,6042
+South,Gadget,14523,5324
+East,Gadget,11106,3462
+West,Gadget,32312,8471
+North,Gizmo,31766,6164
+South,Gizmo,16586,5711
+East,Gizmo,28994,5726
+West,Gizmo,46568,6473
+North,Thingamajig,41275,3025
+South,Thingamajig,29951,9073
+East,Thingamajig,45728,5264
+West,Thingamajig,11780,8689
+
+</script><script type="text/plain" id="customer_data" data-format="csv_embedded" data-src="">
+Country,ProductType,Channel,Revenue,Year
+UK,Standard,Wholesale,2302,2022
+USA,Budget,Online,2832,2023
+USA,Budget,Online,1162,2024
+Japan,Premium,Wholesale,2455,2022
+Japan,Standard,Wholesale,1522,2023
+Test,Standard,Retail,3820,2024
+Japan,Budget,Wholesale,3481,2022
+Germany,Budget,Retail,4701,2023
+Japan,Premium,Wholesale,1388,2024
+USA,Budget,Retail,3625,2022
+USA,Standard,Wholesale,836,2023
+Test,Standard,Wholesale,805,2024
+Test,Premium,Retail,3239,2022
+Test,Budget,Wholesale,2722,2023
+USA,Standard,Wholesale,2943,2024
+Germany,Standard,Online,4505,2022
+France,Budget,Wholesale,784,2023
+France,Standard,Wholesale,2461,2024
+France,Premium,Online,4104,2022
+UK,Premium,Online,1367,2023
+Test,Premium,Wholesale,4907,2024
+France,Premium,Online,793,2022
+Japan,Premium,Online,2633,2023
+USA,Premium,Retail,1534,2024
+Germany,Budget,Online,1117,2022
+UK,Standard,Retail,1470,2023
+USA,Premium,Retail,2309,2024
+USA,Premium,Wholesale,2991,2022
+Germany,Budget,Wholesale,1898,2023
+Germany,Budget,Wholesale,4334,2024
+France,Premium,Wholesale,4446,2022
+UK,Standard,Online,2277,2023
+Japan,Standard,Retail,1508,2024
+UK,Premium,Wholesale,4839,2022
+Test,Premium,Wholesale,4903,2023
+Test,Premium,Retail,1359,2024
+Test,Standard,Online,2590,2022
+Japan,Budget,Wholesale,2973,2023
+USA,Premium,Retail,3685,2024
+USA,Standard,Retail,4106,2022
+Test,Budget,Online,3642,2023
+UK,Premium,Wholesale,1395,2024
+USA,Budget,Online,859,2022
+Japan,Premium,Wholesale,4641,2023
+UK,Budget,Retail,3226,2024
+USA,Budget,Retail,1109,2022
+France,Budget,Retail,3787,2023
+France,Premium,Online,2931,2024
+France,Standard,Retail,4433,2022
+USA,Premium,Wholesale,4670,2023
+France,Standard,Online,4295,2024
+France,Standard,Online,1804,2022
+USA,Budget,Online,628,2023
+UK,Premium,Online,590,2024
+USA,Budget,Wholesale,4070,2022
+USA,Standard,Wholesale,3464,2023
+Japan,Premium,Retail,2104,2024
+France,Budget,Online,2881,2022
+USA,Standard,Online,1001,2023
+UK,Budget,Online,3180,2024
+Germany,Budget,Retail,3198,2022
+UK,Standard,Retail,3372,2023
+Japan,Premium,Retail,960,2024
+USA,Budget,Retail,3353,2022
+France,Standard,Wholesale,2349,2023
+UK,Budget,Wholesale,1425,2024
+France,Premium,Wholesale,2434,2022
+USA,Premium,Wholesale,2042,2023
+France,Standard,Wholesale,4505,2024
+Test,Budget,Wholesale,809,2022
+France,Budget,Retail,1523,2023
+UK,Standard,Wholesale,2929,2024
+Japan,Standard,Online,2475,2022
+Japan,Budget,Retail,2417,2023
+Japan,Standard,Online,2739,2024
+Germany,Standard,Online,3643,2022
+USA,Budget,Retail,4903,2023
+USA,Standard,Online,4778,2024
+USA,Standard,Online,1796,2022
+Test,Premium,Online,1406,2023
+Japan,Standard,Retail,4188,2024
+Japan,Premium,Online,1087,2022
+Japan,Standard,Retail,3613,2023
+UK,Budget,Retail,4177,2024
+UK,Premium,Wholesale,928,2022
+UK,Premium,Online,1506,2023
+UK,Standard,Online,3027,2024
+France,Premium,Wholesale,2367,2022
+Japan,Budget,Retail,4741,2023
+UK,Standard,Retail,2896,2024
+Test,Premium,Wholesale,1165,2022
+Japan,Premium,Wholesale,3250,2023
+USA,Premium,Online,2840,2024
+Japan,Standard,Retail,572,2022
+Germany,Premium,Retail,2107,2023
+Test,Standard,Wholesale,3447,2024
+USA,Premium,Online,2054,2022
+Test,Premium,Wholesale,2444,2023
+Germany,Premium,Wholesale,2945,2024
+UK,Standard,Retail,2868,2022
+UK,Premium,Online,4518,2023
+UK,Standard,Online,4745,2024
+France,Premium,Online,1751,2022
+France,Premium,Wholesale,4147,2023
+France,Premium,Wholesale,3610,2024
+Test,Standard,Wholesale,3949,2022
+France,Budget,Wholesale,2274,2023
+France,Premium,Wholesale,1930,2024
+USA,Premium,Wholesale,4890,2022
+France,Premium,Online,2284,2023
+UK,Budget,Online,2300,2024
+Germany,Budget,Wholesale,2769,2022
+Germany,Budget,Wholesale,588,2023
+USA,Standard,Online,1325,2024
+USA,Standard,Wholesale,1579,2022
+Test,Standard,Wholesale,4361,2023
+USA,Budget,Wholesale,502,2024
+UK,Budget,Online,2986,2022
+Test,Budget,Retail,2749,2023
+Test,Premium,Wholesale,1340,2024
+
+</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
+Category,Brand,Revenue,Quarter
+Electronics,Brand A,2651,Q1
+Clothing,Brand B,9493,Q2
+Home,Brand B,3239,Q3
+Sports,Brand D,3577,Q4
+Books,Brand A,7374,Q1
+Electronics,Brand A,4649,Q2
+Clothing,Brand C,5920,Q3
+Home,Brand D,2313,Q4
+Sports,Brand C,9404,Q1
+Books,Brand C,7841,Q2
+Electronics,Brand D,8621,Q3
+Clothing,Brand D,9082,Q4
+Home,Brand B,2221,Q1
+Sports,Brand B,1191,Q2
+Books,Brand C,9831,Q3
+Electronics,Brand A,6608,Q4
+Clothing,Brand D,2099,Q1
+Home,Brand D,1504,Q2
+Sports,Brand B,4720,Q3
+Books,Brand A,5018,Q4
+Electronics,Brand A,4698,Q1
+Clothing,Brand A,8817,Q2
+Home,Brand B,2536,Q3
+Sports,Brand C,5289,Q4
+Books,Brand A,2553,Q1
+Electronics,Brand D,5372,Q2
+Clothing,Brand A,7229,Q3
+Home,Brand C,4613,Q4
+Sports,Brand A,5211,Q1
+Books,Brand A,6563,Q2
+Electronics,Brand A,5442,Q3
+Clothing,Brand C,5407,Q4
+Home,Brand A,8034,Q1
+Sports,Brand A,5512,Q2
+Books,Brand A,5033,Q3
+Electronics,Brand B,2214,Q4
+Clothing,Brand D,3787,Q1
+Home,Brand D,8915,Q2
+Sports,Brand B,5484,Q3
+Books,Brand C,7547,Q4
+Electronics,Brand C,3404,Q1
+Clothing,Brand A,7259,Q2
+Home,Brand C,4975,Q3
+Sports,Brand C,9476,Q4
+Books,Brand B,4896,Q1
+Electronics,Brand A,1070,Q2
+Clothing,Brand D,1269,Q3
+Home,Brand C,1543,Q4
+Sports,Brand D,8416,Q1
+Books,Brand B,1126,Q2
+Electronics,Brand A,3393,Q3
+Clothing,Brand C,6439,Q4
+Home,Brand C,1075,Q1
+Sports,Brand D,3957,Q2
+Books,Brand B,4930,Q3
+Electronics,Brand D,6540,Q4
+Clothing,Brand D,7221,Q1
+Home,Brand C,5124,Q2
+Sports,Brand D,7953,Q3
+Books,Brand C,9923,Q4
+Electronics,Brand A,4848,Q1
+Clothing,Brand A,6058,Q2
+Home,Brand A,1749,Q3
+Sports,Brand D,6560,Q4
+Books,Brand B,4484,Q1
+Electronics,Brand C,1519,Q2
+Clothing,Brand C,9671,Q3
+Home,Brand B,7695,Q4
+Sports,Brand B,6522,Q1
+Books,Brand C,4684,Q2
+Electronics,Brand D,5906,Q3
+Clothing,Brand B,5720,Q4
+Home,Brand C,5531,Q1
+Sports,Brand C,7384,Q2
+Books,Brand A,7136,Q3
+Electronics,Brand B,9734,Q4
+Clothing,Brand B,3682,Q1
+Home,Brand A,5534,Q2
+Sports,Brand B,4455,Q3
+Books,Brand A,5349,Q4
+Electronics,Brand C,3616,Q1
+Clothing,Brand C,6984,Q2
+Home,Brand C,6219,Q3
+Sports,Brand A,6586,Q4
+Books,Brand A,7668,Q1
+Electronics,Brand C,1298,Q2
+Clothing,Brand A,8187,Q3
+Home,Brand C,6649,Q4
+Sports,Brand A,1280,Q1
+Books,Brand A,9133,Q2
+Electronics,Brand D,5805,Q3
+Clothing,Brand A,8108,Q4
+Home,Brand C,3546,Q1
+Sports,Brand C,3699,Q2
+Books,Brand B,3265,Q3
+Electronics,Brand B,6347,Q4
+Clothing,Brand C,7867,Q1
+Home,Brand D,5449,Q2
+Sports,Brand B,1920,Q3
+Books,Brand A,3207,Q4
+
+</script><script type="text/plain" id="multi_data.bb" data-format="csv_embedded" data-src="">
+Department,Month,Headcount,Budget
+HR,Jan,32,123281
+Engineering,Jan,26,167112
+Sales,Jan,31,186924
+Marketing,Jan,43,109581
+HR,Feb,88,114698
+Engineering,Feb,32,138637
+Sales,Feb,39,175779
+Marketing,Feb,61,99496
+HR,Mar,52,57926
+Engineering,Mar,80,199150
+Sales,Mar,63,113178
+Marketing,Mar,22,170410
+
+</script><script type="text/plain" id="correlations" data-format="csv_embedded" data-src="">
+Symbol1,Symbol2,Correlation
+RTX,GOOG,-0.85
+RTX,MSFT,-0.75
+GOOG,MSFT,0.8
+RTX,RTX,1.0
+GOOG,GOOG,1.0
+MSFT,MSFT,1.0
+GOOG,RTX,-0.85
+MSFT,RTX,-0.75
+MSFT,GOOG,0.8
+
 </script>
 
 <!-- ACTUAL CONTENT -->
@@ -2078,50 +2788,143 @@ Cancel,New,PayPal,Store 2,261
 <br>
     <h2>sales_pivot</h2>
     <p>Basic pivot table - drag fields to reorganize rows and columns</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_sales_pivot"  onchange="toggleTotals_sales_pivot()" />
+            Show Totals
+        </label>
+    </div>
     <div id="sales_pivot"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data</p><br>
+<br>
 <hr>
 <br>
     <h2>performance_heatmap</h2>
     <p>Custom color scale heatmap - green indicates good performance, red needs improvement</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_performance_heatmap"  onchange="toggleTotals_performance_heatmap()" />
+            Show Totals
+        </label>
+    </div>
     <div id="performance_heatmap"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: performance_data</p><br>
+<br>
 <hr>
 <br>
     <h2>revenue_by_category</h2>
     <p>Bar chart renderer - switch renderer in the dropdown to see other visualizations</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_revenue_by_category"  onchange="toggleTotals_revenue_by_category()" />
+            Show Totals
+        </label>
+    </div>
     <div id="revenue_by_category"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: product_data</p><br>
+<br>
 <hr>
 <br>
     <h2>customer_revenue</h2>
     <p>Exclusions feature - 'Test' country data is automatically filtered out</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_customer_revenue"  onchange="toggleTotals_customer_revenue()" />
+            Show Totals
+        </label>
+    </div>
     <div id="customer_revenue"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: customer_data</p><br>
+<br>
 <hr>
 <br>
     <h2>survey_results</h2>
     <p>Inclusions feature - only showing ages 18-45, filtering out older demographics</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_survey_results"  onchange="toggleTotals_survey_results()" />
+            Show Totals
+        </label>
+    </div>
     <div id="survey_results"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: survey_data</p><br>
+<br>
 <hr>
 <br>
     <h2>transaction_analysis</h2>
     <p>Count aggregation - showing transaction counts rather than sums or averages</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_transaction_analysis"  onchange="toggleTotals_transaction_analysis()" />
+            Show Totals
+        </label>
+    </div>
     <div id="transaction_analysis"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: transaction_data</p><br>
+<br>
 <hr>
 <br>
     <h2>Returns_Over_Last_Few_Days</h2>
     <p>Stock returns heatmap with MSFT excluded</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_Returns_Over_Last_Few_Days"  onchange="toggleTotals_Returns_Over_Last_Few_Days()" />
+            Show Totals
+        </label>
+    </div>
     <div id="Returns_Over_Last_Few_Days"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stockReturns</p><br>
+<br>
 <hr>
 <br>
     <h2>Correlation_Matrix</h2>
     <p>Correlation matrix with custom red-white-blue color scale</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_Correlation_Matrix"  onchange="toggleTotals_Correlation_Matrix()" />
+            Show Totals
+        </label>
+    </div>
     <div id="Correlation_Matrix"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: correlations</p><br>
+<br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Dataset Selection Feature</h2>
+<p>This example demonstrates the new <strong>dataset selection</strong> feature in PivotTable. When multiple datasets are provided, a dropdown appears allowing you to switch between them dynamically.</p>
+<h3>How it works:</h3>
+<ul>
+    <li><strong>Struct with DataFrames:</strong> We defined a struct <code>ExampleFrame</code> with fields <code>aa::DataFrame</code> and <code>bb::Union{Missing,DataFrame}</code></li>
+    <li><strong>Automatic extraction:</strong> When you pass the struct to JSPlotPage, the DataFrames are automatically extracted with dot-prefixed names (e.g., <code>Symbol("multi_data.aa")</code>, <code>Symbol("multi_data.bb")</code>)</li>
+    <li><strong>Multiple datasets:</strong> The PivotTable accepts a <code>Vector{Symbol}</code> of dataset labels instead of a single Symbol</li>
+    <li><strong>Dynamic switching:</strong> Changing the dataset reloads the pivot table while preserving your current configuration</li>
+</ul>
+<p><em>Try switching between the three datasets using the dropdown above the pivot table!</em></p>
+
+    </div>
+<br>
+<hr>
+<br>
+    <h2>dataset_selector_demo</h2>
+    <p>Dataset selection demo - use the dropdown above to switch between three different datasets. The pivot table will reload with the new data while preserving your row/column selections where possible.</p>
+        <div style="margin-bottom: 10px;">
+        <label for="dataset_select_dataset_selector_demo"><strong>Dataset:</strong></label>
+        <select id="dataset_select_dataset_selector_demo" onchange="changeDataset_dataset_selector_demo()">
+            <option value="multi_data.aa">multi_data.aa</option>
+            <option value="multi_data.bb">multi_data.bb</option>
+            <option value="standalone_data">standalone_data</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_dataset_selector_demo"  onchange="toggleTotals_dataset_selector_demo()" />
+            Show Totals
+        </label>
+    </div>
+    <div id="dataset_selector_demo"></div>
+<br>
 <hr>
 <br>
     <div class="textblock-content">
@@ -2133,6 +2936,8 @@ Cancel,New,PayPal,Store 2,261
     <li><strong>Aggregation functions:</strong> Sum, Average, Count, Median, Min, Max, etc.</li>
     <li><strong>Data filtering:</strong> Include or exclude specific values</li>
     <li><strong>Multi-level grouping:</strong> Use multiple row or column dimensions</li>
+    <li><strong>Dataset selection:</strong> Switch between multiple datasets with a dropdown</li>
+    <li><strong>Struct support:</strong> Automatically extract DataFrames from structs</li>
     <li><strong>Integration:</strong> Combine PivotTables with LineCharts, 3D plots, and more</li>
 </ul>
 <p><strong>Tip:</strong> Try dragging unused fields from the top into Rows or Columns!</p>
@@ -2140,6 +2945,6 @@ Cancel,New,PayPal,Store 2,261
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

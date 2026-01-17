@@ -392,6 +392,55 @@ chart12b = AreaChart(:stack_comparison, df12, :comparison_data;
     notes = "Bars are stacked, showing the total value and how each segment contributes to it."
 )
 
+# Example 13: Using a Struct as Data Source
+# Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
+
+struct RegionalSalesData
+    monthly_sales::DataFrame
+    quarterly_summary::DataFrame
+end
+
+# Create monthly sales data
+monthly_df = DataFrame()
+regions_struct = ["North", "South", "East", "West"]
+for region in regions_struct
+    for month in 1:12
+        push!(monthly_df, (
+            Month = month,
+            Sales = abs(50000 + randn(rng) * 10000 + month * 2000),
+            Units = abs(500 + randn(rng) * 100 + month * 20),
+            Region = region
+        ))
+    end
+end
+
+# Create quarterly summary
+quarterly_df = DataFrame(
+    Quarter = repeat(1:4, 4),
+    Region = repeat(regions_struct, inner=4),
+    TotalSales = abs.(200000 .+ randn(rng, 16) .* 20000)
+)
+
+# Create the struct instance
+regional_data = RegionalSalesData(monthly_df, quarterly_df)
+
+struct_intro = TextBlock("""
+<h2>Struct Data Source Example</h2>
+<p>This area chart uses data from a struct containing multiple DataFrames.
+The <code>RegionalSalesData</code> struct holds both monthly_sales and quarterly_summary.
+Charts reference the monthly sales using <code>Symbol("regional.monthly_sales")</code>.</p>
+""")
+
+chart13 = AreaChart(:struct_area, regional_data.monthly_sales, Symbol("regional.monthly_sales");
+    x_cols = [:Month],
+    y_cols = [:Sales, :Units],
+    color_cols = [:Region],
+    stack_mode = "stack",
+    title = "Example 13: Regional Sales from Struct Data Source",
+    notes = "This chart references a DataFrame field within a struct. The RegionalSalesData struct " *
+           "contains monthly_sales and quarterly_summary DataFrames."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -415,8 +464,9 @@ conclusion = TextBlock("""
 """)
 
 # Create single combined page
+# Note: regional_data struct is passed directly - JSPlotPage will extract its DataFrame fields
 page = JSPlotPage(
-    Dict{Symbol,DataFrame}(
+    Dict{Symbol,Any}(
         :sales_by_region => df1,
         :product_values => df2,
         :market_share => df3,
@@ -428,13 +478,15 @@ page = JSPlotPage(
         :compare_data => df9,
         :sales_data_x => df10,
         :sales_by_store => df11,
-        :comparison_data => df12
+        :comparison_data => df12,
+        :regional => regional_data  # Struct with monthly_sales and quarterly_summary
     ),
     [header, chart1, chart2, chart3, chart4, chart5, chart6, chart7, chart8,
      comparison_header, chart9a, chart9b, chart9c,
      dynamic_x_header, chart10,
      dodge_header, chart11,
      dodge_comparison_header, chart12a, chart12b,
+     struct_intro, chart13,
      conclusion],
     tab_title = "AreaChart Examples"
 )
@@ -458,3 +510,4 @@ println("  • Side-by-side stack mode comparison")
 println("  • Dynamic X-axis selection (switch between Quarter/Month/Week)")
 println("  • Dodge mode (side-by-side grouped bars)")
 println("  • Dodge vs Stack comparison")
+println("  • Struct data source (referencing struct fields via dot notation)")

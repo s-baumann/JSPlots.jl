@@ -102,16 +102,12 @@ using Random
         include("chart_tests/test_linklist.jl")
     end
 
-    @testset "OHLCChart Tests" begin
-        include("chart_tests/test_ohlcchart.jl")
+    @testset "CandlestickChart Tests" begin
+        include("chart_tests/test_candlestickchart.jl")
     end
 
     @testset "BumpChart Tests" begin
         include("chart_tests/test_bumpchart.jl")
-    end
-
-    @testset "ExecutionPlot Tests" begin
-        include("chart_tests/test_executionplot.jl")
     end
 
     @testset "Pages Tests" begin

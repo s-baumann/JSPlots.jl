@@ -599,7 +599,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -3372,6 +3373,273 @@ $(function(){
         console.error('Error loading data for chart comprehensive_sales:', error);
     });
 })();
+(function() {
+    // Configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const VALUE_COLS = ['amount'];
+    const COLOR_COLS = ['source'];
+    const COLOR_MAPS = {'source': {'Hardware': '#ab63fa', 'Licensing': '#EF553B', 'Services': '#00cc96', 'Other': '#FFA15A', 'Subscriptions': '#636efa'}};
+    const DEFAULT_VALUE_COL = 'amount';
+    const DEFAULT_COLOR_COL = 'source';
+    const HOLE = 0.35;
+    const SHOW_LEGEND = true;
+
+    // Store data globally
+    let allData = [];
+
+    // Function to aggregate data for pie chart
+    function aggregateData(data, labelCol, valueCol) {
+        const aggregated = {};
+        for (const row of data) {
+            const label = String(row[labelCol]);
+            const value = Number(row[valueCol]) || 0;
+            if (aggregated[label]) {
+                aggregated[label] += value;
+            } else {
+                aggregated[label] = value;
+            }
+        }
+        return aggregated;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_struct_pie = function() {
+        // Check if data is loaded
+        if (!allData || allData.length === 0) {
+            return;
+        }
+
+        // Get current value and color columns
+        const valueColSelect = document.getElementById('value_col_select_struct_pie');
+        const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
+
+        const colorColSelect = document.getElementById('color_col_select_struct_pie');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get color map for current color selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_struct_pie');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_struct_pie' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'struct_pie',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_struct_pie');
+        const facet2Select = document.getElementById('facet2_select_struct_pie');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        if (!facet1) {
+            // No faceting - single pie chart
+            const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
+            const labels = Object.keys(aggregated);
+            const values = Object.values(aggregated);
+            const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+
+            const trace = {
+                type: 'pie',
+                labels: labels,
+                values: values,
+                marker: { colors: colors },
+                hole: HOLE,
+                textposition: 'auto',
+                hoverinfo: 'label+value+percent'
+            };
+
+            const layout = {
+                showlegend: SHOW_LEGEND,
+                margin: {l: 50, r: 50, t: 50, b: 50},
+                height: 500
+            };
+
+            Plotly.newPlot('struct_pie', [trace], layout, {responsive: true});
+
+        } else if (facet1 && !facet2) {
+            // Facet wrap (1 variable)
+            const facetValues = [...new Set(filteredData.map(row => String(row[facet1])))].sort();
+            const nFacets = facetValues.length;
+            const nCols = Math.min(3, nFacets);
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const annotations = [];
+
+            for (let i = 0; i < nFacets; i++) {
+                const facetValue = facetValues[i];
+                const facetData = filteredData.filter(row => String(row[facet1]) === facetValue);
+                const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
+                const labels = Object.keys(aggregated);
+                const values = Object.values(aggregated);
+                const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+
+                const row = Math.floor(i / nCols);
+                const col = i % nCols;
+
+                const domain = {
+                    x: [col / nCols + 0.01, (col + 1) / nCols - 0.01],
+                    y: [1 - (row + 1) / nRows + 0.01, 1 - row / nRows - 0.01]
+                };
+
+                traces.push({
+                    type: 'pie',
+                    labels: labels,
+                    values: values,
+                    marker: {colors: colors},
+                    hole: HOLE,
+                    domain: domain,
+                    name: facetValue,
+                    hoverinfo: 'label+value+percent',
+                    textposition: 'auto'
+                });
+
+                // Add facet label
+                annotations.push({
+                    text: facet1 + ': ' + facetValue,
+                    showarrow: false,
+                    x: (col + 0.5) / nCols,
+                    y: 1 - row / nRows - 0.02,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'center',
+                    yanchor: 'top',
+                    font: {size: 12, weight: 'bold'}
+                });
+            }
+
+            const layout = {
+                showlegend: SHOW_LEGEND,
+                annotations: annotations,
+                height: 300 * nRows,
+                margin: {l: 20, r: 20, t: 40, b: 20}
+            };
+
+            Plotly.newPlot('struct_pie', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 variables)
+            const rowValues = [...new Set(filteredData.map(row => String(row[facet1])))].sort();
+            const colValues = [...new Set(filteredData.map(row => String(row[facet2])))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const annotations = [];
+
+            for (let r = 0; r < nRows; r++) {
+                for (let c = 0; c < nCols; c++) {
+                    const rowVal = rowValues[r];
+                    const colVal = colValues[c];
+                    const cellData = filteredData.filter(row =>
+                        String(row[facet1]) === rowVal &&
+                        String(row[facet2]) === colVal
+                    );
+
+                    if (cellData.length > 0) {
+                        const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
+                        const labels = Object.keys(aggregated);
+                        const values = Object.values(aggregated);
+                        const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+
+                        const domain = {
+                            x: [c / nCols + 0.01, (c + 1) / nCols - 0.01],
+                            y: [1 - (r + 1) / nRows + 0.01, 1 - r / nRows - 0.01]
+                        };
+
+                        traces.push({
+                            type: 'pie',
+                            labels: labels,
+                            values: values,
+                            marker: {colors: colors},
+                            hole: HOLE,
+                            domain: domain,
+                            hoverinfo: 'label+value+percent',
+                            textposition: 'auto',
+                            showlegend: false
+                        });
+                    }
+                }
+            }
+
+            // Add column headers
+            for (let c = 0; c < nCols; c++) {
+                annotations.push({
+                    text: facet2 + ': ' + colValues[c],
+                    showarrow: false,
+                    x: (c + 0.5) / nCols,
+                    y: 1.02,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 11, weight: 'bold'}
+                });
+            }
+
+            // Add row headers
+            for (let r = 0; r < nRows; r++) {
+                annotations.push({
+                    text: facet1 + ': ' + rowValues[r],
+                    showarrow: false,
+                    x: -0.02,
+                    y: 1 - (r + 0.5) / nRows,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'right',
+                    yanchor: 'middle',
+                    font: {size: 11, weight: 'bold'}
+                });
+            }
+
+            const layout = {
+                showlegend: SHOW_LEGEND && nRows * nCols <= 4,
+                annotations: annotations,
+                height: 300 * nRows,
+                margin: {l: 80, r: 20, t: 60, b: 20}
+            };
+
+            Plotly.newPlot('struct_pie', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse data
+    loadDataset('company.revenue').then(function(data) {
+        allData = data;
+        window.updateChart_struct_pie();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('struct_pie');
+    }).catch(function(error) {
+        console.error('Error loading data for chart struct_pie:', error);
+    });
+})();
 
 
 });
@@ -3379,159 +3647,44 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="traffic_data" data-format="csv_embedded" data-src="">
-country,browser,device,visitors
-USA,Chrome,Desktop,1586
-USA,Chrome,Mobile,1309
-USA,Chrome,Tablet,5248
-USA,Firefox,Desktop,3053
-USA,Firefox,Mobile,3151
-USA,Firefox,Tablet,7157
-USA,Safari,Desktop,8855
-USA,Safari,Mobile,7556
-USA,Safari,Tablet,6921
-USA,Edge,Desktop,8988
-USA,Edge,Mobile,1687
-USA,Edge,Tablet,7429
-UK,Chrome,Desktop,9144
-UK,Chrome,Mobile,1412
-UK,Chrome,Tablet,4208
-UK,Firefox,Desktop,1457
-UK,Firefox,Mobile,3069
-UK,Firefox,Tablet,2654
-UK,Safari,Desktop,7242
-UK,Safari,Mobile,4826
-UK,Safari,Tablet,3799
-UK,Edge,Desktop,7107
-UK,Edge,Mobile,9210
-UK,Edge,Tablet,1022
-Germany,Chrome,Desktop,6565
-Germany,Chrome,Mobile,6464
-Germany,Chrome,Tablet,3772
-Germany,Firefox,Desktop,3993
-Germany,Firefox,Mobile,6025
-Germany,Firefox,Tablet,8476
-Germany,Safari,Desktop,8226
-Germany,Safari,Mobile,1237
-Germany,Safari,Tablet,7363
-Germany,Edge,Desktop,4920
-Germany,Edge,Mobile,2633
-Germany,Edge,Tablet,3690
-France,Chrome,Desktop,8512
-France,Chrome,Mobile,4339
-France,Chrome,Tablet,7565
-France,Firefox,Desktop,5165
-France,Firefox,Mobile,4929
-France,Firefox,Tablet,4207
-France,Safari,Desktop,8471
-France,Safari,Mobile,4772
-France,Safari,Tablet,9359
-France,Edge,Desktop,8058
-France,Edge,Mobile,5212
-France,Edge,Tablet,1542
-
-</script><script type="text/plain" id="expense_data" data-format="csv_embedded" data-src="">
-department,expense_type,quarter,amount
-Engineering,Salaries,Q1,5939.978434715181
-Engineering,Salaries,Q2,4410.0471830587985
-Engineering,Salaries,Q3,2387.9488889797417
-Engineering,Salaries,Q4,8460.600267246235
-Engineering,Equipment,Q1,5910.8165832073
-Engineering,Equipment,Q2,6833.682873485809
-Engineering,Equipment,Q3,5653.389147283398
-Engineering,Equipment,Q4,6286.298419367933
-Engineering,Travel,Q1,10575.83771153543
-Engineering,Travel,Q2,6677.045854153072
-Engineering,Travel,Q3,2735.8972817935373
-Engineering,Travel,Q4,4292.139191268671
-Engineering,Training,Q1,4256.092278727306
-Engineering,Training,Q2,5208.550100303516
-Engineering,Training,Q3,5349.625546675648
-Engineering,Training,Q4,6106.840208834793
-Engineering,Supplies,Q1,4147.450047440216
-Engineering,Supplies,Q2,992.0222282464229
-Engineering,Supplies,Q3,4284.434802401282
-Engineering,Supplies,Q4,2858.0315975658787
-Sales,Salaries,Q1,8267.471679044906
-Sales,Salaries,Q2,6195.859057678204
-Sales,Salaries,Q3,3482.8732890329543
-Sales,Salaries,Q4,6024.4953997627745
-Sales,Equipment,Q1,4686.170442049062
-Sales,Equipment,Q2,7084.369540107865
-Sales,Equipment,Q3,7162.651051812538
-Sales,Equipment,Q4,1832.3605492705979
-Sales,Travel,Q1,5410.651614653536
-Sales,Travel,Q2,7944.13391781821
-Sales,Travel,Q3,5675.76113946239
-Sales,Travel,Q4,3964.7967921365102
-Sales,Training,Q1,6038.328130161985
-Sales,Training,Q2,2374.911366091249
-Sales,Training,Q3,3168.1525700880293
-Sales,Training,Q4,3913.2998349887384
-Sales,Supplies,Q1,5773.9929877486065
-Sales,Supplies,Q2,6789.8755738510445
-Sales,Supplies,Q3,9367.31149612241
-Sales,Supplies,Q4,6418.270084534872
-Marketing,Salaries,Q1,1228.9170051736824
-Marketing,Salaries,Q2,7046.84323585579
-Marketing,Salaries,Q3,6432.630813451842
-Marketing,Salaries,Q4,7081.351142469832
-Marketing,Equipment,Q1,3791.6771958798945
-Marketing,Equipment,Q2,5087.147958545756
-Marketing,Equipment,Q3,6403.511294605207
-Marketing,Equipment,Q4,2653.412031598319
-Marketing,Travel,Q1,6724.6605963654365
-Marketing,Travel,Q2,3413.5985785774255
-Marketing,Travel,Q3,4596.041769761954
-Marketing,Travel,Q4,3468.3479387666257
-Marketing,Training,Q1,7710.420860682644
-Marketing,Training,Q2,5622.612053719645
-Marketing,Training,Q3,6118.387639362843
-Marketing,Training,Q4,6395.3750610064835
-Marketing,Supplies,Q1,8416.521394463862
-Marketing,Supplies,Q2,4457.002593769017
-Marketing,Supplies,Q3,1597.3847737801048
-Marketing,Supplies,Q4,3534.3134471872736
-Operations,Salaries,Q1,2430.0154097426926
-Operations,Salaries,Q2,5349.383611769229
-Operations,Salaries,Q3,5289.604351524745
-Operations,Salaries,Q4,4462.870853714386
-Operations,Equipment,Q1,5915.0952032846635
-Operations,Equipment,Q2,2300.0722653511425
-Operations,Equipment,Q3,4127.745286754856
-Operations,Equipment,Q4,6539.030664399912
-Operations,Travel,Q1,6439.559410135892
-Operations,Travel,Q2,2461.392228733153
-Operations,Travel,Q3,6960.8238011529975
-Operations,Travel,Q4,6043.893720098054
-Operations,Training,Q1,4098.020801132082
-Operations,Training,Q2,5094.465622347089
-Operations,Training,Q3,3268.5896996041606
-Operations,Training,Q4,2979.3053948016404
-Operations,Supplies,Q1,2736.602784486981
-Operations,Supplies,Q2,2841.2181437555823
-Operations,Supplies,Q3,6955.8554167754155
-Operations,Supplies,Q4,3531.46758918422
-HR,Salaries,Q1,4711.0788695449555
-HR,Salaries,Q2,7856.089552887057
-HR,Salaries,Q3,6311.508037968025
-HR,Salaries,Q4,4167.188025955025
-HR,Equipment,Q1,5282.470064611541
-HR,Equipment,Q2,2632.2357765757265
-HR,Equipment,Q3,4490.772887526044
-HR,Equipment,Q4,6281.50546359416
-HR,Travel,Q1,5134.006348309657
-HR,Travel,Q2,4348.058024337754
-HR,Travel,Q3,5052.409308164372
-HR,Travel,Q4,5508.792340866988
-HR,Training,Q1,2172.0267506784467
-HR,Training,Q2,7439.826789374884
-HR,Training,Q3,6589.2279700843055
-HR,Training,Q4,4250.87104667212
-HR,Supplies,Q1,7926.95889636187
-HR,Supplies,Q2,2091.298391884226
-HR,Supplies,Q3,6117.948941533342
-HR,Supplies,Q4,5700.249523367627
+<script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
+region,product,year,sales
+North,Product A,2022,8102.962800882591
+North,Product A,2023,7901.40031794131
+North,Product A,2024,10643.21075882189
+North,Product B,2022,9635.276106214944
+North,Product B,2023,13048.153533973087
+North,Product B,2024,10821.400848820935
+North,Product C,2022,5843.981119807669
+North,Product C,2023,7835.022842615828
+North,Product C,2024,12344.825714625853
+South,Product A,2022,11346.876569487073
+South,Product A,2023,9953.025546460993
+South,Product A,2024,15366.36415445368
+South,Product B,2022,11354.675096369561
+South,Product B,2023,15176.473040365709
+South,Product B,2024,5985.938294945294
+South,Product C,2022,12586.062506059447
+South,Product C,2023,11790.456429682477
+South,Product C,2024,11995.288157059456
+East,Product A,2022,17924.37890941082
+East,Product A,2023,7584.644925504896
+East,Product A,2024,10930.674875815374
+East,Product B,2022,4126.696819049719
+East,Product B,2023,9275.339563287285
+East,Product B,2024,10044.956124578985
+East,Product C,2022,9708.694971377936
+East,Product C,2023,10392.388748683428
+East,Product C,2024,12982.56833149248
+West,Product A,2022,4034.0949756822192
+West,Product A,2023,11193.07381086299
+West,Product A,2024,9131.376773362295
+West,Product B,2022,476.8089254636143
+West,Product B,2023,10944.25533512773
+West,Product B,2024,10653.878312647235
+West,Product C,2022,10057.213844931634
+West,Product C,2023,7580.147397755023
+West,Product C,2024,8882.59971414583
 
 </script><script type="text/plain" id="comprehensive_data" data-format="csv_embedded" data-src="">
 product,region,channel,quarter,revenue,units_sold,profit,customer_count
@@ -3776,44 +3929,65 @@ Monitor,South America,Wholesale,Q2-2024,81465.67673116425,934,19912.394911474963
 Monitor,South America,Wholesale,Q3-2024,42366.707394912024,661,21942.90191358965,161
 Monitor,South America,Wholesale,Q4-2024,62185.92015046987,795,27608.060829357837,447
 
-</script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
-region,product,year,sales
-North,Product A,2022,8102.962800882591
-North,Product A,2023,7901.40031794131
-North,Product A,2024,10643.21075882189
-North,Product B,2022,9635.276106214944
-North,Product B,2023,13048.153533973087
-North,Product B,2024,10821.400848820935
-North,Product C,2022,5843.981119807669
-North,Product C,2023,7835.022842615828
-North,Product C,2024,12344.825714625853
-South,Product A,2022,11346.876569487073
-South,Product A,2023,9953.025546460993
-South,Product A,2024,15366.36415445368
-South,Product B,2022,11354.675096369561
-South,Product B,2023,15176.473040365709
-South,Product B,2024,5985.938294945294
-South,Product C,2022,12586.062506059447
-South,Product C,2023,11790.456429682477
-South,Product C,2024,11995.288157059456
-East,Product A,2022,17924.37890941082
-East,Product A,2023,7584.644925504896
-East,Product A,2024,10930.674875815374
-East,Product B,2022,4126.696819049719
-East,Product B,2023,9275.339563287285
-East,Product B,2024,10044.956124578985
-East,Product C,2022,9708.694971377936
-East,Product C,2023,10392.388748683428
-East,Product C,2024,12982.56833149248
-West,Product A,2022,4034.0949756822192
-West,Product A,2023,11193.07381086299
-West,Product A,2024,9131.376773362295
-West,Product B,2022,476.8089254636143
-West,Product B,2023,10944.25533512773
-West,Product B,2024,10653.878312647235
-West,Product C,2022,10057.213844931634
-West,Product C,2023,7580.147397755023
-West,Product C,2024,8882.59971414583
+</script><script type="text/plain" id="budget_data" data-format="csv_embedded" data-src="">
+category,amount
+Salaries,250000
+Marketing,80000
+R&D,120000
+Operations,65000
+Infrastructure,45000
+Other,20000
+
+</script><script type="text/plain" id="traffic_data" data-format="csv_embedded" data-src="">
+country,browser,device,visitors
+USA,Chrome,Desktop,1586
+USA,Chrome,Mobile,1309
+USA,Chrome,Tablet,5248
+USA,Firefox,Desktop,3053
+USA,Firefox,Mobile,3151
+USA,Firefox,Tablet,7157
+USA,Safari,Desktop,8855
+USA,Safari,Mobile,7556
+USA,Safari,Tablet,6921
+USA,Edge,Desktop,8988
+USA,Edge,Mobile,1687
+USA,Edge,Tablet,7429
+UK,Chrome,Desktop,9144
+UK,Chrome,Mobile,1412
+UK,Chrome,Tablet,4208
+UK,Firefox,Desktop,1457
+UK,Firefox,Mobile,3069
+UK,Firefox,Tablet,2654
+UK,Safari,Desktop,7242
+UK,Safari,Mobile,4826
+UK,Safari,Tablet,3799
+UK,Edge,Desktop,7107
+UK,Edge,Mobile,9210
+UK,Edge,Tablet,1022
+Germany,Chrome,Desktop,6565
+Germany,Chrome,Mobile,6464
+Germany,Chrome,Tablet,3772
+Germany,Firefox,Desktop,3993
+Germany,Firefox,Mobile,6025
+Germany,Firefox,Tablet,8476
+Germany,Safari,Desktop,8226
+Germany,Safari,Mobile,1237
+Germany,Safari,Tablet,7363
+Germany,Edge,Desktop,4920
+Germany,Edge,Mobile,2633
+Germany,Edge,Tablet,3690
+France,Chrome,Desktop,8512
+France,Chrome,Mobile,4339
+France,Chrome,Tablet,7565
+France,Firefox,Desktop,5165
+France,Firefox,Mobile,4929
+France,Firefox,Tablet,4207
+France,Safari,Desktop,8471
+France,Safari,Mobile,4772
+France,Safari,Tablet,9359
+France,Edge,Desktop,8058
+France,Edge,Mobile,5212
+France,Edge,Tablet,1542
 
 </script><script type="text/plain" id="demo_data" data-format="csv_embedded" data-src="">
 age_group,gender,preference,count
@@ -3842,31 +4016,6 @@ age_group,gender,preference,count
 46+,Female,Desktop,54
 46+,Female,Tablet,102
 
-</script><script type="text/plain" id="segment_data" data-format="csv_embedded" data-src="">
-segment,revenue_contribution
-Enterprise,55
-Mid-Market,25
-Small Business,12
-Startup,6
-Individual,2
-
-</script><script type="text/plain" id="budget_data" data-format="csv_embedded" data-src="">
-category,amount
-Salaries,250000
-Marketing,80000
-R&D,120000
-Operations,65000
-Infrastructure,45000
-Other,20000
-
-</script><script type="text/plain" id="market_data" data-format="csv_embedded" data-src="">
-company,revenue,units
-Company A,45000,1200
-Company B,32000,900
-Company C,18000,600
-Company D,12000,400
-Company E,8000,250
-
 </script><script type="text/plain" id="store_data" data-format="csv_embedded" data-src="">
 store,category,sales
 Store A,Electronics,18503.529218776108
@@ -3884,6 +4033,141 @@ Store C,Clothing,21969.250623874497
 Store C,Home & Garden,16755.652790402903
 Store C,Food,19426.0497238476
 Store C,Books,11918.705181170277
+
+</script><script type="text/plain" id="expense_data" data-format="csv_embedded" data-src="">
+department,expense_type,quarter,amount
+Engineering,Salaries,Q1,5939.978434715181
+Engineering,Salaries,Q2,4410.0471830587985
+Engineering,Salaries,Q3,2387.9488889797417
+Engineering,Salaries,Q4,8460.600267246235
+Engineering,Equipment,Q1,5910.8165832073
+Engineering,Equipment,Q2,6833.682873485809
+Engineering,Equipment,Q3,5653.389147283398
+Engineering,Equipment,Q4,6286.298419367933
+Engineering,Travel,Q1,10575.83771153543
+Engineering,Travel,Q2,6677.045854153072
+Engineering,Travel,Q3,2735.8972817935373
+Engineering,Travel,Q4,4292.139191268671
+Engineering,Training,Q1,4256.092278727306
+Engineering,Training,Q2,5208.550100303516
+Engineering,Training,Q3,5349.625546675648
+Engineering,Training,Q4,6106.840208834793
+Engineering,Supplies,Q1,4147.450047440216
+Engineering,Supplies,Q2,992.0222282464229
+Engineering,Supplies,Q3,4284.434802401282
+Engineering,Supplies,Q4,2858.0315975658787
+Sales,Salaries,Q1,8267.471679044906
+Sales,Salaries,Q2,6195.859057678204
+Sales,Salaries,Q3,3482.8732890329543
+Sales,Salaries,Q4,6024.4953997627745
+Sales,Equipment,Q1,4686.170442049062
+Sales,Equipment,Q2,7084.369540107865
+Sales,Equipment,Q3,7162.651051812538
+Sales,Equipment,Q4,1832.3605492705979
+Sales,Travel,Q1,5410.651614653536
+Sales,Travel,Q2,7944.13391781821
+Sales,Travel,Q3,5675.76113946239
+Sales,Travel,Q4,3964.7967921365102
+Sales,Training,Q1,6038.328130161985
+Sales,Training,Q2,2374.911366091249
+Sales,Training,Q3,3168.1525700880293
+Sales,Training,Q4,3913.2998349887384
+Sales,Supplies,Q1,5773.9929877486065
+Sales,Supplies,Q2,6789.8755738510445
+Sales,Supplies,Q3,9367.31149612241
+Sales,Supplies,Q4,6418.270084534872
+Marketing,Salaries,Q1,1228.9170051736824
+Marketing,Salaries,Q2,7046.84323585579
+Marketing,Salaries,Q3,6432.630813451842
+Marketing,Salaries,Q4,7081.351142469832
+Marketing,Equipment,Q1,3791.6771958798945
+Marketing,Equipment,Q2,5087.147958545756
+Marketing,Equipment,Q3,6403.511294605207
+Marketing,Equipment,Q4,2653.412031598319
+Marketing,Travel,Q1,6724.6605963654365
+Marketing,Travel,Q2,3413.5985785774255
+Marketing,Travel,Q3,4596.041769761954
+Marketing,Travel,Q4,3468.3479387666257
+Marketing,Training,Q1,7710.420860682644
+Marketing,Training,Q2,5622.612053719645
+Marketing,Training,Q3,6118.387639362843
+Marketing,Training,Q4,6395.3750610064835
+Marketing,Supplies,Q1,8416.521394463862
+Marketing,Supplies,Q2,4457.002593769017
+Marketing,Supplies,Q3,1597.3847737801048
+Marketing,Supplies,Q4,3534.3134471872736
+Operations,Salaries,Q1,2430.0154097426926
+Operations,Salaries,Q2,5349.383611769229
+Operations,Salaries,Q3,5289.604351524745
+Operations,Salaries,Q4,4462.870853714386
+Operations,Equipment,Q1,5915.0952032846635
+Operations,Equipment,Q2,2300.0722653511425
+Operations,Equipment,Q3,4127.745286754856
+Operations,Equipment,Q4,6539.030664399912
+Operations,Travel,Q1,6439.559410135892
+Operations,Travel,Q2,2461.392228733153
+Operations,Travel,Q3,6960.8238011529975
+Operations,Travel,Q4,6043.893720098054
+Operations,Training,Q1,4098.020801132082
+Operations,Training,Q2,5094.465622347089
+Operations,Training,Q3,3268.5896996041606
+Operations,Training,Q4,2979.3053948016404
+Operations,Supplies,Q1,2736.602784486981
+Operations,Supplies,Q2,2841.2181437555823
+Operations,Supplies,Q3,6955.8554167754155
+Operations,Supplies,Q4,3531.46758918422
+HR,Salaries,Q1,4711.0788695449555
+HR,Salaries,Q2,7856.089552887057
+HR,Salaries,Q3,6311.508037968025
+HR,Salaries,Q4,4167.188025955025
+HR,Equipment,Q1,5282.470064611541
+HR,Equipment,Q2,2632.2357765757265
+HR,Equipment,Q3,4490.772887526044
+HR,Equipment,Q4,6281.50546359416
+HR,Travel,Q1,5134.006348309657
+HR,Travel,Q2,4348.058024337754
+HR,Travel,Q3,5052.409308164372
+HR,Travel,Q4,5508.792340866988
+HR,Training,Q1,2172.0267506784467
+HR,Training,Q2,7439.826789374884
+HR,Training,Q3,6589.2279700843055
+HR,Training,Q4,4250.87104667212
+HR,Supplies,Q1,7926.95889636187
+HR,Supplies,Q2,2091.298391884226
+HR,Supplies,Q3,6117.948941533342
+HR,Supplies,Q4,5700.249523367627
+
+</script><script type="text/plain" id="company.employees" data-format="csv_embedded" data-src="">
+department,headcount
+Engineering,120
+Sales,80
+Marketing,45
+Support,60
+Admin,25
+
+</script><script type="text/plain" id="segment_data" data-format="csv_embedded" data-src="">
+segment,revenue_contribution
+Enterprise,55
+Mid-Market,25
+Small Business,12
+Startup,6
+Individual,2
+
+</script><script type="text/plain" id="company.revenue" data-format="csv_embedded" data-src="">
+source,amount
+Subscriptions,45000
+Licensing,28000
+Services,18000
+Hardware,7000
+Other,2000
+
+</script><script type="text/plain" id="market_data" data-format="csv_embedded" data-src="">
+company,revenue,units
+Company A,45000,1200
+Company B,32000,900
+Company C,18000,600
+Company D,12000,400
+Company E,8000,250
 
 </script>
 
@@ -4434,6 +4718,26 @@ Store C,Books,11918.705181170277
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Struct Data Source Example</h2>
+<p>This pie chart uses data from a struct containing multiple DataFrames.
+The <code>CompanyData</code> struct holds both revenue and employees data.
+Charts reference the revenue DataFrame using <code>Symbol("company.revenue")</code>.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Example 11: Revenue Sources from Struct Data Source</h2>
+<p>This example shows how to use a struct as a data source. The CompanyData struct contains revenue and employees DataFrames. Access struct fields via dot notation.</p>
+
+
+
+<!-- Chart -->
+<div id="struct_pie"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company.revenue</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Key Features Summary</h2>
 <ul>
     <li><strong>Automatic aggregation:</strong> Values are automatically summed by label</li>
@@ -4451,6 +4755,6 @@ Store C,Books,11918.705181170277
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.3.4.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
 </body>
 </html>

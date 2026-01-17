@@ -343,6 +343,60 @@ radar5 = RadarChart(:investments_radar, :investments_data;
 )
 
 # =============================================================================
+# Example 6: Using a Struct as Data Source
+# =============================================================================
+
+example6_text = TextBlock("""
+<h2>Example 6: Car Comparison from Struct Data Source</h2>
+<p>Compare different car models using data stored in a struct.</p>
+<p><strong>Features demonstrated:</strong></p>
+<ul>
+    <li>Using a struct containing DataFrames as data source</li>
+    <li>Referencing struct fields via dot notation</li>
+    <li>Multiple DataFrames in one struct (specs and pricing)</li>
+</ul>
+""")
+
+# Define a struct with car data
+struct CarData
+    specifications::DataFrame
+    pricing::DataFrame
+end
+
+# Car specifications data
+car_specs = DataFrame(
+    label = ["Tesla Model 3", "BMW 3 Series", "Mercedes C-Class", "Audi A4"],
+    category = ["Electric", "Gasoline", "Gasoline", "Gasoline"],
+    Performance = [92.0, 85.0, 82.0, 84.0],
+    Efficiency = [95.0, 65.0, 62.0, 68.0],
+    Interior_Quality = [78.0, 90.0, 92.0, 88.0],
+    Technology = [95.0, 85.0, 88.0, 86.0],
+    Safety = [92.0, 88.0, 90.0, 87.0],
+    Value = [85.0, 72.0, 70.0, 75.0]
+)
+
+# Pricing data
+car_pricing = DataFrame(
+    model = ["Tesla Model 3", "BMW 3 Series", "Mercedes C-Class", "Audi A4"],
+    base_price = [42000, 45000, 47000, 44000],
+    as_tested = [52000, 58000, 62000, 56000]
+)
+
+# Create the struct
+car_data = CarData(car_specs, car_pricing)
+
+radar6 = RadarChart(:cars_radar, Symbol("cars.specifications");
+    value_cols = [:Performance, :Efficiency, :Interior_Quality, :Technology, :Safety, :Value],
+    label_col = :label,
+    color_col = :category,
+    title = "Car Comparison from Struct Data Source",
+    notes = "This radar chart references data from a CarData struct containing specifications " *
+           "and pricing DataFrames. Charts access struct fields via Symbol(\"cars.specifications\").",
+    max_value = 100.0,
+    show_legend = true
+)
+
+# =============================================================================
 # Summary
 # =============================================================================
 
@@ -394,12 +448,14 @@ summary = TextBlock("""
 # =============================================================================
 
 # Collect all data
-data_dict = Dict{Symbol, DataFrame}(
+# Note: car_data struct is passed directly - JSPlotPage will extract its DataFrame fields
+data_dict = Dict{Symbol, Any}(
     :phones_data => phones_df,
     :foods_data => foods_df,
     :skills_data => employees_df,
     :universities_data => universities_df,
-    :investments_data => investments_df
+    :investments_data => investments_df,
+    :cars => car_data  # Struct with specifications and pricing
 )
 
 # Create page
@@ -411,6 +467,7 @@ page = JSPlotPage(
      example3_text, radar3,
      example4_text, radar4,
      example5_text, radar5,
+     example6_text, radar6,
      summary];
     dataformat = :csv_embedded
 )

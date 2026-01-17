@@ -507,7 +507,8 @@ function loadDataset(dataLabel) {
                         data.push(row);
                     }
 
-                    resolve(data);
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
                 })
                 .catch(function(error) {
                     console.error('Error loading external Parquet:', error);
@@ -628,21 +629,21 @@ $(function(){
     let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
 
     // Make it global so inline onchange can see it
-    window.updateChart_example1_ohlc = function() {
+    window.updateChart_example1_candlestick = function() {
         // Get current control values
-        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example1_ohlc');
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example1_candlestick');
         const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
 
-        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example1_ohlc');
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example1_candlestick');
         const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
 
-        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example1_ohlc');
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example1_candlestick');
         const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
 
-        const chartTypeSelect = document.getElementById('chart_type_select_example1_ohlc');
+        const chartTypeSelect = document.getElementById('chart_type_select_example1_candlestick');
         const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
 
-        const displayModeSelect = document.getElementById('display_mode_select_example1_ohlc');
+        const displayModeSelect = document.getElementById('display_mode_select_example1_candlestick');
         const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
 
         // Get current filter values
@@ -651,7 +652,7 @@ $(function(){
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_example1_ohlc');
+            const select = document.getElementById(col + '_select_example1_candlestick');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
@@ -659,7 +660,7 @@ $(function(){
 
         // Read continuous filters (range sliders)
         CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_example1_ohlc' + '_slider');
+            const slider = $('#' + col + '_range_example1_candlestick' + '_slider');
             if (slider.length > 0) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
@@ -671,7 +672,7 @@ $(function(){
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
             allData,
-            'example1_ohlc',
+            'example1_candlestick',
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
@@ -729,7 +730,7 @@ $(function(){
             const data = symbolData[symbol];
             const color = colorPalette[idx % colorPalette.length];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -745,8 +746,8 @@ $(function(){
                 close = close.map(v => v / base);
             }
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -759,7 +760,7 @@ $(function(){
                 increasing: {line: {color: color}},
                 decreasing: {line: {color: color}}
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -793,7 +794,7 @@ $(function(){
         };
 
         if (showVolume && HAS_VOLUME) {
-            // Two subplots: OHLC on top, volume on bottom
+            // Two subplots: Candlestick on top, volume on bottom
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price',
                 domain: [0.3, 1]
@@ -805,13 +806,13 @@ $(function(){
             };
             layout.barmode = 'group';  // Dodge volume bars
         } else {
-            // Single plot: OHLC only
+            // Single plot: Candlestick only
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price'
             };
         }
 
-        Plotly.newPlot('example1_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example1_candlestick', traces, layout, {responsive: true});
     }
 
     // Render faceted mode (one subplot per symbol)
@@ -837,7 +838,7 @@ $(function(){
         symbols.forEach((symbol, idx) => {
             const data = symbolData[symbol];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -858,8 +859,8 @@ $(function(){
             const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
             const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -870,7 +871,7 @@ $(function(){
                 xaxis: xaxis,
                 yaxis: yaxis
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -924,18 +925,18 @@ $(function(){
             });
         });
 
-        Plotly.newPlot('example1_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example1_candlestick', traces, layout, {responsive: true});
     }
 
     // Load and parse CSV data using centralized parser
     loadDataset('stock_data_1').then(function(data) {
         allData = data;
-        window.updateChart_example1_ohlc();
+        window.updateChart_example1_candlestick();
 
         // Setup aspect ratio control after initial render
-        setupAspectRatioControl('example1_ohlc');
+        setupAspectRatioControl('example1_candlestick');
     }).catch(function(error) {
-        console.error('Error loading data for chart example1_ohlc:', error);
+        console.error('Error loading data for chart example1_candlestick:', error);
     });
 })();
 (function() {
@@ -956,21 +957,21 @@ $(function(){
     let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
 
     // Make it global so inline onchange can see it
-    window.updateChart_example2_ohlc = function() {
+    window.updateChart_example2_candlestick = function() {
         // Get current control values
-        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example2_ohlc');
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example2_candlestick');
         const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
 
-        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example2_ohlc');
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example2_candlestick');
         const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
 
-        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example2_ohlc');
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example2_candlestick');
         const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
 
-        const chartTypeSelect = document.getElementById('chart_type_select_example2_ohlc');
+        const chartTypeSelect = document.getElementById('chart_type_select_example2_candlestick');
         const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
 
-        const displayModeSelect = document.getElementById('display_mode_select_example2_ohlc');
+        const displayModeSelect = document.getElementById('display_mode_select_example2_candlestick');
         const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Overlay';
 
         // Get current filter values
@@ -979,7 +980,7 @@ $(function(){
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_example2_ohlc');
+            const select = document.getElementById(col + '_select_example2_candlestick');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
@@ -987,7 +988,7 @@ $(function(){
 
         // Read continuous filters (range sliders)
         CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_example2_ohlc' + '_slider');
+            const slider = $('#' + col + '_range_example2_candlestick' + '_slider');
             if (slider.length > 0) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
@@ -999,7 +1000,7 @@ $(function(){
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
             allData,
-            'example2_ohlc',
+            'example2_candlestick',
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
@@ -1057,7 +1058,7 @@ $(function(){
             const data = symbolData[symbol];
             const color = colorPalette[idx % colorPalette.length];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -1073,8 +1074,8 @@ $(function(){
                 close = close.map(v => v / base);
             }
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -1087,7 +1088,7 @@ $(function(){
                 increasing: {line: {color: color}},
                 decreasing: {line: {color: color}}
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -1121,7 +1122,7 @@ $(function(){
         };
 
         if (showVolume && HAS_VOLUME) {
-            // Two subplots: OHLC on top, volume on bottom
+            // Two subplots: Candlestick on top, volume on bottom
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price',
                 domain: [0.3, 1]
@@ -1133,13 +1134,13 @@ $(function(){
             };
             layout.barmode = 'group';  // Dodge volume bars
         } else {
-            // Single plot: OHLC only
+            // Single plot: Candlestick only
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price'
             };
         }
 
-        Plotly.newPlot('example2_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example2_candlestick', traces, layout, {responsive: true});
     }
 
     // Render faceted mode (one subplot per symbol)
@@ -1165,7 +1166,7 @@ $(function(){
         symbols.forEach((symbol, idx) => {
             const data = symbolData[symbol];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -1186,8 +1187,8 @@ $(function(){
             const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
             const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -1198,7 +1199,7 @@ $(function(){
                 xaxis: xaxis,
                 yaxis: yaxis
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -1252,18 +1253,18 @@ $(function(){
             });
         });
 
-        Plotly.newPlot('example2_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example2_candlestick', traces, layout, {responsive: true});
     }
 
     // Load and parse CSV data using centralized parser
     loadDataset('stock_data_2').then(function(data) {
         allData = data;
-        window.updateChart_example2_ohlc();
+        window.updateChart_example2_candlestick();
 
         // Setup aspect ratio control after initial render
-        setupAspectRatioControl('example2_ohlc');
+        setupAspectRatioControl('example2_candlestick');
     }).catch(function(error) {
-        console.error('Error loading data for chart example2_ohlc:', error);
+        console.error('Error loading data for chart example2_candlestick:', error);
     });
 })();
 (function() {
@@ -1284,21 +1285,21 @@ $(function(){
     let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
 
     // Make it global so inline onchange can see it
-    window.updateChart_example3_ohlc = function() {
+    window.updateChart_example3_candlestick = function() {
         // Get current control values
-        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example3_ohlc');
+        const renormalizeCheckbox = document.getElementById('renormalize_checkbox_example3_candlestick');
         const RENORMALIZE = renormalizeCheckbox ? renormalizeCheckbox.checked : false;
 
-        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example3_ohlc');
+        const showVolumeCheckbox = document.getElementById('show_volume_checkbox_example3_candlestick');
         const SHOW_VOLUME = HAS_VOLUME && showVolumeCheckbox ? showVolumeCheckbox.checked : false;
 
-        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example3_ohlc');
+        const logVolumeCheckbox = document.getElementById('log_volume_checkbox_example3_candlestick');
         const LOG_VOLUME = SHOW_VOLUME && logVolumeCheckbox ? logVolumeCheckbox.checked : false;
 
-        const chartTypeSelect = document.getElementById('chart_type_select_example3_ohlc');
-        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'ohlc';
+        const chartTypeSelect = document.getElementById('chart_type_select_example3_candlestick');
+        const CHART_TYPE = chartTypeSelect ? chartTypeSelect.value : 'candlestick';
 
-        const displayModeSelect = document.getElementById('display_mode_select_example3_ohlc');
+        const displayModeSelect = document.getElementById('display_mode_select_example3_candlestick');
         const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : 'Faceted';
 
         // Get current filter values
@@ -1307,7 +1308,7 @@ $(function(){
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_example3_ohlc');
+            const select = document.getElementById(col + '_select_example3_candlestick');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
@@ -1315,7 +1316,7 @@ $(function(){
 
         // Read continuous filters (range sliders)
         CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_example3_ohlc' + '_slider');
+            const slider = $('#' + col + '_range_example3_candlestick' + '_slider');
             if (slider.length > 0) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
@@ -1327,7 +1328,7 @@ $(function(){
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
             allData,
-            'example3_ohlc',
+            'example3_candlestick',
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
@@ -1385,7 +1386,7 @@ $(function(){
             const data = symbolData[symbol];
             const color = colorPalette[idx % colorPalette.length];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -1401,8 +1402,8 @@ $(function(){
                 close = close.map(v => v / base);
             }
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -1415,7 +1416,7 @@ $(function(){
                 increasing: {line: {color: color}},
                 decreasing: {line: {color: color}}
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -1449,7 +1450,7 @@ $(function(){
         };
 
         if (showVolume && HAS_VOLUME) {
-            // Two subplots: OHLC on top, volume on bottom
+            // Two subplots: Candlestick on top, volume on bottom
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price',
                 domain: [0.3, 1]
@@ -1461,13 +1462,13 @@ $(function(){
             };
             layout.barmode = 'group';  // Dodge volume bars
         } else {
-            // Single plot: OHLC only
+            // Single plot: Candlestick only
             layout.yaxis = {
                 title: renormalize ? 'Normalized Price' : 'Price'
             };
         }
 
-        Plotly.newPlot('example3_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example3_candlestick', traces, layout, {responsive: true});
     }
 
     // Render faceted mode (one subplot per symbol)
@@ -1493,7 +1494,7 @@ $(function(){
         symbols.forEach((symbol, idx) => {
             const data = symbolData[symbol];
 
-            // Prepare OHLC data
+            // Prepare Candlestick data
             const x = data.map(row => row[TIME_FROM_COL]);
             let open = data.map(row => row[OPEN_COL]);
             let high = data.map(row => row[HIGH_COL]);
@@ -1514,8 +1515,8 @@ $(function(){
             const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
             const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
 
-            // OHLC trace
-            const ohlcTrace = {
+            // Candlestick trace
+            const candlestickTrace = {
                 x: x,
                 open: open,
                 high: high,
@@ -1526,7 +1527,7 @@ $(function(){
                 xaxis: xaxis,
                 yaxis: yaxis
             };
-            traces.push(ohlcTrace);
+            traces.push(candlestickTrace);
 
             // Volume trace if enabled
             if (showVolume && HAS_VOLUME) {
@@ -1580,18 +1581,18 @@ $(function(){
             });
         });
 
-        Plotly.newPlot('example3_ohlc', traces, layout, {responsive: true});
+        Plotly.newPlot('example3_candlestick', traces, layout, {responsive: true});
     }
 
     // Load and parse CSV data using centralized parser
     loadDataset('company_data').then(function(data) {
         allData = data;
-        window.updateChart_example3_ohlc();
+        window.updateChart_example3_candlestick();
 
         // Setup aspect ratio control after initial render
-        setupAspectRatioControl('example3_ohlc');
+        setupAspectRatioControl('example3_candlestick');
     }).catch(function(error) {
-        console.error('Error loading data for chart example3_ohlc:', error);
+        console.error('Error loading data for chart example3_candlestick:', error);
     });
 })();
 
@@ -1603,313 +1604,313 @@ $(function(){
 
 <script type="text/plain" id="company_data" data-format="csv_embedded" data-src="">
 quarter,quarter_end,company,open_price,high_price,low_price,close_price
-1,1,CompanyA,70.57713906720171,74.11383017335953,67.07681990675867,70.64729535115742
-2,2,CompanyA,67.39837326512713,69.21304347012243,64.00775303437585,68.53564614159414
-3,3,CompanyA,70.68540097850217,72.35224260185991,68.15033846139632,71.88761706339135
-4,4,CompanyA,67.36898665438241,70.18555720391068,66.77948453994289,68.58988466927336
-5,5,CompanyA,67.20032107043751,68.878862530441,63.6984869110729,68.878862530441
-6,6,CompanyA,68.23287470399642,69.09776681196364,68.03685912610854,68.18179148441597
-7,7,CompanyA,70.64354065079995,72.74348545145652,70.45513777126753,72.74348545145652
-8,8,CompanyA,71.37148106807886,71.9469640036146,71.10964226189448,71.81772028548546
-9,9,CompanyA,73.79711563784821,76.67183379121293,71.37673823592169,74.03841196390424
-10,10,CompanyA,73.73030893273621,76.01944118088593,70.69914822221962,73.28320673405618
-11,11,CompanyA,73.82276120027736,74.68492853621326,73.4352387236073,74.68492853621326
-12,12,CompanyA,70.2001006782791,72.05528943308049,67.91382409585874,69.86342541507156
-1,1,CompanyB,89.37419807834348,90.7963875406394,87.94799827296372,88.16222647703776
-2,2,CompanyB,93.1732599739675,94.12208495931199,89.34584824509471,92.71393397488418
-3,3,CompanyB,93.4212292960167,96.17906630244649,90.33150911686504,93.9258453027385
-4,4,CompanyB,93.33634909806736,94.50974545825855,90.78689315758358,91.61488134762584
-5,5,CompanyB,99.27434807105864,103.1990438597977,98.49821297531362,98.73521114134397
-6,6,CompanyB,107.75167112803224,111.58843492700376,104.09895025597827,107.81908927207975
-7,7,CompanyB,109.0343167717859,112.28347703182598,105.28485306839909,107.96059625183132
-8,8,CompanyB,110.32163809981965,110.91046913715661,109.51171880622701,110.15833530268267
-9,9,CompanyB,106.69298388827983,109.07354045691065,102.79811708949093,107.50772259444723
-10,10,CompanyB,109.47801896490304,110.07473987328873,105.86304201558404,109.18975378045052
-11,11,CompanyB,108.56070664659413,109.29400187642345,107.2426025188761,107.56692082537765
-12,12,CompanyB,105.35826759243014,106.64473546335752,103.38854654675039,106.64473546335752
+1,1,CompanyA,99.68270775544903,101.44405709002477,97.58288946915556,100.2496894695052
+2,2,CompanyA,98.17853638477413,100.53514920045997,96.20109646453767,97.33059898796901
+3,3,CompanyA,95.95583099857298,97.84267554483492,92.87808802939131,97.84267554483492
+4,4,CompanyA,97.55660894505846,101.11072826985522,95.82410095036896,96.3493139939059
+5,5,CompanyA,97.87319180272567,99.22511641387894,95.90956943046177,97.69615049667141
+6,6,CompanyA,102.87697003244774,105.88724179030113,100.90998996010795,101.2831235159966
+7,7,CompanyA,100.45755041151706,102.51048047671318,99.38895923123386,99.38895923123386
+8,8,CompanyA,97.39289788105131,99.25302472163052,97.13578697700174,97.59532388646986
+9,9,CompanyA,96.62085959300524,97.73163352652496,92.77639014890143,96.34703991561888
+10,10,CompanyA,97.597472749957,99.13423795965682,95.28033658171269,97.72986890413404
+11,11,CompanyA,100.24531413427346,102.88885964060135,96.26905456824122,99.35456705436619
+12,12,CompanyA,98.90358158510422,101.50422230131076,96.15374174208229,98.68194053772991
+1,1,CompanyB,55.260399916912604,57.38301578536732,53.515992823417044,57.38301578536732
+2,2,CompanyB,56.39135598836806,58.586889193750864,52.640757001163976,57.699884917034474
+3,3,CompanyB,59.60698283717083,63.04953797063864,55.73027462084163,59.820262682844586
+4,4,CompanyB,59.43779889124641,61.28700807969877,57.90302525800141,59.486734236666734
+5,5,CompanyB,61.16079973151902,62.15382878123083,59.41935032576641,62.15382878123083
+6,6,CompanyB,59.64650460189455,63.34982983028425,56.71132418543879,60.128397804084166
+7,7,CompanyB,57.92097036251544,57.99162103231558,55.13867703701538,57.76889651956201
+8,8,CompanyB,56.755280271392834,58.287353949837104,53.88492371085331,57.27382596682916
+9,9,CompanyB,60.06083827529467,62.48474475038596,58.98007985756877,59.12042324819288
+10,10,CompanyB,54.977640140821975,56.12446840977149,53.22519214862863,54.28923601889961
+11,11,CompanyB,60.42409866839694,60.83227322179855,58.23094134408278,60.1767572702345
+12,12,CompanyB,58.900480683588476,62.63532569804904,58.57004019846796,59.087378515734095
 
 </script><script type="text/plain" id="stock_data_1" data-format="csv_embedded" data-src="">
 time_from,time_to,symbol,open,high,low,close,volume
-2024-01-01,2024-01-01,AAPL,150.6880486905846,151.7044423474569,147.62203352087622,151.7044423474569,3172433
-2024-01-02,2024-01-02,AAPL,148.3587025702914,153.192570771916,147.92203696713855,149.31258992807463,2916993
-2024-01-03,2024-01-03,AAPL,146.48173289436724,155.92009938989287,146.48173289436724,150.24185903096662,4271821
-2024-01-04,2024-01-04,AAPL,148.562073756925,152.29681226080623,148.43412372149342,149.58142531335983,1544010
-2024-01-05,2024-01-05,AAPL,148.58756051021015,151.08030309574488,148.58756051021015,149.89961166784175,3626356
-2024-01-06,2024-01-06,AAPL,148.36866143521434,153.3881421744949,148.36866143521434,149.6271245550767,4149431
-2024-01-07,2024-01-07,AAPL,149.85560872535024,155.85429062289876,149.67135099142018,151.57730891402247,3284221
-2024-01-08,2024-01-08,AAPL,149.88814384588485,158.75602425724534,149.88814384588485,152.76603393076655,4691906
-2024-01-09,2024-01-09,AAPL,149.65967330164432,155.4592367447598,149.1095113214501,152.53618853157582,2161805
-2024-01-10,2024-01-10,AAPL,150.34524110084965,154.62606993652406,147.77438445915345,152.58792293829828,3783273
-2024-01-11,2024-01-11,AAPL,150.87645369952267,155.49396379057563,149.6761942155988,154.89931081539598,1801070
-2024-01-12,2024-01-12,AAPL,150.34064204264004,158.1023755234356,144.85495304131652,153.62141355248625,2078251
-2024-01-13,2024-01-13,AAPL,149.5948313814343,158.18531527114965,143.71282981649,152.50112167232666,4044558
-2024-01-14,2024-01-14,AAPL,149.03262368699208,156.31238510619085,147.0247812431974,149.6958210540872,1557843
-2024-01-15,2024-01-15,AAPL,145.9895613409027,155.81313101492813,145.9895613409027,152.21809758047723,2172311
-2024-01-16,2024-01-16,AAPL,144.07670584728407,161.19261271493946,144.07670584728407,151.93776656872836,3342002
-2024-01-17,2024-01-17,AAPL,143.8187384246197,157.10052670377434,143.8187384246197,151.64552639205397,1024022
-2024-01-18,2024-01-18,AAPL,145.06688623164223,157.44117451384597,145.06688623164223,154.52486087859955,2235650
-2024-01-19,2024-01-19,AAPL,144.31450909483522,158.20002634371878,144.31450909483522,153.0710394790857,3035614
-2024-01-20,2024-01-20,AAPL,143.1558475053155,156.60091545067166,143.1558475053155,151.70682961137206,4084622
-2024-01-21,2024-01-21,AAPL,141.84606072343536,156.6795892347604,141.84606072343536,153.6670677729023,3526285
-2024-01-22,2024-01-22,AAPL,142.23423932817923,156.99646097094222,142.23423932817923,154.16201976579518,3237383
-2024-01-23,2024-01-23,AAPL,143.49160568824678,157.0840193384874,143.49160568824678,157.0840193384874,2939487
-2024-01-24,2024-01-24,AAPL,143.30042699530102,158.02128136803157,143.30042699530102,154.2646105034415,2613280
-2024-01-25,2024-01-25,AAPL,143.97741009888387,158.7779721403743,143.97741009888387,158.7779721403743,1774296
-2024-01-26,2024-01-26,AAPL,144.48137220732482,158.98346697155714,144.48137220732482,158.98346697155714,2211120
-2024-01-27,2024-01-27,AAPL,144.17942980833095,156.53464857487182,144.17942980833095,156.53464857487182,3311183
-2024-01-28,2024-01-28,AAPL,145.49991738869772,157.9034363223186,145.49991738869772,157.9034363223186,3842589
-2024-01-29,2024-01-29,AAPL,144.12159062274745,158.0509605835132,144.12159062274745,158.0509605835132,3351675
-2024-01-30,2024-01-30,AAPL,144.38465839135762,159.38983101807253,144.38465839135762,159.38983101807253,4135095
-2024-01-31,2024-01-31,AAPL,145.73729073190475,158.61881323626014,145.73729073190475,158.61881323626014,3511132
-2024-02-01,2024-02-01,AAPL,145.35888249904187,157.33812407178672,145.35888249904187,157.33812407178672,2175318
-2024-02-02,2024-02-02,AAPL,145.8064348116729,156.30590437322505,145.8064348116729,156.30590437322505,1918164
-2024-02-03,2024-02-03,AAPL,146.0909141678962,157.03919229349086,145.82482739765155,157.03919229349086,2680462
-2024-02-04,2024-02-04,AAPL,146.44032614899308,155.5659781578899,146.44032614899308,155.5659781578899,4282679
-2024-02-05,2024-02-05,AAPL,146.62386431252327,157.42034682366497,146.62386431252327,157.42034682366497,1224256
-2024-02-06,2024-02-06,AAPL,146.55305830794634,156.27705149107518,146.41470954145677,156.27705149107518,3328639
-2024-02-07,2024-02-07,AAPL,148.46084107828702,157.08715867667829,147.2794930930256,157.08715867667829,2826149
-2024-02-08,2024-02-08,AAPL,147.8398274245748,157.65492449630287,147.8398274245748,157.65492449630287,4230375
-2024-02-09,2024-02-09,AAPL,147.7609085008368,155.431138343954,142.92924932797646,155.431138343954,3629464
-2024-02-10,2024-02-10,AAPL,148.47741386751053,156.6873388953241,142.42120380682292,156.6873388953241,2419365
-2024-02-11,2024-02-11,AAPL,150.55728187063394,156.7735890088047,144.52043121790072,156.7735890088047,3562536
-2024-02-12,2024-02-12,AAPL,150.85487922205053,157.90646441180073,142.00500390077593,157.90646441180073,4863130
-2024-02-13,2024-02-13,AAPL,149.55157028729852,157.99992788065447,144.2742361923322,157.99992788065447,3854002
-2024-02-14,2024-02-14,AAPL,150.14971554985115,158.49569181363654,142.20843783333075,155.5567975874665,3762531
-2024-02-15,2024-02-15,AAPL,149.69302982098176,159.5142504687272,144.57841501505965,156.12665980758564,1127972
-2024-02-16,2024-02-16,AAPL,149.91032720980425,156.1339816504178,141.76961622729613,156.1339816504178,2115164
-2024-02-17,2024-02-17,AAPL,150.25513346212992,156.03521989562347,144.67028437351067,156.03521989562347,2011720
-2024-02-18,2024-02-18,AAPL,149.7195110722958,157.74859029252042,145.25810266768104,157.74859029252042,1956227
-2024-02-19,2024-02-19,AAPL,151.15909220007444,157.9649329153309,141.53622536270683,157.9649329153309,1530663
-2024-02-20,2024-02-20,AAPL,151.63495165298735,157.498171258285,141.6569512895134,156.1974771371655,4661281
-2024-02-21,2024-02-21,AAPL,151.4642390059231,157.63822778602784,141.98267237155483,157.63822778602784,3656437
-2024-02-22,2024-02-22,AAPL,150.14650530533058,160.34435676563615,142.07992300828053,160.34435676563615,2462620
-2024-02-23,2024-02-23,AAPL,151.77609672331303,159.93616845236423,143.15513451912372,158.2422344950253,3193885
-2024-02-24,2024-02-24,AAPL,153.2581587050957,159.36693486119756,141.1212726226141,159.36693486119756,2378988
-2024-02-25,2024-02-25,AAPL,154.1361789923193,158.84977721472225,143.08097260194006,158.84977721472225,3503895
-2024-02-26,2024-02-26,AAPL,155.24784718742046,158.4407877156528,143.55651235152544,158.4407877156528,4164676
-2024-02-27,2024-02-27,AAPL,155.6766502538516,158.37442997565861,140.1638318896669,158.37442997565861,3350673
-2024-02-28,2024-02-28,AAPL,154.92130650447857,156.40261780153608,142.6875102004795,156.40261780153608,2402708
-2024-02-29,2024-02-29,AAPL,155.13716916258628,159.02365617973214,145.43085774288386,159.02365617973214,1050945
-2024-03-01,2024-03-01,AAPL,153.63486979955516,161.41080065917188,141.3092621995964,161.41080065917188,4798361
-2024-03-02,2024-03-02,AAPL,153.9460018851803,160.0844075344127,143.5973436645206,160.0844075344127,2067531
-2024-03-03,2024-03-03,AAPL,152.97815581382645,158.19274167435705,147.7913117497814,158.19274167435705,3964237
-2024-03-04,2024-03-04,AAPL,152.2259328893061,157.81317815157604,144.8484647791664,157.81317815157604,4905725
-2024-03-05,2024-03-05,AAPL,151.15450578265595,156.55187680768364,143.72526717678474,156.2736416588296,2721632
-2024-03-06,2024-03-06,AAPL,149.76463551671026,157.50271377014033,145.86906245157007,155.88570882837075,3508061
-2024-03-07,2024-03-07,AAPL,150.97066866853189,156.09314887583682,146.18199155997306,154.57531321962966,2985913
-2024-03-08,2024-03-08,AAPL,150.31988081115145,159.47240341713524,148.59615160556106,158.40724938737654,2856834
-2024-03-09,2024-03-09,AAPL,150.09464232155793,158.25885588270498,144.8032760221997,155.32248057249956,2387717
-2024-03-10,2024-03-10,AAPL,147.33022027881702,156.45006437366598,146.9282358885345,154.42097619835764,2019620
-2024-03-11,2024-03-11,AAPL,147.0744462947897,159.03615634140766,144.57071222271892,153.56352980495984,4333935
-2024-03-12,2024-03-12,AAPL,146.3432017524016,156.25768415597207,144.86815520610196,153.4195883243951,2387262
-2024-03-13,2024-03-13,AAPL,146.80317211950117,155.47162585433304,145.43001529916094,151.27091820021704,1838702
-2024-03-14,2024-03-14,AAPL,147.31952210393356,156.42354018736657,147.31952210393356,152.3567371370511,4416548
-2024-03-15,2024-03-15,AAPL,149.02097727760344,159.29788993924035,145.8243287465355,151.6800900391236,1063322
-2024-03-16,2024-03-16,AAPL,148.88046268316305,159.42279904489706,146.6778316730976,151.19700673686114,2637840
-2024-03-17,2024-03-17,AAPL,149.5885642027224,152.73683452764138,143.2075987557492,150.95492081195368,2062519
-2024-03-18,2024-03-18,AAPL,149.05555879360992,152.84326961510297,145.00877644016555,149.9419841534122,4115333
-2024-03-19,2024-03-19,AAPL,149.52350623080918,157.41715656071142,145.93971456060447,151.2806464302232,3381325
-2024-03-20,2024-03-20,AAPL,148.36754239601467,157.9269966600903,144.89182867128287,150.14340556366744,2507073
-2024-03-21,2024-03-21,AAPL,147.8057837969554,160.18051448978622,145.12152702021044,150.94556481758377,4941630
-2024-03-22,2024-03-22,AAPL,147.45972790682154,159.30140546537018,141.92443242720287,149.72466059919074,2610753
-2024-03-23,2024-03-23,AAPL,146.38328830689923,160.6726741351602,144.93698442063186,151.82676938701664,4160602
-2024-03-24,2024-03-24,AAPL,147.66462835415084,157.60465085637216,144.86358084151746,150.1400142274982,2622932
-2024-03-25,2024-03-25,AAPL,148.18618314477806,160.30324542393245,148.18618314477806,152.19065403368128,2705279
-2024-03-26,2024-03-26,AAPL,148.51848993594456,157.97258139104827,145.3734925693308,150.36545487502266,2517570
-2024-03-27,2024-03-27,AAPL,147.9404336838701,159.0817964410418,147.3869792405035,149.25257580576667,3132949
-2024-03-28,2024-03-28,AAPL,148.03221985216513,155.7492382469569,143.25553384411353,146.94831803513537,2472354
-2024-03-29,2024-03-29,AAPL,149.96582629134446,156.85735326720533,145.34027069419324,150.3000728492327,2425931
-2024-03-30,2024-03-30,AAPL,150.11803860799932,157.84991991932972,143.78839316126437,152.57089315679954,2661938
-2024-03-31,2024-03-31,AAPL,149.19463425226644,158.18080805503095,145.9589509324482,149.9624703526958,1440924
+2024-01-01,2024-01-01,AAPL,149.68027865288838,151.98943640010577,148.57735772351148,151.98943640010577,4949251
+2024-01-02,2024-01-02,AAPL,150.57242565821673,151.0198821419656,146.2102930068811,149.90318480053043,1769998
+2024-01-03,2024-01-03,AAPL,151.40245666080875,151.40245666080875,146.95252759031243,149.46155338603313,4747257
+2024-01-04,2024-01-04,AAPL,150.16911135190688,150.16911135190688,147.863712531988,149.8001617603186,1800343
+2024-01-05,2024-01-05,AAPL,149.26679593642598,152.68749010117045,146.2851843528816,149.68858100838582,1715267
+2024-01-06,2024-01-06,AAPL,148.50625977177938,149.79891859180444,148.50625977177938,149.51446194506988,1168403
+2024-01-07,2024-01-07,AAPL,148.9696651987457,149.67699032060466,146.14723533471482,147.66720631707423,4406170
+2024-01-08,2024-01-08,AAPL,149.41043536390956,150.1980965414699,147.833036993434,150.1980965414699,4524129
+2024-01-09,2024-01-09,AAPL,149.76270231361482,150.54202043744638,148.89786965434485,150.54202043744638,3698401
+2024-01-10,2024-01-10,AAPL,147.60312194095448,151.40362868520043,147.10571921120905,151.40362868520043,3643037
+2024-01-11,2024-01-11,AAPL,148.02451553054442,150.02060491055173,148.02451553054442,150.02060491055173,1134058
+2024-01-12,2024-01-12,AAPL,146.44313943336354,150.72736834009248,146.44313943336354,149.7150975526181,4276102
+2024-01-13,2024-01-13,AAPL,148.29266644746272,153.44745285202342,147.65205278118543,153.44745285202342,1462523
+2024-01-14,2024-01-14,AAPL,147.7343871988877,150.74292124013937,146.49744921442368,149.20844967044215,3439043
+2024-01-15,2024-01-15,AAPL,148.2340325042408,150.27311317356438,145.5604015937255,148.38802253309225,3840720
+2024-01-16,2024-01-16,AAPL,148.18057202023084,150.43279724407716,146.020148098266,150.43279724407716,3813673
+2024-01-17,2024-01-17,AAPL,147.44526224003627,149.75164504570083,147.44526224003627,149.72553256335877,1232182
+2024-01-18,2024-01-18,AAPL,148.94637689709592,151.61457918475483,147.24472231498322,147.36881306675025,2190627
+2024-01-19,2024-01-19,AAPL,149.09504842964373,149.10439852847358,145.67479125322978,148.9603090835168,3294928
+2024-01-20,2024-01-20,AAPL,147.96754479866985,149.7467110881965,147.02221780040466,147.4724581766133,1996257
+2024-01-21,2024-01-21,AAPL,146.93291211153544,153.22547484215798,146.93291211153544,147.27802767446482,2690989
+2024-01-22,2024-01-22,AAPL,147.2616118778143,152.76724574909034,145.90108956568812,147.74679352437045,4374027
+2024-01-23,2024-01-23,AAPL,149.0021679703987,149.0021679703987,146.01036617541345,146.01036617541345,1775652
+2024-01-24,2024-01-24,AAPL,147.37376959086012,149.74707340140205,142.94128566812424,149.74707340140205,3023963
+2024-01-25,2024-01-25,AAPL,147.40651265337263,149.6016986786606,147.40651265337263,149.6016986786606,1807595
+2024-01-26,2024-01-26,AAPL,148.07716844182346,151.43486728577247,147.24861949409234,151.43486728577247,1999735
+2024-01-27,2024-01-27,AAPL,146.56042378460108,150.6279957611553,144.8883626945096,150.6279957611553,4679082
+2024-01-28,2024-01-28,AAPL,146.1166217584491,150.18373826371294,144.65859006107058,150.18373826371294,1134729
+2024-01-29,2024-01-29,AAPL,145.73549598524008,148.66594323792359,145.73549598524008,148.66594323792359,2556691
+2024-01-30,2024-01-30,AAPL,146.62876513569577,149.46858927882568,146.62876513569577,149.46858927882568,2764704
+2024-01-31,2024-01-31,AAPL,147.63654877081314,149.7530269894179,143.5651124034285,149.7530269894179,3392908
+2024-02-01,2024-02-01,AAPL,147.09466324936275,151.75600903845324,143.24459165677197,151.75600903845324,3174207
+2024-02-02,2024-02-02,AAPL,147.68748494601888,149.22715614232717,143.07325802745828,149.22715614232717,1192168
+2024-02-03,2024-02-03,AAPL,146.57580536674027,150.2759597753813,143.683858787641,150.2759597753813,4608932
+2024-02-04,2024-02-04,AAPL,145.91479691635715,145.91479691635715,144.51818852910247,145.30930039344773,4265785
+2024-02-05,2024-02-05,AAPL,143.88580039528554,147.2276659733991,141.933249497337,147.2276659733991,2041381
+2024-02-06,2024-02-06,AAPL,142.0054995459335,149.91432559818963,142.0054995459335,149.91432559818963,1470121
+2024-02-07,2024-02-07,AAPL,139.89943287608423,149.38116744478464,139.89943287608423,149.38116744478464,4867610
+2024-02-08,2024-02-08,AAPL,139.4877818458523,150.40795564530163,139.4877818458523,150.40795564530163,2311391
+2024-02-09,2024-02-09,AAPL,138.38180869987315,152.02532011974267,138.38180869987315,152.02532011974267,3573383
+2024-02-10,2024-02-10,AAPL,138.01225413199765,151.39587276614722,138.01225413199765,151.39587276614722,4011422
+2024-02-11,2024-02-11,AAPL,137.6301317257314,151.01236171027216,137.6301317257314,151.01236171027216,4891854
+2024-02-12,2024-02-12,AAPL,137.28774583142038,155.35279639569814,137.28774583142038,155.35279639569814,3373996
+2024-02-13,2024-02-13,AAPL,137.95167313843243,156.08299424685598,137.95167313843243,156.08299424685598,4344887
+2024-02-14,2024-02-14,AAPL,137.99066758505793,153.43073421068112,137.99066758505793,153.43073421068112,2117771
+2024-02-15,2024-02-15,AAPL,136.356805271641,152.5949649412924,136.356805271641,152.5949649412924,1419803
+2024-02-16,2024-02-16,AAPL,138.06988559153987,153.2632089891365,138.06988559153987,153.2632089891365,1372966
+2024-02-17,2024-02-17,AAPL,139.06632540240068,154.26174588639577,139.06632540240068,154.26174588639577,1775944
+2024-02-18,2024-02-18,AAPL,138.23382540146676,152.78819557217676,138.23382540146676,152.78819557217676,3435119
+2024-02-19,2024-02-19,AAPL,137.76463885356182,152.47713200872784,137.76463885356182,152.47713200872784,2469669
+2024-02-20,2024-02-20,AAPL,136.54097909517824,155.61367821651743,136.54097909517824,155.61367821651743,1247446
+2024-02-21,2024-02-21,AAPL,137.05790960116607,155.445847579696,137.05790960116607,155.445847579696,4946189
+2024-02-22,2024-02-22,AAPL,136.403502842035,154.00914949262884,136.403502842035,154.00914949262884,4468458
+2024-02-23,2024-02-23,AAPL,136.76800599978037,155.691651155095,136.76800599978037,155.691651155095,2689078
+2024-02-24,2024-02-24,AAPL,138.26510386256817,153.60889710728415,138.26510386256817,153.60889710728415,3075918
+2024-02-25,2024-02-25,AAPL,137.6386589376465,151.64967444276084,137.6386589376465,151.64967444276084,1054850
+2024-02-26,2024-02-26,AAPL,137.8917118826675,154.98808877470626,137.8917118826675,154.98808877470626,4156508
+2024-02-27,2024-02-27,AAPL,135.4949865422964,153.34888385936833,135.4949865422964,153.34888385936833,2762836
+2024-02-28,2024-02-28,AAPL,134.97403180328743,154.0241064545905,134.97403180328743,154.0241064545905,2719580
+2024-02-29,2024-02-29,AAPL,137.26133124403782,154.84282089419244,137.26133124403782,154.84282089419244,1754631
+2024-03-01,2024-03-01,AAPL,139.723731621768,156.93583045113846,139.723731621768,156.93583045113846,3413385
+2024-03-02,2024-03-02,AAPL,139.95389468740808,156.9391986125657,139.95389468740808,156.9391986125657,2452327
+2024-03-03,2024-03-03,AAPL,140.5675364570195,155.8609983628178,140.5675364570195,155.8609983628178,4321758
+2024-03-04,2024-03-04,AAPL,139.80712611793388,157.36651930825886,139.80712611793388,157.36651930825886,4134317
+2024-03-05,2024-03-05,AAPL,139.4713453102683,155.99207179791236,139.4713453102683,155.99207179791236,1855809
+2024-03-06,2024-03-06,AAPL,140.03490887179078,156.37718945360245,140.03490887179078,156.37718945360245,2277812
+2024-03-07,2024-03-07,AAPL,140.07877434058184,156.5138857855509,140.07877434058184,156.5138857855509,4818457
+2024-03-08,2024-03-08,AAPL,141.73553086332961,153.96419044916266,141.73553086332961,153.96419044916266,1536166
+2024-03-09,2024-03-09,AAPL,139.8849611347028,153.51701554239844,139.8849611347028,153.51701554239844,3566205
+2024-03-10,2024-03-10,AAPL,140.1144869573937,153.44263353136296,140.1144869573937,153.44263353136296,4306865
+2024-03-11,2024-03-11,AAPL,139.5092137630282,155.88299375818087,139.5092137630282,155.88299375818087,1579613
+2024-03-12,2024-03-12,AAPL,139.3937060626163,156.83972597973346,139.3937060626163,156.83972597973346,4160221
+2024-03-13,2024-03-13,AAPL,140.55828287632096,156.62316832682484,140.55828287632096,156.62316832682484,2308537
+2024-03-14,2024-03-14,AAPL,141.36554342955878,155.8258755058679,141.36554342955878,155.8258755058679,1867353
+2024-03-15,2024-03-15,AAPL,142.50083622671588,157.7878552823773,142.50083622671588,157.7878552823773,4722064
+2024-03-16,2024-03-16,AAPL,143.14635002991858,157.1319375749034,143.14635002991858,157.1319375749034,1652596
+2024-03-17,2024-03-17,AAPL,144.58058378895572,158.96952439587383,143.80540236313817,158.96952439587383,2568254
+2024-03-18,2024-03-18,AAPL,145.76852397508725,156.69253572413584,144.31689794287334,156.69253572413584,3350788
+2024-03-19,2024-03-19,AAPL,146.09503990100012,160.5807756618136,144.05244842471177,160.5807756618136,3900213
+2024-03-20,2024-03-20,AAPL,146.70990406462363,157.71995866881053,143.83140151684077,157.71995866881053,4121656
+2024-03-21,2024-03-21,AAPL,147.4125931567818,157.87697972879886,143.54599868230233,157.87697972879886,3484275
+2024-03-22,2024-03-22,AAPL,145.5212549676327,156.7430778830267,143.9357827614166,156.7430778830267,1899288
+2024-03-23,2024-03-23,AAPL,145.8300643003227,158.08519784552826,140.3037961046326,158.08519784552826,1346603
+2024-03-24,2024-03-24,AAPL,146.9187569702636,160.0997799156381,140.33885102762977,160.0997799156381,1720579
+2024-03-25,2024-03-25,AAPL,147.3608333824168,158.15238941676301,141.1944726082568,158.15238941676301,4076283
+2024-03-26,2024-03-26,AAPL,147.7043816590954,159.9194899762885,140.79320806306941,159.9194899762885,3024456
+2024-03-27,2024-03-27,AAPL,146.81436756328083,158.25038147152637,139.75710356893939,158.25038147152637,4724274
+2024-03-28,2024-03-28,AAPL,146.12236819836315,160.17821581005518,138.6761391057209,160.17821581005518,2423173
+2024-03-29,2024-03-29,AAPL,144.93300604349497,157.97941838289879,142.40091879750335,157.97941838289879,1274545
+2024-03-30,2024-03-30,AAPL,143.79149203965292,158.71264907483535,143.79149203965292,158.71264907483535,2649621
+2024-03-31,2024-03-31,AAPL,144.38430785354117,158.77029069095377,144.38430785354117,158.77029069095377,2563250
 
 </script><script type="text/plain" id="stock_data_2" data-format="csv_embedded" data-src="">
 time_from,time_to,symbol,open,high,low,close,volume
-2024-01-01,2024-01-01,AAPL,152.586253712334,156.66941816730238,150.7631227531415,152.3576716432497,1185182
-2024-01-02,2024-01-02,AAPL,155.48605042170655,158.72251572224755,154.14344274680968,154.1685259778055,3282764
-2024-01-03,2024-01-03,AAPL,155.27191563500207,156.56225684555383,153.94099440923995,156.56225684555383,1933138
-2024-01-04,2024-01-04,AAPL,150.49178718465487,153.4715298536189,149.83649776649736,149.83649776649736,4471230
-2024-01-05,2024-01-05,AAPL,153.10207067939405,155.78742144484954,152.12863618918618,155.78742144484954,1552462
-2024-01-06,2024-01-06,AAPL,154.1262253264436,154.24075077038438,150.29540057282273,152.27366896864538,4657244
-2024-01-07,2024-01-07,AAPL,153.69989620655483,157.16350984869803,153.2277800017024,153.2277800017024,4862496
-2024-01-08,2024-01-08,AAPL,154.4617911913311,157.06113919502081,153.41522201863722,155.01071642322836,1007537
-2024-01-09,2024-01-09,AAPL,157.4835445668086,159.83815446261372,154.643374837798,159.83815446261372,1077277
-2024-01-10,2024-01-10,AAPL,155.2005028660041,158.58754130769336,151.28585009594218,155.36333677766956,3241754
-2024-01-11,2024-01-11,AAPL,155.18665126118185,157.6680233437454,154.1451265817866,155.57639384923726,3055702
-2024-01-12,2024-01-12,AAPL,152.19898079404902,154.73040882160956,147.8360040807107,153.51328958518016,3672594
-2024-01-13,2024-01-13,AAPL,151.70760363241317,155.79319652478344,146.78679479900126,150.35280763050434,4865320
-2024-01-14,2024-01-14,AAPL,150.60797031382785,151.81831186772493,148.2988326889715,148.48707182882418,4145391
-2024-01-15,2024-01-15,AAPL,148.84483088493175,150.90972164693974,144.31650950585833,148.47085664482526,1941393
-2024-01-16,2024-01-16,AAPL,150.9584050677142,152.65852039791113,150.04013289965695,151.59206486558287,2049730
-2024-01-17,2024-01-17,AAPL,149.94423901960783,154.7227577328083,147.9246951320874,150.9271094317614,4924633
-2024-01-18,2024-01-18,AAPL,151.29018698852744,155.21334851372836,146.59507460753048,150.84901610854973,4253556
-2024-01-19,2024-01-19,AAPL,152.6165060762533,153.89193665716806,150.38392568119997,153.89193665716806,2015175
-2024-01-20,2024-01-20,AAPL,153.82032421770006,156.5626054721954,152.5852807141352,153.50364858795191,4400125
-2024-01-21,2024-01-21,AAPL,153.3042725720135,156.42307983648783,151.64877247453563,154.09990523718037,4019212
-2024-01-22,2024-01-22,AAPL,154.7470788579481,159.41009152810344,151.86652308864475,154.79169738207304,3411681
-2024-01-23,2024-01-23,AAPL,152.72276965617257,156.15376680175194,151.4441167240915,151.4441167240915,1446367
-2024-01-24,2024-01-24,AAPL,152.47755335582096,153.84496861670698,148.56893948928735,153.2248019556155,4628809
-2024-01-25,2024-01-25,AAPL,152.47272854205872,152.98325762747388,149.68071544447108,152.64631476595304,3864778
-2024-01-26,2024-01-26,AAPL,153.61474111687406,156.83785896985285,150.71868201779031,152.03913938585978,4274437
-2024-01-27,2024-01-27,AAPL,157.25396598869068,161.61543208557322,154.33213814932725,156.44428019063696,3049975
-2024-01-28,2024-01-28,AAPL,156.23257747365483,158.55472596378286,152.20759180789744,154.2719863566628,1989617
-2024-01-29,2024-01-29,AAPL,155.30893236434093,159.74794491333552,153.7843005525064,154.52849803369205,4878879
-2024-01-30,2024-01-30,AAPL,155.25072959407984,159.1866625419872,151.63153928778232,156.2509839520693,1160351
-2024-01-31,2024-01-31,AAPL,154.6972620205068,157.92582511597857,153.3761773009189,154.80601838057265,3108430
-2024-02-01,2024-02-01,AAPL,157.41647747506133,159.9950570032029,157.37455091894583,158.21676608634283,1499533
-2024-02-02,2024-02-02,AAPL,159.21206419813288,162.2209170860047,159.06720430308562,159.4883028150598,1935902
-2024-02-03,2024-02-03,AAPL,160.10637644248465,161.36185064808487,155.9030353862668,161.2256390677872,1340306
-2024-02-04,2024-02-04,AAPL,159.68321977859537,160.4447620159319,154.70016228459824,160.4447620159319,3052082
-2024-02-05,2024-02-05,AAPL,157.95170972340287,158.85362789822392,153.23294147887765,158.83438353087527,2837126
-2024-02-06,2024-02-06,AAPL,157.59611955136924,160.6047870683106,153.08479109154067,156.36737845269639,4871873
-2024-02-07,2024-02-07,AAPL,157.47770279704227,161.70307037515934,156.2557477740967,157.96499132539319,4912755
-2024-02-08,2024-02-08,AAPL,154.42568390730423,154.74559299525328,151.04028131160254,154.20304965999904,3553546
-2024-02-09,2024-02-09,AAPL,155.38954553232057,158.28135493590338,153.24942816813513,156.10970400060023,3192874
-2024-02-10,2024-02-10,AAPL,155.8509790156357,156.4692251576963,153.4883308783096,155.78910520689982,4873778
-2024-02-11,2024-02-11,AAPL,154.05497268203897,157.75063238300064,149.53254823911465,154.41676607335265,2272779
-2024-02-12,2024-02-12,AAPL,152.75693210622828,154.4647837405563,147.87723111521063,151.87175993985588,3103943
-2024-02-13,2024-02-13,AAPL,151.51679574816856,154.18181495288835,150.01613497583654,150.87075737308845,4328969
-2024-02-14,2024-02-14,AAPL,148.93983701034472,150.58319243740723,146.22253759442202,148.3841634003185,3844583
-2024-02-15,2024-02-15,AAPL,150.01797245176937,152.28760875016656,146.8994424986232,150.8041771246569,4793265
-2024-02-16,2024-02-16,AAPL,151.03812166969615,152.02083501316636,149.58012417335632,149.58012417335632,3465439
-2024-02-17,2024-02-17,AAPL,155.45003460665708,156.19786680382748,151.05485902417425,154.74738931353676,4675942
-2024-02-18,2024-02-18,AAPL,154.27536250284854,158.17850155477396,149.27983101335013,154.71643855393384,1592295
-2024-02-19,2024-02-19,AAPL,152.5926349415167,153.05482264018417,151.31585450166833,152.476601787396,2056564
-2024-02-20,2024-02-20,AAPL,153.0851416403329,154.61566704864123,152.63881034593655,153.52498994461232,2589687
-2024-02-21,2024-02-21,AAPL,153.14088880036695,153.448557501835,150.47627359228466,152.19032224095946,1014004
-2024-02-22,2024-02-22,AAPL,154.62039725461162,156.08936642649928,153.87009782440674,153.87009782440674,2179429
-2024-02-23,2024-02-23,AAPL,154.5525279850602,156.88564986255767,154.05602541947914,154.32819788016846,2185223
-2024-02-24,2024-02-24,AAPL,151.70476577639997,154.59333331150668,148.51741595118767,152.33494986968486,4297757
-2024-02-25,2024-02-25,AAPL,148.3275466746012,152.97550879159004,146.38449563929478,147.59468626303982,3115469
-2024-02-26,2024-02-26,AAPL,147.88780058004713,148.55974964574511,146.96679337826356,147.11294935661485,3473536
-2024-02-27,2024-02-27,AAPL,149.17755465993886,150.24967260290572,147.45360152986328,150.24967260290572,1485028
-2024-02-28,2024-02-28,AAPL,151.69705647908953,153.9634682229346,149.0188793158943,151.48650960505918,2062585
-2024-02-29,2024-02-29,AAPL,150.89039085430423,155.19138588537484,148.7634946209188,151.53984164776068,3504403
-2024-01-01,2024-01-01,GOOGL,2802.0187306756256,2803.175814177291,2800.798034160481,2802.1870530410047,3106078
-2024-01-02,2024-01-02,GOOGL,2798.5283203699864,2801.623084261206,2794.221168580762,2798.229061146132,1952914
-2024-01-03,2024-01-03,GOOGL,2799.753966816561,2800.2357195634504,2797.505065468963,2800.2357195634504,3551491
-2024-01-04,2024-01-04,GOOGL,2801.078600089726,2804.857583215896,2799.3369930719277,2802.46029774489,4307827
-2024-01-05,2024-01-05,GOOGL,2800.523063052108,2802.983465380718,2796.9445729109602,2801.4672342022955,1487342
-2024-01-06,2024-01-06,GOOGL,2801.9813349219385,2803.0291309961453,2800.031872727786,2801.569761144873,1419270
-2024-01-07,2024-01-07,GOOGL,2800.3510792686493,2803.0875318664635,2798.7671717085054,2800.5342348489326,4668672
-2024-01-08,2024-01-08,GOOGL,2797.6530127491296,2802.1029055222584,2796.315766254959,2798.7446727771353,3048782
-2024-01-09,2024-01-09,GOOGL,2799.2326662714045,2800.2835711692937,2796.535843017421,2798.160020064905,2837534
-2024-01-10,2024-01-10,GOOGL,2798.0837181616503,2802.2191282015306,2796.6413905875165,2796.6413905875165,3337159
-2024-01-11,2024-01-11,GOOGL,2794.9480942183336,2797.710338463411,2791.275499843483,2797.710338463411,4508542
-2024-01-12,2024-01-12,GOOGL,2794.520518418721,2799.164760751538,2789.7496634652816,2794.4794760552245,3057668
-2024-01-13,2024-01-13,GOOGL,2796.901604987611,2798.8570074716395,2792.0197669944605,2796.4871473138637,4974698
-2024-01-14,2024-01-14,GOOGL,2796.3215597417493,2797.5509956440374,2794.8479932546406,2794.8479932546406,3013857
-2024-01-15,2024-01-15,GOOGL,2797.1312925561087,2799.6218876687503,2792.9985332119154,2795.4545460795543,4780903
-2024-01-16,2024-01-16,GOOGL,2796.5248815760765,2801.116860396883,2795.135471615185,2795.135471615185,4580191
-2024-01-17,2024-01-17,GOOGL,2795.5293494787693,2797.6895091868105,2791.526592880336,2797.2981833997123,2706182
-2024-01-18,2024-01-18,GOOGL,2799.2272249996554,2800.561739410711,2797.9870156065012,2798.6367171256065,4969632
-2024-01-19,2024-01-19,GOOGL,2796.796267380701,2799.262143916214,2795.066561896375,2796.0785137461144,2974438
-2024-01-20,2024-01-20,GOOGL,2798.751911196345,2802.7651643754048,2796.1823623001897,2799.721421983958,3013938
-2024-01-21,2024-01-21,GOOGL,2798.75037041228,2803.0511218922356,2796.0580321350676,2800.406502450455,4228691
-2024-01-22,2024-01-22,GOOGL,2800.719223322182,2800.725920015375,2797.4264228379375,2800.5496283067373,1457809
-2024-01-23,2024-01-23,GOOGL,2800.1702115479266,2805.003695395483,2796.7482840856846,2800.5576016300156,3690237
-2024-01-24,2024-01-24,GOOGL,2800.3535781405653,2802.7512920237664,2800.0658095747463,2801.2573885108636,4401677
-2024-01-25,2024-01-25,GOOGL,2798.758490852787,2801.520292736296,2795.7423264407066,2798.194232002558,1010661
-2024-01-26,2024-01-26,GOOGL,2798.4924639020646,2801.7737704655347,2798.243860251219,2798.682030813479,3545930
-2024-01-27,2024-01-27,GOOGL,2795.935060137269,2797.2069475983044,2794.8546442235606,2795.7249165194135,4597170
-2024-01-28,2024-01-28,GOOGL,2797.98570227863,2799.618832970489,2795.5954207840887,2799.618832970489,2295517
-2024-01-29,2024-01-29,GOOGL,2798.0522560962618,2802.0664110521334,2795.9768176920584,2795.9768176920584,4992365
-2024-01-30,2024-01-30,GOOGL,2799.3717771845163,2800.0775111686226,2796.7375145906826,2799.4648291911585,4492822
-2024-01-31,2024-01-31,GOOGL,2798.267054722144,2802.7756055364625,2796.5894699912196,2796.5894699912196,2964110
-2024-02-01,2024-02-01,GOOGL,2796.912105355227,2797.9741838547257,2794.751441438937,2796.0637699909844,4002622
-2024-02-02,2024-02-02,GOOGL,2798.002463259693,2800.9791939052334,2793.9373691170417,2796.0444409207894,2359411
-2024-02-03,2024-02-03,GOOGL,2795.278441466352,2799.3635491860105,2794.246699791211,2794.614480888311,3413695
-2024-02-04,2024-02-04,GOOGL,2794.525129575864,2796.28836634336,2791.030889300127,2796.28836634336,4981929
-2024-02-05,2024-02-05,GOOGL,2794.9602512258793,2798.1852651490776,2790.6838915350613,2796.1154218157617,3183686
-2024-02-06,2024-02-06,GOOGL,2793.1188750845117,2797.438673948844,2789.145674381691,2792.1131615834306,3695923
-2024-02-07,2024-02-07,GOOGL,2790.8964492353844,2794.6695778717394,2788.859663466814,2791.6076068915954,3406136
-2024-02-08,2024-02-08,GOOGL,2792.515979276026,2795.709957588048,2790.281454230126,2792.2166490563873,3754287
-2024-02-09,2024-02-09,GOOGL,2791.5142657741203,2795.641712335214,2786.788781023532,2792.709187205372,4749498
-2024-02-10,2024-02-10,GOOGL,2789.910332212876,2792.5098259580727,2785.911917204763,2790.333831716419,4886185
-2024-02-11,2024-02-11,GOOGL,2792.9569794630493,2793.2050553590684,2791.801901565209,2793.007168492665,2281522
-2024-02-12,2024-02-12,GOOGL,2795.0772389778176,2796.2376115491866,2793.225975349171,2794.9455388241095,4131050
-2024-02-13,2024-02-13,GOOGL,2794.018409334276,2794.694188692043,2792.7570288641277,2792.7570288641277,4274982
-2024-02-14,2024-02-14,GOOGL,2794.1028946023957,2798.707054880215,2791.577204945468,2795.058676701752,1916393
-2024-02-15,2024-02-15,GOOGL,2792.6855299130166,2797.5457194673672,2792.2046344104365,2792.9959703816817,2190436
-2024-02-16,2024-02-16,GOOGL,2789.2046891125756,2793.0096378075723,2784.5413866477716,2788.603977974469,1162846
-2024-02-17,2024-02-17,GOOGL,2789.945914010597,2790.76110454891,2788.447825101394,2790.76110454891,3167697
-2024-02-18,2024-02-18,GOOGL,2788.796049546825,2790.828937278326,2787.459580005096,2789.7074090604233,4473150
-2024-02-19,2024-02-19,GOOGL,2788.3495518383907,2793.210563037133,2784.0377358448172,2790.190107065843,3168405
-2024-02-20,2024-02-20,GOOGL,2790.959248354972,2795.6918910958348,2789.0118876436877,2789.522723144615,4870500
-2024-02-21,2024-02-21,GOOGL,2790.249375996865,2792.4508416912445,2788.2957178390393,2789.100658261428,4576395
-2024-02-22,2024-02-22,GOOGL,2789.2034930628247,2791.3402125904854,2785.3134808142595,2789.3517164964,3881584
-2024-02-23,2024-02-23,GOOGL,2791.178372451946,2794.7728143853146,2789.8931592617414,2790.973429713386,4393457
-2024-02-24,2024-02-24,GOOGL,2790.9637714755654,2793.7186187067705,2787.4296073904743,2791.2110120935617,3785389
-2024-02-25,2024-02-25,GOOGL,2793.382667421459,2795.0279542962767,2790.4553690807534,2793.5626219689366,2401896
-2024-02-26,2024-02-26,GOOGL,2793.2431486822948,2796.8977183136535,2788.4643446933264,2795.021890397253,3414572
-2024-02-27,2024-02-27,GOOGL,2791.3080569075037,2795.0826106292875,2788.377939205109,2790.4921669358087,2122033
-2024-02-28,2024-02-28,GOOGL,2789.635262966531,2790.9931381946762,2786.20523604734,2789.60561997923,3406662
-2024-02-29,2024-02-29,GOOGL,2792.5303523705047,2792.989770917985,2789.2246103575303,2792.5654191132962,4538150
-2024-01-01,2024-01-01,MSFT,380.40943306436327,384.78504889745983,377.7314681667669,381.1211022583605,2393937
-2024-01-02,2024-01-02,MSFT,377.3316283511146,379.34074696081,376.387236246422,376.44492764468345,4595481
-2024-01-03,2024-01-03,MSFT,374.3509055476621,378.49795362346845,369.670573716846,374.96477507258123,2300858
-2024-01-04,2024-01-04,MSFT,372.81463591763463,375.2165495442049,368.0994044609377,372.8414491096988,1184715
-2024-01-05,2024-01-05,MSFT,374.0255516820236,377.5226799867076,372.61178025137116,373.78793067847073,2498502
-2024-01-06,2024-01-06,MSFT,374.1077424473769,376.2788311410633,372.5063404148581,373.7686940053048,3161091
-2024-01-07,2024-01-07,MSFT,373.8467441045817,377.3256364226991,372.06320444553796,372.6358240148236,4463579
-2024-01-08,2024-01-08,MSFT,371.74327966241515,372.89526076779185,370.4620201446409,370.4620201446409,4870093
-2024-01-09,2024-01-09,MSFT,369.5478141652122,370.55748371904104,366.13687663425117,370.55748371904104,3252986
-2024-01-10,2024-01-10,MSFT,369.8761003607536,374.80146831779996,365.19026154357664,369.8447282948601,3279779
-2024-01-11,2024-01-11,MSFT,369.8988298416993,373.6116587248677,368.0207085936549,368.0207085936549,1931232
-2024-01-12,2024-01-12,MSFT,372.1262582057307,375.10227931910276,370.9931332959607,372.11562556317085,1368561
-2024-01-13,2024-01-13,MSFT,372.8367870033394,374.68289377514276,369.49238450410013,373.48991339242,1626907
-2024-01-14,2024-01-14,MSFT,373.1365326643012,377.2432608280383,371.0625055777781,374.61143680076736,4621414
-2024-01-15,2024-01-15,MSFT,372.3123039167347,375.17269395934443,371.6473864572203,373.238653087789,2155216
-2024-01-16,2024-01-16,MSFT,374.8895146734965,379.2882966916357,373.6504161977585,374.9811751816949,3646438
-2024-01-17,2024-01-17,MSFT,377.62152577868187,377.6254688529531,375.3311220496009,377.2486591240262,3502084
-2024-01-18,2024-01-18,MSFT,376.7393404645974,381.41317024220103,372.7021393676132,374.7073887033174,4942876
-2024-01-19,2024-01-19,MSFT,378.9702937526001,383.50518290551344,375.6751821916816,378.83878437681767,4937585
-2024-01-20,2024-01-20,MSFT,380.9063452095551,382.2442686779167,377.8590242011311,380.7394690300935,3393674
-2024-01-21,2024-01-21,MSFT,379.2481470017025,382.3092721322141,377.34111764386495,378.6296921043611,1847854
-2024-01-22,2024-01-22,MSFT,380.04275954947536,381.10663205782095,377.8191993930413,381.10663205782095,3429278
-2024-01-23,2024-01-23,MSFT,378.5428956269307,382.84352202105964,376.0265259308282,376.0265259308282,2590081
-2024-01-24,2024-01-24,MSFT,378.3982434252265,381.10096652640135,376.21000760340945,378.3682575062559,3945826
-2024-01-25,2024-01-25,MSFT,378.03324247644804,382.056847944993,373.52272479816304,377.76984718330846,2542433
-2024-01-26,2024-01-26,MSFT,376.74430044775386,379.84022525911104,375.2527336173364,375.48882841289156,4805207
-2024-01-27,2024-01-27,MSFT,373.12721114946817,374.74599679339474,370.6773123308238,374.74599679339474,4842052
-2024-01-28,2024-01-28,MSFT,373.2773640251142,375.2868163904643,370.33237224209364,373.2749104158838,3779474
-2024-01-29,2024-01-29,MSFT,376.45172144843616,378.79063203679465,375.7547541336456,375.7547541336456,4857257
-2024-01-30,2024-01-30,MSFT,376.2117170727547,378.2055911127893,372.68104690265125,375.60650813061204,4150719
-2024-01-31,2024-01-31,MSFT,373.20682955375077,374.29351158565373,372.3675825946341,372.90762174247476,4630439
-2024-02-01,2024-02-01,MSFT,370.4993376444064,374.6237062127579,369.09613669935,370.91101697276935,2632556
-2024-02-02,2024-02-02,MSFT,373.5268386661946,373.91551302567217,369.5300390357647,373.59251477540937,1081412
-2024-02-03,2024-02-03,MSFT,372.5269973007242,372.9958941569213,371.6021501874942,372.4255428799842,1676108
-2024-02-04,2024-02-04,MSFT,376.57524714531036,377.0040737426341,375.3387676175009,376.4675178229567,1759001
-2024-02-05,2024-02-05,MSFT,377.3981916584291,378.7148175843395,375.4485264212101,376.4597888840521,3831130
-2024-02-06,2024-02-06,MSFT,375.93416397351064,379.11755298148654,372.6765675071468,377.12149329399693,3811921
-2024-02-07,2024-02-07,MSFT,375.0203173787414,376.29793557991985,372.7335734078504,374.05591761987466,4858084
-2024-02-08,2024-02-08,MSFT,376.39715624570806,377.6852511178442,374.96310066703506,377.4009413197338,2250363
-2024-02-09,2024-02-09,MSFT,377.4104313570956,379.3932745012904,373.33362356746795,378.09336125094785,4714745
-2024-02-10,2024-02-10,MSFT,377.59199124881735,380.7671839063648,376.8112382223477,378.4145766593579,3263334
-2024-02-11,2024-02-11,MSFT,381.239451912843,382.7847352269193,379.3956171998657,380.2385758643528,1499554
-2024-02-12,2024-02-12,MSFT,382.8015674726863,387.5254812964003,379.64000429618454,383.0485552486939,1367157
-2024-02-13,2024-02-13,MSFT,384.07005386819066,384.3890997299102,379.1236248034521,383.9605653594506,3054202
-2024-02-14,2024-02-14,MSFT,384.2463231651858,384.7731066790639,383.2647193400344,383.2647193400344,3174201
-2024-02-15,2024-02-15,MSFT,383.0264346935453,385.74580336347515,379.10568659303385,382.8061478570344,1893498
-2024-02-16,2024-02-16,MSFT,381.51702402690535,385.8429241054116,377.1757033325709,382.4349748218699,2201872
-2024-02-17,2024-02-17,MSFT,380.24850521339977,383.99351842904844,379.32127380680447,380.02509751522473,4907731
-2024-02-18,2024-02-18,MSFT,379.21089995927787,382.9358765748618,375.9969017461761,379.17144540215486,4679649
-2024-02-19,2024-02-19,MSFT,378.8274500102946,381.8331122653649,375.0501265285326,381.8331122653649,1956816
-2024-02-20,2024-02-20,MSFT,380.6930336881698,380.7842837052423,376.8804123256712,380.2298057259806,1754620
-2024-02-21,2024-02-21,MSFT,380.9420214094848,385.7890950139732,379.9187795654212,381.4134618372782,1686380
-2024-02-22,2024-02-22,MSFT,381.16804721070156,382.68320392449317,379.31187027496526,382.68320392449317,4299526
-2024-02-23,2024-02-23,MSFT,381.39873812283014,385.05141286141645,379.0537258716689,380.7866202054128,3262247
-2024-02-24,2024-02-24,MSFT,381.5153041741498,384.6629798846415,379.92106313036373,379.99439538698556,4353934
-2024-02-25,2024-02-25,MSFT,381.44054583818445,385.4684555215486,379.7604246310442,379.7604246310442,4020266
-2024-02-26,2024-02-26,MSFT,379.59329906306544,383.8770452896796,377.805594401461,379.68974625269027,2626436
-2024-02-27,2024-02-27,MSFT,378.02099464616987,378.80460832711105,377.166798614197,378.42401965553825,3972976
-2024-02-28,2024-02-28,MSFT,374.9335622033522,377.9733714257278,370.4124471911089,374.0024337169778,1520346
-2024-02-29,2024-02-29,MSFT,376.124880841093,376.1713941487216,374.1731511588344,375.982047460232,3888533
+2024-01-01,2024-01-01,AAPL,150.25099015098556,152.64132234514068,145.45870078940274,149.7726705048298,3888875
+2024-01-02,2024-01-02,AAPL,148.11119917385003,150.29646941670254,145.5224604790068,147.7127163533339,4249997
+2024-01-03,2024-01-03,AAPL,146.32138489498232,151.15656937055596,142.746729500923,146.71222757696012,3530268
+2024-01-04,2024-01-04,AAPL,146.37995964334684,151.26703070195026,143.00453668958616,145.73951459815402,3759387
+2024-01-05,2024-01-05,AAPL,144.53817016339892,146.45202085205696,144.32653363127483,144.50447074379983,1651497
+2024-01-06,2024-01-06,AAPL,144.94872235287855,147.5938996592372,140.3773422225834,145.77299479720213,4780063
+2024-01-07,2024-01-07,AAPL,145.3384440692702,147.41634212599112,143.3421017828499,144.23424562006574,3295846
+2024-01-08,2024-01-08,AAPL,142.1097161965169,144.0839181913703,139.63501161582585,142.67315864509104,4535615
+2024-01-09,2024-01-09,AAPL,142.76230975934672,143.64380382460266,139.30333155966156,143.00899222308095,2457802
+2024-01-10,2024-01-10,AAPL,145.42129883461558,146.9818753695635,144.6647903304167,146.9818753695635,3550238
+2024-01-11,2024-01-11,AAPL,144.1824093146154,145.5350711546069,142.47066836675242,143.9165340760129,2521907
+2024-01-12,2024-01-12,AAPL,143.73292019914956,146.0278155805253,140.82076263226665,144.07514050902915,4361138
+2024-01-13,2024-01-13,AAPL,144.5921116942377,148.956530614053,139.73542831641873,144.46371681795884,1697822
+2024-01-14,2024-01-14,AAPL,146.26351259345878,147.8633991138604,145.59380835273967,146.65797495532112,4219493
+2024-01-15,2024-01-15,AAPL,146.24984200279408,149.57276022092887,144.14301590019244,146.31649668374658,3686774
+2024-01-16,2024-01-16,AAPL,149.51492073127616,154.20464191249388,144.95293069235998,149.68019294616326,3980809
+2024-01-17,2024-01-17,AAPL,150.27080125586812,154.6412172518751,146.07986430588477,152.26299755003203,2161049
+2024-01-18,2024-01-18,AAPL,152.86480955632402,155.7302795474207,148.57183136766565,152.61580353919305,4566634
+2024-01-19,2024-01-19,AAPL,149.48217085855916,149.90264129554754,147.9046409705074,148.0323840240988,1095953
+2024-01-20,2024-01-20,AAPL,148.64716819123112,149.81577606567927,146.17094775862662,149.81577606567927,4854663
+2024-01-21,2024-01-21,AAPL,148.28825340964272,149.9540283014251,144.13735713378347,148.53256770900788,1038059
+2024-01-22,2024-01-22,AAPL,147.2554716869809,148.51937466052559,143.07847990325325,145.79391175670284,4103356
+2024-01-23,2024-01-23,AAPL,146.65698545640598,151.54431501455556,142.69821191771842,145.36517872567273,2032064
+2024-01-24,2024-01-24,AAPL,143.09999128812467,145.72547535061477,141.7755624505889,144.0973443214369,4350434
+2024-01-25,2024-01-25,AAPL,140.30698876970501,140.62130120979458,138.0908320865635,140.12274315289147,1017617
+2024-01-26,2024-01-26,AAPL,138.1671675202307,138.78767616645902,137.2771559594945,138.37046103989428,2116708
+2024-01-27,2024-01-27,AAPL,138.91888776631126,143.3253580003493,136.99412120332647,139.18966456210185,1414004
+2024-01-28,2024-01-28,AAPL,142.37657696830004,146.83096123856134,141.03216032191364,141.26542188091503,4107711
+2024-01-29,2024-01-29,AAPL,137.80128346239906,140.89631459855107,136.7241738715561,138.93044064799258,1626285
+2024-01-30,2024-01-30,AAPL,137.78918357439028,139.95559872110096,134.97281743944313,137.0868936865947,1811278
+2024-01-31,2024-01-31,AAPL,139.58877620751352,141.770990778896,137.61926738066552,137.9188805660869,2974135
+2024-02-01,2024-02-01,AAPL,139.38179085855958,140.91207176066777,137.50408874710303,139.28023349175356,4459740
+2024-02-02,2024-02-02,AAPL,138.2421491934695,141.8623755753506,137.43322022257598,138.10937897115076,4650147
+2024-02-03,2024-02-03,AAPL,135.33617600421405,137.4374404339743,135.11942002560534,135.82638113709373,4236571
+2024-02-04,2024-02-04,AAPL,136.17233247178584,138.2722835551487,134.8768371868204,136.7511121030599,1482204
+2024-02-05,2024-02-05,AAPL,134.86860471214467,136.90456363578514,132.52243374457865,136.90456363578514,2466846
+2024-02-06,2024-02-06,AAPL,136.7764504900661,136.958343768838,134.7825481687808,134.7825481687808,2787837
+2024-02-07,2024-02-07,AAPL,139.69712837353802,141.065386790204,136.70672961405955,139.68308522715725,2085870
+2024-02-08,2024-02-08,AAPL,140.1263707995161,144.85316959949887,138.7287905119198,138.7287905119198,1364701
+2024-02-09,2024-02-09,AAPL,144.77654344715054,149.6952318658198,143.89369417233274,146.47521211928762,4419768
+2024-02-10,2024-02-10,AAPL,141.77754800939968,143.83886659441916,137.4898637649998,143.83886659441916,2269513
+2024-02-11,2024-02-11,AAPL,138.17333866911804,138.6137151242891,137.5116320878456,137.5116320878456,4516639
+2024-02-12,2024-02-12,AAPL,137.31519183629587,138.44361855529002,133.21085068648787,136.481482982404,1960006
+2024-02-13,2024-02-13,AAPL,137.00260169591738,140.38563146593754,133.9326233500252,137.00169899667182,1604658
+2024-02-14,2024-02-14,AAPL,139.30603552169487,141.33803072935865,135.36021538402935,141.14772293715245,4444910
+2024-02-15,2024-02-15,AAPL,141.84737390103666,145.17372532260922,141.22950113079244,143.13718786409763,4129768
+2024-02-16,2024-02-16,AAPL,140.07933343735422,140.3157485505349,138.00471005053237,139.15657781246793,3471028
+2024-02-17,2024-02-17,AAPL,140.69115637365024,141.9248521089754,137.80425717335987,140.85338649785277,3201533
+2024-02-18,2024-02-18,AAPL,140.28594568201305,142.71628983095042,137.08313352690575,137.9461053595589,1440791
+2024-02-19,2024-02-19,AAPL,140.20463985123942,141.0965683073344,137.48098201977118,141.0965683073344,1047763
+2024-02-20,2024-02-20,AAPL,139.29202637938485,142.49667131798725,138.9810503026856,140.02750209510177,1404756
+2024-02-21,2024-02-21,AAPL,141.57253383909983,145.41989360447926,140.47180895582161,140.47180895582161,3488302
+2024-02-22,2024-02-22,AAPL,136.68940767177244,138.54899980294624,134.4344822194364,135.54716868688303,1696664
+2024-02-23,2024-02-23,AAPL,136.50466424229685,138.14406446946919,135.15391625958478,135.95496105175218,3519300
+2024-02-24,2024-02-24,AAPL,136.4613939583472,141.18166425353783,135.82930823680363,137.6355489455012,3991246
+2024-02-25,2024-02-25,AAPL,135.58315401034076,137.5246611419201,130.59657389326202,134.84069453628777,4726008
+2024-02-26,2024-02-26,AAPL,133.02542931813383,135.66941183656533,130.07419599295457,133.50060066291408,3380740
+2024-02-27,2024-02-27,AAPL,134.99846616370684,138.38789683673036,133.45520985475883,135.6092174530939,3596981
+2024-02-28,2024-02-28,AAPL,136.8956875489415,140.22537856334583,133.49077019235582,139.15958356484154,3523685
+2024-02-29,2024-02-29,AAPL,138.25026429210126,139.1858057571072,134.43229633358067,139.1858057571072,1243155
+2024-01-01,2024-01-01,GOOGL,2795.9223847041803,2800.5811945854853,2795.153052300646,2795.4102395765494,4950838
+2024-01-02,2024-01-02,GOOGL,2798.878461104687,2799.799563841561,2795.888746225209,2799.2820959404057,2318398
+2024-01-03,2024-01-03,GOOGL,2798.8560476694847,2802.7757256810437,2797.9126477057866,2798.7188632702764,1815583
+2024-01-04,2024-01-04,GOOGL,2796.79569077767,2797.745772546745,2794.150481759766,2796.6800797463106,4140652
+2024-01-05,2024-01-05,GOOGL,2799.6460103664754,2801.623573735857,2795.850197091443,2801.149391181129,1243110
+2024-01-06,2024-01-06,GOOGL,2799.188164492353,2800.361734239764,2794.3882816342243,2799.348758083909,1524987
+2024-01-07,2024-01-07,GOOGL,2797.0754623839966,2800.6544011224037,2794.172221918264,2797.622927834196,4287635
+2024-01-08,2024-01-08,GOOGL,2799.276909017444,2803.051934648261,2795.3867099601084,2799.687387399428,2832499
+2024-01-09,2024-01-09,GOOGL,2796.665627165701,2797.2335656512437,2793.036464166879,2794.9517464351834,1648085
+2024-01-10,2024-01-10,GOOGL,2796.0420479575773,2797.928025302797,2794.15279163631,2794.591276509649,2850424
+2024-01-11,2024-01-11,GOOGL,2794.7575292827864,2797.0413722588073,2791.617499273333,2794.4114684029205,1014559
+2024-01-12,2024-01-12,GOOGL,2790.3262951776996,2794.1401910028103,2788.103300630398,2789.4613103794204,4981405
+2024-01-13,2024-01-13,GOOGL,2795.3018194220413,2797.1790681637426,2790.729000545256,2795.3580031481592,3590185
+2024-01-14,2024-01-14,GOOGL,2795.5084915094512,2799.729473841242,2793.1680322792217,2795.9955406201493,2107460
+2024-01-15,2024-01-15,GOOGL,2795.4184465925728,2799.626443730068,2794.7924226721757,2794.832435494428,3822187
+2024-01-16,2024-01-16,GOOGL,2796.4358741563956,2798.057520030911,2792.6522622037505,2794.334959788234,4322154
+2024-01-17,2024-01-17,GOOGL,2799.5395012177514,2801.3428952638906,2797.388385606089,2799.59315039461,2509681
+2024-01-18,2024-01-18,GOOGL,2798.7328283995316,2799.5165047726687,2793.9281383890457,2799.0425076569745,1347223
+2024-01-19,2024-01-19,GOOGL,2797.1484140131292,2797.2742636836547,2792.833307761275,2796.5655589527596,3217455
+2024-01-20,2024-01-20,GOOGL,2798.3875741861475,2802.8678236103337,2794.3127146974884,2797.5353817709756,3239746
+2024-01-21,2024-01-21,GOOGL,2797.9700054892605,2800.852738536252,2795.8623335865445,2795.8623335865445,4961392
+2024-01-22,2024-01-22,GOOGL,2796.592235128864,2798.844601718899,2795.3010526174708,2796.87652522367,1406626
+2024-01-23,2024-01-23,GOOGL,2796.0843919392655,2796.7529768154454,2793.1338760369617,2796.447739151184,1661172
+2024-01-24,2024-01-24,GOOGL,2795.5562264111995,2796.4174537164185,2791.160311198944,2796.4174537164185,1716900
+2024-01-25,2024-01-25,GOOGL,2797.024057533806,2800.8283553929355,2795.7875515858827,2796.9440783620935,2024405
+2024-01-26,2024-01-26,GOOGL,2795.428692763503,2796.5650612433283,2795.347244801344,2796.3842536443667,2578732
+2024-01-27,2024-01-27,GOOGL,2797.5475019157875,2799.833086960125,2795.2265407889245,2797.8705286345134,2911069
+2024-01-28,2024-01-28,GOOGL,2797.7698334860656,2802.5950397013794,2794.1316009989832,2798.882715046699,1702991
+2024-01-29,2024-01-29,GOOGL,2798.5914090589235,2800.108162268861,2796.2054673114094,2798.1562524298565,1856633
+2024-01-30,2024-01-30,GOOGL,2796.870935568424,2801.6528702931423,2792.70033389259,2796.466557137988,2720872
+2024-01-31,2024-01-31,GOOGL,2795.7750528532606,2796.515075083831,2792.749168397448,2796.515075083831,2636267
+2024-02-01,2024-02-01,GOOGL,2796.621513697124,2801.5685282983827,2794.9870677907516,2795.718470180502,2616152
+2024-02-02,2024-02-02,GOOGL,2796.0757889045917,2797.0414638277844,2793.590382064615,2797.0414638277844,4850333
+2024-02-03,2024-02-03,GOOGL,2796.729353174485,2801.2947962952217,2795.5626487142595,2796.023276598216,2730379
+2024-02-04,2024-02-04,GOOGL,2797.356060435529,2801.0608068423035,2796.064635723005,2796.6572738771447,3105218
+2024-02-05,2024-02-05,GOOGL,2798.2360859157993,2802.3931272754644,2795.2015826084557,2797.862743779934,4758339
+2024-02-06,2024-02-06,GOOGL,2799.5883237747594,2800.9684322697562,2796.5339667031535,2799.042793243845,3858715
+2024-02-07,2024-02-07,GOOGL,2798.380328072985,2802.314416677915,2795.113268707722,2798.235077189524,2038961
+2024-02-08,2024-02-08,GOOGL,2794.8151144146086,2798.6557031768143,2791.930183341575,2793.940491972221,1180326
+2024-02-09,2024-02-09,GOOGL,2796.1831369169754,2798.877077789174,2792.3108396289344,2797.275183543192,1391887
+2024-02-10,2024-02-10,GOOGL,2798.252149725252,2800.026126904756,2793.701485287062,2798.9985099110463,3823285
+2024-02-11,2024-02-11,GOOGL,2797.89753581013,2801.366547643458,2796.7979586082247,2797.6889567991666,4925366
+2024-02-12,2024-02-12,GOOGL,2797.9386050509024,2801.4350368516953,2794.147858227275,2798.5376336230956,1852925
+2024-02-13,2024-02-13,GOOGL,2796.4911917586414,2798.0196537253332,2795.544998238898,2795.59914347075,4269542
+2024-02-14,2024-02-14,GOOGL,2794.7336996064564,2796.7101413840683,2793.3558541353605,2794.839415575028,1308087
+2024-02-15,2024-02-15,GOOGL,2794.494854014328,2798.05637782404,2790.070916604889,2794.0458014147925,2321145
+2024-02-16,2024-02-16,GOOGL,2792.875426439672,2796.8743950150283,2790.3389904056226,2793.914183084096,4799516
+2024-02-17,2024-02-17,GOOGL,2797.8236939364674,2799.7831042490493,2796.949578588012,2798.0009248275214,1806136
+2024-02-18,2024-02-18,GOOGL,2797.7654148155957,2797.9597063330025,2792.9877394097066,2797.531670826704,4528363
+2024-02-19,2024-02-19,GOOGL,2794.245971183465,2795.5648524900366,2791.949733495758,2794.267351813708,1423822
+2024-02-20,2024-02-20,GOOGL,2797.785618224602,2801.749151995697,2795.949754528391,2798.5351966759204,2900853
+2024-02-21,2024-02-21,GOOGL,2793.6070020152915,2794.164480795223,2789.887940817608,2794.164480795223,2726552
+2024-02-22,2024-02-22,GOOGL,2793.633835377815,2796.6297011433085,2790.5994487668277,2793.174992146633,4432473
+2024-02-23,2024-02-23,GOOGL,2794.1971743028544,2794.7629568386756,2791.2273594623866,2794.7629568386756,2142590
+2024-02-24,2024-02-24,GOOGL,2792.278121954794,2794.990155304694,2791.5257315081144,2791.980526552461,3125487
+2024-02-25,2024-02-25,GOOGL,2794.633743689241,2798.459333314078,2794.541394346058,2794.541394346058,4718458
+2024-02-26,2024-02-26,GOOGL,2795.4944698135623,2797.9058547988107,2795.23193293646,2795.3107900530185,2539902
+2024-02-27,2024-02-27,GOOGL,2792.7358357789135,2793.7404030746325,2791.4316801952255,2792.716699504802,4882491
+2024-02-28,2024-02-28,GOOGL,2794.0511129651586,2797.2180746713375,2792.1707884127663,2794.42567639665,4560533
+2024-02-29,2024-02-29,GOOGL,2793.7886209798435,2796.845566013455,2788.8011069367303,2792.6160641893084,2419753
+2024-01-01,2024-01-01,MSFT,381.26178243291633,384.16503489958905,376.5838746050349,381.7810626548356,1265120
+2024-01-02,2024-01-02,MSFT,381.9239321373603,383.3177467820275,376.9707364472822,382.41540032415713,3382760
+2024-01-03,2024-01-03,MSFT,380.45520540724465,383.08330810244115,378.33278590833453,381.06071393623614,2001481
+2024-01-04,2024-01-04,MSFT,381.6914606352014,385.0442031178725,379.2738951520357,382.0657194800535,2836897
+2024-01-05,2024-01-05,MSFT,380.8809066667218,382.30991308132485,378.17090621516377,379.6081644173865,4617934
+2024-01-06,2024-01-06,MSFT,380.4740960798205,383.3701772873714,378.375616160143,380.2683722325732,2545234
+2024-01-07,2024-01-07,MSFT,377.2759024962482,377.64130797259367,373.6370396652164,376.81709224250983,4018089
+2024-01-08,2024-01-08,MSFT,380.3944335835196,383.8257769747189,375.86099495346315,377.7725454812557,2045881
+2024-01-09,2024-01-09,MSFT,378.96804956770893,379.3323080968007,377.77032477699106,379.3323080968007,2476152
+2024-01-10,2024-01-10,MSFT,378.087978818747,378.93634578740915,376.95805796894075,378.03648608393945,3644041
+2024-01-11,2024-01-11,MSFT,374.4151981480391,379.0993522742476,373.7195647244141,373.7195647244141,4543440
+2024-01-12,2024-01-12,MSFT,374.3901646944306,376.06333844962404,374.2931767205096,376.06333844962404,4799662
+2024-01-13,2024-01-13,MSFT,377.8277401263166,378.5427430054905,377.24909640223774,378.3426285073071,4620599
+2024-01-14,2024-01-14,MSFT,378.6138321620782,380.45105953172913,374.5464520380409,378.29537853179727,1637563
+2024-01-15,2024-01-15,MSFT,380.6493653468667,383.51848204867133,377.4621901896452,381.19118719523254,3799914
+2024-01-16,2024-01-16,MSFT,379.2508783704141,380.40048843460056,374.8054681493338,377.76283889863925,3674989
+2024-01-17,2024-01-17,MSFT,379.9957898236924,381.6602846596943,375.55610858827896,378.72890445323776,3800567
+2024-01-18,2024-01-18,MSFT,382.7232992055419,386.8149240774666,378.37881421683466,383.0868614245569,1545021
+2024-01-19,2024-01-19,MSFT,382.62627326569566,386.2144044017468,378.67054795386326,383.0148594771083,4931181
+2024-01-20,2024-01-20,MSFT,383.13798605642114,386.7470239494242,380.8001566973073,383.034838416388,2188760
+2024-01-21,2024-01-21,MSFT,382.99015974568556,383.352972066756,379.1389058532965,383.25355408062524,4415610
+2024-01-22,2024-01-22,MSFT,385.2553124707059,388.4115956106088,382.0019215401622,386.54765432348125,2672097
+2024-01-23,2024-01-23,MSFT,387.61539533117485,390.6704389158374,385.66671057024615,386.64317325609596,4981546
+2024-01-24,2024-01-24,MSFT,386.63955025571414,391.20247164096315,382.7863468220389,385.78518130891115,1175861
+2024-01-25,2024-01-25,MSFT,387.26412367315777,387.85525472047163,385.41224152062216,385.41224152062216,3448744
+2024-01-26,2024-01-26,MSFT,384.8793971292691,385.9578605338998,382.28198097958386,385.39949432157545,4791480
+2024-01-27,2024-01-27,MSFT,387.1095712589777,390.0370701650332,385.7615374100144,385.7615374100144,2700890
+2024-01-28,2024-01-28,MSFT,386.4268954331402,388.4199921038704,384.6118968667316,386.05783283530405,1994082
+2024-01-29,2024-01-29,MSFT,381.9919886257955,383.87734911232747,378.66145310452094,380.356324904471,1224557
+2024-01-30,2024-01-30,MSFT,380.29357556309503,384.6199611282897,379.04064331051836,380.64272635728514,4037114
+2024-01-31,2024-01-31,MSFT,380.1744358362685,380.76344698809396,379.4852588315862,380.76344698809396,2721283
+2024-02-01,2024-02-01,MSFT,379.81014070199564,383.4368635808266,375.62814973835134,381.47226158132753,2793428
+2024-02-02,2024-02-02,MSFT,378.37717421820196,378.99555063368786,377.3180549716957,378.9752978579205,4419756
+2024-02-03,2024-02-03,MSFT,375.0899319861845,377.69486164739226,371.5471501849482,374.91844044125094,3174358
+2024-02-04,2024-02-04,MSFT,380.083868904069,380.5609007362114,377.2095371451327,380.5609007362114,3823188
+2024-02-05,2024-02-05,MSFT,380.5902250012933,381.74375283637545,377.61192652720604,379.30429030428735,2812189
+2024-02-06,2024-02-06,MSFT,382.32660909279383,384.12514192325403,377.6062952683772,384.12514192325403,1101678
+2024-02-07,2024-02-07,MSFT,381.67812277493806,385.9864276417008,379.74451496006066,379.74451496006066,3186510
+2024-02-08,2024-02-08,MSFT,381.6827085803149,385.08034599647476,379.95771826113054,379.95771826113054,3011788
+2024-02-09,2024-02-09,MSFT,379.62581896596237,381.38556914330695,374.89184450496657,376.9946922726033,4929078
+2024-02-10,2024-02-10,MSFT,380.93664098431753,385.2425678246321,376.15380013658097,381.25884683266344,1944892
+2024-02-11,2024-02-11,MSFT,380.8920683652796,383.8959003855385,377.10660910670043,381.7938189784878,2868886
+2024-02-12,2024-02-12,MSFT,383.54098159220416,386.4643243453378,383.41668144200526,385.0505259019862,2014442
+2024-02-13,2024-02-13,MSFT,380.6375010084348,382.2339402719437,377.5915157315718,381.12019592561177,3419445
+2024-02-14,2024-02-14,MSFT,377.9715892411921,378.9933850088994,376.6530893174674,378.1830858524407,1230385
+2024-02-15,2024-02-15,MSFT,379.8153085159308,381.7475249353518,378.5232532356807,381.7475249353518,4803386
+2024-02-16,2024-02-16,MSFT,376.09111114378186,378.1747123094318,374.73717599891944,376.03127552523625,4774772
+2024-02-17,2024-02-17,MSFT,374.34696101731487,376.8024407845949,371.35483526413117,371.35483526413117,1009802
+2024-02-18,2024-02-18,MSFT,376.82425342979406,377.7161510385026,373.9104591994467,376.87911225723377,1567805
+2024-02-19,2024-02-19,MSFT,375.34694572536125,375.94865518455754,371.40433270451,375.94865518455754,4741516
+2024-02-20,2024-02-20,MSFT,380.6628925140985,381.32129339579075,379.1565373954404,381.1604751566883,2159735
+2024-02-21,2024-02-21,MSFT,381.1169874911578,385.3173721861061,376.1983260218935,381.56711024819316,2929724
+2024-02-22,2024-02-22,MSFT,378.3180323299757,379.09106298480526,377.9123391066246,379.0241765922276,1314668
+2024-02-23,2024-02-23,MSFT,376.6185973152891,379.068668019432,374.60690036395397,376.7978956071116,4795943
+2024-02-24,2024-02-24,MSFT,376.5655418111769,377.9130013825788,373.95171960263326,375.5766535222044,2253626
+2024-02-25,2024-02-25,MSFT,376.52816170368544,379.89065594103874,372.4541171754469,378.1360977996301,2715572
+2024-02-26,2024-02-26,MSFT,373.8782749023132,376.1559755566635,373.6064243300879,373.6398398298293,3969861
+2024-02-27,2024-02-27,MSFT,373.77787612434525,374.53716325246654,371.8155250175181,374.0164669523394,3004231
+2024-02-28,2024-02-28,MSFT,371.6356305743236,372.1760874837769,366.9147394343795,371.1096236711841,4352848
+2024-02-29,2024-02-29,MSFT,371.32766074932687,376.10705353520586,368.39401081866276,371.33056174159384,3055279
 
 </script>
 
 <!-- ACTUAL CONTENT -->
 
-<h1>OHLC Chart Examples</h1>
+<h1>Candlestick Chart Examples</h1>
 <p></p>
 
 <h2>Example 1: Single Stock with Volume (AAPL)</h2>
@@ -1920,46 +1921,46 @@ time_from,time_to,symbol,open,high,low,close,volume
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="chart_type_select_example1_ohlc">Chart Type: </label>
-                <select id="chart_type_select_example1_ohlc" onchange="updateChart_example1_ohlc()">
+                <label for="chart_type_select_example1_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example1_candlestick" onchange="updateChart_example1_candlestick()">
                 <option value="candlestick" selected>candlestick</option>
                 <option value="ohlc">ohlc</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="chart_type_select_example1_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="chart_type_select_example1_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
                 <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="display_mode_select_example1_ohlc">Display Mode: </label>
-                <select id="display_mode_select_example1_ohlc" onchange="updateChart_example1_ohlc()">
+                <label for="display_mode_select_example1_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example1_candlestick" onchange="updateChart_example1_candlestick()">
                 <option value="Overlay" selected>Overlay</option>
                 <option value="Faceted">Faceted</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="display_mode_select_example1_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="display_mode_select_example1_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
             <div style="margin: 10px; display: flex; flex-direction: column;">
         <div style="margin: 5px 0;">
-            <input type="checkbox" id="renormalize_checkbox_example1_ohlc" onchange="updateChart_example1_ohlc()">
-            <label for="renormalize_checkbox_example1_ohlc">Renormalize (first bar open = 1)</label>
+            <input type="checkbox" id="renormalize_checkbox_example1_candlestick" onchange="updateChart_example1_candlestick()">
+            <label for="renormalize_checkbox_example1_candlestick">Renormalize (first bar open = 1)</label>
         </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="show_volume_checkbox_example1_ohlc" checked onchange="updateChart_example1_ohlc()">
-        <label for="show_volume_checkbox_example1_ohlc">Show Volume</label>
+        <input type="checkbox" id="show_volume_checkbox_example1_candlestick" checked onchange="updateChart_example1_candlestick()">
+        <label for="show_volume_checkbox_example1_candlestick">Show Volume</label>
     </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="log_volume_checkbox_example1_ohlc" onchange="updateChart_example1_ohlc()">
-        <label for="log_volume_checkbox_example1_ohlc">Log Volume</label>
+        <input type="checkbox" id="log_volume_checkbox_example1_candlestick" onchange="updateChart_example1_candlestick()">
+        <label for="log_volume_checkbox_example1_candlestick">Log Volume</label>
     </div>
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
-    <label for="example1_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example1_ohlc_aspect_ratio_label">0.6</span>
-    <input type="range" id="example1_ohlc_aspect_ratio_slider"
+    <label for="example1_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example1_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example1_candlestick_aspect_ratio_slider"
            min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
@@ -1968,7 +1969,7 @@ time_from,time_to,symbol,open,high,low,close,volume
 </div>
 
 <!-- Chart -->
-<div id="example1_ohlc"></div>
+<div id="example1_candlestick"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_1</p><br>
 <hr>
 <br>
@@ -1980,46 +1981,46 @@ time_from,time_to,symbol,open,high,low,close,volume
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="chart_type_select_example2_ohlc">Chart Type: </label>
-                <select id="chart_type_select_example2_ohlc" onchange="updateChart_example2_ohlc()">
+                <label for="chart_type_select_example2_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example2_candlestick" onchange="updateChart_example2_candlestick()">
                 <option value="candlestick" selected>candlestick</option>
                 <option value="ohlc">ohlc</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="chart_type_select_example2_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="chart_type_select_example2_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
                 <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="display_mode_select_example2_ohlc">Display Mode: </label>
-                <select id="display_mode_select_example2_ohlc" onchange="updateChart_example2_ohlc()">
+                <label for="display_mode_select_example2_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example2_candlestick" onchange="updateChart_example2_candlestick()">
                 <option value="Overlay" selected>Overlay</option>
                 <option value="Faceted">Faceted</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="display_mode_select_example2_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="display_mode_select_example2_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
             <div style="margin: 10px; display: flex; flex-direction: column;">
         <div style="margin: 5px 0;">
-            <input type="checkbox" id="renormalize_checkbox_example2_ohlc" onchange="updateChart_example2_ohlc()">
-            <label for="renormalize_checkbox_example2_ohlc">Renormalize (first bar open = 1)</label>
+            <input type="checkbox" id="renormalize_checkbox_example2_candlestick" onchange="updateChart_example2_candlestick()">
+            <label for="renormalize_checkbox_example2_candlestick">Renormalize (first bar open = 1)</label>
         </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="show_volume_checkbox_example2_ohlc" checked onchange="updateChart_example2_ohlc()">
-        <label for="show_volume_checkbox_example2_ohlc">Show Volume</label>
+        <input type="checkbox" id="show_volume_checkbox_example2_candlestick" checked onchange="updateChart_example2_candlestick()">
+        <label for="show_volume_checkbox_example2_candlestick">Show Volume</label>
     </div>
     <div style="margin: 5px 0;">
-        <input type="checkbox" id="log_volume_checkbox_example2_ohlc" onchange="updateChart_example2_ohlc()">
-        <label for="log_volume_checkbox_example2_ohlc">Log Volume</label>
+        <input type="checkbox" id="log_volume_checkbox_example2_candlestick" onchange="updateChart_example2_candlestick()">
+        <label for="log_volume_checkbox_example2_candlestick">Log Volume</label>
     </div>
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
-    <label for="example2_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example2_ohlc_aspect_ratio_label">0.6</span>
-    <input type="range" id="example2_ohlc_aspect_ratio_slider"
+    <label for="example2_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example2_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example2_candlestick_aspect_ratio_slider"
            min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
@@ -2028,50 +2029,50 @@ time_from,time_to,symbol,open,high,low,close,volume
 </div>
 
 <!-- Chart -->
-<div id="example2_ohlc"></div>
+<div id="example2_candlestick"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: stock_data_2</p><br>
 <hr>
 <br>
 <h2>Example 3: Quarterly Data Without Volume</h2>
-<p>Quarterly company performance using integer time periods. No volume data. Using OHLC bar style instead of candlesticks. Faceted display shows each company separately.</p>
+<p>Quarterly company performance using integer time periods. No volume data. Using Candlestick bar style instead of candlesticks. Faceted display shows each company separately.</p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
             <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="chart_type_select_example3_ohlc">Chart Type: </label>
-                <select id="chart_type_select_example3_ohlc" onchange="updateChart_example3_ohlc()">
-                <option value="candlestick">candlestick</option>
-                <option value="ohlc" selected>ohlc</option>
+                <label for="chart_type_select_example3_candlestick">Chart Type: </label>
+                <select id="chart_type_select_example3_candlestick" onchange="updateChart_example3_candlestick()">
+                <option value="candlestick" selected>candlestick</option>
+                <option value="ohlc">ohlc</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="chart_type_select_example3_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="chart_type_select_example3_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
                 <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
-                <label for="display_mode_select_example3_ohlc">Display Mode: </label>
-                <select id="display_mode_select_example3_ohlc" onchange="updateChart_example3_ohlc()">
+                <label for="display_mode_select_example3_candlestick">Display Mode: </label>
+                <select id="display_mode_select_example3_candlestick" onchange="updateChart_example3_candlestick()">
                 <option value="Overlay">Overlay</option>
                 <option value="Faceted" selected>Faceted</option>
             </select>
             </div>
             <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
-                <span id="display_mode_select_example3_ohlc_obs_count" style="font-size: 0.9em; color: #666;"></span>
+                <span id="display_mode_select_example3_candlestick_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
             <div style="margin: 10px; display: flex; flex-direction: column;">
         <div style="margin: 5px 0;">
-            <input type="checkbox" id="renormalize_checkbox_example3_ohlc" onchange="updateChart_example3_ohlc()">
-            <label for="renormalize_checkbox_example3_ohlc">Renormalize (first bar open = 1)</label>
+            <input type="checkbox" id="renormalize_checkbox_example3_candlestick" onchange="updateChart_example3_candlestick()">
+            <label for="renormalize_checkbox_example3_candlestick">Renormalize (first bar open = 1)</label>
         </div>
     </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
-    <label for="example3_ohlc_aspect_ratio_slider">Aspect Ratio: </label>
-    <span id="example3_ohlc_aspect_ratio_label">0.6</span>
-    <input type="range" id="example3_ohlc_aspect_ratio_slider"
+    <label for="example3_candlestick_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example3_candlestick_aspect_ratio_label">0.6</span>
+    <input type="range" id="example3_candlestick_aspect_ratio_slider"
            min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
            style="width: 75%; margin-left: 10px;">
     <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
@@ -2080,7 +2081,7 @@ time_from,time_to,symbol,open,high,low,close,volume
 </div>
 
 <!-- Chart -->
-<div id="example3_ohlc"></div>
+<div id="example3_candlestick"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: company_data</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.0.</small></p>
