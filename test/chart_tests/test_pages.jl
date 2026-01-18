@@ -820,4 +820,278 @@ using DataFrames
             @test occursin("No other pages", content)
         end
     end
+
+    # ========================================
+    # Tests for struct-related functionality
+    # ========================================
+
+    @testset "is_struct_with_dataframes function" begin
+        # Create test struct with DataFrame fields
+        struct TestStructWithDF
+            prices::DataFrame
+            volumes::DataFrame
+        end
+
+        struct TestStructWithOptionalDF
+            data::DataFrame
+            optional::Union{Missing, DataFrame}
+        end
+
+        struct TestStructNoDF
+            name::String
+            value::Int
+        end
+
+        # Struct with DataFrame
+        df = DataFrame(x = 1:5)
+        test_with_df = TestStructWithDF(df, df)
+        @test JSPlots.is_struct_with_dataframes(test_with_df) == true
+
+        # Struct with Union{Missing, DataFrame}
+        test_with_optional = TestStructWithOptionalDF(df, missing)
+        @test JSPlots.is_struct_with_dataframes(test_with_optional) == true
+
+        # Struct without DataFrame
+        test_no_df = TestStructNoDF("test", 42)
+        @test JSPlots.is_struct_with_dataframes(test_no_df) == false
+
+        # Basic types should return false
+        @test JSPlots.is_struct_with_dataframes(DataFrame(x = 1:5)) == false
+        @test JSPlots.is_struct_with_dataframes(Dict(:a => 1)) == false
+        @test JSPlots.is_struct_with_dataframes([1, 2, 3]) == false
+        @test JSPlots.is_struct_with_dataframes(42) == false
+        @test JSPlots.is_struct_with_dataframes("string") == false
+        @test JSPlots.is_struct_with_dataframes(:symbol) == false
+    end
+
+    @testset "extract_dataframes_from_struct function" begin
+        struct TestDataStruct
+            prices::DataFrame
+            volumes::DataFrame
+            name::String
+        end
+
+        prices_df = DataFrame(date = 1:5, price = rand(5))
+        volumes_df = DataFrame(date = 1:3, volume = rand(3))
+
+        test_struct = TestDataStruct(prices_df, volumes_df, "test")
+        result = JSPlots.extract_dataframes_from_struct(test_struct, :my_data)
+
+        @test length(result) == 2
+        @test haskey(result, Symbol("my_data.prices"))
+        @test haskey(result, Symbol("my_data.volumes"))
+        @test result[Symbol("my_data.prices")] == prices_df
+        @test result[Symbol("my_data.volumes")] == volumes_df
+    end
+
+    @testset "extract_dataframes_from_struct with Union{Missing, DataFrame}" begin
+        struct TestOptionalStruct
+            data::DataFrame
+            optional::Union{Missing, DataFrame}
+        end
+
+        df = DataFrame(x = 1:5, y = rand(5))
+
+        # With non-missing optional
+        test1 = TestOptionalStruct(df, df)
+        result1 = JSPlots.extract_dataframes_from_struct(test1, :test)
+        @test length(result1) == 2
+        @test haskey(result1, Symbol("test.data"))
+        @test haskey(result1, Symbol("test.optional"))
+
+        # With missing optional
+        test2 = TestOptionalStruct(df, missing)
+        result2 = JSPlots.extract_dataframes_from_struct(test2, :test)
+        @test length(result2) == 1
+        @test haskey(result2, Symbol("test.data"))
+        @test !haskey(result2, Symbol("test.optional"))
+    end
+
+    @testset "extract_dataframes_from_struct skips empty DataFrames" begin
+        struct TestEmptyDF
+            full::DataFrame
+            empty::DataFrame
+        end
+
+        full_df = DataFrame(x = 1:5)
+        empty_df = DataFrame()
+
+        test_struct = TestEmptyDF(full_df, empty_df)
+        result = JSPlots.extract_dataframes_from_struct(test_struct, :data)
+
+        @test length(result) == 1
+        @test haskey(result, Symbol("data.full"))
+        @test !haskey(result, Symbol("data.empty"))
+    end
+
+    @testset "JSPlotPage with struct containing DataFrames" begin
+        struct ChartData
+            prices::DataFrame
+            volumes::DataFrame
+        end
+
+        prices_df = DataFrame(x = 1:10, price = rand(10))
+        volumes_df = DataFrame(x = 1:10, volume = rand(10))
+        chart_data = ChartData(prices_df, volumes_df)
+
+        page = JSPlotPage(
+            Dict{Symbol, Any}(:chart_data => chart_data),
+            [TextBlock("<p>Struct test</p>")]
+        )
+
+        # Check that DataFrames were extracted
+        @test haskey(page.dataframes, Symbol("chart_data.prices"))
+        @test haskey(page.dataframes, Symbol("chart_data.volumes"))
+        @test page.dataframes[Symbol("chart_data.prices")] == prices_df
+        @test page.dataframes[Symbol("chart_data.volumes")] == volumes_df
+    end
+
+    @testset "JSPlotPage with mixed DataFrames and structs" begin
+        struct MixedData
+            data::DataFrame
+        end
+
+        df1 = DataFrame(x = 1:5)
+        df2 = DataFrame(y = 1:3)
+        mixed_struct = MixedData(df2)
+
+        page = JSPlotPage(
+            Dict{Symbol, Any}(:direct_df => df1, :struct_data => mixed_struct),
+            [TextBlock("<p>Mixed test</p>")]
+        )
+
+        # Check that both direct DataFrame and struct DataFrame are present
+        @test haskey(page.dataframes, :direct_df)
+        @test haskey(page.dataframes, Symbol("struct_data.data"))
+        @test page.dataframes[:direct_df] == df1
+        @test page.dataframes[Symbol("struct_data.data")] == df2
+    end
+
+    @testset "JSPlotPage with invalid data type" begin
+        # Passing something that's neither a DataFrame nor a struct with DataFrames
+        @test_throws ErrorException JSPlotPage(
+            Dict{Symbol, Any}(:invalid => "just a string"),
+            [TextBlock("<p>Error test</p>")]
+        )
+
+        @test_throws ErrorException JSPlotPage(
+            Dict{Symbol, Any}(:invalid => 42),
+            [TextBlock("<p>Error test</p>")]
+        )
+    end
+
+    @testset "JSPlotPage with invalid dataformat" begin
+        df = DataFrame(x = 1:5)
+        @test_throws ErrorException JSPlotPage(
+            Dict(:data => df),
+            [TextBlock("<p>Test</p>")],
+            dataformat = :invalid_format
+        )
+    end
+
+    @testset "Pages alternate constructor with invalid dataformat" begin
+        df = DataFrame(x = 1:5)
+        page = JSPlotPage(Dict(:data => df), [TextBlock("<p>Test</p>")])
+
+        @test_throws ErrorException Pages(
+            [TextBlock("<h1>Cover</h1>")],
+            [page],
+            dataformat = :invalid_format
+        )
+    end
+
+    @testset "Pages OrderedDict constructor with invalid dataformat" begin
+        using OrderedCollections
+
+        df = DataFrame(x = 1:5)
+        page = JSPlotPage(Dict(:data => df), [TextBlock("<p>Test</p>")], tab_title = "Test")
+
+        grouped = OrderedCollections.OrderedDict("Section" => [page])
+
+        @test_throws ErrorException Pages(
+            [TextBlock("<h1>Cover</h1>")],
+            grouped,
+            dataformat = :invalid_format
+        )
+    end
+
+    @testset "Pages with struct data and external formats" begin
+        struct ExternalData
+            fills::DataFrame
+            metadata::DataFrame
+        end
+
+        mktempdir() do tmpdir
+            fills_df = DataFrame(date = 1:10, x = 1:10, y = rand(10))
+            metadata_df = DataFrame(id = 1:5, info = ["a", "b", "c", "d", "e"])
+            ext_data = ExternalData(fills_df, metadata_df)
+
+            # Create a chart that actually uses the struct data
+            chart = LineChart(:fills_chart, fills_df, Symbol("market_data.fills");
+                x_cols = [:x], y_cols = [:y], title = "Fills Chart")
+
+            page = JSPlotPage(
+                Dict{Symbol, Any}(:market_data => ext_data),
+                [chart],  # Include a chart that uses the struct data
+                tab_title = "External Test"
+            )
+
+            # Verify struct DataFrames were extracted
+            @test haskey(page.dataframes, Symbol("market_data.fills"))
+            @test haskey(page.dataframes, Symbol("market_data.metadata"))
+
+            pages = Pages(
+                [TextBlock("<h1>Cover</h1>")],
+                [page],
+                dataformat = :parquet
+            )
+
+            outfile = joinpath(tmpdir, "struct_external.html")
+            create_html(pages, outfile)
+
+            project_dir = joinpath(tmpdir, "struct_external")
+            @test isdir(project_dir)
+
+            # Check for data subfolder
+            data_dir = joinpath(project_dir, "data")
+            @test isdir(data_dir)
+
+            # Find all parquet files recursively (struct data may be in subfolders)
+            function find_parquet_files(dir)
+                files = String[]
+                for (root, dirs, fnames) in walkdir(dir)
+                    for f in fnames
+                        if endswith(f, ".parquet")
+                            push!(files, joinpath(root, f))
+                        end
+                    end
+                end
+                return files
+            end
+
+            parquet_files = find_parquet_files(data_dir)
+            # Should have at least one parquet file for the fills data used by chart
+            @test !isempty(parquet_files)
+        end
+    end
+
+    @testset "JSPlotPage struct with all missing DataFrames" begin
+        struct AllOptional
+            data1::Union{Missing, DataFrame}
+            data2::Union{Missing, DataFrame}
+        end
+
+        all_missing = AllOptional(missing, missing)
+
+        # This should result in an empty dataframes dict since all are missing
+        page = JSPlotPage(
+            Dict{Symbol, Any}(:opt_data => all_missing),
+            [TextBlock("<p>All missing test</p>")]
+        )
+
+        # Since no DataFrames are extracted, the resulting dict should be empty
+        # for this struct (but not error)
+        @test !haskey(page.dataframes, Symbol("opt_data.data1"))
+        @test !haskey(page.dataframes, Symbol("opt_data.data2"))
+    end
 end

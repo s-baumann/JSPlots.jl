@@ -122,6 +122,10 @@ using Random
         include("chart_tests/test_geoplot.jl")
     end
 
+    @testset "RadarChart Tests" begin
+        include("chart_tests/test_radarchart.jl")
+    end
+
     @testset "Pages Tests" begin
         include("chart_tests/test_pages.jl")
     end

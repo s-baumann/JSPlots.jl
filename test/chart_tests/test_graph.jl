@@ -569,6 +569,323 @@ import JSPlots: Graph, GraphScenario, calculate_smart_cutoff, dependencies
         @test occursin("addClass('deselected')", graph.functional_html)
         @test occursin("opacity", graph.functional_html)
     end
+
+    # ========================================
+    # Tests for DataFrame-based constructor (new API)
+    # ========================================
+
+    @testset "Graph DataFrame constructor - basic" begin
+        # New API: Pass DataFrame directly instead of GraphScenario
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6]
+        )
+
+        graph = Graph(:df_basic, graph_df, :df_basic_data;
+            title = "DataFrame API Test"
+        )
+
+        @test graph.chart_title == :df_basic
+        @test graph.data_label == :df_basic_data
+        @test !isempty(graph.functional_html)
+        @test !isempty(graph.appearance_html)
+        @test occursin("DataFrame API Test", graph.appearance_html)
+    end
+
+    @testset "Graph DataFrame constructor - with scenario column" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B", "A", "A", "B"],
+            node2 = ["B", "C", "C", "B", "C", "C"],
+            strength = [0.9, 0.7, 0.6, 0.85, 0.75, 0.55],
+            scenario = [fill("Base", 3); fill("Stress", 3)]
+        )
+
+        graph = Graph(:df_scenario, graph_df, :df_scenario_data;
+            scenario_col = :scenario,
+            default_scenario = "Base",
+            title = "Scenario Test"
+        )
+
+        @test occursin("scenario_select_df_scenario", graph.appearance_html)
+        @test occursin("Base", graph.appearance_html)
+        @test occursin("Stress", graph.appearance_html)
+    end
+
+    @testset "Graph DataFrame constructor - missing required columns" begin
+        # Missing strength column
+        bad_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"]
+        )
+
+        @test_throws ErrorException Graph(:bad_df, bad_df, :bad_data)
+    end
+
+    @testset "Graph DataFrame constructor - missing scenario column" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8]
+        )
+
+        @test_throws ErrorException Graph(:bad_scenario_col, graph_df, :bad_data;
+            scenario_col = :nonexistent
+        )
+    end
+
+    @testset "Graph tooltip_cols parameter" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            sector = ["Tech", "Finance", "Tech"],
+            description = ["Node A", "Node B", "Node C"]
+        )
+
+        graph = Graph(:tooltip_test, graph_df, :tooltip_data;
+            tooltip_cols = [:sector, :description],
+            title = "Tooltip Test"
+        )
+
+        @test occursin("tooltipCols", graph.functional_html)
+        @test occursin("sector", graph.functional_html)
+        @test occursin("description", graph.functional_html)
+        @test occursin("setupTooltips_tooltip_test", graph.functional_html)
+    end
+
+    @testset "Graph tooltip_cols with missing columns warning" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8]
+        )
+
+        # Should warn about missing column but not error
+        @test_logs (:warn, r"Tooltip column nonexistent not found") begin
+            graph = Graph(:tooltip_warn, graph_df, :tooltip_warn_data;
+                tooltip_cols = [:nonexistent]
+            )
+            @test !isnothing(graph)
+        end
+    end
+
+    @testset "Graph colour_map - global gradient" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            score = [1.5, -0.5, 2.0]
+        )
+
+        colour_gradient = Dict{Float64,String}(
+            -2.0 => "#FF0000",
+            0.0 => "#FFFFFF",
+            2.0 => "#0000FF"
+        )
+
+        graph = Graph(:colour_map_test, graph_df, :colour_map_data;
+            color_cols = [:score],
+            colour_map = colour_gradient,
+            title = "Colour Map Test"
+        )
+
+        @test occursin("colourMap", graph.functional_html)
+        @test occursin("FF0000", graph.functional_html)
+        @test occursin("FFFFFF", graph.functional_html)
+        @test occursin("0000FF", graph.functional_html)
+        @test occursin("applyContinuousColoring", graph.functional_html)
+    end
+
+    @testset "Graph colour_map - per-variable gradients" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            score1 = [1.5, -0.5, 2.0],
+            score2 = [0.3, 0.8, 0.5]
+        )
+
+        per_var_gradients = Dict{String,Dict{Float64,String}}(
+            "score1" => Dict(-2.0 => "#FF0000", 0.0 => "#FFFFFF", 2.0 => "#0000FF"),
+            "score2" => Dict(0.0 => "#00FF00", 1.0 => "#FF00FF")
+        )
+
+        graph = Graph(:per_var_colour, graph_df, :per_var_data;
+            color_cols = [:score1, :score2],
+            colour_map = per_var_gradients,
+            title = "Per-Variable Gradients"
+        )
+
+        @test occursin("colourMap", graph.functional_html)
+        @test occursin("score1", graph.functional_html)
+        @test occursin("score2", graph.functional_html)
+    end
+
+    @testset "Graph colour_map validation - too few stops" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8],
+            score = [1.0, 2.0]
+        )
+
+        # Global gradient with only 1 stop
+        bad_gradient = Dict{Float64,String}(0.0 => "#FF0000")
+
+        @test_throws ErrorException Graph(:bad_gradient, graph_df, :bad_data;
+            color_cols = [:score],
+            colour_map = bad_gradient
+        )
+    end
+
+    @testset "Graph colour_map validation - per-variable too few stops" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8],
+            score = [1.0, 2.0]
+        )
+
+        # Per-variable gradient with only 1 stop
+        bad_per_var = Dict{String,Dict{Float64,String}}(
+            "score" => Dict(0.0 => "#FF0000")
+        )
+
+        @test_throws ErrorException Graph(:bad_per_var, graph_df, :bad_data;
+            color_cols = [:score],
+            colour_map = bad_per_var
+        )
+    end
+
+    @testset "Graph extrapolate_colors parameter" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            score = [1.5, -0.5, 5.0]  # 5.0 is outside gradient range
+        )
+
+        colour_gradient = Dict{Float64,String}(
+            -2.0 => "#FF0000",
+            0.0 => "#FFFFFF",
+            2.0 => "#0000FF"
+        )
+
+        # With extrapolation enabled
+        graph = Graph(:extrapolate_test, graph_df, :extrapolate_data;
+            color_cols = [:score],
+            colour_map = colour_gradient,
+            extrapolate_colors = true
+        )
+
+        @test occursin("extrapolateColors = true", graph.functional_html)
+
+        # Without extrapolation (default)
+        graph_clamp = Graph(:clamp_test, graph_df, :clamp_data;
+            color_cols = [:score],
+            colour_map = colour_gradient,
+            extrapolate_colors = false
+        )
+
+        @test occursin("extrapolateColors = false", graph_clamp.functional_html)
+    end
+
+    @testset "Graph continuous vs discrete color column detection" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            numeric_col = [1.5, 2.0, 3.5],
+            string_col = ["X", "Y", "Z"]
+        )
+
+        graph = Graph(:col_type_test, graph_df, :col_type_data;
+            color_cols = [:numeric_col, :string_col],
+            title = "Column Type Detection"
+        )
+
+        @test occursin("continuousCols", graph.functional_html)
+        @test occursin("discreteCols", graph.functional_html)
+        @test occursin("numeric_col", graph.functional_html)
+        @test occursin("string_col", graph.functional_html)
+
+        # Check appearance HTML shows type indicators
+        @test occursin("(continuous)", graph.appearance_html)
+        @test occursin("(discrete)", graph.appearance_html)
+    end
+
+    @testset "Graph js_dependencies function" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8]
+        )
+
+        graph = Graph(:js_deps_test, graph_df, :js_deps_data)
+
+        js_deps = js_dependencies(graph)
+        @test length(js_deps) >= 2
+        @test any(dep -> occursin("jquery", lowercase(dep)), js_deps)
+        @test any(dep -> occursin("cytoscape", lowercase(dep)), js_deps)
+    end
+
+    @testset "Graph correlation_method column detection" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B", "A", "A", "B"],
+            node2 = ["B", "C", "C", "B", "C", "C"],
+            strength = [0.9, 0.7, 0.6, 0.85, 0.75, 0.55],
+            correlation_method = [fill("pearson", 3); fill("spearman", 3)]
+        )
+
+        graph = Graph(:corr_method_test, graph_df, :corr_method_data;
+            title = "Correlation Method Test"
+        )
+
+        # Check for correlation method selector container
+        @test occursin("corr_method_container_corr_method_test", graph.appearance_html)
+        @test occursin("corr_method_select_corr_method_test", graph.appearance_html)
+        @test occursin("Correlation method", graph.appearance_html)
+    end
+
+    @testset "Graph aspect ratio slider" begin
+        graph_df = DataFrame(
+            node1 = ["A", "B"],
+            node2 = ["B", "C"],
+            strength = [0.9, 0.8]
+        )
+
+        graph = Graph(:aspect_test, graph_df, :aspect_data)
+
+        # Check for aspect ratio control
+        @test occursin("aspect_ratio_slider_aspect_test", graph.appearance_html)
+        @test occursin("Aspect Ratio", graph.appearance_html)
+        @test occursin("setupGraphAspectRatio_aspect_test", graph.functional_html)
+    end
+
+    @testset "Graph DataFrame with combined color and tooltip cols" begin
+        graph_df = DataFrame(
+            node1 = ["A", "A", "B"],
+            node2 = ["B", "C", "C"],
+            strength = [0.9, 0.7, 0.6],
+            sector = ["Tech", "Finance", "Tech"],
+            region = ["North", "South", "East"],
+            extra_info = ["Info1", "Info2", "Info3"]
+        )
+
+        # color_cols and tooltip_cols with overlap - should deduplicate
+        graph = Graph(:combined_cols, graph_df, :combined_data;
+            color_cols = [:sector, :region],
+            tooltip_cols = [:sector, :extra_info],  # sector overlaps
+            title = "Combined Columns Test"
+        )
+
+        # All should appear in tooltipCols
+        @test occursin("tooltipCols", graph.functional_html)
+        @test occursin("sector", graph.functional_html)
+        @test occursin("region", graph.functional_html)
+        @test occursin("extra_info", graph.functional_html)
+    end
 end
 
 println("Graph tests completed successfully!")
