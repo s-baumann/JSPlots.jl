@@ -529,3 +529,4 @@ struct CandlestickChart <: JSPlotsType
 end
 
 dependencies(a::CandlestickChart) = [a.data_label]
+js_dependencies(::CandlestickChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

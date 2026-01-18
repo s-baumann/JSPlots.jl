@@ -608,3 +608,4 @@ struct Waterfall <: JSPlotsType
 end
 
 dependencies(w::Waterfall) = [w.data_label]
+js_dependencies(::Waterfall) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

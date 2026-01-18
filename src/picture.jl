@@ -591,3 +591,4 @@ function check_image_size(path::String, dataformat::Symbol)
 end
 
 dependencies(a::Picture) = []
+js_dependencies(::Picture) = vcat(JS_DEP_JQUERY)

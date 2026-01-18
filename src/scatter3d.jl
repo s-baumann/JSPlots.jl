@@ -817,3 +817,4 @@ $style_html        </div>
 end
 
 dependencies(a::Scatter3D) = [a.data_label]
+js_dependencies(::Scatter3D) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

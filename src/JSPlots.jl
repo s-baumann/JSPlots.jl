@@ -4,17 +4,101 @@ module JSPlots
 
     abstract type JSPlotsType end
 
+    # =============================================================================
+    # JavaScript Dependency Constants
+    # =============================================================================
+    # These constants define the external JavaScript libraries used by different chart types.
+    # Each chart type declares its dependencies via js_dependencies(), and make_html.jl
+    # collects the union of all dependencies for a page.
+
+    # Core dependencies - jQuery for DOM manipulation and filters
+    const JS_DEP_JQUERY = [
+        """<link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">""",
+        """<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>""",
+        """<script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>""",
+    ]
+
+    # CSV parsing for data loading (PapaParse)
+    const JS_DEP_CSV = [
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>""",
+    ]
+
+    # Plotly.js for most 2D and 3D charts
+    const JS_DEP_PLOTLY = [
+        """<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>""",
+    ]
+
+    # D3.js v3 for TSNEPlot, RadarChart
+    const JS_DEP_D3 = [
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>""",
+    ]
+
+    # C3.js (requires D3) - used by PivotTable
+    const JS_DEP_C3 = [
+        """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>""",
+    ]
+
+    # PivotTable.js (requires D3 and C3)
+    const JS_DEP_PIVOTTABLE = [
+        """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>""",
+    ]
+
+    # Cytoscape.js for Graph visualization
+    const JS_DEP_CYTOSCAPE = [
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>""",
+    ]
+
+    # Prism.js for code syntax highlighting (base - languages added separately)
+    const JS_DEP_PRISM = [
+        """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">""",
+        """<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>""",
+    ]
+
+    # Leaflet.js for geographic maps
+    const JS_DEP_LEAFLET = [
+        """<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">""",
+        """<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>""",
+        """<script src="https://unpkg.com/topojson-client@3"></script>""",
+    ]
+
+    # Parquet-wasm for Parquet data format (requires Arrow, loaded as ES module in body)
+    const JS_DEP_PARQUET = [
+        """<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>""",
+        """<script type="module">
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+await parquet.default();
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>""",
+    ]
+
+    # Export dependency constants for use by chart types
+    export JS_DEP_JQUERY, JS_DEP_CSV, JS_DEP_PLOTLY, JS_DEP_D3, JS_DEP_C3
+    export JS_DEP_PIVOTTABLE, JS_DEP_CYTOSCAPE, JS_DEP_PRISM, JS_DEP_LEAFLET, JS_DEP_PARQUET
+
     """
         js_dependencies(plot::JSPlotsType)
 
     Returns a vector of HTML script/link tags for JavaScript dependencies required by this plot type.
     Default implementation returns an empty vector. Plot types with special dependencies should override this.
 
-    # Example
+    Charts should use the JS_DEP_* constants to declare their chart-specific dependencies, e.g.:
     ```julia
-    js_dependencies(geo::GeoPlot)  # Returns Leaflet.js and TopoJSON scripts
-    js_dependencies(line::LineChart)  # Returns [] (uses base dependencies only)
+    js_dependencies(::LineChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
+    js_dependencies(::GeoPlot) = vcat(JS_DEP_JQUERY, JS_DEP_LEAFLET)
     ```
+
+    Note: Data format dependencies (PapaParse for CSV, Arrow for Parquet) are added automatically
+    based on the page's dataformat setting, not from chart dependencies.
+
+    The make_html.jl module collects dependencies from all charts on a page and includes
+    only the unique union, so duplication in declarations is handled automatically.
     """
     js_dependencies(::JSPlotsType) = String[]
 

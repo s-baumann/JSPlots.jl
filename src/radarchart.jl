@@ -13,6 +13,7 @@ end
 
 # Dependencies
 dependencies(r::RadarChartInternal) = [r.data_label]
+js_dependencies(::RadarChartInternal) = vcat(JS_DEP_JQUERY, JS_DEP_D3)
 
 """
     RadarChart(chart_id, data_label; kwargs...)

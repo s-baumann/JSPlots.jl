@@ -428,3 +428,4 @@ $style_html        </div>
 end
 
 dependencies(a::ScatterPlot) = [a.data_label]
+js_dependencies(::ScatterPlot) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

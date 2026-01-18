@@ -122,3 +122,4 @@ end
 
 # Dependencies method for LinkList (no data dependencies)
 dependencies(a::LinkList) = Symbol[]
+js_dependencies(::LinkList) = vcat(JS_DEP_JQUERY)

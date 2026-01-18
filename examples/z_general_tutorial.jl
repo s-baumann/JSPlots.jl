@@ -1621,33 +1621,35 @@ geoplot_points = GeoPlot(:global_cities_geo, cities_geo_df, :cities_geo_data;
     popup_cols = [:city, :continent],
     filters = [:continent],
     color_scale = :viridis,
-    zoom = 2,
-    height = 450,
     title = "Global Major Cities - Points Mode",
     notes = "Markers colored by population (millions). Click markers for details. Filter by continent."
 )
 
-# Create sample country GDP data for choropleth mode
+# Create sample country data with multiple metrics for choropleth mode
 countries_geo_df = DataFrame(
     country = ["United States", "China", "Germany", "Japan", "India",
                "United Kingdom", "France", "Italy", "Brazil", "Canada",
                "Russia", "Australia", "Spain", "Mexico", "Indonesia"],
     gdp_trillion = [25.46, 17.96, 4.07, 4.23, 3.39,
                     3.07, 2.78, 2.01, 1.92, 2.14,
-                    1.78, 1.68, 1.42, 1.32, 1.32]
+                    1.78, 1.68, 1.42, 1.32, 1.32],
+    population_millions = [331.0, 1412.0, 83.0, 125.0, 1408.0,
+                          67.0, 65.0, 59.0, 214.0, 38.0,
+                          144.0, 26.0, 47.0, 129.0, 274.0],
+    area_million_km2 = [9.83, 9.60, 0.36, 0.38, 3.29,
+                        0.24, 0.64, 0.30, 8.52, 9.98,
+                        17.10, 7.69, 0.51, 1.96, 1.90]
 )
 
-# Choropleth mode example - World GDP
-geoplot_choropleth = GeoPlot(:world_gdp_geo, countries_geo_df, :countries_geo_data;
+# Choropleth mode example with multiple overlays - switch between GDP, Population, and Area
+geoplot_choropleth = GeoPlot(:world_stats_geo, countries_geo_df, :countries_geo_data;
     region = :country,
-    value = :gdp_trillion,
+    value_cols = [:gdp_trillion, :population_millions, :area_million_km2],  # Multiple overlays!
     region_type = :world_countries,
     region_key = "name",
     color_scale = :turbo,
-    zoom = 2,
-    height = 450,
-    title = "World GDP by Country - Choropleth Mode",
-    notes = "Countries shaded by GDP (trillion USD). Hover over countries for values. Gray indicates no data."
+    title = "World Country Statistics - Multiple Overlays",
+    notes = "Use the Overlay dropdown to switch between GDP (trillion USD), Population (millions), and Area (million km²). Gray indicates no data."
 )
 
 
@@ -1748,7 +1750,7 @@ financial_plot_page =  JSPlotPage(
     [financial_section, candlestick_chart, execution_plot],
     tab_title="Financial Charts",
     page_header = "Financial Charts",
-    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology. See the <a href=\"https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5114581\" style=\"color: blue;\">SSRN paper</a> and <a href=\"https://github.com/s-baumann/RefinedSlippage.jl\" style=\"color: blue;\">RefinedSlippage.jl</a> for methodology details.",
+    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology.",
     dataformat = :parquet
 )
 

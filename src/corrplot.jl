@@ -362,6 +362,7 @@ end
 
 # Add dependencies function for CorrPlot
 dependencies(cp::CorrPlot) = [cp.data_label]
+js_dependencies(::CorrPlot) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
 
 function build_corrplot_appearance_html(chart_title_str, title, notes, scenarios,
                                         scenario_col, default_scenario_name, allow_manual_order)

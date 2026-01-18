@@ -2,7 +2,8 @@
     GeoPlot - Interactive geographic visualization with points and choropleth regions
 
 Create interactive maps with markers (points) and/or choropleth shading (regions).
-Uses Leaflet.js with OpenStreetMap tiles for rendering.
+Uses Leaflet.js with OpenStreetMap tiles for rendering. The map automatically zooms
+to fit the data on initial load.
 
 # Two Modes
 
@@ -19,13 +20,22 @@ geo = GeoPlot(:earthquakes, df, :data;
 ```
 
 ## Choropleth Mode
-Shade regions by value:
+Shade regions by value (supports multiple overlay options):
 ```julia
+# Single overlay
 geo = GeoPlot(:population, df, :data;
     region = :state_name,    # column with region names like "Minnesota"
-    value = :population,     # column with values to shade by
+    value_cols = [:population],  # column with values to shade by
     region_type = :us_states,
     title = "US Population by State"
+)
+
+# Multiple overlays with dropdown to switch between them
+geo = GeoPlot(:stats, df, :data;
+    region = :state_name,
+    value_cols = [:population, :area_sq_km, :gdp],  # user can switch between these
+    region_type = :us_states,
+    title = "US State Statistics"
 )
 ```
 
@@ -39,7 +49,7 @@ For regions not in the built-in list:
 ```julia
 geo = GeoPlot(:custom, df, :data;
     region = :territory_id,
-    value = :revenue,
+    value_cols = [:revenue],
     geojson_url = "https://example.com/territories.geojson",
     region_key = "id"  # property in GeoJSON to match against
 )
@@ -61,7 +71,7 @@ struct GeoPlot <: JSPlotsType
                      popup_cols::Vector{Symbol}=Symbol[],
                      # Choropleth mode parameters
                      region::Union{Nothing, Symbol}=nothing,
-                     value::Union{Nothing, Symbol}=nothing,
+                     value_cols::Vector{Symbol}=Symbol[],    # overlay columns (use dropdown to switch)
                      region_type::Union{Nothing, Symbol}=nothing,
                      geojson_url::Union{Nothing, String}=nothing,
                      region_key::String="name",
@@ -69,18 +79,14 @@ struct GeoPlot <: JSPlotsType
                      color_scale::Symbol=:viridis,
                      filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                      title::String="Geographic Map",
-                     notes::String="",
-                     center_lat::Float64=0.0,
-                     center_lon::Float64=0.0,
-                     zoom::Int=2,
-                     height::Int=500)
+                     notes::String="")
 
         # Determine mode based on parameters
         has_points = lat !== nothing && lon !== nothing
-        has_choropleth = region !== nothing && value !== nothing
+        has_choropleth = region !== nothing && !isempty(value_cols)
 
         if !has_points && !has_choropleth
-            error("GeoPlot requires either (lat, lon) for points mode or (region, value, region_type) for choropleth mode")
+            error("GeoPlot requires either (lat, lon) for points mode or (region, value_cols, region_type) for choropleth mode")
         end
 
         mode = has_points ? :points : :choropleth
@@ -102,13 +108,17 @@ struct GeoPlot <: JSPlotsType
 
         if has_choropleth
             validate_column(df, region, "region")
-            validate_column(df, value, "value")
+            for col in value_cols
+                validate_column(df, col, "value_cols")
+            end
 
             # Validate region_type or geojson_url
             if region_type === nothing && geojson_url === nothing
                 error("Choropleth mode requires either region_type or geojson_url")
             end
         end
+
+        default_value_col = isempty(value_cols) ? nothing : value_cols[1]
 
         # Normalize filters
         normalized_filters = normalize_filters(filters, df)
@@ -143,6 +153,10 @@ struct GeoPlot <: JSPlotsType
         # Build popup columns array for JavaScript
         popup_cols_js = build_js_array(popup_cols)
 
+        # Build value columns array for JavaScript
+        value_cols_js = build_js_array(String.(value_cols))
+        default_value_col_str = default_value_col !== nothing ? string(default_value_col) : ""
+
         # Mode-specific JavaScript configuration
         mode_config = if mode == :points
             lat_col = string(lat)
@@ -158,12 +172,12 @@ struct GeoPlot <: JSPlotsType
             const POPUP_COLS = $popup_cols_js;
             const GEOJSON_URL = null;
             const REGION_COL = null;
-            const VALUE_COL = null;
+            const VALUE_COLS = [];
+            let VALUE_COL = null;
             const REGION_KEY = null;
             """
         else
             region_col = string(region)
-            value_col = string(value)
             """
             const MODE = 'choropleth';
             const LAT_COL = null;
@@ -173,12 +187,28 @@ struct GeoPlot <: JSPlotsType
             const POPUP_COLS = [];
             const GEOJSON_URL = '$geojson_source';
             const REGION_COL = '$region_col';
-            const VALUE_COL = '$value_col';
+            const VALUE_COLS = $value_cols_js;
+            let VALUE_COL = '$default_value_col_str';
             const REGION_KEY = '$region_key';
             """
         end
 
         chart_title_str = string(chart_title)
+
+        # Build overlay dropdown HTML if multiple value columns
+        overlay_dropdown_html = if mode == :choropleth && length(value_cols) > 1
+            options_html = join(["""<option value="$col" $(col == default_value_col ? "selected" : "")>$col</option>""" for col in value_cols], "\n")
+            """
+            <div style="margin-bottom: 10px;">
+                <label for="overlay_select_$chart_title_str" style="font-weight: bold;">Overlay: </label>
+                <select id="overlay_select_$chart_title_str" onchange="updateMap_$chart_title_str()" style="padding: 5px; border-radius: 4px;">
+                    $options_html
+                </select>
+            </div>
+            """
+        else
+            ""
+        end
 
         functional_html = """
         (function() {
@@ -236,6 +266,7 @@ struct GeoPlot <: JSPlotsType
 
             // Fix polygons that cross the antimeridian (180° longitude line)
             // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+            // Excludes Antarctica which is a polar region requiring different handling
             function fixAntimeridian(geojson) {
                 if (!geojson || !geojson.features) return geojson;
 
@@ -243,6 +274,14 @@ struct GeoPlot <: JSPlotsType
 
                 geojson.features.forEach(feature => {
                     if (!feature.geometry) {
+                        newFeatures.push(feature);
+                        return;
+                    }
+
+                    // Skip Antarctica - it's a polar region that wraps differently
+                    const props = feature.properties || {};
+                    const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+                    if (featureName.includes('antarctica')) {
                         newFeatures.push(feature);
                         return;
                     }
@@ -371,7 +410,7 @@ struct GeoPlot <: JSPlotsType
             }
 
             // Render points mode
-            function renderPoints(data) {
+            function renderPoints(data, fitBoundsToData = false) {
                 if (markersLayer_$chart_title_str) {
                     map_$chart_title_str.removeLayer(markersLayer_$chart_title_str);
                 }
@@ -457,8 +496,8 @@ struct GeoPlot <: JSPlotsType
                     createLegend(colorMin, colorMax, COLOR_COL);
                 }
 
-                // Fit bounds to markers
-                if (data.length > 0) {
+                // Fit bounds to markers only on initial render
+                if (fitBoundsToData && data.length > 0) {
                     const bounds = [];
                     data.forEach(row => {
                         const lat = parseFloat(row[LAT_COL]);
@@ -474,7 +513,7 @@ struct GeoPlot <: JSPlotsType
             }
 
             // Render choropleth mode
-            function renderChoropleth(data) {
+            function renderChoropleth(data, fitBoundsToData = false) {
                 if (choroplethLayer_$chart_title_str) {
                     map_$chart_title_str.removeLayer(choroplethLayer_$chart_title_str);
                 }
@@ -500,6 +539,9 @@ struct GeoPlot <: JSPlotsType
                         max = Math.max(max, v);
                     }
                 });
+
+                // Track layers that have matching data for bounds calculation
+                const layersWithData = [];
 
                 // Style function
                 function style(feature) {
@@ -527,6 +569,21 @@ struct GeoPlot <: JSPlotsType
                     };
                 }
 
+                // Check if a feature has matching data
+                function featureHasData(feature) {
+                    const props = feature.properties || {};
+                    const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+                    for (const key of possibleKeys) {
+                        if (props[key]) {
+                            const lookupKey = normalizeRegionName(props[key]);
+                            if (dataLookup[lookupKey] !== undefined) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+
                 // Popup function
                 function onEachFeature(feature, layer) {
                     const props = feature.properties || {};
@@ -534,17 +591,24 @@ struct GeoPlot <: JSPlotsType
 
                     let regionName = 'Unknown';
                     let value = null;
+                    let hasData = false;
                     for (const key of possibleKeys) {
                         if (props[key]) {
                             const lookupKey = normalizeRegionName(props[key]);
                             if (dataLookup[lookupKey] !== undefined) {
                                 regionName = props[key];
                                 value = dataLookup[lookupKey];
+                                hasData = true;
                                 break;
                             } else if (regionName === 'Unknown') {
                                 regionName = props[key];
                             }
                         }
+                    }
+
+                    // Track layers with data for bounds fitting
+                    if (hasData) {
+                        layersWithData.push(layer);
                     }
 
                     let popupContent = '<strong>' + regionName + '</strong>';
@@ -577,12 +641,24 @@ struct GeoPlot <: JSPlotsType
                     createLegend(min, max, VALUE_COL);
                 }
 
-                // Fit bounds
-                map_$chart_title_str.fitBounds(choroplethLayer_$chart_title_str.getBounds());
+                // Fit bounds only to regions that have data (not the entire GeoJSON)
+                if (fitBoundsToData && layersWithData.length > 0) {
+                    const group = L.featureGroup(layersWithData);
+                    map_$chart_title_str.fitBounds(group.getBounds(), {padding: [20, 20]});
+                } else if (fitBoundsToData) {
+                    // Fallback: if no specific layers matched, fit to entire choropleth layer
+                    map_$chart_title_str.fitBounds(choroplethLayer_$chart_title_str.getBounds(), {padding: [20, 20]});
+                }
             }
 
             // Main update function
             window.updateMap_$chart_title_str = function() {
+                // Get overlay column from dropdown if it exists
+                const overlaySelect = document.getElementById('overlay_select_$chart_title_str');
+                if (overlaySelect) {
+                    VALUE_COL = overlaySelect.value;
+                }
+
                 // Get filter values
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -613,25 +689,99 @@ struct GeoPlot <: JSPlotsType
                     rangeFilters
                 );
 
-                // Render based on mode
+                // Always fit bounds to show the current filtered data
+                // This ensures the view refocuses when filters change
                 if (MODE === 'points') {
-                    renderPoints(filteredData);
+                    renderPoints(filteredData, true);
                 } else {
-                    renderChoropleth(filteredData);
+                    renderChoropleth(filteredData, true);
                 }
+
+                // Update zoom slider to reflect current zoom level
+                updateZoomSlider_$chart_title_str();
             };
 
             // Initialize map
             function initMap() {
+                // Set initial height based on width and aspect ratio (default 0.6)
+                const mapDiv = document.getElementById('map_$chart_title_str');
+                const width = mapDiv.offsetWidth;
+                const aspectSlider = document.getElementById('map_$chart_title_str' + '_aspect_ratio_slider');
+                let aspectRatio = 0.6;
+                if (aspectSlider) {
+                    aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+                }
+                mapDiv.style.height = (width * aspectRatio) + 'px';
+
                 map_$chart_title_str = L.map('map_$chart_title_str', {
                     worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
-                    maxBoundsViscosity: 1.0
-                }).setView([$center_lat, $center_lon], $zoom);
+                    maxBoundsViscosity: 1.0,
+                    zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+                    zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+                }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                     noWrap: false  // Allow world wrapping for better antimeridian handling
                 }).addTo(map_$chart_title_str);
+            }
+
+            // Setup aspect ratio slider for map
+            function setupMapAspectRatio() {
+                const slider = document.getElementById('map_$chart_title_str' + '_aspect_ratio_slider');
+                const label = document.getElementById('map_$chart_title_str' + '_aspect_ratio_label');
+                if (!slider || !label) return;
+
+                slider.addEventListener('input', function() {
+                    const logValue = parseFloat(this.value);
+                    const aspectRatio = Math.exp(logValue);
+                    label.textContent = aspectRatio.toFixed(2);
+
+                    const mapDiv = document.getElementById('map_$chart_title_str');
+                    if (!mapDiv || !map_$chart_title_str) return;
+
+                    const width = mapDiv.offsetWidth;
+                    const height = width * aspectRatio;
+                    mapDiv.style.height = height + 'px';
+
+                    // Invalidate map size without panning - keeps center and zoom fixed
+                    map_$chart_title_str.invalidateSize({pan: false});
+                });
+            }
+
+            // Update zoom slider to reflect current map zoom level
+            function updateZoomSlider_$chart_title_str() {
+                const slider = document.getElementById('map_$chart_title_str' + '_zoom_slider');
+                const label = document.getElementById('map_$chart_title_str' + '_zoom_label');
+                if (!slider || !label || !map_$chart_title_str) return;
+
+                const zoom = map_$chart_title_str.getZoom();
+                slider.value = zoom;
+                label.textContent = zoom.toFixed(1);
+            }
+
+            // Setup zoom slider for map
+            function setupMapZoom() {
+                const slider = document.getElementById('map_$chart_title_str' + '_zoom_slider');
+                const label = document.getElementById('map_$chart_title_str' + '_zoom_label');
+                if (!slider || !label) return;
+
+                // Update zoom when slider changes
+                slider.addEventListener('input', function() {
+                    const zoom = parseFloat(this.value);
+                    label.textContent = zoom.toFixed(1);
+
+                    if (map_$chart_title_str) {
+                        map_$chart_title_str.setZoom(zoom);
+                    }
+                });
+
+                // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+                if (map_$chart_title_str) {
+                    map_$chart_title_str.on('zoomend', function() {
+                        updateZoomSlider_$chart_title_str();
+                    });
+                }
             }
 
             // Load data and initialize
@@ -640,6 +790,8 @@ struct GeoPlot <: JSPlotsType
 
                 \$(function() {
                     initMap();
+                    setupMapAspectRatio();
+                    setupMapZoom();
 
                     if (MODE === 'choropleth' && GEOJSON_URL) {
                         // Load GeoJSON for choropleth
@@ -672,16 +824,44 @@ struct GeoPlot <: JSPlotsType
         })();
         """
 
+        # Build aspect ratio slider HTML (logarithmic scale, default 0.6)
+        aspect_ratio_default = 0.6
+        log_min = log(0.25)
+        log_max = log(2.5)
+        log_default = log(aspect_ratio_default)
+
+        # Build sliders HTML (aspect ratio and zoom side by side)
+        sliders_html = """
+        <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+            <div style="flex: 1; min-width: 250px;">
+                <label for="map_$(chart_title_str)_aspect_ratio_slider">Aspect Ratio: </label>
+                <span id="map_$(chart_title_str)_aspect_ratio_label">$(round(aspect_ratio_default, digits=2))</span>
+                <input type="range" id="map_$(chart_title_str)_aspect_ratio_slider"
+                       min="$(log_min)" max="$(log_max)" step="0.01" value="$(log_default)"
+                       style="width: 60%; margin-left: 10px;">
+            </div>
+            <div style="flex: 1; min-width: 250px;">
+                <label for="map_$(chart_title_str)_zoom_slider">Zoom: </label>
+                <span id="map_$(chart_title_str)_zoom_label">2.0</span>
+                <input type="range" id="map_$(chart_title_str)_zoom_slider"
+                       min="1" max="18" step="0.1" value="2"
+                       style="width: 60%; margin-left: 10px;">
+            </div>
+        </div>
+        """
+
         # Build appearance HTML
         map_container = """
-        <div id="map_$chart_title_str" style="width: 100%; height: $(height)px; border: 1px solid #ccc; border-radius: 4px;"></div>
+        <div id="map_$chart_title_str" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
         """
 
         appearance_html = """
         <div class="chart-container" style="margin-bottom: 20px;">
             <h3>$title</h3>
             $(isempty(notes) ? "" : "<p style=\"color: #666; font-size: 0.9em;\">$notes</p>")
+            $sliders_html
             <div style="margin-bottom: 10px;">
+                $overlay_dropdown_html
                 $filters_html
             </div>
             $map_container
@@ -708,11 +888,12 @@ function get_geojson_url(region_type::Union{Nothing, Symbol}, geojson_url::Union
     end
 
     # Map region types to CDN URLs
+    # Note: US states uses a GeoJSON with full state names (not abbreviations)
     region_urls = Dict(
         :world_countries => "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json",
         :world_countries_50m => "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json",
         :world_countries_10m => "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-10m.json",
-        :us_states => "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json",
+        :us_states => "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json",
         :us_counties => "https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json",
         :us_nation => "https://cdn.jsdelivr.net/npm/us-atlas@3/nation-10m.json"
     )
@@ -745,9 +926,5 @@ end
 
 dependencies(g::GeoPlot) = [g.data_label]
 
-# GeoPlot requires Leaflet.js and TopoJSON libraries
-js_dependencies(::GeoPlot) = [
-    """<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">""",
-    """<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>""",
-    """<script src="https://unpkg.com/topojson-client@3"></script>"""
-]
+# GeoPlot requires jQuery, CSV loading, and Leaflet.js with TopoJSON
+js_dependencies(::GeoPlot) = vcat(JS_DEP_JQUERY, JS_DEP_LEAFLET)

@@ -743,3 +743,4 @@ struct AreaChart <: JSPlotsType
 end
 
 dependencies(a::AreaChart) = [a.data_label]
+js_dependencies(::AreaChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

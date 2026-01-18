@@ -411,3 +411,4 @@ normalized_filters = normalize_filters(filters, df)
 end
 
 dependencies(a::PieChart) = [a.data_label]
+js_dependencies(::PieChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

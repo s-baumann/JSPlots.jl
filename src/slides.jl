@@ -697,4 +697,5 @@ function generate_slides_html(slides::Slides, dataformat::Symbol, project_dir::S
 end
 
 dependencies(s::Slides) = [s.data_label]
+js_dependencies(::Slides) = vcat(JS_DEP_JQUERY)
 

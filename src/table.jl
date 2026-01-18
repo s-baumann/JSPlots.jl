@@ -229,4 +229,5 @@ function html_escape(s::AbstractString)
 end
 
 dependencies(a::Table) = []
+js_dependencies(::Table) = vcat(JS_DEP_JQUERY)
 

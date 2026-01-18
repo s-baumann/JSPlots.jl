@@ -557,3 +557,4 @@ struct KernelDensity <: JSPlotsType
 end
 
 dependencies(a::KernelDensity) = [a.data_label]
+js_dependencies(::KernelDensity) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

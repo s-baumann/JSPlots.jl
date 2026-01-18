@@ -655,3 +655,4 @@ struct BumpChart <: JSPlotsType
 end
 
 dependencies(a::BumpChart) = [a.data_label]
+js_dependencies(::BumpChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

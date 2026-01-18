@@ -296,3 +296,4 @@ function Base.getproperty(pt::PivotTable, name::Symbol)
 end
 
 dependencies(a::PivotTable) = collect(a.data_labels)
+js_dependencies(::PivotTable) = vcat(JS_DEP_JQUERY, JS_DEP_D3, JS_DEP_C3, JS_DEP_PIVOTTABLE)

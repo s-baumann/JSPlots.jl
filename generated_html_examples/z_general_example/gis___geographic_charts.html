@@ -3,12 +3,15 @@
 <head>
     <title>GIS / Geographic Charts</title>
     <meta charset="UTF-8">
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
+
     <style>
         body {
             margin: 0;
@@ -122,44 +125,18 @@
     </style>
 
 
-    <!-- external libs -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
-
-    <!-- Leaflet.js for geographic maps (only loaded if GeoPlot is used) -->
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <script src="https://unpkg.com/topojson-client@3"></script>
-
-    <!-- Prism.js for code syntax highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <!-- Prism.js language components for CodeBlocks -->
     
 
 </head>
 
 <body>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
 <script type="module">
-// Import parquet-wasm for Parquet file support
 import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
-
-// Initialize parquet-wasm
 await parquet.default();
-
-// Make parquet available globally for loadDataset
 window.parquetWasm = parquet;
 window.parquetReady = true;
 console.log('Parquet-wasm library loaded successfully');
@@ -718,7 +695,8 @@ const SIZE_COL = null;
 const POPUP_COLS = ['city', 'continent'];
 const GEOJSON_URL = null;
 const REGION_COL = null;
-const VALUE_COL = null;
+const VALUE_COLS = [];
+let VALUE_COL = null;
 const REGION_KEY = null;
 
     const COLOR_PALETTE = ["#440154","#482878","#3e4989","#31688e","#26838f","#1f9e89","#35b779","#6ece58","#b5de2b","#fde725"];
@@ -773,6 +751,7 @@ const REGION_KEY = null;
 
     // Fix polygons that cross the antimeridian (180° longitude line)
     // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
     function fixAntimeridian(geojson) {
         if (!geojson || !geojson.features) return geojson;
 
@@ -780,6 +759,14 @@ const REGION_KEY = null;
 
         geojson.features.forEach(feature => {
             if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
                 newFeatures.push(feature);
                 return;
             }
@@ -908,7 +895,7 @@ const REGION_KEY = null;
     }
 
     // Render points mode
-    function renderPoints(data) {
+    function renderPoints(data, fitBoundsToData = false) {
         if (markersLayer_global_cities_geo) {
             map_global_cities_geo.removeLayer(markersLayer_global_cities_geo);
         }
@@ -994,8 +981,8 @@ const REGION_KEY = null;
             createLegend(colorMin, colorMax, COLOR_COL);
         }
 
-        // Fit bounds to markers
-        if (data.length > 0) {
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
             const bounds = [];
             data.forEach(row => {
                 const lat = parseFloat(row[LAT_COL]);
@@ -1011,7 +998,7 @@ const REGION_KEY = null;
     }
 
     // Render choropleth mode
-    function renderChoropleth(data) {
+    function renderChoropleth(data, fitBoundsToData = false) {
         if (choroplethLayer_global_cities_geo) {
             map_global_cities_geo.removeLayer(choroplethLayer_global_cities_geo);
         }
@@ -1037,6 +1024,9 @@ const REGION_KEY = null;
                 max = Math.max(max, v);
             }
         });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
 
         // Style function
         function style(feature) {
@@ -1064,6 +1054,21 @@ const REGION_KEY = null;
             };
         }
 
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         // Popup function
         function onEachFeature(feature, layer) {
             const props = feature.properties || {};
@@ -1071,17 +1076,24 @@ const REGION_KEY = null;
 
             let regionName = 'Unknown';
             let value = null;
+            let hasData = false;
             for (const key of possibleKeys) {
                 if (props[key]) {
                     const lookupKey = normalizeRegionName(props[key]);
                     if (dataLookup[lookupKey] !== undefined) {
                         regionName = props[key];
                         value = dataLookup[lookupKey];
+                        hasData = true;
                         break;
                     } else if (regionName === 'Unknown') {
                         regionName = props[key];
                     }
                 }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
             }
 
             let popupContent = '<strong>' + regionName + '</strong>';
@@ -1114,12 +1126,24 @@ const REGION_KEY = null;
             createLegend(min, max, VALUE_COL);
         }
 
-        // Fit bounds
-        map_global_cities_geo.fitBounds(choroplethLayer_global_cities_geo.getBounds());
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_global_cities_geo.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_global_cities_geo.fitBounds(choroplethLayer_global_cities_geo.getBounds(), {padding: [20, 20]});
+        }
     }
 
     // Main update function
     window.updateMap_global_cities_geo = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_global_cities_geo');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
         // Get filter values
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1150,25 +1174,99 @@ const REGION_KEY = null;
             rangeFilters
         );
 
-        // Render based on mode
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
         if (MODE === 'points') {
-            renderPoints(filteredData);
+            renderPoints(filteredData, true);
         } else {
-            renderChoropleth(filteredData);
+            renderChoropleth(filteredData, true);
         }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_global_cities_geo();
     };
 
     // Initialize map
     function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_global_cities_geo');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_global_cities_geo' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
         map_global_cities_geo = L.map('map_global_cities_geo', {
             worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
-            maxBoundsViscosity: 1.0
-        }).setView([0.0, 0.0], 2);
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             noWrap: false  // Allow world wrapping for better antimeridian handling
         }).addTo(map_global_cities_geo);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_global_cities_geo' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_global_cities_geo');
+            if (!mapDiv || !map_global_cities_geo) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_global_cities_geo.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_global_cities_geo() {
+        const slider = document.getElementById('map_global_cities_geo' + '_zoom_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_zoom_label');
+        if (!slider || !label || !map_global_cities_geo) return;
+
+        const zoom = map_global_cities_geo.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_global_cities_geo' + '_zoom_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_global_cities_geo) {
+                map_global_cities_geo.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_global_cities_geo) {
+            map_global_cities_geo.on('zoomend', function() {
+                updateZoomSlider_global_cities_geo();
+            });
+        }
     }
 
     // Load data and initialize
@@ -1177,6 +1275,8 @@ const REGION_KEY = null;
 
         $(function() {
             initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
 
             if (MODE === 'choropleth' && GEOJSON_URL) {
                 // Load GeoJSON for choropleth
@@ -1217,18 +1317,19 @@ const SIZE_COL = null;
 const POPUP_COLS = [];
 const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
 const REGION_COL = 'country';
-const VALUE_COL = 'gdp_trillion';
+const VALUE_COLS = ['gdp_trillion', 'population_millions', 'area_million_km2'];
+let VALUE_COL = 'gdp_trillion';
 const REGION_KEY = 'name';
 
     const COLOR_PALETTE = ["#30123b","#4662d7","#36aaf9","#1ae4b6","#72fe5e","#c8ef34","#faba39","#f66b19","#ca2a04","#7a0403"];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
 
-    let map_world_gdp_geo = null;
-    let markersLayer_world_gdp_geo = null;
-    let choroplethLayer_world_gdp_geo = null;
-    let legend_world_gdp_geo = null;
-    let geojsonData_world_gdp_geo = null;
+    let map_world_stats_geo = null;
+    let markersLayer_world_stats_geo = null;
+    let choroplethLayer_world_stats_geo = null;
+    let legend_world_stats_geo = null;
+    let geojsonData_world_stats_geo = null;
 
     // Country/region name aliases for matching
     // Maps common variations to canonical names used in data
@@ -1272,6 +1373,7 @@ const REGION_KEY = 'name';
 
     // Fix polygons that cross the antimeridian (180° longitude line)
     // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
     function fixAntimeridian(geojson) {
         if (!geojson || !geojson.features) return geojson;
 
@@ -1279,6 +1381,14 @@ const REGION_KEY = 'name';
 
         geojson.features.forEach(feature => {
             if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
                 newFeatures.push(feature);
                 return;
             }
@@ -1383,12 +1493,12 @@ const REGION_KEY = 'name';
 
     // Create legend
     function createLegend(min, max, units) {
-        if (legend_world_gdp_geo) {
-            map_world_gdp_geo.removeControl(legend_world_gdp_geo);
+        if (legend_world_stats_geo) {
+            map_world_stats_geo.removeControl(legend_world_stats_geo);
         }
 
-        legend_world_gdp_geo = L.control({position: 'bottomright'});
-        legend_world_gdp_geo.onAdd = function(map) {
+        legend_world_stats_geo = L.control({position: 'bottomright'});
+        legend_world_stats_geo.onAdd = function(map) {
             const div = L.DomUtil.create('div', 'info legend');
             div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
 
@@ -1403,16 +1513,16 @@ const REGION_KEY = 'name';
             div.innerHTML = html;
             return div;
         };
-        legend_world_gdp_geo.addTo(map_world_gdp_geo);
+        legend_world_stats_geo.addTo(map_world_stats_geo);
     }
 
     // Render points mode
-    function renderPoints(data) {
-        if (markersLayer_world_gdp_geo) {
-            map_world_gdp_geo.removeLayer(markersLayer_world_gdp_geo);
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_world_stats_geo) {
+            map_world_stats_geo.removeLayer(markersLayer_world_stats_geo);
         }
 
-        markersLayer_world_gdp_geo = L.layerGroup();
+        markersLayer_world_stats_geo = L.layerGroup();
 
         // Calculate min/max for color and size scaling
         let colorMin = Infinity, colorMax = -Infinity;
@@ -1483,18 +1593,18 @@ const REGION_KEY = 'name';
                 fillOpacity: 0.7
             }).bindPopup(popupContent);
 
-            markersLayer_world_gdp_geo.addLayer(marker);
+            markersLayer_world_stats_geo.addLayer(marker);
         });
 
-        markersLayer_world_gdp_geo.addTo(map_world_gdp_geo);
+        markersLayer_world_stats_geo.addTo(map_world_stats_geo);
 
         // Create legend if color column is used
         if (COLOR_COL && colorMin !== Infinity) {
             createLegend(colorMin, colorMax, COLOR_COL);
         }
 
-        // Fit bounds to markers
-        if (data.length > 0) {
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
             const bounds = [];
             data.forEach(row => {
                 const lat = parseFloat(row[LAT_COL]);
@@ -1504,18 +1614,18 @@ const REGION_KEY = 'name';
                 }
             });
             if (bounds.length > 0) {
-                map_world_gdp_geo.fitBounds(bounds, {padding: [20, 20]});
+                map_world_stats_geo.fitBounds(bounds, {padding: [20, 20]});
             }
         }
     }
 
     // Render choropleth mode
-    function renderChoropleth(data) {
-        if (choroplethLayer_world_gdp_geo) {
-            map_world_gdp_geo.removeLayer(choroplethLayer_world_gdp_geo);
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_world_stats_geo) {
+            map_world_stats_geo.removeLayer(choroplethLayer_world_stats_geo);
         }
 
-        if (!geojsonData_world_gdp_geo) {
+        if (!geojsonData_world_stats_geo) {
             console.error('GeoJSON data not loaded');
             return;
         }
@@ -1536,6 +1646,9 @@ const REGION_KEY = 'name';
                 max = Math.max(max, v);
             }
         });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
 
         // Style function
         function style(feature) {
@@ -1563,6 +1676,21 @@ const REGION_KEY = 'name';
             };
         }
 
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         // Popup function
         function onEachFeature(feature, layer) {
             const props = feature.properties || {};
@@ -1570,17 +1698,24 @@ const REGION_KEY = 'name';
 
             let regionName = 'Unknown';
             let value = null;
+            let hasData = false;
             for (const key of possibleKeys) {
                 if (props[key]) {
                     const lookupKey = normalizeRegionName(props[key]);
                     if (dataLookup[lookupKey] !== undefined) {
                         regionName = props[key];
                         value = dataLookup[lookupKey];
+                        hasData = true;
                         break;
                     } else if (regionName === 'Unknown') {
                         regionName = props[key];
                     }
                 }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
             }
 
             let popupContent = '<strong>' + regionName + '</strong>';
@@ -1598,31 +1733,43 @@ const REGION_KEY = 'name';
                     layer.bringToFront();
                 },
                 mouseout: function(e) {
-                    choroplethLayer_world_gdp_geo.resetStyle(e.target);
+                    choroplethLayer_world_stats_geo.resetStyle(e.target);
                 }
             });
         }
 
-        choroplethLayer_world_gdp_geo = L.geoJSON(geojsonData_world_gdp_geo, {
+        choroplethLayer_world_stats_geo = L.geoJSON(geojsonData_world_stats_geo, {
             style: style,
             onEachFeature: onEachFeature
-        }).addTo(map_world_gdp_geo);
+        }).addTo(map_world_stats_geo);
 
         // Create legend
         if (min !== Infinity) {
             createLegend(min, max, VALUE_COL);
         }
 
-        // Fit bounds
-        map_world_gdp_geo.fitBounds(choroplethLayer_world_gdp_geo.getBounds());
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_world_stats_geo.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_world_stats_geo.fitBounds(choroplethLayer_world_stats_geo.getBounds(), {padding: [20, 20]});
+        }
     }
 
     // Main update function
-    window.updateMap_world_gdp_geo = function() {
+    window.updateMap_world_stats_geo = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_world_stats_geo');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
         // Get filter values
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_world_gdp_geo');
+            const select = document.getElementById(col + '_select_world_stats_geo');
             if (select) {
                 filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
             }
@@ -1630,7 +1777,7 @@ const REGION_KEY = 'name';
 
         const rangeFilters = {};
         CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_world_gdp_geo' + '_slider');
+            const slider = $('#' + col + '_range_world_stats_geo' + '_slider');
             if (slider.length > 0) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
@@ -1641,41 +1788,117 @@ const REGION_KEY = 'name';
 
         // Apply filters
         const filteredData = applyFiltersWithCounting(
-            window.allData_world_gdp_geo,
-            'world_gdp_geo',
+            window.allData_world_stats_geo,
+            'world_stats_geo',
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
             rangeFilters
         );
 
-        // Render based on mode
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
         if (MODE === 'points') {
-            renderPoints(filteredData);
+            renderPoints(filteredData, true);
         } else {
-            renderChoropleth(filteredData);
+            renderChoropleth(filteredData, true);
         }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_world_stats_geo();
     };
 
     // Initialize map
     function initMap() {
-        map_world_gdp_geo = L.map('map_world_gdp_geo', {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_world_stats_geo');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_world_stats_geo' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_world_stats_geo = L.map('map_world_stats_geo', {
             worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
-            maxBoundsViscosity: 1.0
-        }).setView([0.0, 0.0], 2);
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
             noWrap: false  // Allow world wrapping for better antimeridian handling
-        }).addTo(map_world_gdp_geo);
+        }).addTo(map_world_stats_geo);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_world_stats_geo' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_world_stats_geo');
+            if (!mapDiv || !map_world_stats_geo) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_world_stats_geo.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_world_stats_geo() {
+        const slider = document.getElementById('map_world_stats_geo' + '_zoom_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_zoom_label');
+        if (!slider || !label || !map_world_stats_geo) return;
+
+        const zoom = map_world_stats_geo.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_world_stats_geo' + '_zoom_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_world_stats_geo) {
+                map_world_stats_geo.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_world_stats_geo) {
+            map_world_stats_geo.on('zoomend', function() {
+                updateZoomSlider_world_stats_geo();
+            });
+        }
     }
 
     // Load data and initialize
     loadDataset('countries_geo_data').then(data => {
-        window.allData_world_gdp_geo = data;
+        window.allData_world_stats_geo = data;
 
         $(function() {
             initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
 
             if (MODE === 'choropleth' && GEOJSON_URL) {
                 // Load GeoJSON for choropleth
@@ -1692,19 +1915,19 @@ const REGION_KEY = 'name';
                             parsedGeojson = geojson;
                         }
                         // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
-                        geojsonData_world_gdp_geo = fixAntimeridian(parsedGeojson);
-                        updateMap_world_gdp_geo();
+                        geojsonData_world_stats_geo = fixAntimeridian(parsedGeojson);
+                        updateMap_world_stats_geo();
                     })
                     .catch(error => {
                         console.error('Error loading GeoJSON:', error);
-                        document.getElementById('map_world_gdp_geo').innerHTML =
+                        document.getElementById('map_world_stats_geo').innerHTML =
                             '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
                     });
             } else {
-                updateMap_world_gdp_geo();
+                updateMap_world_stats_geo();
             }
         });
-    }).catch(error => console.error('Error loading data for chart world_gdp_geo:', error));
+    }).catch(error => console.error('Error loading data for chart world_stats_geo:', error));
 })();
 
 
@@ -1740,7 +1963,25 @@ Custom GeoJSON can also be provided via URL.</p>
 <div class="chart-container" style="margin-bottom: 20px;">
     <h3>Global Major Cities - Points Mode</h3>
     <p style="color: #666; font-size: 0.9em;">Markers colored by population (millions). Click markers for details. Filter by continent.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_global_cities_geo_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_global_cities_geo_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_global_cities_geo_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_global_cities_geo_zoom_slider">Zoom: </label>
+        <span id="map_global_cities_geo_zoom_label">2.0</span>
+        <input type="range" id="map_global_cities_geo_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
     <div style="margin-bottom: 10px;">
+        
                 <div style="margin: 10px; display: flex; align-items: center;">
             <div style="flex: 0 0 70%;">
                 <label for="continent_select_global_cities_geo">continent: </label>
@@ -1758,7 +1999,7 @@ Custom GeoJSON can also be provided via URL.</p>
         </div>
         
     </div>
-    <div id="map_global_cities_geo" style="width: 100%; height: 450px; border: 1px solid #ccc; border-radius: 4px;"></div>
+    <div id="map_global_cities_geo" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
 
     <div id="obs_count_global_cities_geo" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
 </div>
@@ -1766,14 +2007,40 @@ Custom GeoJSON can also be provided via URL.</p>
 <hr>
 <br>
 <div class="chart-container" style="margin-bottom: 20px;">
-    <h3>World GDP by Country - Choropleth Mode</h3>
-    <p style="color: #666; font-size: 0.9em;">Countries shaded by GDP (trillion USD). Hover over countries for values. Gray indicates no data.</p>
+    <h3>World Country Statistics - Multiple Overlays</h3>
+    <p style="color: #666; font-size: 0.9em;">Use the Overlay dropdown to switch between GDP (trillion USD), Population (millions), and Area (million km²). Gray indicates no data.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_stats_geo_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_world_stats_geo_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_world_stats_geo_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_stats_geo_zoom_slider">Zoom: </label>
+        <span id="map_world_stats_geo_zoom_label">2.0</span>
+        <input type="range" id="map_world_stats_geo_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
     <div style="margin-bottom: 10px;">
+        <div style="margin-bottom: 10px;">
+    <label for="overlay_select_world_stats_geo" style="font-weight: bold;">Overlay: </label>
+    <select id="overlay_select_world_stats_geo" onchange="updateMap_world_stats_geo()" style="padding: 5px; border-radius: 4px;">
+        <option value="gdp_trillion" selected>gdp_trillion</option>
+<option value="population_millions" >population_millions</option>
+<option value="area_million_km2" >area_million_km2</option>
+    </select>
+</div>
+
         
     </div>
-    <div id="map_world_gdp_geo" style="width: 100%; height: 450px; border: 1px solid #ccc; border-radius: 4px;"></div>
+    <div id="map_world_stats_geo" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
 
-    <div id="obs_count_world_gdp_geo" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+    <div id="obs_count_world_stats_geo" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
 </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: countries_geo_data.parquet</p>
 

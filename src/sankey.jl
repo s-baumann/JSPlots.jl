@@ -444,3 +444,6 @@ end
 function dependencies(x::SanKey)
     return [x.data_label]  # Return the data label so the data file gets saved
 end
+
+# SanKey uses Plotly for visualization
+js_dependencies(::SanKey) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

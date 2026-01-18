@@ -852,3 +852,4 @@ normalized_filters = normalize_filters(filters, df)
 end
 
 dependencies(a::Path) = [a.data_label]
+js_dependencies(::Path) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

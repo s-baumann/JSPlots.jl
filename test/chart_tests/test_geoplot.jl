@@ -81,14 +81,14 @@ using DataFrames
 
         geo = GeoPlot(:us_pop, df, :state_data;
             region = :state,
-            value = :population,
+            value_cols = [:population],
             region_type = :us_states,
             title = "US Population by State"
         )
 
         @test geo.mode == :choropleth
         @test occursin("GEOJSON_URL", geo.functional_html)
-        @test occursin("us-atlas", geo.functional_html)
+        @test occursin("us-states.json", geo.functional_html)
         @test occursin("REGION_COL", geo.functional_html)
         @test occursin("VALUE_COL", geo.functional_html)
         @test occursin("L.geoJSON", geo.functional_html)
@@ -102,7 +102,7 @@ using DataFrames
 
         geo = GeoPlot(:world_gdp, df, :country_data;
             region = :country,
-            value = :gdp,
+            value_cols = [:gdp],
             region_type = :world_countries,
             title = "World GDP"
         )
@@ -119,7 +119,7 @@ using DataFrames
 
         geo = GeoPlot(:custom_geo, df, :custom_data;
             region = :region_id,
-            value = :value,
+            value_cols = [:value],
             geojson_url = "https://example.com/custom.geojson",
             region_key = "id",
             title = "Custom Regions"
@@ -139,7 +139,7 @@ using DataFrames
         # Test viridis (default)
         geo_viridis = GeoPlot(:viridis_test, df, :data;
             region = :state,
-            value = :value,
+            value_cols = [:value],
             region_type = :us_states,
             color_scale = :viridis
         )
@@ -148,14 +148,14 @@ using DataFrames
         # Test blues
         geo_blues = GeoPlot(:blues_test, df, :data;
             region = :state,
-            value = :value,
+            value_cols = [:value],
             region_type = :us_states,
             color_scale = :blues
         )
         @test occursin("#f7fbff", geo_blues.functional_html)  # Blues starts with this color
     end
 
-    @testset "Map configuration" begin
+    @testset "Map controls" begin
         df = DataFrame(
             lat = [51.5074],
             lon = [-0.1278]
@@ -164,17 +164,14 @@ using DataFrames
         geo = GeoPlot(:london, df, :data;
             lat = :lat,
             lon = :lon,
-            center_lat = 51.5,
-            center_lon = -0.1,
-            zoom = 10,
-            height = 600,
             title = "London"
         )
 
-        @test occursin("51.5", geo.functional_html)
-        @test occursin("-0.1", geo.functional_html)
-        @test occursin("10", geo.functional_html)  # zoom level
-        @test occursin("600px", geo.appearance_html)
+        # Map auto-zooms to data bounds and has controls
+        @test occursin("fitBounds", geo.functional_html)
+        @test occursin("aspect_ratio_slider", geo.appearance_html)
+        @test occursin("zoom_slider", geo.appearance_html)
+        @test occursin("updateZoomSlider", geo.functional_html)
     end
 
     @testset "Filters support" begin
@@ -234,7 +231,7 @@ using DataFrames
         # Choropleth without region_type or geojson_url
         @test_throws ErrorException GeoPlot(:error_test, df, :data;
             region = :region,
-            value = :value
+            value_cols = [:value]
         )
     end
 
@@ -243,14 +240,14 @@ using DataFrames
 
         @test_throws ErrorException GeoPlot(:error_test, df, :data;
             region = :region,
-            value = :value,
+            value_cols = [:value],
             region_type = :invalid_type
         )
     end
 
     @testset "get_geojson_url function" begin
         # Test known region types
-        @test JSPlots.get_geojson_url(:us_states, nothing) == "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json"
+        @test JSPlots.get_geojson_url(:us_states, nothing) == "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json"
         @test JSPlots.get_geojson_url(:world_countries, nothing) == "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json"
         @test JSPlots.get_geojson_url(:us_counties, nothing) == "https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json"
 
@@ -302,7 +299,7 @@ using DataFrames
 
         geo = GeoPlot(:topojson_test, df, :data;
             region = :state,
-            value = :value,
+            value_cols = [:value],
             region_type = :us_states
         )
 

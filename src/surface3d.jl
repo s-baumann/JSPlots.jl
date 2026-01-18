@@ -230,4 +230,5 @@ normalized_filters = normalize_filters(filters, df)
 end
 
 dependencies(a::Surface3D) = [a.data_label]
+js_dependencies(::Surface3D) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
 

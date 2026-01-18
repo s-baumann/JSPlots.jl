@@ -686,4 +686,5 @@ struct LineChart <: JSPlotsType
 end
 
 dependencies(a::LineChart) = [a.data_label]
+js_dependencies(::LineChart) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
 

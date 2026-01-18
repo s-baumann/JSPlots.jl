@@ -289,6 +289,7 @@ function compute_surfaces(df, x_col, y_col, z_col, group_cols, group_levels,
 end
 
 dependencies(ss::ScatterSurface3D) = [ss.data_label]
+js_dependencies(::ScatterSurface3D) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
 
 """
 Generate HTML and JavaScript for ScatterSurface3D

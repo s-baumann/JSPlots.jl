@@ -1101,6 +1101,9 @@ function dependencies(a::ExecutionPlot)
     return deps
 end
 
+# ExecutionPlot uses Plotly for visualization
+js_dependencies(::ExecutionPlot) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
+
 # Custom function to get all data for serialization
 # Uses dot notation for subfolder organization: exec_data.fills -> data/exec_data/fills.csv
 # exec_data is the original ExecutionData object (stored in prepared_data[:exec_data])

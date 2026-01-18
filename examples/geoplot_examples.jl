@@ -54,10 +54,6 @@ cities_map = GeoPlot(:us_cities, cities_df, :cities_data;
     popup_cols = [:city, :region],
     filters = [:region],
     color_scale = :viridis,
-    center_lat = 39.0,
-    center_lon = -98.0,
-    zoom = 4,
-    height = 500,
     title = "Major US Cities by Population",
     notes = "Marker size and color indicate population in millions. Click on markers for details. Use the filter to show cities by region."
 )
@@ -93,14 +89,10 @@ states_df = DataFrame(
 
 states_map = GeoPlot(:us_states_pop, states_df, :states_data;
     region = :state,
-    value = :population,
+    value_cols = [:population],
     region_type = :us_states,
     region_key = "name",
     color_scale = :plasma,
-    center_lat = 39.0,
-    center_lon = -98.0,
-    zoom = 4,
-    height = 500,
     title = "US State Population (2020 Census)",
     notes = "Population in millions. Hover over states to see values. Data from 2020 US Census."
 )
@@ -128,14 +120,10 @@ world_gdp_df = DataFrame(
 
 world_map = GeoPlot(:world_gdp, world_gdp_df, :gdp_data;
     region = :country,
-    value = :gdp_trillion,
+    value_cols = [:gdp_trillion],
     region_type = :world_countries,
     region_key = "name",
     color_scale = :turbo,
-    center_lat = 20.0,
-    center_lon = 0.0,
-    zoom = 2,
-    height = 500,
     title = "World GDP by Country (2023)",
     notes = "GDP in trillion USD (nominal). Countries without data shown in gray. Data from IMF estimates."
 )
@@ -181,10 +169,6 @@ earthquake_map = GeoPlot(:earthquakes, earthquake_df, :quake_data;
     popup_cols = [:region],
     filters = [:region],
     color_scale = :reds,
-    center_lat = 10.0,
-    center_lon = -160.0,
-    zoom = 2,
-    height = 500,
     title = "Simulated Earthquake Data - Pacific Ring of Fire",
     notes = "Color indicates magnitude (darker = stronger). Size indicates depth (larger = deeper). " *
             "Filter by region to focus on specific areas. This is simulated data for demonstration."
@@ -210,10 +194,41 @@ offices_map = GeoPlot(:offices, offices_df, :office_data;
     popup_cols = [:office, :type],
     filters = [:type],
     color_scale = :blues,
-    zoom = 2,
-    height = 400,
     title = "Global Office Locations",
     notes = "Click on markers to see office details. Color intensity indicates number of employees."
+)
+
+# ========================================
+# Example 6: Multiple Overlays - Country Statistics
+# ========================================
+println("Creating Multiple Overlays example...")
+
+# Country data with multiple metrics that can be switched between
+country_stats_df = DataFrame(
+    country = ["United States", "China", "India", "Brazil", "Russia",
+               "Japan", "Germany", "United Kingdom", "France", "Italy",
+               "Canada", "Australia", "Spain", "Mexico", "Indonesia"],
+    population_millions = [331.0, 1412.0, 1408.0, 214.0, 144.0,
+                          125.0, 83.0, 67.0, 65.0, 59.0,
+                          38.0, 26.0, 47.0, 129.0, 274.0],
+    area_million_km2 = [9.83, 9.60, 3.29, 8.52, 17.10,
+                        0.38, 0.36, 0.24, 0.64, 0.30,
+                        9.98, 7.69, 0.51, 1.96, 1.90],
+    gdp_per_capita_usd = [76399, 12720, 2410, 8920, 12195,
+                          33815, 48636, 45850, 43659, 34085,
+                          52722, 64491, 30103, 10045, 4788]
+)
+
+# Multi-overlay map - user can switch between Population, Area, and GDP per Capita
+multi_overlay_map = GeoPlot(:country_stats, country_stats_df, :country_stats_data;
+    region = :country,
+    value_cols = [:population_millions, :area_million_km2, :gdp_per_capita_usd],  # Multiple overlays!
+    region_type = :world_countries,
+    region_key = "name",
+    color_scale = :viridis,
+    title = "Country Statistics - Multiple Overlays",
+    notes = "Use the Overlay dropdown to switch between Population, Area, and GDP per Capita. " *
+            "This demonstrates how to provide multiple data columns that users can switch between."
 )
 
 # ========================================
@@ -227,13 +242,14 @@ all_data = Dict{Symbol, Any}(
     :states_data => states_df,
     :gdp_data => world_gdp_df,
     :quake_data => earthquake_df,
-    :office_data => offices_df
+    :office_data => offices_df,
+    :country_stats_data => country_stats_df
 )
 
 # Create page with all examples
 page = JSPlotPage(
     all_data,
-    [header, cities_map, states_map, world_map, earthquake_map, offices_map],
+    [header, cities_map, states_map, world_map, earthquake_map, offices_map, multi_overlay_map],
     dataformat=:csv_embedded
 )
 
@@ -250,4 +266,3 @@ println("  3. World GDP - Choropleth of countries")
 println("  4. Earthquake Data - Points with color and size")
 println("  5. Global Offices - Simple points example")
 println()
-println("Note: Maps require an internet connection to load OpenStreetMap tiles and boundary data.")

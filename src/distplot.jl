@@ -489,3 +489,4 @@ struct DistPlot <: JSPlotsType
 end
 
 dependencies(a::DistPlot) = [a.data_label]
+js_dependencies(::DistPlot) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

@@ -1115,6 +1115,7 @@ end
 
 # Dependencies
 dependencies(g::GraphChart) = [g.data_label]
+js_dependencies(::GraphChart) = vcat(JS_DEP_JQUERY, JS_DEP_CYTOSCAPE)
 
 """
     GraphScenario

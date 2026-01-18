@@ -687,3 +687,4 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
 end
 
 dependencies(bw::BoxAndWhiskers) = [bw.data_label]
+js_dependencies(::BoxAndWhiskers) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)

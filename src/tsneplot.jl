@@ -1252,5 +1252,6 @@ end
 
 # Struct definition and dependencies
 dependencies(t::TSNEPlot) = [t.data_label]
+js_dependencies(::TSNEPlot) = vcat(JS_DEP_JQUERY, JS_DEP_D3)
 
 export TSNEPlot

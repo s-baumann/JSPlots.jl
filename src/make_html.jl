@@ -51,12 +51,10 @@ const FULL_PAGE_TEMPLATE = raw"""
 <head>
     <title>___TITLE_OF_PAGE___</title>
     <meta charset="UTF-8">
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+    ___JS_DEPENDENCIES___
+
     <style>
         body {
             margin: 0;
@@ -78,46 +76,15 @@ const FULL_PAGE_TEMPLATE = raw"""
     </style>
     ___EXTRA_STYLES___
 
-    <!-- external libs -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
-
-    <!-- Leaflet.js for geographic maps (only loaded if GeoPlot is used) -->
-    ___LEAFLET_SCRIPTS___
-
-    <!-- Prism.js for code syntax highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <!-- Prism.js language components for CodeBlocks -->
     ___PRISM_LANGUAGES___
 
 </head>
 
 <body>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-
-<script type="module">
-// Import parquet-wasm for Parquet file support
-import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
-
-// Initialize parquet-wasm
-await parquet.default();
-
-// Make parquet available globally for loadDataset
-window.parquetWasm = parquet;
-window.parquetReady = true;
-console.log('Parquet-wasm library loaded successfully');
-</script>
+<!-- Parquet support (loaded if using parquet dataformat) -->
+___PARQUET_SCRIPT___
 
 <script>
 // Helper function to wait for parquet-wasm to be loaded
@@ -967,7 +934,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         extra_styles *= TABLE_STYLE
     end
 
-    # Collect Prism.js language components needed for CodeBlocks
+    # Collect Prism.js language components needed for CodeBlocks (base Prism is in JS_DEP_PRISM)
     prism_languages = JSPlots.get_languages_from_codeblocks(pt.pivot_tables)
     prism_scripts = if isempty(prism_languages)
         ""
@@ -978,8 +945,21 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
 
     # Collect JavaScript dependencies from all plot types on this page
     all_js_deps = reduce(vcat, js_dependencies.(pt.pivot_tables); init=String[])
+
+    # Add dataformat-specific dependencies (PapaParse for CSV formats)
+    if pt.dataformat in [:csv_embedded, :csv_external]
+        append!(all_js_deps, JS_DEP_CSV)
+    end
+
     unique_js_deps = unique(all_js_deps)
     js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
+
+    # Parquet support script (only needed for parquet dataformat)
+    parquet_script = if pt.dataformat == :parquet
+        join(JS_DEP_PARQUET, "\n")
+    else
+        ""
+    end
 
     # Handle external formats (csv_external, json_external, parquet) differently
     if pt.dataformat in [:csv_external, :json_external, :parquet]
@@ -1078,8 +1058,9 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+        full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-        full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
+        full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         # Save HTML file
@@ -1175,8 +1156,9 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
         full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
         full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+        full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-        full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
+        full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
         open(outfile_path, "w") do outfile
@@ -1267,8 +1249,21 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
 
     # Collect JavaScript dependencies from all plot types on this page
     all_js_deps = reduce(vcat, js_dependencies.(page.pivot_tables); init=String[])
+
+    # Add dataformat-specific dependencies (PapaParse for CSV formats)
+    if dataformat in [:csv_embedded, :csv_external]
+        append!(all_js_deps, JS_DEP_CSV)
+    end
+
     unique_js_deps = unique(all_js_deps)
     js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
+
+    # Parquet support script (only needed for parquet dataformat)
+    parquet_script = if dataformat == :parquet
+        join(JS_DEP_PARQUET, "\n")
+    else
+        ""
+    end
 
     # Generate datasets HTML
     data_set_bit = isempty(dataframes) ? "" : reduce(*, [dataset_to_html(k, v, dataformat) for (k,v) in dataframes])
@@ -1330,8 +1325,9 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     full_page_html = replace(full_page_html, "___PAGE_HEADER___" => page.page_header)
     full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
     full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+    full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
     full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-    full_page_html = replace(full_page_html, "___LEAFLET_SCRIPTS___" => js_dependencies_html)
+    full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
     full_page_html = replace(full_page_html, "___VERSION___" => version_str)
 
     return full_page_html

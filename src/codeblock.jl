@@ -453,3 +453,4 @@ function get_languages_from_codeblocks(charts::Vector)
 end
 
 dependencies(a::CodeBlock) = []
+js_dependencies(::CodeBlock) = vcat(JS_DEP_JQUERY, JS_DEP_PRISM)
