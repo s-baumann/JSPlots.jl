@@ -55,7 +55,10 @@ The plot types are below. For each you can click on the name of the chart and se
 
 #### Financial Time Series
 - **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
-- **[ExecutionChart]()** - A chart showing fills relative to bid and ask over the course of trading a security.
+- **[ExecutionChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/execution_analysis/execution_analysis.html)** - A chart showing fills relative to bid and ask over the course of trading a security.
+
+#### Geographical Plots
+- **[GeoPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/geoplot_examples.html)** - Plot points or areas on a map.
 
 #### Situational Plots
 - **[Waterfall](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html)** - Make Waterfall plots showing how positive and negative elements add up to an aggregate.
