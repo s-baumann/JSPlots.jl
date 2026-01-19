@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Correlation Clusters</title>
+    <meta charset="UTF-8">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+    
+
+    <!-- Prism.js language components for CodeBlocks -->
+    
+
+</head>
+
+<body>
+
+<!-- Parquet support (loaded if using parquet dataformat) -->
+
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const ENTITY_COL = 'entity';
+    const LABEL_COL = 'entity';
+    const ALL_NUMERIC_COLS = [];
+    const INITIAL_FEATURE_COLS = [];
+    const IS_DISTANCE_MATRIX = true;
+    const COLOR_COLS = [];
+    const TOOLTIP_COLS = [];
+    const INITIAL_PERPLEXITY = 8.0;
+    const INITIAL_LEARNING_RATE = 150.0;
+
+    // State
+    let rawData = null;
+    let entities = [];
+    let entityMap = {};
+    let distanceMatrix = null;
+    let selectedFeatures = [...INITIAL_FEATURE_COLS];
+    let positions = [];
+    let velocities = [];
+    let gains = [];  // For adaptive learning rate
+    let iteration = 0;
+    let isRunning = false;
+    let animationFrameId = null;
+    let lastTotalMovement = 0;
+    let cachedP = null;
+    let lastPerplexity = null;
+
+    // Current transform state (for drag coordinate conversion)
+    let currentTransform = { scale: 1, centerX: 0, centerY: 0 };
+
+    // Pan offset (in embedding coordinates)
+    let panOffsetX = 0;
+    let panOffsetY = 0;
+
+    // Zoom factor (for manual zoom control)
+    let zoomFactor = 1.0;
+
+    // SVG elements
+    let svg = null;
+    let width = 800;
+    let height = 600;
+    const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+    const nodeRadius = 8;
+
+    // Tooltip - get dynamically to ensure DOM is ready
+    function getTooltipDiv() {
+        return document.getElementById('tooltip_asset_correlation_tsne');
+    }
+
+    // Load data
+    loadDataset('distance_data').then(function(data) {
+        rawData = data;
+        initializeVisualization();
+    }).catch(function(error) {
+        console.error('Failed to load t-SNE data:', error);
+    });
+
+    function initializeVisualization() {
+        // Extract entities
+        if (IS_DISTANCE_MATRIX) {
+            const entitySet = new Set();
+            rawData.forEach(function(row) {
+                entitySet.add(row.entity1);
+                entitySet.add(row.entity2);
+            });
+            entities = Array.from(entitySet).sort();
+        } else {
+            entities = [];
+            const seen = new Set();
+            rawData.forEach(function(row) {
+                const e = row[ENTITY_COL];
+                if (!seen.has(e)) {
+                    seen.add(e);
+                    entities.push(e);
+                }
+            });
+        }
+
+        // Build entity to index map
+        entities.forEach(function(e, i) {
+            entityMap[e] = i;
+        });
+
+        // Initialize feature selection UI
+        if (!IS_DISTANCE_MATRIX) {
+            populateFeatureSelectors();
+        }
+
+        // Build distance matrix
+        buildDistanceMatrix();
+
+        // Initialize random positions
+        randomizePositions_asset_correlation_tsne();
+
+        // Create SVG
+        createSVG();
+
+        // Setup aspect ratio control
+        setupAspectRatio();
+
+        // Initial render
+        render();
+    }
+
+    function populateFeatureSelectors() {
+        const availableSelect = document.getElementById('available_features_asset_correlation_tsne');
+        const selectedSelect = document.getElementById('selected_features_asset_correlation_tsne');
+
+        if (!availableSelect || !selectedSelect) return;
+
+        availableSelect.innerHTML = '';
+        selectedSelect.innerHTML = '';
+
+        ALL_NUMERIC_COLS.forEach(function(col) {
+            const option = document.createElement('option');
+            option.value = col;
+            option.text = col;
+            if (selectedFeatures.includes(col)) {
+                selectedSelect.appendChild(option);
+            } else {
+                availableSelect.appendChild(option);
+            }
+        });
+    }
+
+    window.addFeature_asset_correlation_tsne = function() {
+        const availableSelect = document.getElementById('available_features_asset_correlation_tsne');
+        const selectedSelect = document.getElementById('selected_features_asset_correlation_tsne');
+        const selected = Array.from(availableSelect.selectedOptions);
+        selected.forEach(function(opt) {
+            selectedSelect.appendChild(opt);
+            if (!selectedFeatures.includes(opt.value)) {
+                selectedFeatures.push(opt.value);
+            }
+        });
+    };
+
+    window.removeFeature_asset_correlation_tsne = function() {
+        const availableSelect = document.getElementById('available_features_asset_correlation_tsne');
+        const selectedSelect = document.getElementById('selected_features_asset_correlation_tsne');
+        const selected = Array.from(selectedSelect.selectedOptions);
+        selected.forEach(function(opt) {
+            availableSelect.appendChild(opt);
+            const idx = selectedFeatures.indexOf(opt.value);
+            if (idx > -1) selectedFeatures.splice(idx, 1);
+        });
+    };
+
+    window.recalculateDistances_asset_correlation_tsne = function() {
+        if (selectedFeatures.length === 0) {
+            alert('Please select at least one feature');
+            return;
+        }
+        // Stop any running optimization
+        if (isRunning) {
+            toggleRun_asset_correlation_tsne();
+        }
+        // Rebuild distance matrix with new features
+        buildDistanceMatrix();
+        // Reset positions and state
+        cachedP = null;
+        randomizePositions_asset_correlation_tsne();
+        render();
+        updateStatus('Distances recalculated - ready');
+    };
+
+    function buildDistanceMatrix() {
+        const n = entities.length;
+        distanceMatrix = [];
+        for (let i = 0; i < n; i++) {
+            distanceMatrix[i] = [];
+            for (let j = 0; j < n; j++) {
+                distanceMatrix[i][j] = 0;
+            }
+        }
+
+        if (IS_DISTANCE_MATRIX) {
+            rawData.forEach(function(row) {
+                const i = entityMap[row.entity1];
+                const j = entityMap[row.entity2];
+                if (i !== undefined && j !== undefined) {
+                    distanceMatrix[i][j] = row.distance;
+                    distanceMatrix[j][i] = row.distance;
+                }
+            });
+        } else {
+            // Get rescaling method
+            const rescalingSelect = document.getElementById('rescaling_asset_correlation_tsne');
+            const rescaling = rescalingSelect ? rescalingSelect.value : 'zscore';
+
+            // Build feature vectors
+            const featureVectors = {};
+            rawData.forEach(function(row) {
+                const entity = row[ENTITY_COL];
+                if (!featureVectors[entity]) {
+                    const vec = selectedFeatures.map(function(col) {
+                        const val = row[col];
+                        return typeof val === 'number' && !isNaN(val) ? val : 0;
+                    });
+                    featureVectors[entity] = vec;
+                }
+            });
+
+            // Apply rescaling per feature
+            if (selectedFeatures.length > 0 && rescaling !== 'none') {
+                selectedFeatures.forEach(function(col, colIdx) {
+                    const values = entities.map(function(e) {
+                        return featureVectors[e] ? featureVectors[e][colIdx] : 0;
+                    });
+
+                    if (rescaling === 'zscore' || rescaling === 'zscore_capped') {
+                        // Z-score normalization
+                        const mean = values.reduce(function(a, b) { return a + b; }, 0) / values.length;
+                        const variance = values.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / values.length;
+                        const std = Math.sqrt(variance) || 1;
+
+                        entities.forEach(function(entity) {
+                            if (featureVectors[entity]) {
+                                let zval = (featureVectors[entity][colIdx] - mean) / std;
+                                if (rescaling === 'zscore_capped') {
+                                    zval = Math.max(-2, Math.min(2, zval));
+                                }
+                                featureVectors[entity][colIdx] = zval;
+                            }
+                        });
+                    } else if (rescaling === 'quantile') {
+                        // Quantile scaling: min=0, median=0.5, max=1
+                        const sorted = values.slice().sort(function(a, b) { return a - b; });
+                        const rankMap = {};
+                        sorted.forEach(function(val, rank) {
+                            if (!(val in rankMap)) {
+                                rankMap[val] = rank;
+                            }
+                        });
+                        const maxRank = sorted.length - 1;
+
+                        entities.forEach(function(entity) {
+                            if (featureVectors[entity]) {
+                                const val = featureVectors[entity][colIdx];
+                                const rank = rankMap[val] || 0;
+                                featureVectors[entity][colIdx] = maxRank > 0 ? rank / maxRank : 0.5;
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Calculate Euclidean distances
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const v1 = featureVectors[entities[i]] || [];
+                    const v2 = featureVectors[entities[j]] || [];
+                    let dist = 0;
+                    const len = Math.max(v1.length, v2.length);
+                    for (let k = 0; k < len; k++) {
+                        const a = v1[k] || 0;
+                        const b = v2[k] || 0;
+                        dist += (a - b) * (a - b);
+                    }
+                    dist = Math.sqrt(dist);
+                    distanceMatrix[i][j] = dist;
+                    distanceMatrix[j][i] = dist;
+                }
+            }
+        }
+    }
+
+    function createSVG() {
+        const container = document.getElementById('tsne_canvas_asset_correlation_tsne');
+        width = container.offsetWidth || 800;
+        height = width * 0.6;
+        container.style.height = height + 'px';
+        container.innerHTML = '';
+
+        svg = d3.select(container)
+            .append('svg')
+            .attr('width', width)
+            .attr('height', height);
+
+        // Add background rect for pan events
+        svg.append('rect')
+            .attr('class', 'tsne-background-asset_correlation_tsne')
+            .attr('width', width)
+            .attr('height', height)
+            .attr('fill', 'transparent')
+            .style('cursor', 'move')
+            .call(d3.behavior.drag()
+                .on('dragstart', panStarted)
+                .on('drag', panning)
+                .on('dragend', panEnded));
+
+        // D3 v3 drag behavior for nodes
+        const drag = d3.behavior.drag()
+            .origin(function(d) { return d; })
+            .on('dragstart', dragStarted)
+            .on('drag', dragged)
+            .on('dragend', dragEnded);
+
+        window.tsneDrag_asset_correlation_tsne = drag;
+    }
+
+    // Pan handlers
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+
+    function panStarted() {
+        isPanning = true;
+        panStartX = d3.event.x;
+        panStartY = d3.event.y;
+        d3.event.sourceEvent.stopPropagation();
+    }
+
+    function panning() {
+        if (!isPanning) return;
+        const dx = d3.event.x - panStartX;
+        const dy = d3.event.y - panStartY;
+        // Convert screen delta to embedding delta
+        panOffsetX -= dx / currentTransform.scale;
+        panOffsetY -= dy / currentTransform.scale;
+        panStartX = d3.event.x;
+        panStartY = d3.event.y;
+        render();
+    }
+
+    function panEnded() {
+        isPanning = false;
+    }
+
+    function dragStarted(d) {
+        if (isRunning) {
+            toggleRun_asset_correlation_tsne();
+        }
+        d3.select(this).classed('dragging', true);
+    }
+
+    function dragged(d) {
+        const idx = entityMap[d.entity];
+        // Convert screen coordinates back to embedding coordinates
+        const screenX = d3.event.x;
+        const screenY = d3.event.y;
+        const embeddingX = currentTransform.centerX + (screenX - width / 2) / currentTransform.scale;
+        const embeddingY = currentTransform.centerY + (screenY - height / 2) / currentTransform.scale;
+
+        positions[idx].x = embeddingX;
+        positions[idx].y = embeddingY;
+        // Reset velocity when manually moved
+        velocities[idx].x = 0;
+        velocities[idx].y = 0;
+
+        render();
+    }
+
+    function dragEnded(d) {
+        d3.select(this).classed('dragging', false);
+    }
+
+    function setupAspectRatio() {
+        const aspectSlider = document.getElementById('aspect_ratio_slider_asset_correlation_tsne');
+        const aspectLabel = document.getElementById('aspect_ratio_label_asset_correlation_tsne');
+        const zoomSlider = document.getElementById('zoom_slider_asset_correlation_tsne');
+        const zoomLabel = document.getElementById('zoom_label_asset_correlation_tsne');
+        const container = document.getElementById('tsne_canvas_asset_correlation_tsne');
+
+        if (!aspectSlider || !aspectLabel || !container) return;
+
+        // Aspect ratio slider - changes viewport height/width ratio
+        aspectSlider.addEventListener('input', function() {
+            const aspectRatio = parseFloat(this.value);
+            aspectLabel.textContent = aspectRatio.toFixed(2);
+
+            width = container.offsetWidth;
+            height = width * aspectRatio;
+            container.style.height = height + 'px';
+
+            if (svg) {
+                svg.attr('width', width).attr('height', height);
+                // Update background rect size
+                svg.select('.tsne-background-asset_correlation_tsne')
+                    .attr('width', width)
+                    .attr('height', height);
+                render();
+            }
+        });
+
+        // Zoom slider - changes how much of the embedding is visible
+        if (zoomSlider && zoomLabel) {
+            zoomSlider.addEventListener('input', function() {
+                zoomFactor = parseFloat(this.value);
+                zoomLabel.textContent = zoomFactor.toFixed(1);
+                render();
+            });
+        }
+
+        // Initialize aspect ratio
+        const initialAspectRatio = parseFloat(aspectSlider.value);
+        aspectLabel.textContent = initialAspectRatio.toFixed(2);
+        height = width * initialAspectRatio;
+        container.style.height = height + 'px';
+    }
+
+    // t-SNE algorithm with proper scaling
+    function computeGaussianPerplexity(distances, targetPerplexity) {
+        const n = distances.length;
+        const P = [];
+        for (let i = 0; i < n; i++) {
+            P[i] = [];
+            for (let j = 0; j < n; j++) {
+                P[i][j] = 0;
+            }
+        }
+        const logPerp = Math.log(targetPerplexity);
+
+        for (let i = 0; i < n; i++) {
+            let betaMin = -Infinity;
+            let betaMax = Infinity;
+            let beta = 1.0;
+
+            for (let iter = 0; iter < 50; iter++) {
+                let sum = 0;
+                for (let j = 0; j < n; j++) {
+                    if (i !== j) {
+                        P[i][j] = Math.exp(-distances[i][j] * distances[i][j] * beta);
+                        sum += P[i][j];
+                    }
+                }
+
+                if (sum > 0) {
+                    for (let j = 0; j < n; j++) {
+                        P[i][j] /= sum;
+                    }
+                }
+
+                let H = 0;
+                for (let j = 0; j < n; j++) {
+                    if (P[i][j] > 1e-7) {
+                        H -= P[i][j] * Math.log(P[i][j]);
+                    }
+                }
+
+                const diff = H - logPerp;
+                if (Math.abs(diff) < 1e-5) break;
+
+                if (diff > 0) {
+                    betaMin = beta;
+                    beta = betaMax === Infinity ? beta * 2 : (beta + betaMax) / 2;
+                } else {
+                    betaMax = beta;
+                    beta = betaMin === -Infinity ? beta / 2 : (beta + betaMin) / 2;
+                }
+            }
+        }
+
+        // Symmetrize
+        const P_sym = [];
+        for (let i = 0; i < n; i++) {
+            P_sym[i] = [];
+            for (let j = 0; j < n; j++) {
+                P_sym[i][j] = (P[i][j] + P[j][i]) / (2 * n);
+            }
+        }
+
+        return P_sym;
+    }
+
+    function getExaggerationFactor() {
+        const input = document.getElementById('exag_factor_asset_correlation_tsne');
+        return input ? parseFloat(input.value) || 4.0 : 4.0;
+    }
+
+    function getExaggerationIters() {
+        const input = document.getElementById('exag_iters_asset_correlation_tsne');
+        return input ? parseInt(input.value) || 100 : 100;
+    }
+
+    function tsneStep(P, learningRate, useExaggeration) {
+        const n = positions.length;
+        const exaggeration = useExaggeration ? getExaggerationFactor() : 1.0;
+
+        // Compute Q matrix (Student-t distribution)
+        let Qsum = 0;
+        const Qnum = [];
+        for (let i = 0; i < n; i++) {
+            Qnum[i] = [];
+            for (let j = 0; j < n; j++) {
+                if (i !== j) {
+                    const dx = positions[i].x - positions[j].x;
+                    const dy = positions[i].y - positions[j].y;
+                    const dist2 = dx * dx + dy * dy;
+                    Qnum[i][j] = 1 / (1 + dist2);
+                    Qsum += Qnum[i][j];
+                } else {
+                    Qnum[i][j] = 0;
+                }
+            }
+        }
+
+        // Compute gradients
+        const gradients = [];
+        for (let i = 0; i < n; i++) {
+            gradients[i] = { x: 0, y: 0 };
+        }
+
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                if (i !== j) {
+                    const Q_ij = Qnum[i][j] / Qsum;
+                    const P_ij = P[i][j] * exaggeration;
+                    const dx = positions[i].x - positions[j].x;
+                    const dy = positions[i].y - positions[j].y;
+                    const mult = (P_ij - Q_ij) * Qnum[i][j];
+                    gradients[i].x += 4 * mult * dx;
+                    gradients[i].y += 4 * mult * dy;
+                }
+            }
+        }
+
+        // Update with momentum and adaptive gains
+        const momentum = iteration < 250 ? 0.5 : 0.8;
+        let totalMovement = 0;
+
+        for (let i = 0; i < n; i++) {
+            // Update gains (for adaptive learning rate)
+            const gx = gradients[i].x;
+            const gy = gradients[i].y;
+            gains[i].x = (Math.sign(gx) === Math.sign(velocities[i].x)) ? gains[i].x * 0.8 : gains[i].x + 0.2;
+            gains[i].y = (Math.sign(gy) === Math.sign(velocities[i].y)) ? gains[i].y * 0.8 : gains[i].y + 0.2;
+            gains[i].x = Math.max(gains[i].x, 0.01);
+            gains[i].y = Math.max(gains[i].y, 0.01);
+
+            // Velocity update
+            velocities[i].x = momentum * velocities[i].x - learningRate * gains[i].x * gx;
+            velocities[i].y = momentum * velocities[i].y - learningRate * gains[i].y * gy;
+
+            // Position update
+            positions[i].x += velocities[i].x;
+            positions[i].y += velocities[i].y;
+
+            totalMovement += Math.sqrt(velocities[i].x * velocities[i].x + velocities[i].y * velocities[i].y);
+        }
+
+        return totalMovement;
+    }
+
+    // Global functions
+    window.randomizePositions_asset_correlation_tsne = function() {
+        const n = entities.length;
+        positions = [];
+        velocities = [];
+        gains = [];
+
+        // Initialize in a small region centered at origin
+        const scale = 0.0001;
+        for (let i = 0; i < n; i++) {
+            positions.push({
+                x: (Math.random() - 0.5) * scale,
+                y: (Math.random() - 0.5) * scale
+            });
+            velocities.push({ x: 0, y: 0 });
+            gains.push({ x: 1, y: 1 });
+        }
+
+        iteration = 0;
+        lastTotalMovement = 0;
+        cachedP = null;
+        // Reset pan offset
+        panOffsetX = 0;
+        panOffsetY = 0;
+        updateStatus('Ready');
+        updateIterationDisplay();
+
+        if (svg) render();
+    };
+
+    window.stepIteration_asset_correlation_tsne = function(forceExaggeration) {
+        if (!distanceMatrix) return;
+
+        const perplexity = parseFloat(document.getElementById('perplexity_slider_asset_correlation_tsne').value);
+        const learningRate = parseFloat(document.getElementById('lr_slider_asset_correlation_tsne').value);
+
+        // Cache P matrix if perplexity hasn't changed
+        if (!cachedP || lastPerplexity !== perplexity) {
+            cachedP = computeGaussianPerplexity(distanceMatrix, perplexity);
+            lastPerplexity = perplexity;
+        }
+
+        // forceExaggeration: true = always exaggerate, false = never exaggerate
+        const useExaggeration = forceExaggeration === true;
+        lastTotalMovement = tsneStep(cachedP, learningRate, useExaggeration);
+        iteration++;
+
+        updateIterationDisplay();
+        render();
+    };
+
+    window.toggleRun_asset_correlation_tsne = function() {
+        if (isRunning) {
+            isRunning = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            document.getElementById('run_btn_asset_correlation_tsne').textContent = 'Run to Convergence';
+            updateStatus('Stopped');
+        } else {
+            isRunning = true;
+            document.getElementById('run_btn_asset_correlation_tsne').textContent = 'Stop';
+            updateStatus('Running...');
+            runLoop();
+        }
+    };
+
+    function runLoop() {
+        if (!isRunning) return;
+
+        const perplexity = parseFloat(document.getElementById('perplexity_slider_asset_correlation_tsne').value);
+        const learningRate = parseFloat(document.getElementById('lr_slider_asset_correlation_tsne').value);
+        const convergenceThreshold = parseFloat(document.getElementById('convergence_asset_correlation_tsne').value);
+        const maxIter = parseInt(document.getElementById('max_iter_asset_correlation_tsne').value);
+        const exagIters = getExaggerationIters();
+
+        if (!cachedP || lastPerplexity !== perplexity) {
+            cachedP = computeGaussianPerplexity(distanceMatrix, perplexity);
+            lastPerplexity = perplexity;
+        }
+
+        const useExaggeration = iteration < exagIters;
+        lastTotalMovement = tsneStep(cachedP, learningRate, useExaggeration);
+        iteration++;
+
+        updateIterationDisplay();
+        render();
+
+        if (iteration > exagIters && lastTotalMovement < convergenceThreshold) {
+            isRunning = false;
+            document.getElementById('run_btn_asset_correlation_tsne').textContent = 'Run to Convergence';
+            updateStatus('Converged!');
+            return;
+        }
+
+        if (iteration >= maxIter) {
+            isRunning = false;
+            document.getElementById('run_btn_asset_correlation_tsne').textContent = 'Run to Convergence';
+            updateStatus('Max iterations reached');
+            return;
+        }
+
+        animationFrameId = requestAnimationFrame(runLoop);
+    }
+
+    window.updateColors_asset_correlation_tsne = function() {
+        render();
+    };
+
+    function updateIterationDisplay() {
+        document.getElementById('iteration_asset_correlation_tsne').textContent = iteration;
+        document.getElementById('distance_asset_correlation_tsne').textContent = lastTotalMovement.toFixed(4);
+
+        const exaggerationStatus = document.getElementById('exaggeration_status_asset_correlation_tsne');
+        const exagIters = getExaggerationIters();
+        if (exaggerationStatus) {
+            if (iteration < exagIters) {
+                exaggerationStatus.textContent = '(Early Exaggeration: ' + (exagIters - iteration) + ' iters remaining)';
+            } else {
+                exaggerationStatus.textContent = '';
+            }
+        }
+    }
+
+    function updateStatus(status) {
+        document.getElementById('status_asset_correlation_tsne').textContent = status;
+    }
+
+    function render() {
+        if (!svg || !positions || positions.length === 0) return;
+        if (width <= 0 || height <= 0) return;
+
+        // Find bounds and scale to fit canvas
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        positions.forEach(function(p) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        });
+
+        // Handle case where all points are at the same location
+        let rangeX = maxX - minX;
+        let rangeY = maxY - minY;
+        if (rangeX < 1e-10) rangeX = 1;
+        if (rangeY < 1e-10) rangeY = 1;
+
+        const innerWidth = Math.max(1, width - margin.left - margin.right - 2 * nodeRadius);
+        const innerHeight = Math.max(1, height - margin.top - margin.bottom - 2 * nodeRadius);
+
+        // Base scale fits all points, zoom factor adjusts how much is visible
+        const baseScale = Math.min(innerWidth / rangeX, innerHeight / rangeY) * 0.9;
+        const currentZoom = zoomFactor || 1.0;
+        const scale = isFinite(baseScale) ? baseScale * currentZoom : 1;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        // Apply pan offset to center (ensure panOffset is valid)
+        const validPanX = isFinite(panOffsetX) ? panOffsetX : 0;
+        const validPanY = isFinite(panOffsetY) ? panOffsetY : 0;
+        const viewCenterX = centerX + validPanX;
+        const viewCenterY = centerY + validPanY;
+
+        // Save transform for drag coordinate conversion
+        currentTransform.scale = scale;
+        currentTransform.centerX = viewCenterX;
+        currentTransform.centerY = viewCenterY;
+
+        function toScreenX(x) {
+            return width / 2 + (x - viewCenterX) * scale;
+        }
+        function toScreenY(y) {
+            return height / 2 + (y - viewCenterY) * scale;
+        }
+
+        // Get current color column
+        const colorSelect = document.getElementById('color_select_asset_correlation_tsne');
+        const colorBy = colorSelect ? colorSelect.value : 'none';
+
+        // Build color map
+        const colorPalette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                              '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+        let colorMap = {};
+        if (colorBy !== 'none' && !IS_DISTANCE_MATRIX) {
+            const uniqueValues = [];
+            const seen = new Set();
+            rawData.forEach(function(row) {
+                const v = row[colorBy];
+                if (!seen.has(v)) {
+                    seen.add(v);
+                    uniqueValues.push(v);
+                }
+            });
+            uniqueValues.forEach(function(val, idx) {
+                colorMap[val] = colorPalette[idx % colorPalette.length];
+            });
+        }
+
+        // Get entity data
+        const entityData = {};
+        if (!IS_DISTANCE_MATRIX) {
+            rawData.forEach(function(row) {
+                const entity = row[ENTITY_COL];
+                if (!entityData[entity]) {
+                    entityData[entity] = row;
+                }
+            });
+        }
+
+        // Prepare node data
+        const nodeData = entities.map(function(entity, idx) {
+            return {
+                entity: entity,
+                label: IS_DISTANCE_MATRIX ? entity : (entityData[entity] ? entityData[entity][LABEL_COL] : entity) || entity,
+                x: toScreenX(positions[idx].x),
+                y: toScreenY(positions[idx].y),
+                color: (colorBy !== 'none' && entityData[entity]) ?
+                       (colorMap[entityData[entity][colorBy]] || '#3498db') : '#3498db',
+                data: entityData[entity] || {}
+            };
+        });
+
+        // Update nodes (D3 v3 pattern)
+        const nodes = svg.selectAll('.tsne-node-asset_correlation_tsne')
+            .data(nodeData, function(d) { return d.entity; });
+
+        nodes.exit().remove();
+
+        nodes.enter()
+            .append('circle')
+            .attr('class', 'tsne-node-asset_correlation_tsne')
+            .attr('r', nodeRadius)
+            .call(window.tsneDrag_asset_correlation_tsne)
+            .on('mouseover', function(d) { showTooltip(d); })
+            .on('mousemove', function(d) { moveTooltip(); })
+            .on('mouseout', function() { hideTooltip(); });
+
+        svg.selectAll('.tsne-node-asset_correlation_tsne')
+            .attr('cx', function(d) { return d.x; })
+            .attr('cy', function(d) { return d.y; })
+            .attr('fill', function(d) { return d.color; });
+
+        // Update labels
+        const labels = svg.selectAll('.tsne-label-asset_correlation_tsne')
+            .data(nodeData, function(d) { return d.entity; });
+
+        labels.exit().remove();
+
+        labels.enter()
+            .append('text')
+            .attr('class', 'tsne-label-asset_correlation_tsne');
+
+        svg.selectAll('.tsne-label-asset_correlation_tsne')
+            .attr('x', function(d) { return d.x + nodeRadius + 3; })
+            .attr('y', function(d) { return d.y + 3; })
+            .text(function(d) { return d.label; });
+    }
+
+    function showTooltip(d) {
+        const tooltipDiv = getTooltipDiv();
+        if (!tooltipDiv) return;
+
+        let content = '<strong>' + d.label + '</strong>';
+
+        TOOLTIP_COLS.forEach(function(col) {
+            const val = d.data[col];
+            if (val !== undefined && val !== null) {
+                const colName = col.charAt(0).toUpperCase() + col.slice(1).replace(/_/g, ' ');
+                let formattedValue;
+                if (typeof val === 'number') {
+                    formattedValue = Math.abs(val) < 10 ? val.toFixed(2) : val.toFixed(1);
+                } else {
+                    formattedValue = val;
+                }
+                content += '<br>' + colName + ': ' + formattedValue;
+            }
+        });
+
+        tooltipDiv.innerHTML = content;
+        tooltipDiv.style.display = 'block';
+        moveTooltip();
+    }
+
+    function moveTooltip() {
+        const tooltipDiv = getTooltipDiv();
+        if (!tooltipDiv) return;
+
+        const event = d3.event;
+        if (!event) return;
+
+        // Use clientX/clientY with position:fixed for accurate positioning
+        tooltipDiv.style.left = (event.clientX + 15) + 'px';
+        tooltipDiv.style.top = (event.clientY + 15) + 'px';
+    }
+
+    function hideTooltip() {
+        const tooltipDiv = getTooltipDiv();
+        if (tooltipDiv) {
+            tooltipDiv.style.display = 'none';
+        }
+    }
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="distance_data" data-format="csv_external" data-src="data/distance_data.csv"></script><script type="text/plain" id="stock_data" data-format="csv_external" data-src="data/stock_data.csv"></script><script type="text/plain" id="highdim_data" data-format="csv_external" data-src="data/highdim_data.csv"></script><script type="text/plain" id="minimal_data" data-format="csv_external" data-src="data/minimal_data.csv"></script><script type="text/plain" id="cities_data" data-format="csv_external" data-src="data/cities_data.csv"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>t-SNE: Asset Correlation Distances</h1>
+<p></p>
+
+<style>
+    .tsne-container-asset_correlation_tsne {
+        position: relative;
+    }
+    .tsne-tooltip-asset_correlation_tsne {
+        position: fixed;
+        display: none;
+        background-color: rgba(0, 0, 0, 0.85);
+        color: white;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        pointer-events: none;
+        z-index: 1000;
+        max-width: 300px;
+        white-space: pre-line;
+        line-height: 1.4;
+    }
+    .tsne-node-asset_correlation_tsne {
+        cursor: grab;
+    }
+    .tsne-node-asset_correlation_tsne:active {
+        cursor: grabbing;
+    }
+    .tsne-label-asset_correlation_tsne {
+        font-size: 10px;
+        pointer-events: none;
+        user-select: none;
+    }
+</style>
+<div class="tsne-container-asset_correlation_tsne">
+    <h2>Example 2: Asset Correlation Clusters (Distance Matrix)</h2>
+    <p>Assets are positioned based on correlation distances. Highly correlated assets should cluster together. The underlying data has 5 distinct correlation clusters.</p>
+    
+    
+    <div style="margin-bottom: 10px;">
+    <label for="perplexity_slider_asset_correlation_tsne"><strong>Perplexity:</strong>
+           <span id="perplexity_value_asset_correlation_tsne">8.0</span>
+    </label>
+    <input type="range" id="perplexity_slider_asset_correlation_tsne"
+           min="5" max="100" step="1" value="8.0"
+           style="width: 50%; margin-left: 10px;"
+           oninput="document.getElementById('perplexity_value_asset_correlation_tsne').textContent = this.value;">
+    <span style="font-size: 11px; color: #666; margin-left: 5px;">(5-100, typically 15-50)</span>
+</div>
+
+    <div style="margin-bottom: 10px;">
+    <label for="lr_slider_asset_correlation_tsne"><strong>Learning Rate:</strong>
+           <span id="lr_value_asset_correlation_tsne">150.0</span>
+    </label>
+    <input type="range" id="lr_slider_asset_correlation_tsne"
+           min="10" max="1000" step="10" value="150.0"
+           style="width: 50%; margin-left: 10px;"
+           oninput="document.getElementById('lr_value_asset_correlation_tsne').textContent = this.value;">
+    <span style="font-size: 11px; color: #666; margin-left: 5px;">(10-1000, typically 100-500)</span>
+</div>
+
+    <div style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+    <button id="randomize_btn_asset_correlation_tsne" onclick="randomizePositions_asset_correlation_tsne()"
+            style="padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Randomize Positions
+    </button>
+    <button id="step_btn_asset_correlation_tsne" onclick="stepIteration_asset_correlation_tsne(false)"
+            style="padding: 8px 16px; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Step (small)
+    </button>
+    <button id="exag_step_btn_asset_correlation_tsne" onclick="stepIteration_asset_correlation_tsne(true)"
+            style="padding: 8px 16px; background-color: #f39c12; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Exaggerated Step
+    </button>
+    <button id="run_btn_asset_correlation_tsne" onclick="toggleRun_asset_correlation_tsne()"
+            style="padding: 8px 16px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;">
+        Run to Convergence
+    </button>
+</div>
+
+    <div style="margin-bottom: 15px; display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
+    <div>
+        <label for="convergence_asset_correlation_tsne"><strong>Convergence threshold:</strong></label>
+        <input type="number" id="convergence_asset_correlation_tsne" value="0.1" min="0.001" max="10" step="0.01"
+               style="width: 80px; margin-left: 5px;">
+    </div>
+    <div>
+        <label for="max_iter_asset_correlation_tsne"><strong>Max iterations:</strong></label>
+        <input type="number" id="max_iter_asset_correlation_tsne" value="5000" min="100" max="10000" step="100"
+               style="width: 80px; margin-left: 5px;">
+    </div>
+    <div>
+        <label for="exag_iters_asset_correlation_tsne"><strong>Early exaggeration iters:</strong></label>
+        <input type="number" id="exag_iters_asset_correlation_tsne" value="100" min="0" max="500" step="10"
+               style="width: 70px; margin-left: 5px;">
+    </div>
+    <div>
+        <label for="exag_factor_asset_correlation_tsne"><strong>Exaggeration factor:</strong></label>
+        <input type="number" id="exag_factor_asset_correlation_tsne" value="4.0" min="1.0" max="20.0" step="0.5"
+               style="width: 60px; margin-left: 5px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; font-family: monospace;">
+    <div><strong>Iteration:</strong> <span id="iteration_asset_correlation_tsne">0</span>
+         <span id="exaggeration_status_asset_correlation_tsne" style="color: #e74c3c; margin-left: 10px;"></span></div>
+    <div><strong>Movement (last iteration):</strong> <span id="distance_asset_correlation_tsne">0.000</span></div>
+    <div><strong>Status:</strong> <span id="status_asset_correlation_tsne">Ready</span></div>
+</div>
+
+    <div style="margin-bottom: 10px; display: flex; gap: 30px; flex-wrap: wrap;">
+    <div style="flex: 1; min-width: 200px;">
+        <label for="aspect_ratio_slider_asset_correlation_tsne"><strong>Aspect Ratio:</strong>
+               <span id="aspect_ratio_label_asset_correlation_tsne">0.6</span>
+        </label>
+        <input type="range" id="aspect_ratio_slider_asset_correlation_tsne"
+               min="0.3" max="1.2" step="0.05" value="0.6"
+               style="width: 70%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 200px;">
+        <label for="zoom_slider_asset_correlation_tsne"><strong>Zoom:</strong>
+               <span id="zoom_label_asset_correlation_tsne">1.0</span>x
+        </label>
+        <input type="range" id="zoom_slider_asset_correlation_tsne"
+               min="0.2" max="5.0" step="0.1" value="1.0"
+               style="width: 70%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div id="tsne_canvas_asset_correlation_tsne" style="width: 100%; border: 1px solid #ccc; position: relative; overflow: hidden;"></div>
+    <div id="tooltip_asset_correlation_tsne" class="tsne-tooltip-asset_correlation_tsne"></div>
+    <div style="margin-top: 10px; font-size: 12px; color: #666;">
+        <strong>Tip:</strong> Drag nodes to manually reposition. "Run to Convergence" uses early exaggeration for the configured number of iterations; "Step (small)" never uses exaggeration; "Exaggerated Step" always uses it.
+    </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: distance_data.csv</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+</body>
+</html>

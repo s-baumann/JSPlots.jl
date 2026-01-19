@@ -1,0 +1,4863 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSPlots.jl</title>
+    <meta charset="UTF-8">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
+
+    <!-- Prism.js language components for CodeBlocks -->
+    
+
+</head>
+
+<body>
+
+<!-- Parquet support (loaded if using parquet dataformat) -->
+
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const MODE = 'points';
+const LAT_COL = 'latitude';
+const LON_COL = 'longitude';
+const COLOR_COL = 'population_millions';
+const SIZE_COL = null;
+const POPUP_COLS = ['city', 'region'];
+const GEOJSON_URL = null;
+const REGION_COL = null;
+const VALUE_COLS = [];
+let VALUE_COL = null;
+const REGION_KEY = null;
+
+    const COLOR_PALETTE = ["#440154","#482878","#3e4989","#31688e","#26838f","#1f9e89","#35b779","#6ece58","#b5de2b","#fde725"];
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_us_cities = null;
+    let markersLayer_us_cities = null;
+    let choroplethLayer_us_cities = null;
+    let legend_us_cities = null;
+    let geojsonData_us_cities = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_us_cities) {
+            map_us_cities.removeControl(legend_us_cities);
+        }
+
+        legend_us_cities = L.control({position: 'bottomright'});
+        legend_us_cities.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_us_cities.addTo(map_us_cities);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_us_cities) {
+            map_us_cities.removeLayer(markersLayer_us_cities);
+        }
+
+        markersLayer_us_cities = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_us_cities.addLayer(marker);
+        });
+
+        markersLayer_us_cities.addTo(map_us_cities);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_us_cities.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_us_cities) {
+            map_us_cities.removeLayer(choroplethLayer_us_cities);
+        }
+
+        if (!geojsonData_us_cities) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_us_cities.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_us_cities = L.geoJSON(geojsonData_us_cities, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_us_cities);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_us_cities.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_us_cities.fitBounds(choroplethLayer_us_cities.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_us_cities = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_us_cities');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_us_cities');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_us_cities' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_us_cities,
+            'us_cities',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_us_cities();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_us_cities');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_us_cities' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_us_cities = L.map('map_us_cities', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_us_cities);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_us_cities' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_us_cities' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_us_cities');
+            if (!mapDiv || !map_us_cities) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_us_cities.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_us_cities() {
+        const slider = document.getElementById('map_us_cities' + '_zoom_slider');
+        const label = document.getElementById('map_us_cities' + '_zoom_label');
+        if (!slider || !label || !map_us_cities) return;
+
+        const zoom = map_us_cities.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_us_cities' + '_zoom_slider');
+        const label = document.getElementById('map_us_cities' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_us_cities) {
+                map_us_cities.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_us_cities) {
+            map_us_cities.on('zoomend', function() {
+                updateZoomSlider_us_cities();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('cities_data').then(data => {
+        window.allData_us_cities = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_us_cities = fixAntimeridian(parsedGeojson);
+                        updateMap_us_cities();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_us_cities').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_us_cities();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart us_cities:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'choropleth';
+const LAT_COL = null;
+const LON_COL = null;
+const COLOR_COL = null;
+const SIZE_COL = null;
+const POPUP_COLS = [];
+const GEOJSON_URL = 'https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json';
+const REGION_COL = 'state';
+const VALUE_COLS = ['population'];
+let VALUE_COL = 'population';
+const REGION_KEY = 'name';
+
+    const COLOR_PALETTE = ["#0d0887","#46039f","#7201a8","#9c179e","#bd3786","#d8576b","#ed7953","#fb9f3a","#fdca26","#f0f921"];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_us_states_pop = null;
+    let markersLayer_us_states_pop = null;
+    let choroplethLayer_us_states_pop = null;
+    let legend_us_states_pop = null;
+    let geojsonData_us_states_pop = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_us_states_pop) {
+            map_us_states_pop.removeControl(legend_us_states_pop);
+        }
+
+        legend_us_states_pop = L.control({position: 'bottomright'});
+        legend_us_states_pop.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_us_states_pop.addTo(map_us_states_pop);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_us_states_pop) {
+            map_us_states_pop.removeLayer(markersLayer_us_states_pop);
+        }
+
+        markersLayer_us_states_pop = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_us_states_pop.addLayer(marker);
+        });
+
+        markersLayer_us_states_pop.addTo(map_us_states_pop);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_us_states_pop.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_us_states_pop) {
+            map_us_states_pop.removeLayer(choroplethLayer_us_states_pop);
+        }
+
+        if (!geojsonData_us_states_pop) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_us_states_pop.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_us_states_pop = L.geoJSON(geojsonData_us_states_pop, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_us_states_pop);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_us_states_pop.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_us_states_pop.fitBounds(choroplethLayer_us_states_pop.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_us_states_pop = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_us_states_pop');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_us_states_pop');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_us_states_pop' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_us_states_pop,
+            'us_states_pop',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_us_states_pop();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_us_states_pop');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_us_states_pop' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_us_states_pop = L.map('map_us_states_pop', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_us_states_pop);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_us_states_pop' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_us_states_pop' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_us_states_pop');
+            if (!mapDiv || !map_us_states_pop) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_us_states_pop.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_us_states_pop() {
+        const slider = document.getElementById('map_us_states_pop' + '_zoom_slider');
+        const label = document.getElementById('map_us_states_pop' + '_zoom_label');
+        if (!slider || !label || !map_us_states_pop) return;
+
+        const zoom = map_us_states_pop.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_us_states_pop' + '_zoom_slider');
+        const label = document.getElementById('map_us_states_pop' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_us_states_pop) {
+                map_us_states_pop.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_us_states_pop) {
+            map_us_states_pop.on('zoomend', function() {
+                updateZoomSlider_us_states_pop();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('states_data').then(data => {
+        window.allData_us_states_pop = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_us_states_pop = fixAntimeridian(parsedGeojson);
+                        updateMap_us_states_pop();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_us_states_pop').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_us_states_pop();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart us_states_pop:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'choropleth';
+const LAT_COL = null;
+const LON_COL = null;
+const COLOR_COL = null;
+const SIZE_COL = null;
+const POPUP_COLS = [];
+const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+const REGION_COL = 'country';
+const VALUE_COLS = ['gdp_trillion'];
+let VALUE_COL = 'gdp_trillion';
+const REGION_KEY = 'name';
+
+    const COLOR_PALETTE = ["#30123b","#4662d7","#36aaf9","#1ae4b6","#72fe5e","#c8ef34","#faba39","#f66b19","#ca2a04","#7a0403"];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_world_gdp = null;
+    let markersLayer_world_gdp = null;
+    let choroplethLayer_world_gdp = null;
+    let legend_world_gdp = null;
+    let geojsonData_world_gdp = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_world_gdp) {
+            map_world_gdp.removeControl(legend_world_gdp);
+        }
+
+        legend_world_gdp = L.control({position: 'bottomright'});
+        legend_world_gdp.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_world_gdp.addTo(map_world_gdp);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_world_gdp) {
+            map_world_gdp.removeLayer(markersLayer_world_gdp);
+        }
+
+        markersLayer_world_gdp = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_world_gdp.addLayer(marker);
+        });
+
+        markersLayer_world_gdp.addTo(map_world_gdp);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_world_gdp.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_world_gdp) {
+            map_world_gdp.removeLayer(choroplethLayer_world_gdp);
+        }
+
+        if (!geojsonData_world_gdp) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_world_gdp.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_world_gdp = L.geoJSON(geojsonData_world_gdp, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_world_gdp);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_world_gdp.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_world_gdp.fitBounds(choroplethLayer_world_gdp.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_world_gdp = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_world_gdp');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_world_gdp');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_world_gdp' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_world_gdp,
+            'world_gdp',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_world_gdp();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_world_gdp');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_world_gdp' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_world_gdp = L.map('map_world_gdp', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_world_gdp);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_world_gdp' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_world_gdp' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_world_gdp');
+            if (!mapDiv || !map_world_gdp) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_world_gdp.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_world_gdp() {
+        const slider = document.getElementById('map_world_gdp' + '_zoom_slider');
+        const label = document.getElementById('map_world_gdp' + '_zoom_label');
+        if (!slider || !label || !map_world_gdp) return;
+
+        const zoom = map_world_gdp.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_world_gdp' + '_zoom_slider');
+        const label = document.getElementById('map_world_gdp' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_world_gdp) {
+                map_world_gdp.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_world_gdp) {
+            map_world_gdp.on('zoomend', function() {
+                updateZoomSlider_world_gdp();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('gdp_data').then(data => {
+        window.allData_world_gdp = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_world_gdp = fixAntimeridian(parsedGeojson);
+                        updateMap_world_gdp();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_world_gdp').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_world_gdp();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart world_gdp:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'points';
+const LAT_COL = 'latitude';
+const LON_COL = 'longitude';
+const COLOR_COL = 'magnitude';
+const SIZE_COL = 'depth_km';
+const POPUP_COLS = ['region'];
+const GEOJSON_URL = null;
+const REGION_COL = null;
+const VALUE_COLS = [];
+let VALUE_COL = null;
+const REGION_KEY = null;
+
+    const COLOR_PALETTE = ["#fff5f0","#fee0d2","#fcbba1","#fc9272","#fb6a4a","#ef3b2c","#cb181d","#a50f15","#67000d"];
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_earthquakes = null;
+    let markersLayer_earthquakes = null;
+    let choroplethLayer_earthquakes = null;
+    let legend_earthquakes = null;
+    let geojsonData_earthquakes = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_earthquakes) {
+            map_earthquakes.removeControl(legend_earthquakes);
+        }
+
+        legend_earthquakes = L.control({position: 'bottomright'});
+        legend_earthquakes.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_earthquakes.addTo(map_earthquakes);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_earthquakes) {
+            map_earthquakes.removeLayer(markersLayer_earthquakes);
+        }
+
+        markersLayer_earthquakes = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_earthquakes.addLayer(marker);
+        });
+
+        markersLayer_earthquakes.addTo(map_earthquakes);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_earthquakes.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_earthquakes) {
+            map_earthquakes.removeLayer(choroplethLayer_earthquakes);
+        }
+
+        if (!geojsonData_earthquakes) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_earthquakes.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_earthquakes = L.geoJSON(geojsonData_earthquakes, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_earthquakes);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_earthquakes.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_earthquakes.fitBounds(choroplethLayer_earthquakes.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_earthquakes = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_earthquakes');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_earthquakes');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_earthquakes' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_earthquakes,
+            'earthquakes',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_earthquakes();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_earthquakes');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_earthquakes' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_earthquakes = L.map('map_earthquakes', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_earthquakes);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_earthquakes' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_earthquakes' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_earthquakes');
+            if (!mapDiv || !map_earthquakes) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_earthquakes.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_earthquakes() {
+        const slider = document.getElementById('map_earthquakes' + '_zoom_slider');
+        const label = document.getElementById('map_earthquakes' + '_zoom_label');
+        if (!slider || !label || !map_earthquakes) return;
+
+        const zoom = map_earthquakes.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_earthquakes' + '_zoom_slider');
+        const label = document.getElementById('map_earthquakes' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_earthquakes) {
+                map_earthquakes.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_earthquakes) {
+            map_earthquakes.on('zoomend', function() {
+                updateZoomSlider_earthquakes();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('quake_data').then(data => {
+        window.allData_earthquakes = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_earthquakes = fixAntimeridian(parsedGeojson);
+                        updateMap_earthquakes();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_earthquakes').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_earthquakes();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart earthquakes:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'points';
+const LAT_COL = 'latitude';
+const LON_COL = 'longitude';
+const COLOR_COL = 'employees';
+const SIZE_COL = null;
+const POPUP_COLS = ['office', 'type'];
+const GEOJSON_URL = null;
+const REGION_COL = null;
+const VALUE_COLS = [];
+let VALUE_COL = null;
+const REGION_KEY = null;
+
+    const COLOR_PALETTE = ["#f7fbff","#deebf7","#c6dbef","#9ecae1","#6baed6","#4292c6","#2171b5","#08519c","#08306b"];
+    const CATEGORICAL_FILTERS = ['type'];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_offices = null;
+    let markersLayer_offices = null;
+    let choroplethLayer_offices = null;
+    let legend_offices = null;
+    let geojsonData_offices = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_offices) {
+            map_offices.removeControl(legend_offices);
+        }
+
+        legend_offices = L.control({position: 'bottomright'});
+        legend_offices.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_offices.addTo(map_offices);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_offices) {
+            map_offices.removeLayer(markersLayer_offices);
+        }
+
+        markersLayer_offices = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_offices.addLayer(marker);
+        });
+
+        markersLayer_offices.addTo(map_offices);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_offices.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_offices) {
+            map_offices.removeLayer(choroplethLayer_offices);
+        }
+
+        if (!geojsonData_offices) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_offices.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_offices = L.geoJSON(geojsonData_offices, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_offices);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_offices.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_offices.fitBounds(choroplethLayer_offices.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_offices = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_offices');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_offices');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_offices' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_offices,
+            'offices',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_offices();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_offices');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_offices' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_offices = L.map('map_offices', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_offices);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_offices' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_offices' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_offices');
+            if (!mapDiv || !map_offices) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_offices.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_offices() {
+        const slider = document.getElementById('map_offices' + '_zoom_slider');
+        const label = document.getElementById('map_offices' + '_zoom_label');
+        if (!slider || !label || !map_offices) return;
+
+        const zoom = map_offices.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_offices' + '_zoom_slider');
+        const label = document.getElementById('map_offices' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_offices) {
+                map_offices.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_offices) {
+            map_offices.on('zoomend', function() {
+                updateZoomSlider_offices();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('office_data').then(data => {
+        window.allData_offices = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_offices = fixAntimeridian(parsedGeojson);
+                        updateMap_offices();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_offices').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_offices();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart offices:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'choropleth';
+const LAT_COL = null;
+const LON_COL = null;
+const COLOR_COL = null;
+const SIZE_COL = null;
+const POPUP_COLS = [];
+const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+const REGION_COL = 'country';
+const VALUE_COLS = ['population_millions', 'area_million_km2', 'gdp_per_capita_usd'];
+let VALUE_COL = 'population_millions';
+const REGION_KEY = 'name';
+
+    const COLOR_PALETTE = ["#440154","#482878","#3e4989","#31688e","#26838f","#1f9e89","#35b779","#6ece58","#b5de2b","#fde725"];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_country_stats = null;
+    let markersLayer_country_stats = null;
+    let choroplethLayer_country_stats = null;
+    let legend_country_stats = null;
+    let geojsonData_country_stats = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_country_stats) {
+            map_country_stats.removeControl(legend_country_stats);
+        }
+
+        legend_country_stats = L.control({position: 'bottomright'});
+        legend_country_stats.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_country_stats.addTo(map_country_stats);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_country_stats) {
+            map_country_stats.removeLayer(markersLayer_country_stats);
+        }
+
+        markersLayer_country_stats = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_country_stats.addLayer(marker);
+        });
+
+        markersLayer_country_stats.addTo(map_country_stats);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_country_stats.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_country_stats) {
+            map_country_stats.removeLayer(choroplethLayer_country_stats);
+        }
+
+        if (!geojsonData_country_stats) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_country_stats.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_country_stats = L.geoJSON(geojsonData_country_stats, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_country_stats);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_country_stats.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_country_stats.fitBounds(choroplethLayer_country_stats.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_country_stats = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_country_stats');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_country_stats');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_country_stats' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_country_stats,
+            'country_stats',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_country_stats();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_country_stats');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_country_stats' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_country_stats = L.map('map_country_stats', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_country_stats);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_country_stats' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_country_stats' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_country_stats');
+            if (!mapDiv || !map_country_stats) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_country_stats.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_country_stats() {
+        const slider = document.getElementById('map_country_stats' + '_zoom_slider');
+        const label = document.getElementById('map_country_stats' + '_zoom_label');
+        if (!slider || !label || !map_country_stats) return;
+
+        const zoom = map_country_stats.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_country_stats' + '_zoom_slider');
+        const label = document.getElementById('map_country_stats' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_country_stats) {
+                map_country_stats.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_country_stats) {
+            map_country_stats.on('zoomend', function() {
+                updateZoomSlider_country_stats();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('country_stats_data').then(data => {
+        window.allData_country_stats = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_country_stats = fixAntimeridian(parsedGeojson);
+                        updateMap_country_stats();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_country_stats').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_country_stats();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart country_stats:', error));
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="office_data" data-format="csv_embedded" data-src="">
+office,latitude,longitude,employees,type
+New York HQ,40.758,-73.9855,500,Headquarters
+London,51.5074,-0.1278,250,Regional
+Tokyo,35.6762,139.6503,180,Regional
+Sydney,-33.8688,151.2093,120,Regional
+São Paulo,-23.5505,-46.6333,80,Regional
+Dubai,25.2048,55.2708,60,Regional
+
+</script><script type="text/plain" id="states_data" data-format="csv_embedded" data-src="">
+state,population
+California,39.54
+Texas,29.15
+Florida,21.54
+New York,20.2
+Pennsylvania,13.0
+Illinois,12.81
+Ohio,11.8
+Georgia,10.71
+North Carolina,10.44
+Michigan,10.08
+New Jersey,9.29
+Virginia,8.63
+Washington,7.71
+Arizona,7.15
+Massachusetts,7.03
+Tennessee,6.91
+Indiana,6.79
+Missouri,6.15
+Maryland,6.18
+Wisconsin,5.89
+Colorado,5.77
+Minnesota,5.71
+South Carolina,5.12
+Alabama,5.02
+Louisiana,4.66
+Kentucky,4.51
+Oregon,4.24
+Oklahoma,3.96
+Connecticut,3.61
+Utah,3.27
+Iowa,3.19
+Nevada,3.1
+Arkansas,3.01
+Mississippi,2.96
+Kansas,2.94
+New Mexico,2.12
+Nebraska,1.96
+Idaho,1.9
+West Virginia,1.79
+Hawaii,1.46
+New Hampshire,1.38
+Maine,1.36
+Rhode Island,1.1
+Montana,1.08
+Delaware,0.99
+South Dakota,0.89
+North Dakota,0.78
+Alaska,0.73
+Vermont,0.64
+Wyoming,0.58
+
+</script><script type="text/plain" id="quake_data" data-format="csv_embedded" data-src="">
+latitude,longitude,magnitude,depth_km,region
+35.212148194283564,146.11464726873567,3.5828166713288225,82.5015327153656,Japan
+32.26462704956285,142.07096737165912,5.67064336507889,181.07498150144002,Japan
+36.0259516291303,140.91003063406046,3.2006847266106586,58.134913894335114,Japan
+35.65631502459845,138.3468465563669,7.281352982558058,34.16491551878586,Japan
+36.350333820737234,138.5565970239282,4.6926159526931475,9.652771985677884,Japan
+35.06596264962499,139.5488861769011,6.761390811174537,14.124971920814673,Japan
+34.59413683409765,140.72866263286903,3.943791421637399,90.80518436827535,Japan
+37.447495072929456,140.0615396861711,6.15097105161467,89.67918297808366,Japan
+30.12537722439001,140.01744604174664,3.1272082787935807,147.87023574409395,Japan
+35.145142901760146,137.73590523752057,5.186175528788288,64.4153180090391,Japan
+-5.97141556328305,124.30395472130792,7.2320189700022155,114.17155693862956,Indonesia
+-7.683962445126799,119.78820025486641,5.229458669677812,142.63418484977018,Indonesia
+-3.660156999715424,120.56765985829158,5.143182908786609,201.4654883823189,Indonesia
+-5.433188611306204,113.1355074929343,5.298263308155118,75.44283757824567,Indonesia
+-2.3702039871036886,117.91045635671458,3.8557483906240333,50.042896267756305,Indonesia
+-7.272243830913974,117.03401761671208,4.872473857010714,15.099750389099027,Indonesia
+1.4699565838217854,118.23704686894354,6.57947907041874,122.7146880931117,Indonesia
+-1.415699795990875,122.28193399981227,7.290391182846941,157.6983611944553,Indonesia
+-6.272223013748298,118.62618065371569,4.189895896099403,13.72088825795685,Indonesia
+-5.441480006928052,122.34732482464833,5.7547329116391,13.457415822985848,Indonesia
+-36.33772721360289,-70.43854464288154,3.3920133250027353,66.3309780947056,Chile
+-32.15186637064373,-69.42553522453395,6.151934452428511,13.423613978239075,Chile
+-28.88171677225298,-71.20327527216405,4.019158570122691,172.60601252248594,Chile
+-31.867862019343736,-68.42960215919325,7.135836399789613,114.50175914572284,Chile
+-32.506100677036244,-69.14088352569611,6.891028930865803,20.284350361301023,Chile
+-34.064434010739596,-71.21795278177241,4.125369562846692,71.34648895379244,Chile
+-30.668865920357277,-71.6743429675059,7.064033920066361,111.30710672798145,Chile
+-33.26284493039085,-71.30418836410225,4.542533518027447,60.62399785688243,Chile
+-33.3952435594423,-73.59212254684302,6.073446181282268,27.55274730529151,Chile
+-29.31340739418618,-70.98614979285541,4.661384034707876,138.53632240464714,Chile
+36.782685376992205,-123.37382045743477,4.287992968175001,54.588508319669614,California
+35.40878349723963,-122.50750194151816,5.85998501138627,116.35314208333189,California
+35.94009020086883,-122.68393716791863,5.290126185900853,73.90739485126542,California
+38.88041175419472,-120.67575338532248,4.817050148061535,174.38703560909002,California
+39.98649765462354,-123.11509487010683,5.025035665685212,195.1732413734338,California
+35.01484031912946,-122.08672598477479,5.556357556414694,79.33439676150985,California
+39.700822024883976,-123.18236238765124,6.827665560957606,18.762677409273927,California
+32.222972071248066,-120.69517802197257,3.8117099089993847,31.324463080973672,California
+35.828926728843555,-118.64377515368024,5.297933475821992,76.25365713212423,California
+38.19982804251744,-120.44363746623296,4.97575597871694,7.347231116441639,California
+59.44504046595174,-149.44072033073337,6.219960922889143,50.301284092090825,Alaska
+60.08949558656888,-152.99693916539695,3.5893425576952187,140.75085363594556,Alaska
+65.1415398994024,-140.4858156440398,6.757938368789082,89.44690667471716,Alaska
+59.935381789158406,-149.68438960206237,6.311943470000128,135.25498500550964,Alaska
+61.984025538900646,-146.15206342210115,4.939665272999988,194.9202214627218,Alaska
+62.011033745849595,-153.88395495629916,5.58423258836242,129.0084094572107,Alaska
+63.73090437204024,-152.45460366150036,3.670063299998189,11.898708628747574,Alaska
+65.39076536490018,-151.87884385093355,5.986853053395779,56.14776435994801,Alaska
+59.85199502372996,-152.08126374193722,6.890336516946251,87.50558324100669,Alaska
+59.31102113160129,-151.3668240334656,4.358254583755526,104.60965482310162,Alaska
+
+</script><script type="text/plain" id="country_stats_data" data-format="csv_embedded" data-src="">
+country,population_millions,area_million_km2,gdp_per_capita_usd
+United States,331.0,9.83,76399
+China,1412.0,9.6,12720
+India,1408.0,3.29,2410
+Brazil,214.0,8.52,8920
+Russia,144.0,17.1,12195
+Japan,125.0,0.38,33815
+Germany,83.0,0.36,48636
+United Kingdom,67.0,0.24,45850
+France,65.0,0.64,43659
+Italy,59.0,0.3,34085
+Canada,38.0,9.98,52722
+Australia,26.0,7.69,64491
+Spain,47.0,0.51,30103
+Mexico,129.0,1.96,10045
+Indonesia,274.0,1.9,4788
+
+</script><script type="text/plain" id="gdp_data" data-format="csv_embedded" data-src="">
+country,gdp_trillion
+United States,25.46
+China,17.96
+Germany,4.07
+Japan,4.23
+India,3.39
+United Kingdom,3.07
+France,2.78
+Italy,2.01
+Brazil,1.92
+Canada,2.14
+Russia,1.78
+Mexico,1.32
+South Korea,1.67
+Australia,1.68
+Spain,1.42
+Indonesia,1.32
+Netherlands,1.01
+Saudi Arabia,1.07
+Turkey,0.91
+Switzerland,0.81
+Poland,0.69
+Argentina,0.63
+Sweden,0.59
+Belgium,0.58
+Ireland,0.53
+Norway,0.48
+Israel,0.52
+Austria,0.47
+United Arab Emirates,0.51
+Thailand,0.5
+
+</script><script type="text/plain" id="cities_data" data-format="csv_embedded" data-src="">
+city,latitude,longitude,population_millions,region
+New York,40.7128,-74.006,8.34,Northeast
+Los Angeles,34.0522,-118.2437,3.98,West
+Chicago,41.8781,-87.6298,2.69,Midwest
+Houston,29.7604,-95.3698,2.32,South
+Phoenix,33.4484,-112.074,1.68,West
+Philadelphia,39.9526,-75.1652,1.58,Northeast
+San Antonio,29.4241,-98.4936,1.55,South
+San Diego,32.7157,-117.1611,1.42,West
+Dallas,32.7767,-96.797,1.34,South
+San Jose,37.3382,-121.8863,1.01,West
+Austin,30.2672,-97.7431,0.98,South
+Jacksonville,30.3322,-81.6557,0.91,South
+Fort Worth,32.7555,-97.3308,0.91,South
+Columbus,39.9612,-82.9988,0.88,Midwest
+Charlotte,35.2271,-80.8431,0.87,South
+
+</script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1></h1>
+<p></p>
+
+    <div class="textblock-content">
+        <a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/geoplot_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+<h1>GeoPlot Examples</h1>
+<p>This page demonstrates the GeoPlot chart type in JSPlots for geographic data visualization.</p>
+<p>GeoPlot supports two modes:</p>
+<ul>
+    <li><strong>Points Mode:</strong> Display markers at latitude/longitude coordinates</li>
+    <li><strong>Choropleth Mode:</strong> Shade regions by value (countries, states, etc.)</li>
+</ul>
+<p><strong>Note:</strong> Maps require an internet connection to load tiles and boundary data from CDNs.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>Major US Cities by Population</h3>
+    <p style="color: #666; font-size: 0.9em;">Marker size and color indicate population in millions. Click on markers for details. Use the filter to show cities by region.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_us_cities_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_us_cities_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_us_cities_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_us_cities_zoom_slider">Zoom: </label>
+        <span id="map_us_cities_zoom_label">2.0</span>
+        <input type="range" id="map_us_cities_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_us_cities">region: </label>
+                <select id="region_select_us_cities" multiple onchange="updateMap_us_cities()">
+                <option value="Midwest" selected>Midwest</option>
+                <option value="Northeast" selected>Northeast</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_us_cities_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+    </div>
+    <div id="map_us_cities" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_us_cities" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: cities_data</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>US State Population (2020 Census)</h3>
+    <p style="color: #666; font-size: 0.9em;">Population in millions. Hover over states to see values. Data from 2020 US Census.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_us_states_pop_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_us_states_pop_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_us_states_pop_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_us_states_pop_zoom_slider">Zoom: </label>
+        <span id="map_us_states_pop_zoom_label">2.0</span>
+        <input type="range" id="map_us_states_pop_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+        
+    </div>
+    <div id="map_us_states_pop" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_us_states_pop" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: states_data</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>World GDP by Country (2023)</h3>
+    <p style="color: #666; font-size: 0.9em;">GDP in trillion USD (nominal). Countries without data shown in gray. Data from IMF estimates.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_gdp_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_world_gdp_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_world_gdp_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_gdp_zoom_slider">Zoom: </label>
+        <span id="map_world_gdp_zoom_label">2.0</span>
+        <input type="range" id="map_world_gdp_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+        
+    </div>
+    <div id="map_world_gdp" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_world_gdp" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: gdp_data</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>Simulated Earthquake Data - Pacific Ring of Fire</h3>
+    <p style="color: #666; font-size: 0.9em;">Color indicates magnitude (darker = stronger). Size indicates depth (larger = deeper). Filter by region to focus on specific areas. This is simulated data for demonstration.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_earthquakes_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_earthquakes_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_earthquakes_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_earthquakes_zoom_slider">Zoom: </label>
+        <span id="map_earthquakes_zoom_label">2.0</span>
+        <input type="range" id="map_earthquakes_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_earthquakes">region: </label>
+                <select id="region_select_earthquakes" multiple onchange="updateMap_earthquakes()">
+                <option value="Alaska" selected>Alaska</option>
+                <option value="California" selected>California</option>
+                <option value="Chile" selected>Chile</option>
+                <option value="Indonesia" selected>Indonesia</option>
+                <option value="Japan" selected>Japan</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_earthquakes_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+    </div>
+    <div id="map_earthquakes" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_earthquakes" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: quake_data</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>Global Office Locations</h3>
+    <p style="color: #666; font-size: 0.9em;">Click on markers to see office details. Color intensity indicates number of employees.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_offices_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_offices_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_offices_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_offices_zoom_slider">Zoom: </label>
+        <span id="map_offices_zoom_label">2.0</span>
+        <input type="range" id="map_offices_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="type_select_offices">type: </label>
+                <select id="type_select_offices" multiple onchange="updateMap_offices()">
+                <option value="Headquarters" selected>Headquarters</option>
+                <option value="Regional" selected>Regional</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="type_select_offices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+    </div>
+    <div id="map_offices" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_offices" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: office_data</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>Country Statistics - Multiple Overlays</h3>
+    <p style="color: #666; font-size: 0.9em;">Use the Overlay dropdown to switch between Population, Area, and GDP per Capita. This demonstrates how to provide multiple data columns that users can switch between.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_country_stats_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_country_stats_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_country_stats_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_country_stats_zoom_slider">Zoom: </label>
+        <span id="map_country_stats_zoom_label">2.0</span>
+        <input type="range" id="map_country_stats_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        <div style="margin-bottom: 10px;">
+    <label for="overlay_select_country_stats" style="font-weight: bold;">Overlay: </label>
+    <select id="overlay_select_country_stats" onchange="updateMap_country_stats()" style="padding: 5px; border-radius: 4px;">
+        <option value="population_millions" selected>population_millions</option>
+<option value="area_million_km2" >area_million_km2</option>
+<option value="gdp_per_capita_usd" >gdp_per_capita_usd</option>
+    </select>
+</div>
+
+        
+    </div>
+    <div id="map_country_stats" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_country_stats" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: country_stats_data</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+</body>
+</html>

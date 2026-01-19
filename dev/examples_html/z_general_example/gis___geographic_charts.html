@@ -1,0 +1,2049 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GIS / Geographic Charts</title>
+    <meta charset="UTF-8">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
+
+    <!-- Prism.js language components for CodeBlocks -->
+    
+
+</head>
+
+<body>
+
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+<script type="module">
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+await parquet.default();
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts ISO date strings to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Check first row to identify date and time columns
+    var firstRow = data[0];
+    var dateColumns = [];
+    var timeColumns = [];
+
+    for (var key in firstRow) {
+        if (firstRow.hasOwnProperty(key)) {
+            var value = firstRow[key];
+            if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    dateColumns.push(key);
+                } else if (timePattern.test(value)) {
+                    timeColumns.push(key);
+                }
+            }
+        }
+    }
+
+    // If no date or time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
+
+    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    newRow[key] = new Date(row[key]);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = row[key].split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else {
+                    newRow[key] = row[key];
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    // Configuration
+    const MODE = 'points';
+const LAT_COL = 'latitude';
+const LON_COL = 'longitude';
+const COLOR_COL = 'population_millions';
+const SIZE_COL = null;
+const POPUP_COLS = ['city', 'continent'];
+const GEOJSON_URL = null;
+const REGION_COL = null;
+const VALUE_COLS = [];
+let VALUE_COL = null;
+const REGION_KEY = null;
+
+    const COLOR_PALETTE = ["#440154","#482878","#3e4989","#31688e","#26838f","#1f9e89","#35b779","#6ece58","#b5de2b","#fde725"];
+    const CATEGORICAL_FILTERS = ['continent'];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_global_cities_geo = null;
+    let markersLayer_global_cities_geo = null;
+    let choroplethLayer_global_cities_geo = null;
+    let legend_global_cities_geo = null;
+    let geojsonData_global_cities_geo = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_global_cities_geo) {
+            map_global_cities_geo.removeControl(legend_global_cities_geo);
+        }
+
+        legend_global_cities_geo = L.control({position: 'bottomright'});
+        legend_global_cities_geo.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_global_cities_geo.addTo(map_global_cities_geo);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_global_cities_geo) {
+            map_global_cities_geo.removeLayer(markersLayer_global_cities_geo);
+        }
+
+        markersLayer_global_cities_geo = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_global_cities_geo.addLayer(marker);
+        });
+
+        markersLayer_global_cities_geo.addTo(map_global_cities_geo);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_global_cities_geo.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_global_cities_geo) {
+            map_global_cities_geo.removeLayer(choroplethLayer_global_cities_geo);
+        }
+
+        if (!geojsonData_global_cities_geo) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_global_cities_geo.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_global_cities_geo = L.geoJSON(geojsonData_global_cities_geo, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_global_cities_geo);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_global_cities_geo.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_global_cities_geo.fitBounds(choroplethLayer_global_cities_geo.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_global_cities_geo = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_global_cities_geo');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_global_cities_geo');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_global_cities_geo' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_global_cities_geo,
+            'global_cities_geo',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_global_cities_geo();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_global_cities_geo');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_global_cities_geo' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_global_cities_geo = L.map('map_global_cities_geo', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_global_cities_geo);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_global_cities_geo' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_global_cities_geo');
+            if (!mapDiv || !map_global_cities_geo) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_global_cities_geo.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_global_cities_geo() {
+        const slider = document.getElementById('map_global_cities_geo' + '_zoom_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_zoom_label');
+        if (!slider || !label || !map_global_cities_geo) return;
+
+        const zoom = map_global_cities_geo.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_global_cities_geo' + '_zoom_slider');
+        const label = document.getElementById('map_global_cities_geo' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_global_cities_geo) {
+                map_global_cities_geo.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_global_cities_geo) {
+            map_global_cities_geo.on('zoomend', function() {
+                updateZoomSlider_global_cities_geo();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('cities_geo_data').then(data => {
+        window.allData_global_cities_geo = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_global_cities_geo = fixAntimeridian(parsedGeojson);
+                        updateMap_global_cities_geo();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_global_cities_geo').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_global_cities_geo();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart global_cities_geo:', error));
+})();
+(function() {
+    // Configuration
+    const MODE = 'choropleth';
+const LAT_COL = null;
+const LON_COL = null;
+const COLOR_COL = null;
+const SIZE_COL = null;
+const POPUP_COLS = [];
+const GEOJSON_URL = 'https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json';
+const REGION_COL = 'country';
+const VALUE_COLS = ['gdp_trillion', 'population_millions', 'area_million_km2'];
+let VALUE_COL = 'gdp_trillion';
+const REGION_KEY = 'name';
+
+    const COLOR_PALETTE = ["#30123b","#4662d7","#36aaf9","#1ae4b6","#72fe5e","#c8ef34","#faba39","#f66b19","#ca2a04","#7a0403"];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    let map_world_stats_geo = null;
+    let markersLayer_world_stats_geo = null;
+    let choroplethLayer_world_stats_geo = null;
+    let legend_world_stats_geo = null;
+    let geojsonData_world_stats_geo = null;
+
+    // Country/region name aliases for matching
+    // Maps common variations to canonical names used in data
+    const NAME_ALIASES = {
+        'russian federation': 'russia',
+        'united states of america': 'united states',
+        'usa': 'united states',
+        'uk': 'united kingdom',
+        'great britain': 'united kingdom',
+        'republic of korea': 'south korea',
+        'korea, republic of': 'south korea',
+        'democratic people\'s republic of korea': 'north korea',
+        'korea, dem. people\'s rep.': 'north korea',
+        'china, people\'s republic of': 'china',
+        'iran, islamic republic of': 'iran',
+        'czech republic': 'czechia',
+        'syrian arab republic': 'syria',
+        'venezuela, bolivarian republic of': 'venezuela',
+        'viet nam': 'vietnam',
+        'lao people\'s democratic republic': 'laos',
+        'myanmar (burma)': 'myanmar',
+        'côte d\'ivoire': 'ivory coast',
+        'congo, democratic republic of the': 'democratic republic of the congo',
+        'congo, republic of the': 'republic of the congo',
+        'tanzania, united republic of': 'tanzania',
+        'bolivia, plurinational state of': 'bolivia',
+        'the bahamas': 'bahamas',
+        'the gambia': 'gambia'
+    };
+
+    // Normalize a region name for matching
+    function normalizeRegionName(name) {
+        if (!name) return '';
+        let normalized = String(name).toLowerCase().trim();
+        // Check if this name has an alias
+        if (NAME_ALIASES[normalized]) {
+            return NAME_ALIASES[normalized];
+        }
+        return normalized;
+    }
+
+    // Fix polygons that cross the antimeridian (180° longitude line)
+    // This prevents Fiji, Russia, etc. from rendering as lines across the whole map
+    // Excludes Antarctica which is a polar region requiring different handling
+    function fixAntimeridian(geojson) {
+        if (!geojson || !geojson.features) return geojson;
+
+        const newFeatures = [];
+
+        geojson.features.forEach(feature => {
+            if (!feature.geometry) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            // Skip Antarctica - it's a polar region that wraps differently
+            const props = feature.properties || {};
+            const featureName = (props.name || props.NAME || props.Name || '').toLowerCase();
+            if (featureName.includes('antarctica')) {
+                newFeatures.push(feature);
+                return;
+            }
+
+            const geomType = feature.geometry.type;
+
+            if (geomType === 'Polygon') {
+                const fixed = fixPolygonAntimeridian(feature.geometry.coordinates);
+                if (fixed.length === 1) {
+                    newFeatures.push(feature);
+                } else {
+                    // Split into MultiPolygon
+                    newFeatures.push({
+                        ...feature,
+                        geometry: {
+                            type: 'MultiPolygon',
+                            coordinates: fixed.map(ring => [ring])
+                        }
+                    });
+                }
+            } else if (geomType === 'MultiPolygon') {
+                const allFixed = [];
+                feature.geometry.coordinates.forEach(polygon => {
+                    const fixed = fixPolygonAntimeridian(polygon);
+                    fixed.forEach(ring => allFixed.push([ring]));
+                });
+                newFeatures.push({
+                    ...feature,
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: allFixed
+                    }
+                });
+            } else {
+                newFeatures.push(feature);
+            }
+        });
+
+        return { ...geojson, features: newFeatures };
+    }
+
+    function fixPolygonAntimeridian(rings) {
+        // Check if polygon crosses antimeridian
+        const outerRing = rings[0];
+        let crossesAntimeridian = false;
+
+        for (let i = 1; i < outerRing.length; i++) {
+            const lon1 = outerRing[i-1][0];
+            const lon2 = outerRing[i][0];
+            // If there's a jump of more than 180 degrees, it crosses
+            if (Math.abs(lon2 - lon1) > 180) {
+                crossesAntimeridian = true;
+                break;
+            }
+        }
+
+        if (!crossesAntimeridian) {
+            return [outerRing];
+        }
+
+        // Split the polygon at the antimeridian
+        const westRing = [];
+        const eastRing = [];
+
+        for (let i = 0; i < outerRing.length; i++) {
+            let [lon, lat] = outerRing[i];
+
+            // Normalize longitude to be either all positive or handle split
+            if (lon < 0) {
+                westRing.push([lon, lat]);
+                eastRing.push([lon + 360, lat]);
+            } else {
+                westRing.push([lon - 360, lat]);
+                eastRing.push([lon, lat]);
+            }
+        }
+
+        // Return both rings - Leaflet will clip them appropriately
+        // Filter to only keep the ring that makes sense for each hemisphere
+        const westFiltered = westRing.filter(([lon, lat]) => lon >= -180 && lon <= 0);
+        const eastFiltered = eastRing.filter(([lon, lat]) => lon >= 0 && lon <= 180);
+
+        // If filtering didn't work well, just shift all coordinates
+        if (westFiltered.length < 4 || eastFiltered.length < 4) {
+            // Alternative: shift all negative longitudes to positive
+            const shiftedRing = outerRing.map(([lon, lat]) => {
+                return lon < 0 ? [lon + 360, lat] : [lon, lat];
+            });
+            return [shiftedRing];
+        }
+
+        return [westFiltered, eastFiltered];
+    }
+
+    // Color interpolation for choropleth
+    function getColor(value, min, max) {
+        if (value === null || value === undefined || isNaN(value)) return '#cccccc';
+        const ratio = max > min ? (value - min) / (max - min) : 0;
+        const idx = Math.min(Math.floor(ratio * (COLOR_PALETTE.length - 1)), COLOR_PALETTE.length - 1);
+        return COLOR_PALETTE[Math.max(0, idx)];
+    }
+
+    // Create legend
+    function createLegend(min, max, units) {
+        if (legend_world_stats_geo) {
+            map_world_stats_geo.removeControl(legend_world_stats_geo);
+        }
+
+        legend_world_stats_geo = L.control({position: 'bottomright'});
+        legend_world_stats_geo.onAdd = function(map) {
+            const div = L.DomUtil.create('div', 'info legend');
+            div.style.cssText = 'background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);';
+
+            let html = '<strong>' + (units || 'Value') + '</strong><br>';
+            const steps = 5;
+            for (let i = 0; i <= steps; i++) {
+                const val = min + (max - min) * (i / steps);
+                html += '<i style="background:' + getColor(val, min, max) +
+                        '; width: 18px; height: 18px; display: inline-block; margin-right: 5px;"></i> ' +
+                        val.toFixed(1) + '<br>';
+            }
+            div.innerHTML = html;
+            return div;
+        };
+        legend_world_stats_geo.addTo(map_world_stats_geo);
+    }
+
+    // Render points mode
+    function renderPoints(data, fitBoundsToData = false) {
+        if (markersLayer_world_stats_geo) {
+            map_world_stats_geo.removeLayer(markersLayer_world_stats_geo);
+        }
+
+        markersLayer_world_stats_geo = L.layerGroup();
+
+        // Calculate min/max for color and size scaling
+        let colorMin = Infinity, colorMax = -Infinity;
+        let sizeMin = Infinity, sizeMax = -Infinity;
+
+        if (COLOR_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[COLOR_COL]);
+                if (!isNaN(v)) {
+                    colorMin = Math.min(colorMin, v);
+                    colorMax = Math.max(colorMax, v);
+                }
+            });
+        }
+
+        if (SIZE_COL) {
+            data.forEach(d => {
+                const v = parseFloat(d[SIZE_COL]);
+                if (!isNaN(v)) {
+                    sizeMin = Math.min(sizeMin, v);
+                    sizeMax = Math.max(sizeMax, v);
+                }
+            });
+        }
+
+        data.forEach(row => {
+            const lat = parseFloat(row[LAT_COL]);
+            const lon = parseFloat(row[LON_COL]);
+
+            if (isNaN(lat) || isNaN(lon)) return;
+
+            // Determine marker color
+            let markerColor = '#3388ff';
+            if (COLOR_COL && row[COLOR_COL] !== null && row[COLOR_COL] !== undefined) {
+                const colorVal = parseFloat(row[COLOR_COL]);
+                if (!isNaN(colorVal)) {
+                    markerColor = getColor(colorVal, colorMin, colorMax);
+                }
+            }
+
+            // Determine marker size
+            let radius = 6;
+            if (SIZE_COL && row[SIZE_COL] !== null && row[SIZE_COL] !== undefined) {
+                const sizeVal = parseFloat(row[SIZE_COL]);
+                if (!isNaN(sizeVal) && sizeMax > sizeMin) {
+                    radius = 4 + 12 * (sizeVal - sizeMin) / (sizeMax - sizeMin);
+                }
+            }
+
+            // Build popup content
+            let popupContent = '';
+            POPUP_COLS.forEach(col => {
+                if (row[col] !== undefined && row[col] !== null) {
+                    popupContent += '<strong>' + col + ':</strong> ' + row[col] + '<br>';
+                }
+            });
+            if (COLOR_COL) popupContent += '<strong>' + COLOR_COL + ':</strong> ' + row[COLOR_COL] + '<br>';
+            if (SIZE_COL) popupContent += '<strong>' + SIZE_COL + ':</strong> ' + row[SIZE_COL] + '<br>';
+            popupContent += '<strong>Lat:</strong> ' + lat.toFixed(4) + '<br>';
+            popupContent += '<strong>Lon:</strong> ' + lon.toFixed(4);
+
+            const marker = L.circleMarker([lat, lon], {
+                radius: radius,
+                fillColor: markerColor,
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.7
+            }).bindPopup(popupContent);
+
+            markersLayer_world_stats_geo.addLayer(marker);
+        });
+
+        markersLayer_world_stats_geo.addTo(map_world_stats_geo);
+
+        // Create legend if color column is used
+        if (COLOR_COL && colorMin !== Infinity) {
+            createLegend(colorMin, colorMax, COLOR_COL);
+        }
+
+        // Fit bounds to markers only on initial render
+        if (fitBoundsToData && data.length > 0) {
+            const bounds = [];
+            data.forEach(row => {
+                const lat = parseFloat(row[LAT_COL]);
+                const lon = parseFloat(row[LON_COL]);
+                if (!isNaN(lat) && !isNaN(lon)) {
+                    bounds.push([lat, lon]);
+                }
+            });
+            if (bounds.length > 0) {
+                map_world_stats_geo.fitBounds(bounds, {padding: [20, 20]});
+            }
+        }
+    }
+
+    // Render choropleth mode
+    function renderChoropleth(data, fitBoundsToData = false) {
+        if (choroplethLayer_world_stats_geo) {
+            map_world_stats_geo.removeLayer(choroplethLayer_world_stats_geo);
+        }
+
+        if (!geojsonData_world_stats_geo) {
+            console.error('GeoJSON data not loaded');
+            return;
+        }
+
+        // Build lookup from data with normalized names
+        const dataLookup = {};
+        data.forEach(row => {
+            const key = normalizeRegionName(row[REGION_COL]);
+            dataLookup[key] = parseFloat(row[VALUE_COL]);
+        });
+
+        // Calculate min/max values
+        let min = Infinity, max = -Infinity;
+        data.forEach(row => {
+            const v = parseFloat(row[VALUE_COL]);
+            if (!isNaN(v)) {
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        });
+
+        // Track layers that have matching data for bounds calculation
+        const layersWithData = [];
+
+        // Style function
+        function style(feature) {
+            // Try multiple property names for matching
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+
+            let value = null;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        value = dataLookup[lookupKey];
+                        break;
+                    }
+                }
+            }
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 1,
+                color: '#666',
+                fillOpacity: 0.7
+            };
+        }
+
+        // Check if a feature has matching data
+        function featureHasData(feature) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev', 'iso_a2', 'iso_a3', 'STUSPS', 'STATEFP'];
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Popup function
+        function onEachFeature(feature, layer) {
+            const props = feature.properties || {};
+            const possibleKeys = [REGION_KEY, 'name', 'NAME', 'Name', 'postal', 'abbrev'];
+
+            let regionName = 'Unknown';
+            let value = null;
+            let hasData = false;
+            for (const key of possibleKeys) {
+                if (props[key]) {
+                    const lookupKey = normalizeRegionName(props[key]);
+                    if (dataLookup[lookupKey] !== undefined) {
+                        regionName = props[key];
+                        value = dataLookup[lookupKey];
+                        hasData = true;
+                        break;
+                    } else if (regionName === 'Unknown') {
+                        regionName = props[key];
+                    }
+                }
+            }
+
+            // Track layers with data for bounds fitting
+            if (hasData) {
+                layersWithData.push(layer);
+            }
+
+            let popupContent = '<strong>' + regionName + '</strong>';
+            if (value !== null) {
+                popupContent += '<br>' + VALUE_COL + ': ' + value.toFixed(2);
+            } else {
+                popupContent += '<br><em>No data</em>';
+            }
+            layer.bindPopup(popupContent);
+
+            layer.on({
+                mouseover: function(e) {
+                    const layer = e.target;
+                    layer.setStyle({weight: 3, color: '#333'});
+                    layer.bringToFront();
+                },
+                mouseout: function(e) {
+                    choroplethLayer_world_stats_geo.resetStyle(e.target);
+                }
+            });
+        }
+
+        choroplethLayer_world_stats_geo = L.geoJSON(geojsonData_world_stats_geo, {
+            style: style,
+            onEachFeature: onEachFeature
+        }).addTo(map_world_stats_geo);
+
+        // Create legend
+        if (min !== Infinity) {
+            createLegend(min, max, VALUE_COL);
+        }
+
+        // Fit bounds only to regions that have data (not the entire GeoJSON)
+        if (fitBoundsToData && layersWithData.length > 0) {
+            const group = L.featureGroup(layersWithData);
+            map_world_stats_geo.fitBounds(group.getBounds(), {padding: [20, 20]});
+        } else if (fitBoundsToData) {
+            // Fallback: if no specific layers matched, fit to entire choropleth layer
+            map_world_stats_geo.fitBounds(choroplethLayer_world_stats_geo.getBounds(), {padding: [20, 20]});
+        }
+    }
+
+    // Main update function
+    window.updateMap_world_stats_geo = function() {
+        // Get overlay column from dropdown if it exists
+        const overlaySelect = document.getElementById('overlay_select_world_stats_geo');
+        if (overlaySelect) {
+            VALUE_COL = overlaySelect.value;
+        }
+
+        // Get filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_world_stats_geo');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_world_stats_geo' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters
+        const filteredData = applyFiltersWithCounting(
+            window.allData_world_stats_geo,
+            'world_stats_geo',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Always fit bounds to show the current filtered data
+        // This ensures the view refocuses when filters change
+        if (MODE === 'points') {
+            renderPoints(filteredData, true);
+        } else {
+            renderChoropleth(filteredData, true);
+        }
+
+        // Update zoom slider to reflect current zoom level
+        updateZoomSlider_world_stats_geo();
+    };
+
+    // Initialize map
+    function initMap() {
+        // Set initial height based on width and aspect ratio (default 0.6)
+        const mapDiv = document.getElementById('map_world_stats_geo');
+        const width = mapDiv.offsetWidth;
+        const aspectSlider = document.getElementById('map_world_stats_geo' + '_aspect_ratio_slider');
+        let aspectRatio = 0.6;
+        if (aspectSlider) {
+            aspectRatio = Math.exp(parseFloat(aspectSlider.value));
+        }
+        mapDiv.style.height = (width * aspectRatio) + 'px';
+
+        map_world_stats_geo = L.map('map_world_stats_geo', {
+            worldCopyJump: true,  // Helps with features crossing the antimeridian (like Russia)
+            maxBoundsViscosity: 1.0,
+            zoomSnap: 0.1,        // Enable fractional/continuous zoom (default is 1)
+            zoomDelta: 0.5        // Smaller zoom steps for mouse wheel
+        }).setView([0, 0], 2);  // Default world view, will be overwritten by fitBounds
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            noWrap: false  // Allow world wrapping for better antimeridian handling
+        }).addTo(map_world_stats_geo);
+    }
+
+    // Setup aspect ratio slider for map
+    function setupMapAspectRatio() {
+        const slider = document.getElementById('map_world_stats_geo' + '_aspect_ratio_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_aspect_ratio_label');
+        if (!slider || !label) return;
+
+        slider.addEventListener('input', function() {
+            const logValue = parseFloat(this.value);
+            const aspectRatio = Math.exp(logValue);
+            label.textContent = aspectRatio.toFixed(2);
+
+            const mapDiv = document.getElementById('map_world_stats_geo');
+            if (!mapDiv || !map_world_stats_geo) return;
+
+            const width = mapDiv.offsetWidth;
+            const height = width * aspectRatio;
+            mapDiv.style.height = height + 'px';
+
+            // Invalidate map size without panning - keeps center and zoom fixed
+            map_world_stats_geo.invalidateSize({pan: false});
+        });
+    }
+
+    // Update zoom slider to reflect current map zoom level
+    function updateZoomSlider_world_stats_geo() {
+        const slider = document.getElementById('map_world_stats_geo' + '_zoom_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_zoom_label');
+        if (!slider || !label || !map_world_stats_geo) return;
+
+        const zoom = map_world_stats_geo.getZoom();
+        slider.value = zoom;
+        label.textContent = zoom.toFixed(1);
+    }
+
+    // Setup zoom slider for map
+    function setupMapZoom() {
+        const slider = document.getElementById('map_world_stats_geo' + '_zoom_slider');
+        const label = document.getElementById('map_world_stats_geo' + '_zoom_label');
+        if (!slider || !label) return;
+
+        // Update zoom when slider changes
+        slider.addEventListener('input', function() {
+            const zoom = parseFloat(this.value);
+            label.textContent = zoom.toFixed(1);
+
+            if (map_world_stats_geo) {
+                map_world_stats_geo.setZoom(zoom);
+            }
+        });
+
+        // Sync slider when map zoom changes (via mouse wheel, buttons, etc.)
+        if (map_world_stats_geo) {
+            map_world_stats_geo.on('zoomend', function() {
+                updateZoomSlider_world_stats_geo();
+            });
+        }
+    }
+
+    // Load data and initialize
+    loadDataset('countries_geo_data').then(data => {
+        window.allData_world_stats_geo = data;
+
+        $(function() {
+            initMap();
+            setupMapAspectRatio();
+            setupMapZoom();
+
+            if (MODE === 'choropleth' && GEOJSON_URL) {
+                // Load GeoJSON for choropleth
+                fetch(GEOJSON_URL)
+                    .then(response => response.json())
+                    .then(geojson => {
+                        // Handle TopoJSON format
+                        let parsedGeojson;
+                        if (geojson.type === 'Topology') {
+                            // Convert TopoJSON to GeoJSON
+                            const objectName = Object.keys(geojson.objects)[0];
+                            parsedGeojson = topojson.feature(geojson, geojson.objects[objectName]);
+                        } else {
+                            parsedGeojson = geojson;
+                        }
+                        // Fix polygons that cross the antimeridian (Fiji, Russia, etc.)
+                        geojsonData_world_stats_geo = fixAntimeridian(parsedGeojson);
+                        updateMap_world_stats_geo();
+                    })
+                    .catch(error => {
+                        console.error('Error loading GeoJSON:', error);
+                        document.getElementById('map_world_stats_geo').innerHTML =
+                            '<div style="padding: 20px; color: red;">Error loading map boundaries: ' + error.message + '</div>';
+                    });
+            } else {
+                updateMap_world_stats_geo();
+            }
+        });
+    }).catch(error => console.error('Error loading data for chart world_stats_geo:', error));
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>GIS / Geographic Charts</h1>
+<p>This shows examples of GeoPlot for geographic data visualization. GeoPlot supports both points mode (markers at coordinates) and choropleth mode (shaded regions). Maps use Leaflet.js with OpenStreetMap tiles and require an internet connection.</p>
+
+    <div class="textblock-content">
+        <h2>Geographic Maps (GeoPlot)</h2>
+<p>GeoPlot creates interactive geographic visualizations using Leaflet.js with OpenStreetMap tiles.
+It supports two modes:</p>
+<ul>
+    <li><strong>Points Mode:</strong> Display markers at latitude/longitude coordinates with optional color and size encoding</li>
+    <li><strong>Choropleth Mode:</strong> Shade geographic regions (countries, states) by value</li>
+</ul>
+<p>Built-in region types include <code>:world_countries</code>, <code>:us_states</code>, and <code>:us_counties</code>.
+Custom GeoJSON can also be provided via URL.</p>
+<p><strong>Note:</strong> Maps require an internet connection to load tiles and boundary data.</p>
+<p><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/geoplot_examples.html" style="color: blue; font-weight: bold;">See here for GeoPlot examples</a></p>
+
+    </div>
+<br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>Global Major Cities - Points Mode</h3>
+    <p style="color: #666; font-size: 0.9em;">Markers colored by population (millions). Click markers for details. Filter by continent.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_global_cities_geo_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_global_cities_geo_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_global_cities_geo_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_global_cities_geo_zoom_slider">Zoom: </label>
+        <span id="map_global_cities_geo_zoom_label">2.0</span>
+        <input type="range" id="map_global_cities_geo_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="continent_select_global_cities_geo">continent: </label>
+                <select id="continent_select_global_cities_geo" multiple onchange="updateMap_global_cities_geo()">
+                <option value="Asia" selected>Asia</option>
+                <option value="Europe" selected>Europe</option>
+                <option value="North America" selected>North America</option>
+                <option value="Oceania" selected>Oceania</option>
+                <option value="South America" selected>South America</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="continent_select_global_cities_geo_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+    </div>
+    <div id="map_global_cities_geo" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_global_cities_geo" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: cities_geo_data.parquet</p><br>
+<hr>
+<br>
+<div class="chart-container" style="margin-bottom: 20px;">
+    <h3>World Country Statistics - Multiple Overlays</h3>
+    <p style="color: #666; font-size: 0.9em;">Use the Overlay dropdown to switch between GDP (trillion USD), Population (millions), and Area (million km²). Gray indicates no data.</p>
+    <div style="margin-bottom: 10px; display: flex; flex-wrap: wrap; gap: 20px;">
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_stats_geo_aspect_ratio_slider">Aspect Ratio: </label>
+        <span id="map_world_stats_geo_aspect_ratio_label">0.6</span>
+        <input type="range" id="map_world_stats_geo_aspect_ratio_slider"
+               min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+    <div style="flex: 1; min-width: 250px;">
+        <label for="map_world_stats_geo_zoom_slider">Zoom: </label>
+        <span id="map_world_stats_geo_zoom_label">2.0</span>
+        <input type="range" id="map_world_stats_geo_zoom_slider"
+               min="1" max="18" step="0.1" value="2"
+               style="width: 60%; margin-left: 10px;">
+    </div>
+</div>
+
+    <div style="margin-bottom: 10px;">
+        <div style="margin-bottom: 10px;">
+    <label for="overlay_select_world_stats_geo" style="font-weight: bold;">Overlay: </label>
+    <select id="overlay_select_world_stats_geo" onchange="updateMap_world_stats_geo()" style="padding: 5px; border-radius: 4px;">
+        <option value="gdp_trillion" selected>gdp_trillion</option>
+<option value="population_millions" >population_millions</option>
+<option value="area_million_km2" >area_million_km2</option>
+    </select>
+</div>
+
+        
+    </div>
+    <div id="map_world_stats_geo" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
+
+    <div id="obs_count_world_stats_geo" style="color: #666; font-size: 0.85em; margin-top: 5px;"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: countries_geo_data.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+</body>
+</html>

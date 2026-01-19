@@ -3,12 +3,14 @@
 <head>
     <title>Situational Charts</title>
     <meta charset="UTF-8">
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+
     <style>
         body {
             margin: 0;
@@ -30,39 +32,18 @@
     </style>
     
 
-    <!-- external libs -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
-
-    <!-- Prism.js for code syntax highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <!-- Prism.js language components for CodeBlocks -->
     
 
 </head>
 
 <body>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
 <script type="module">
-// Import parquet-wasm for Parquet file support
 import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
-
-// Initialize parquet-wasm
 await parquet.default();
-
-// Make parquet available globally for loadDataset
 window.parquetWasm = parquet;
 window.parquetReady = true;
 console.log('Parquet-wasm library loaded successfully');
@@ -1635,6 +1616,494 @@ $(function(){
         container.appendChild(legendDiv);
     }
 })();
+(function() {
+    // Configuration
+    const CATEGORICAL_FILTERS = ['segment', 'region'];
+    const CONTINUOUS_FILTERS = [];
+    const X_COL = 'quarter';
+    const PERFORMANCE_COLS = ['sales_total', 'profit_total', 'quantity_total', 'satisfaction_avg'];
+    const ENTITY_COL = 'product';
+    const COLOR_MAP = {'Phone': '#00cc96', 'Laptop': '#636efa', 'Tablet': '#EF553B'};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+    const DEFAULT_PERF_COL = 'sales_total';
+
+    let allData = [];
+    let entityColors = {};  // Store entity color assignments
+
+    // Calculate dense ranks for data
+    function calculateDenseRanks(data, xCol, perfCol) {
+        const xGroups = {};
+        data.forEach(row => {
+            const xVal = row[xCol];
+            const xKey = String(xVal);
+            if (!xGroups[xKey]) {
+                xGroups[xKey] = [];
+            }
+            xGroups[xKey].push(row);
+        });
+
+        const rankedData = [];
+        for (let xKey in xGroups) {
+            const group = xGroups[xKey];
+
+            // Sort by performance descending (best first)
+            const sorted = group.sort((a, b) => b[perfCol] - a[perfCol]);
+
+            // Get unique performance values
+            const uniqueValues = [...new Set(sorted.map(r => r[perfCol]))].sort((a, b) => b - a);
+
+            // Assign dense ranks (ties get same rank, next rank = current + 1)
+            const valueToRank = {};
+            uniqueValues.forEach((val, idx) => {
+                valueToRank[val] = idx + 1;  // Dense rank: 1, 2, 3, ... (no gaps)
+            });
+
+            sorted.forEach(row => {
+                rankedData.push({
+                    ...row,
+                    y_value: valueToRank[row[perfCol]],
+                    original_value: row[perfCol]
+                });
+            });
+        }
+
+        return rankedData;
+    }
+
+    // Assign colors to entities from filtered data
+    function assignEntityColors(data) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        entityColors = {};
+        entities.forEach((entity, idx) => {
+            entityColors[entity] = COLOR_MAP[entity] || COLOR_PALETTE[idx % COLOR_PALETTE.length];
+        });
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_bump_rankings = function() {
+        // Get current performance column
+        const perfColSelect = document.getElementById('perf_col_select_bump_rankings');
+        const PERF_COL = perfColSelect ? perfColSelect.value : DEFAULT_PERF_COL;
+
+        // Get Y-axis mode
+        const yModeSelect = document.getElementById('y_mode_select_bump_rankings');
+        const Y_MODE = yModeSelect ? yModeSelect.value : 'Ranking';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_bump_rankings');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_bump_rankings' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_bump_rankings');
+        const facet2Select = document.getElementById('facet2_select_bump_rankings');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'bump_rankings',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Assign colors to entities in filtered data
+        assignEntityColors(filteredData);
+
+        // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
+        if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
+            renderNoFacets(processedData, X_COL, Y_MODE);
+        } else if (FACET_COLS.length === 1) {
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
+        } else {
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
+        }
+    };
+
+    // Render without facets
+    function renderNoFacets(data, xCol, yMode) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        const traces = [];
+
+        entities.forEach(entity => {
+            const entityData = data.filter(row => String(row[ENTITY_COL]) === entity);
+            entityData.sort((a, b) => {
+                const aVal = a[xCol];
+                const bVal = b[xCol];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const xValues = entityData.map(row => row[xCol]);
+            const yValues = entityData.map(row => row.y_value);
+            const origValues = entityData.map(row => row.original_value);
+
+            traces.push({
+                x: xValues,
+                y: yValues,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: entity,
+                line: {
+                    color: entityColors[entity],
+                    width: 3
+                },
+                marker: {size: 6},
+                customdata: origValues,
+                hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                              (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                              '<extra></extra>'
+            });
+        });
+
+        const layout = {
+            xaxis: {title: xCol},
+            yaxis: {
+                title: yMode === 'Ranking' ? 'Rank' : 'Performance',
+                autorange: yMode === 'Ranking' ? 'reversed' : true  // Rank 1 at top
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        Plotly.newPlot('bump_rankings', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('bump_rankings', traces);
+        });
+    }
+
+    // Render with one facet
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
+        const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nFacets = facetValues.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+        const nRows = Math.ceil(nFacets / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        facetValues.forEach((facetVal, idx) => {
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
+            const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            entities.forEach(entity => {
+                const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                entityData.sort((a, b) => {
+                    const aVal = a[xCol];
+                    const bVal = b[xCol];
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+                    return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                });
+
+                const xValues = entityData.map(row => row[xCol]);
+                const yValues = entityData.map(row => row.y_value);
+                const origValues = entityData.map(row => row.original_value);
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: entity,
+                    legendgroup: entity,
+                    showlegend: idx === 0,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    line: {
+                        color: entityColors[entity],
+                        width: 3
+                    },
+                    marker: {size: 6},
+                    customdata: origValues,
+                    hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                  (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                  '<extra></extra>'
+                });
+            });
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? xCol : '',
+                anchor: yaxis
+            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
+
+            // Add annotation for facet label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: facetCol + ': ' + facetVal,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('bump_rankings', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('bump_rankings', traces);
+        });
+    }
+
+    // Render with two facets
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
+        const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
+        const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nRows = rowValues.length;
+        const nCols = colValues.length;
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        rowValues.forEach((rowVal, rowIdx) => {
+            colValues.forEach((colVal, colIdx) => {
+                const rawFacetData = data.filter(row =>
+                    row[facetRow] === rowVal && row[facetCol] === colVal
+                );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
+                const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+                const idx = rowIdx * nCols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                entities.forEach(entity => {
+                    const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                    entityData.sort((a, b) => {
+                        const aVal = a[xCol];
+                        const bVal = b[xCol];
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+                        return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                    });
+
+                    const xValues = entityData.map(row => row[xCol]);
+                    const yValues = entityData.map(row => row.y_value);
+                    const origValues = entityData.map(row => row.original_value);
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: entity,
+                        legendgroup: entity,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: entityColors[entity],
+                            width: 3
+                        },
+                        marker: {size: 6},
+                        customdata: origValues,
+                        hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                      (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                      '<extra></extra>'
+                    });
+                });
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: rowIdx === nRows - 1 ? xCol : '',
+                    anchor: yaxis
+                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
+
+                // Add annotations for facet labels
+                if (!layout.annotations) layout.annotations = [];
+
+                // Column header
+                if (rowIdx === 0) {
+                    layout.annotations.push({
+                        text: facetCol + ': ' + colVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 0.5,
+                        y: 1.1,
+                        xanchor: 'center',
+                        yanchor: 'bottom',
+                        font: {size: 10}
+                    });
+                }
+
+                // Row label
+                if (colIdx === nCols - 1) {
+                    layout.annotations.push({
+                        text: facetRow + ': ' + rowVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 1.05,
+                        y: 0.5,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        textangle: -90,
+                        font: {size: 10}
+                    });
+                }
+            });
+        });
+
+        Plotly.newPlot('bump_rankings', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('bump_rankings', traces);
+        });
+    }
+
+    // Setup cross-facet highlighting (hover over one line greys out all others)
+    function setupCrossFacetHighlighting(chartId, allTraces) {
+        const chartDiv = document.getElementById(chartId);
+        const originalColors = allTraces.map(t => t.line.color);
+
+        chartDiv.on('plotly_hover', function(data) {
+            if (!data.points || data.points.length === 0) return;
+
+            const hoveredEntity = data.points[0].data.name;
+
+            // Update all traces: hovered stays colored, others turn grey
+            const updates = allTraces.map((trace, idx) => {
+                if (trace.name === hoveredEntity) {
+                    return originalColors[idx];  // Keep original color
+                } else {
+                    return 'rgba(200, 200, 200, 0.3)';  // Grey out
+                }
+            });
+
+            Plotly.restyle(chartId, {'line.color': updates});
+        });
+
+        chartDiv.on('plotly_unhover', function() {
+            // Restore all original colors
+            Plotly.restyle(chartId, {'line.color': originalColors});
+        });
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('rankings_data').then(function(data) {
+        allData = data;
+        window.updateChart_bump_rankings();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('bump_rankings');
+    }).catch(function(error) {
+        console.error('Error loading data for chart bump_rankings:', error);
+    });
+})();
 
 
 });
@@ -1642,12 +2111,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Situational Charts</h1>
-<p>This shows examples of Waterfall, SanKey, and RadarChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics.</p>
+<p>This shows examples of Waterfall, SanKey, RadarChart, and BumpChart. Waterfall charts display cumulative effects of sequential positive and negative values. SanKey (alluvial) diagrams show how entities flow between categories over time. RadarChart (spider chart) displays multi-dimensional data on axes radiating from a central point, ideal for comparing items across multiple metrics. BumpChart shows rankings over time with dense ranking and cross-facet highlighting.</p>
 
 <h2>Profit & Loss Waterfall</h2>
 <p>A Waterfall chart visualizes how an initial value is affected by a series of positive and negative values. This example shows a profit & loss statement. <strong>Features:</strong> Automatic cumulative calculation, side-by-side table grouped by category, click bars or table rows to exclude items, toggle categories with checkboxes, switch between value-based (green/red) and category-based coloring, black total bar (toggleable). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html" style="color: blue; font-weight: bold;">See here for more Waterfall examples</a></p>
@@ -1861,8 +2330,109 @@ $(function(){
         </div>
     </div>
 </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: radar_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: radar_data.parquet</p><br>
+<hr>
+<br>
+<h2>Product Rankings Over Time</h2>
+<p>A BumpChart shows how entities rank over time based on different performance metrics. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html" style="color: blue; font-weight: bold;">See here for BumpChart examples</a></p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.1.</small></p>
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="bump_rankings_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="segment_select_bump_rankings">segment: </label>
+                <select id="segment_select_bump_rankings" multiple onchange="updateChart_bump_rankings()">
+                <option value="Consumer" selected>Consumer</option>
+                <option value="Enterprise" selected>Enterprise</option>
+                <option value="SMB" selected>SMB</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="segment_select_bump_rankings_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_bump_rankings">region: </label>
+                <select id="region_select_bump_rankings" multiple onchange="updateChart_bump_rankings()">
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_bump_rankings_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_mode_select_bump_rankings">Y-axis Mode: </label>
+                <select id="y_mode_select_bump_rankings" onchange="updateChart_bump_rankings()">
+                <option value="Ranking" selected>Ranking</option>
+                <option value="Absolute">Absolute</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_mode_select_bump_rankings_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-radius: 5px;">
+        <h4 style="margin: 0 0 10px 0;">Performance Metric</h4>
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="perf_col_select_bump_rankings">Metric: </label>
+                <select id="perf_col_select_bump_rankings" onchange="updateChart_bump_rankings()">
+                    <option value="sales_total" selected>sales_total</option>
+                    <option value="profit_total">profit_total</option>
+                    <option value="quantity_total">quantity_total</option>
+                    <option value="satisfaction_avg">satisfaction_avg</option>
+                </select>
+            </div>
+        </div>
+    </div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_bump_rankings">Facet 1: </label>
+        <select id="facet1_select_bump_rankings" style="padding: 5px 10px;" onchange="updateChart_bump_rankings()">
+            <option value="None">None</option>
+<option value="region" selected>region</option>
+<option value="segment">segment</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_bump_rankings">Facet 2: </label>
+        <select id="facet2_select_bump_rankings" style="padding: 5px 10px;" onchange="updateChart_bump_rankings()">
+            <option value="None">None</option>
+<option value="region">region</option>
+<option value="segment" selected>segment</option>
+        </select>
+    </div>
+</div>
+
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="bump_rankings_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="bump_rankings_aspect_ratio_label">0.3</span>
+    <input type="range" id="bump_rankings_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="bump_rankings"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: rankings_data.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
 </body>
 </html>

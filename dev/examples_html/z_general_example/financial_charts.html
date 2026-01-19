@@ -3,12 +3,13 @@
 <head>
     <title>Financial Charts</title>
     <meta charset="UTF-8">
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
     <style>
         body {
             margin: 0;
@@ -122,39 +123,18 @@
     </style>
 
 
-    <!-- external libs -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-csv/0.71/jquery.csv-0.71.min.js"></script>
-
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/pivot.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/d3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/c3_renderers.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.19.0/export_renderers.min.js"></script>
-
-    <!-- Prism.js for code syntax highlighting -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <!-- Prism.js language components for CodeBlocks -->
     
 
 </head>
 
 <body>
 
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
 <script type="module">
-// Import parquet-wasm for Parquet file support
 import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
-
-// Initialize parquet-wasm
 await parquet.default();
-
-// Make parquet available globally for loadDataset
 window.parquetWasm = parquet;
 window.parquetReady = true;
 console.log('Parquet-wasm library loaded successfully');
@@ -1031,6 +1011,643 @@ $(function(){
         console.error('Error loading data for chart financial_candlestick:', error);
     });
 })();
+(function() {
+    // Configuration
+    const EXECUTION_NAMES = ["Order_1_asset_1","Order_2_asset_2","Order_3_asset_3","Order_4_asset_4","Order_5_asset_5"];
+    const COLOR_COLS = ["order_type","exchange","broker"];
+    const DEFAULT_COLOR_COL = null;
+    const TOOLTIP_COLS = ["order_type","exchange","broker"];
+    const PEER_COLS = ["asset_3","asset_4","asset_5","asset_2","asset_1"];
+    const METADATA_COLS = [];
+    const HAS_COUNTERFACTUAL = true;
+    const HAS_SPREAD_CROSS = true;
+    const HAS_VS_VWAP = true;
+    const HAS_VOLUME = true;
+
+    // Data storage
+    let fillsData = [];
+    let tobData = [];
+    let summaryDataBps = [];
+    let summaryDataPct = [];
+    let summaryDataUsd = [];
+    let volumeData = [];
+
+    // Current state
+    let currentExecution = EXECUTION_NAMES.length > 0 ? EXECUTION_NAMES[0] : null;
+    let currentColorCol = DEFAULT_COLOR_COL;
+    let currentUnits = 'bps';  // Default to basis points
+    let currentTopView = 1;
+    let showVolume = HAS_VOLUME;  // Volume on by default if available
+
+    // Get current summary data based on selected units
+    function getSummaryData() {
+        switch (currentUnits) {
+            case 'pct': return summaryDataPct;
+            case 'usd': return summaryDataUsd;
+            default: return summaryDataBps;
+        }
+    }
+
+    // Get unit label for display
+    function getUnitLabel() {
+        switch (currentUnits) {
+            case 'pct': return '%';
+            case 'usd': return 'USD';
+            default: return 'bps';
+        }
+    }
+
+    // Color palette
+    const colorPalette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+                          '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+
+    // Initialize controls
+    function initializeControls() {
+        // Populate execution dropdown
+        const execSelect = document.getElementById('exec_select_execution_analysis');
+        if (execSelect) {
+            execSelect.innerHTML = '';
+            EXECUTION_NAMES.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                if (name === currentExecution) option.selected = true;
+                execSelect.appendChild(option);
+            });
+        }
+
+        // Populate color dropdown
+        const colorSelect = document.getElementById('color_select_execution_analysis');
+        if (colorSelect) {
+            colorSelect.innerHTML = '<option value="">No coloring</option>';
+            COLOR_COLS.forEach(col => {
+                const option = document.createElement('option');
+                option.value = col;
+                option.textContent = col;
+                if (col === currentColorCol) option.selected = true;
+                colorSelect.appendChild(option);
+            });
+        }
+
+        // Set up view toggle buttons
+        updateTopViewButtons();
+
+        // Set initial volume button state
+        const volBtn = document.getElementById('volume_toggle_execution_analysis');
+        if (volBtn) {
+            volBtn.style.backgroundColor = showVolume ? '#27ae60' : '#95a5a6';
+        }
+    }
+
+    function updateTopViewButtons() {
+        for (let i = 1; i <= 6; i++) {
+            const btn = document.getElementById('top_view_' + i + '_execution_analysis');
+            if (btn) {
+                btn.style.backgroundColor = (i === currentTopView) ? '#3498db' : '#95a5a6';
+            }
+        }
+        // Hide/show View 3 button if no peer data
+        const view3Btn = document.getElementById('top_view_3_execution_analysis');
+        if (view3Btn) {
+            view3Btn.style.display = (HAS_COUNTERFACTUAL && PEER_COLS.length > 0) ? 'inline-block' : 'none';
+        }
+        // Hide/show View 2 button if no counterfactual
+        const view2Btn = document.getElementById('top_view_2_execution_analysis');
+        if (view2Btn) {
+            view2Btn.style.display = HAS_COUNTERFACTUAL ? 'inline-block' : 'none';
+        }
+    }
+
+    // Event handlers
+    window.onExecChange_execution_analysis = function() {
+        const select = document.getElementById('exec_select_execution_analysis');
+        if (select) {
+            currentExecution = select.value;
+            updateChart_execution_analysis();
+        }
+    };
+
+    window.onColorChange_execution_analysis = function() {
+        const select = document.getElementById('color_select_execution_analysis');
+        if (select) {
+            currentColorCol = select.value || null;
+            updateChart_execution_analysis();
+        }
+    };
+
+    window.onUnitsChange_execution_analysis = function() {
+        const select = document.getElementById('units_select_execution_analysis');
+        if (select) {
+            currentUnits = select.value;
+            updateChart_execution_analysis();
+        }
+    };
+
+    window.setTopView_execution_analysis = function(view) {
+        currentTopView = view;
+        updateTopViewButtons();
+        updateChart_execution_analysis();
+    };
+
+    window.toggleVolume_execution_analysis = function() {
+        showVolume = !showVolume;
+        const btn = document.getElementById('volume_toggle_execution_analysis');
+        if (btn) {
+            btn.style.backgroundColor = showVolume ? '#27ae60' : '#95a5a6';
+        }
+        updateChart_execution_analysis();
+    };
+
+    // Aspect ratio control for the chart panel
+    function setupAspectRatioControl_execution_analysis() {
+        const slider = document.getElementById('aspect_ratio_slider_execution_analysis');
+        if (!slider) return;
+
+        function applyAspectRatio() {
+            const ratio = parseFloat(slider.value);
+            const panel = document.getElementById('top_panel_execution_analysis');
+
+            if (panel) {
+                const width = panel.clientWidth;
+                const height = Math.round(width * ratio);
+                panel.style.height = height + 'px';
+                Plotly.relayout('top_panel_execution_analysis', { height: height });
+            }
+        }
+
+        slider.addEventListener('input', applyAspectRatio);
+
+        // Apply initial aspect ratio after a short delay to ensure chart is rendered
+        setTimeout(applyAspectRatio, 100);
+    }
+
+    // Update summary table
+    function updateSummaryTable() {
+        const table = document.getElementById('summary_table_execution_analysis');
+        if (!table || !currentExecution) return;
+
+        const summaryData = getSummaryData();
+        const unitLabel = getUnitLabel();
+        const summary = summaryData.find(r => r.execution_name === currentExecution);
+        const fills = fillsData.filter(r => r.execution_name === currentExecution);
+
+        if (!summary || fills.length === 0) {
+            table.innerHTML = '<tr><td colspan="8">No data for selected execution</td></tr>';
+            return;
+        }
+
+        const asset = fills[0].asset || 'N/A';
+        const side = summary.side || 'N/A';
+        const desiredQty = fills[0].desired_quantity || sum(fills.map(f => f.quantity));
+        const executedQty = fills.reduce((s, f) => s + f.quantity, 0);
+
+        let html = '<tr>';
+        html += '<td><strong>Asset:</strong> ' + asset + '</td>';
+        html += '<td><strong>Side:</strong> ' + side + '</td>';
+        html += '<td><strong>Planned Qty:</strong> ' + desiredQty.toLocaleString() + '</td>';
+        html += '<td><strong>Executed Qty:</strong> ' + executedQty.toLocaleString() + '</td>';
+        html += '<td><strong>Classical:</strong> ' + (summary.classical_slippage || 0).toFixed(2) + ' ' + unitLabel + '</td>';
+
+        if (HAS_VS_VWAP && summary.vs_vwap_slippage !== undefined) {
+            html += '<td><strong>vs VWAP:</strong> ' + (summary.vs_vwap_slippage || 0).toFixed(2) + ' ' + unitLabel + '</td>';
+        }
+
+        if (HAS_COUNTERFACTUAL && summary.refined_slippage !== undefined) {
+            html += '<td><strong>Refined:</strong> ' + (summary.refined_slippage || 0).toFixed(2) + ' ' + unitLabel + '</td>';
+        }
+
+        if (HAS_SPREAD_CROSS && summary.spread_cross_pct !== undefined) {
+            html += '<td><strong>Spread Cross:</strong> ' + ((summary.spread_cross_pct || 0) * 100).toFixed(1) + '%</td>';
+        }
+
+        // Add user-specified metadata columns
+        METADATA_COLS.forEach(col => {
+            if (summary[col] !== undefined) {
+                let val = summary[col];
+                // Format numbers nicely
+                if (typeof val === 'number') {
+                    val = Number.isInteger(val) ? val.toLocaleString() : val.toFixed(4);
+                }
+                html += '<td><strong>' + col + ':</strong> ' + val + '</td>';
+            }
+        });
+
+        html += '</tr>';
+        table.innerHTML = html;
+    }
+
+    // Get filtered data for current execution
+    function getExecutionData() {
+        const fills = fillsData.filter(r => r.execution_name === currentExecution);
+        if (fills.length === 0) return { fills: [], tob: [], volume: [] };
+
+        const asset = fills[0].asset;
+        const times = fills.map(f => f.time);
+        const minTime = Math.min(...times);
+        const maxTime = Math.max(...times);
+        const timeRange = maxTime - minTime;
+
+        // Get TOB data for this asset and time window (with 10% buffer)
+        const tob = tobData.filter(r =>
+            r.symbol === asset &&
+            r.time >= minTime - timeRange * 0.1 &&
+            r.time <= maxTime + timeRange * 0.1
+        ).sort((a, b) => a.time - b.time);
+
+        // Get volume data if available
+        const vol = volumeData.filter(r =>
+            r.symbol === asset &&
+            r.time_to >= minTime &&
+            r.time_from <= maxTime
+        ).sort((a, b) => a.time_from - b.time_from);
+
+        return { fills: fills.sort((a, b) => a.time - b.time), tob, volume: vol };
+    }
+
+    // Render top panel based on current view
+    function renderTopPanel(data) {
+        const { fills, tob, volume } = data;
+        if (fills.length === 0) {
+            Plotly.newPlot('top_panel_execution_analysis', [], {
+                title: 'No data for selected execution'
+            });
+            return;
+        }
+
+        const traces = [];
+        const layout = {
+            xaxis: { title: 'Time' },
+            hovermode: 'closest',
+            showlegend: true,
+            legend: { orientation: 'h', y: 1.1 }
+        };
+
+        // Get color mapping for fills
+        const fillColors = getFillColors(fills);
+
+        switch (currentTopView) {
+            case 1:
+                // Bid/Ask + Fills
+                renderBidAskView(traces, layout, fills, tob, volume, fillColors);
+                break;
+            case 2:
+                // Mid + Counterfactual
+                renderMidCounterfactualView(traces, layout, fills, tob, fillColors);
+                break;
+            case 3:
+                // With Peers
+                renderPeersView(traces, layout, fills, tob, fillColors);
+                break;
+            case 4:
+                // Execution Progress (CDF)
+                renderProgressView(traces, layout, fills, fillColors);
+                break;
+            case 5:
+                // Spread Position
+                renderSpreadPositionView(traces, layout, fills, tob, fillColors);
+                break;
+            case 6:
+                // Accrued Slippage
+                renderSlippageView(traces, layout, fills);
+                break;
+        }
+
+        // Add volume overlay for views 1-3 (price-based views)
+        if (showVolume && HAS_VOLUME && volume.length > 0 && currentTopView <= 3) {
+            addVolumeTrace(traces, layout, volume);
+        }
+
+        Plotly.newPlot('top_panel_execution_analysis', traces, layout, {responsive: true});
+    }
+
+    // Get colors for fills based on color column
+    function getFillColors(fills) {
+        if (!currentColorCol) {
+            return fills.map(() => colorPalette[0]);
+        }
+
+        const categories = [...new Set(fills.map(f => f[currentColorCol]))];
+        const colorMap = {};
+        categories.forEach((cat, i) => {
+            colorMap[cat] = colorPalette[i % colorPalette.length];
+        });
+
+        return fills.map(f => colorMap[f[currentColorCol]]);
+    }
+
+    // Build tooltip text for a fill including all tooltip columns
+    function buildFillTooltip(fill) {
+        let text = 'Qty: ' + fill.quantity.toLocaleString() + '<br>Price: ' + fill.price.toFixed(4);
+
+        // Add tooltip columns
+        TOOLTIP_COLS.forEach(col => {
+            if (fill[col] !== undefined && fill[col] !== null) {
+                let val = fill[col];
+                // Format numbers nicely
+                if (typeof val === 'number') {
+                    val = Number.isInteger(val) ? val.toLocaleString() : val.toFixed(4);
+                }
+                text += '<br>' + col + ': ' + val;
+            }
+        });
+
+        return text;
+    }
+
+    // View 1: Bid/Ask + Fills
+    function renderBidAskView(traces, layout, fills, tob, volume, fillColors) {
+        // Bid line
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(r => r.bid_price),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Bid',
+            line: { color: '#006400', width: 1.5 }
+        });
+
+        // Ask line
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(r => r.ask_price),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Ask',
+            line: { color: '#d62728', width: 1.5 }
+        });
+
+        // Fill points (sized by log volume)
+        traces.push({
+            x: fills.map(r => r.time),
+            y: fills.map(r => r.price),
+            type: 'scatter',
+            mode: 'markers',
+            name: 'Fills',
+            marker: {
+                size: fills.map(r => Math.max(8, Math.log(r.quantity) * 3)),
+                color: fillColors,
+                line: { color: 'black', width: 1 }
+            },
+            text: fills.map(r => buildFillTooltip(r)),
+            hoverinfo: 'text'
+        });
+
+        layout.yaxis = { title: 'Price' };
+    }
+
+    // View 2: Mid + Counterfactual
+    function renderMidCounterfactualView(traces, layout, fills, tob, fillColors) {
+        // Mid price line
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(r => r.mid_price),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Mid Price',
+            line: { color: '#1f77b4', width: 1.5 }
+        });
+
+        // Counterfactual price line (at fill times)
+        if (HAS_COUNTERFACTUAL) {
+            traces.push({
+                x: fills.map(r => r.time),
+                y: fills.map(r => r.counterfactual_price),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Counterfactual',
+                line: { color: '#ff7f0e', width: 2, dash: 'dash' },
+                marker: { size: 6 }
+            });
+        }
+
+        // Fill points
+        traces.push({
+            x: fills.map(r => r.time),
+            y: fills.map(r => r.price),
+            type: 'scatter',
+            mode: 'markers',
+            name: 'Fills',
+            marker: {
+                size: fills.map(r => Math.max(8, Math.log(r.quantity) * 3)),
+                color: fillColors,
+                line: { color: 'black', width: 1 }
+            },
+            text: fills.map(r => buildFillTooltip(r)),
+            hoverinfo: 'text'
+        });
+
+        layout.yaxis = { title: 'Price' };
+    }
+
+    // View 3: With Peers
+    function renderPeersView(traces, layout, fills, tob, fillColors) {
+        // Get the initial price (arrival price of the first fill)
+        const initialPrice = fills[0].arrival_price || fills[0].price;
+
+        // First add peer lines (grey, semi-transparent)
+        // Peer columns contain cumulative returns from time 1 to each fill time
+        // We need returns relative to the first fill time, so we normalize:
+        // peer_price = initialPrice * (peer_return_at_t / peer_return_at_first_fill)
+        // This ensures the peer line starts at initialPrice at the first fill time
+        PEER_COLS.forEach(peer => {
+            const firstFillPeerReturn = fills[0][peer];
+            if (firstFillPeerReturn !== undefined && firstFillPeerReturn !== 0) {
+                traces.push({
+                    x: fills.map(r => r.time),
+                    y: fills.map(r => initialPrice * (r[peer] / firstFillPeerReturn)),
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: peer,
+                    line: { color: 'rgba(150, 150, 150, 0.5)', width: 1 },
+                    hoverinfo: 'name+y'
+                });
+            }
+        });
+
+        // Then add mid and counterfactual (on top)
+        renderMidCounterfactualView(traces, layout, fills, tob, fillColors);
+    }
+
+    // View 4: Execution Progress (CDF)
+    function renderProgressView(traces, layout, fills, fillColors) {
+        traces.push({
+            x: fills.map(r => r.time),
+            y: fills.map(r => (r.pct_complete || 0) * 100),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: '% Completed',
+            line: { color: '#2ca02c', width: 2 },
+            marker: {
+                size: fills.map(r => Math.max(8, Math.log(r.quantity) * 3)),
+                color: fillColors,
+                line: { color: 'black', width: 1 }
+            },
+            text: fills.map(r => '% Complete: ' + ((r.pct_complete || 0) * 100).toFixed(1) + '%<br>' + buildFillTooltip(r)),
+            hoverinfo: 'text',
+            fill: 'tozeroy',
+            fillcolor: 'rgba(44, 160, 44, 0.2)'
+        });
+
+        layout.yaxis = { title: '% Executed', range: [0, 105] };
+    }
+
+    // View 5: Spread Position
+    function renderSpreadPositionView(traces, layout, fills, tob, fillColors) {
+        // Bid at 0
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(() => 0),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Bid (0)',
+            line: { color: '#006400', width: 2 }
+        });
+
+        // Ask at 1
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(() => 1),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Ask (1)',
+            line: { color: '#d62728', width: 2 }
+        });
+
+        // Mid at 0.5 (dotted)
+        traces.push({
+            x: tob.map(r => r.time),
+            y: tob.map(() => 0.5),
+            type: 'scatter',
+            mode: 'lines',
+            name: 'Mid (0.5)',
+            line: { color: '#7f7f7f', width: 1, dash: 'dot' }
+        });
+
+        // Fill positions (normalized 0-1)
+        traces.push({
+            x: fills.map(r => r.time),
+            y: fills.map(r => r.norm_fill_pos || 0.5),
+            type: 'scatter',
+            mode: 'markers',
+            name: 'Fills',
+            marker: {
+                size: fills.map(r => Math.max(8, Math.log(r.quantity) * 3)),
+                color: fillColors,
+                line: { color: 'black', width: 1 }
+            },
+            text: fills.map(r => 'Spread Position: ' + ((r.norm_fill_pos || 0.5) * 100).toFixed(1) + '%<br>' + buildFillTooltip(r)),
+            hoverinfo: 'text'
+        });
+
+        layout.yaxis = { title: 'Position in Spread', range: [-0.1, 1.1] };
+    }
+
+    // Add volume bars
+    function addVolumeTrace(traces, layout, volume) {
+        traces.push({
+            x: volume.map(r => (r.time_from + r.time_to) / 2),
+            y: volume.map(r => r.volume),
+            type: 'bar',
+            name: 'Volume',
+            yaxis: 'y2',
+            marker: { color: 'rgba(100, 100, 100, 0.3)' },
+            showlegend: false
+        });
+
+        layout.yaxis2 = {
+            title: 'Volume',
+            overlaying: 'y',
+            side: 'right',
+            showgrid: false
+        };
+    }
+
+    // View 6: Accrued Slippage
+    function renderSlippageView(traces, layout, fills) {
+        const unitLabel = getUnitLabel();
+
+        // Get the column suffix based on current units
+        const unitSuffix = currentUnits;  // 'bps', 'pct', or 'usd'
+
+        // Classical slippage
+        const classicalCol = 'cum_classical_slippage_' + unitSuffix;
+        traces.push({
+            x: fills.map(r => r.time),
+            y: fills.map(r => r[classicalCol] || 0),
+            type: 'scatter',
+            mode: 'lines+markers',
+            name: 'Classical',
+            line: { color: '#8B4513', width: 2 },
+            marker: { size: 6 }
+        });
+
+        // vs VWAP slippage (if available)
+        const vwapCol = 'cum_vs_vwap_slippage_' + unitSuffix;
+        if (HAS_VS_VWAP && fills[0][vwapCol] !== undefined) {
+            traces.push({
+                x: fills.map(r => r.time),
+                y: fills.map(r => r[vwapCol] || 0),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'vs VWAP',
+                line: { color: '#4169E1', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        // Refined slippage (if available)
+        const refinedCol = 'cum_refined_slippage_' + unitSuffix;
+        if (HAS_COUNTERFACTUAL && fills[0][refinedCol] !== undefined) {
+            traces.push({
+                x: fills.map(r => r.time),
+                y: fills.map(r => r[refinedCol] || 0),
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: 'Refined',
+                line: { color: '#000000', width: 2 },
+                marker: { size: 6 }
+            });
+        }
+
+        layout.yaxis = { title: 'Cumulative Slippage (' + unitLabel + ')' };
+    }
+
+    // Main update function
+    window.updateChart_execution_analysis = function() {
+        updateSummaryTable();
+        const data = getExecutionData();
+        renderTopPanel(data);
+
+        // Setup aspect ratio control
+        setupAspectRatioControl_execution_analysis();
+    };
+
+    // Check if summary_pct and summary_usd are available
+    const HAS_SUMMARY_PCT = true;
+    const HAS_SUMMARY_USD = true;
+
+    // Load data and initialize
+    Promise.all([
+        loadDataset('exec_data.fills'),
+        loadDataset('exec_data.tob'),
+        loadDataset('exec_data.summary_bps'),
+        HAS_VOLUME ? loadDataset('exec_data.volume') : Promise.resolve([]),
+        HAS_SUMMARY_PCT ? loadDataset('exec_data.summary_pct') : Promise.resolve([]),
+        HAS_SUMMARY_USD ? loadDataset('exec_data.summary_usd') : Promise.resolve([])
+    ]).then(function([fills, tob, summaryBps, volume, summaryPct, summaryUsd]) {
+        fillsData = fills;
+        tobData = tob;
+        summaryDataBps = summaryBps;
+        summaryDataPct = HAS_SUMMARY_PCT ? summaryPct : summaryBps;  // Fallback to bps if not available
+        summaryDataUsd = HAS_SUMMARY_USD ? summaryUsd : summaryBps;  // Fallback to bps if not available
+        volumeData = volume;
+
+        initializeControls();
+        updateChart_execution_analysis();
+    }).catch(function(error) {
+        console.error('Error loading execution data:', error);
+    });
+})();
 
 
 });
@@ -1038,12 +1655,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Financial Charts</h1>
-<p>This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis with volume, renormalization, and time range controls.</p>
+<p>This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology.</p>
 
     <div class="textblock-content">
         <h1>Financial Charts</h1>
@@ -1126,8 +1743,109 @@ $(function(){
 
 <!-- Chart -->
 <div id="financial_candlestick"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: candlestick_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: candlestick_data.parquet</p><br>
+<hr>
+<br>
+<div class="chart-wrapper" style="margin: 20px 0;">
+    <div class="chart-header" style="margin-bottom: 15px;">
+        <h3 style="margin: 0;">Trading Execution Analysis</h3>
+    </div>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.4.1.</small></p>
+    <!-- Controls Row 1: Execution, Color, and Units dropdowns -->
+    <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <div>
+            <label><strong>Execution:</strong></label>
+            <select id="exec_select_execution_analysis" onchange="onExecChange_execution_analysis()"
+                    style="margin-left: 5px; padding: 4px 8px; min-width: 200px;">
+            </select>
+        </div>
+        <div>
+            <label><strong>Color by:</strong></label>
+            <select id="color_select_execution_analysis" onchange="onColorChange_execution_analysis()"
+                    style="margin-left: 5px; padding: 4px 8px; min-width: 150px;">
+            </select>
+        </div>
+        <div>
+            <label><strong>Units:</strong></label>
+            <select id="units_select_execution_analysis" onchange="onUnitsChange_execution_analysis()"
+                    style="margin-left: 5px; padding: 4px 8px; min-width: 80px;">
+                <option value="bps" selected>bps</option>
+                <option value="pct">%</option>
+                <option value="usd">USD</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Summary Table -->
+    <div style="margin-bottom: 15px; overflow-x: auto;">
+        <table id="summary_table_execution_analysis" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+            <tr><td colspan="8" style="padding: 8px; background: #f5f5f5;">Loading...</td></tr>
+        </table>
+    </div>
+
+    <!-- Controls Row 2: View buttons - Top and Bottom on same row -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+        <!-- Top Panel View Buttons -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <span><strong>Top:</strong></span>
+            <button id="top_view_1_execution_analysis" onclick="setTopView_execution_analysis(1)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #3498db; font-size: 12px;">
+                Bid/Ask
+            </button>
+            <button id="top_view_2_execution_analysis" onclick="setTopView_execution_analysis(2)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                Mid+CF
+            </button>
+            <button id="top_view_3_execution_analysis" onclick="setTopView_execution_analysis(3)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                +Peers
+            </button>
+            <button id="top_view_4_execution_analysis" onclick="setTopView_execution_analysis(4)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                Progress
+            </button>
+            <button id="top_view_5_execution_analysis" onclick="setTopView_execution_analysis(5)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                Spread Pos
+            </button>
+            <button id="top_view_6_execution_analysis" onclick="setTopView_execution_analysis(6)"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                Slippage
+            </button>
+            <button id="volume_toggle_execution_analysis" onclick="toggleVolume_execution_analysis()"
+                    style="padding: 5px 10px; border: none; border-radius: 4px; cursor: pointer; color: white; background: #95a5a6; font-size: 12px;">
+                Volume
+            </button>
+        </div>
+    </div>
+
+    <!-- Aspect Ratio Slider -->
+    <div style="margin-bottom: 15px;">
+        <label for="aspect_ratio_slider_execution_analysis"><strong>Aspect Ratio:</strong></label>
+        <input type="range" id="aspect_ratio_slider_execution_analysis" min="0.3" max="0.8" step="0.02" value="0.5"
+               style="width: 70%; vertical-align: middle; margin-left: 10px;">
+    </div>
+
+    <!-- Chart Panel -->
+    <div id="top_panel_execution_analysis" style="width: 100%; height: 400px;"></div>
+
+    <div style="margin-top: 10px; font-size: 12px; color: #666;">ExecutionPlot provides comprehensive analysis of trading execution quality using the RefinedSlippage methodology. <strong>Key Features:</strong> Dropdown to select individual executions, color fills by order type or exchange, units dropdown to switch between bps/pct/USD, summary table with key metrics (classical slippage, vs VWAP, refined slippage, spread crossing). <strong>Views:</strong> Bid/Ask shows market spread with fills and volume bars, Mid+CF shows counterfactual prices from peer correlations, +Peers overlays correlated asset price paths, Progress shows execution completion %, Spread Pos shows where fills occurred within the bid-ask spread, Slippage shows cumulative slippage metrics over the order. Volume toggle adds market volume bars. Data source documentation appears below the chart. <strong>References:</strong> <a href="https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5114581" style="color: blue; font-weight: bold;">SSRN paper on Refined Slippage</a> | <a href="https://github.com/s-baumann/RefinedSlippage.jl" style="color: blue; font-weight: bold;">RefinedSlippage.jl GitHub repo</a> | <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/executionplot_examples.html" style="color: blue; font-weight: bold;">See here for ExecutionPlot examples</a></div>
+
+    <!-- Data Sources -->
+    <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; font-size: 11px; color: #666;">
+        <strong>Data Sources:</strong> This visualization uses data from <code>RefinedSlippage.ExecutionData</code>.
+        <ul style="margin: 5px 0 0 15px; padding: 0;">
+            <li><strong>Fills:</strong> Trade executions from <code>exec_data.fills</code> (time, price, quantity, execution_name, asset)</li>
+            <li><strong>Bid/Ask:</strong> Top-of-book quotes from <code>exec_data.tob</code> (time, symbol, bid_price, ask_price)</li>
+            <li><strong>Volume:</strong> Market volume from <code>exec_data.volume</code> (time_from, time_to, symbol, volume) - optional</li>
+            <li><strong>Peer Returns:</strong> Correlated asset returns from <code>exec_data.fill_returns</code> columns (computed via covariance matrix)</li>
+            <li><strong>Slippage Metrics:</strong> Summary statistics from <code>exec_data.summary_bps</code> (classical, refined, vs_vwap slippage)</li>
+        </ul>
+        To regenerate: <code>exec_data = ExecutionData(fills, metadata, tob, covar_matrix; volume=volume)</code> then <code>calculate_slippage!(exec_data)</code>
+    </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: exec_data.parquet</p>
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
 </body>
 </html>
