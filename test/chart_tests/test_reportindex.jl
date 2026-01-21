@@ -239,12 +239,12 @@ using Dates
             idx = ReportIndex(:test_index, manifest_path,
                 title="Reports",
                 default_group_by=:category,
-                default_group_by_2=:date,
+                default_then_group_by=:date,
                 default_sort_by=:description
             )
 
             @test idx.default_group_by == :category
-            @test idx.default_group_by_2 == :date
+            @test idx.default_then_group_by == :date
             @test idx.default_sort_by == :description
         end
     end
@@ -315,6 +315,92 @@ using Dates
 
     @testset "MANIFEST_REQUIRED_COLS" begin
         @test JSPlots.MANIFEST_REQUIRED_COLS == [:path, :html_filename, :description, :date]
+    end
+
+    @testset "ReportIndex default_then_group_by is nothing by default" begin
+        mktempdir() do tmpdir
+            manifest_path = joinpath(tmpdir, "manifest.csv")
+            add_to_manifest(manifest_path, path="test", html_filename="index.html",
+                description="Test", date=Date(2024, 1, 15))
+
+            idx = ReportIndex(:test_index, manifest_path)
+
+            @test isnothing(idx.default_then_group_by)
+        end
+    end
+
+    @testset "ReportIndex in JSPlotPage integration" begin
+        mktempdir() do tmpdir
+            manifest_path = joinpath(tmpdir, "manifest.csv")
+
+            # Add some entries
+            add_to_manifest(manifest_path, path="reports", html_filename="report1.html",
+                description="Report 1", date=Date(2024, 1, 15), category="daily")
+            add_to_manifest(manifest_path, path="reports", html_filename="report2.html",
+                description="Report 2", date=Date(2024, 2, 20), category="weekly")
+
+            idx = ReportIndex(:my_index, manifest_path,
+                title="Test Reports",
+                default_group_by=:category)
+
+            page = JSPlotPage(Dict{Symbol,Any}(), [idx])
+
+            output_file = joinpath(tmpdir, "index.html")
+            create_html(page, output_file)
+
+            @test isfile(output_file)
+            html_content = read(output_file, String)
+
+            # Check ReportIndex elements in HTML
+            @test occursin("reportindex-container-my_index", html_content)
+            @test occursin("Test Reports", html_content)
+            @test occursin("loadManifest", html_content)
+        end
+    end
+
+    @testset "ManifestEntry with empty extra_columns" begin
+        entry = ManifestEntry(
+            path = "2024-01-15",
+            html_filename = "report.html",
+            description = "Test Report",
+            date = Date(2024, 1, 15)
+        )
+
+        @test entry.path == "2024-01-15"
+        @test isempty(entry.extra_columns)
+    end
+
+    @testset "add_to_manifest with different filenames same path" begin
+        mktempdir() do tmpdir
+            manifest_path = joinpath(tmpdir, "manifest.csv")
+
+            # Add two entries with same path but different filenames
+            add_to_manifest(manifest_path, path="2024-01", html_filename="report1.html",
+                description="Report 1", date=Date(2024, 1, 15))
+            add_to_manifest(manifest_path, path="2024-01", html_filename="report2.html",
+                description="Report 2", date=Date(2024, 1, 20))
+
+            df = CSV.read(manifest_path, DataFrame)
+            @test nrow(df) == 2  # Both should exist (different filenames)
+        end
+    end
+
+    @testset "ReportIndex functional_html contains default values" begin
+        mktempdir() do tmpdir
+            manifest_path = joinpath(tmpdir, "manifest.csv")
+            add_to_manifest(manifest_path, path="test", html_filename="index.html",
+                description="Test", date=Date(2024, 1, 15), category="test_cat")
+
+            idx = ReportIndex(:my_index, manifest_path,
+                default_group_by=:category,
+                default_then_group_by=:date,
+                default_sort_by=:description)
+
+            # Check default values are in JavaScript
+            @test occursin("DEFAULT_GROUP_BY_1 = 'category'", idx.functional_html)
+            @test occursin("DEFAULT_GROUP_BY_2 = 'date'", idx.functional_html)
+            @test occursin("DEFAULT_SORT_BY = 'description'", idx.functional_html)
+        end
     end
 end
 
