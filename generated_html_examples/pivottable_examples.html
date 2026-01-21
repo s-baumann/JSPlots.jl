@@ -761,9 +761,135 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
+// Global fix for PivotTable.js filter box positioning issue
+// See: https://github.com/nicolaskruchten/pivottable/issues/865
+// The library calculates position incorrectly - we fix it by repositioning after creation
+(function() {
+    if (window._pvtFilterBoxFixApplied) return; // Only apply once
+    window._pvtFilterBoxFixApplied = true;
+
+    var lastClickedTriangle = null;
+
+    // Helper function to reposition the filter box
+    function repositionFilterBox($box, triangle) {
+        if (!triangle || !$box.length) return;
+
+        // Get triangle position relative to viewport
+        var triangleRect = triangle.getBoundingClientRect();
+
+        // Get box dimensions (use defaults if not yet rendered)
+        var boxWidth = $box.outerWidth() || 300;
+        var boxHeight = $box.outerHeight() || 400;
+
+        // Calculate position relative to viewport (for position:fixed)
+        var newLeft = triangleRect.left;
+        var newTop = triangleRect.bottom + 5;
+
+        // Adjust if it would go off the right edge
+        if (newLeft + boxWidth > window.innerWidth - 20) {
+            newLeft = triangleRect.right - boxWidth;
+        }
+
+        // Adjust if it would go off the bottom edge
+        if (newTop + boxHeight > window.innerHeight - 20) {
+            newTop = triangleRect.top - boxHeight - 5;
+        }
+
+        // Ensure minimum positions
+        if (newLeft < 10) newLeft = 10;
+        if (newTop < 10) newTop = 10;
+
+        // Use position:fixed for viewport-relative positioning
+        $box.css({
+            'position': 'fixed',
+            'left': newLeft + 'px',
+            'top': newTop + 'px'
+        });
+    }
+
+    // Capture which triangle was clicked
+    $(document).on('click', '.pvtTriangle', function(e) {
+        lastClickedTriangle = this;
+    });
+
+    // Watch for filter box creation and fix position
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1 && $(node).hasClass('pvtFilterBox')) {
+                    var $box = $(node);
+                    var triangle = lastClickedTriangle;
+
+                    // Apply the fix multiple times to ensure it sticks after PivotTable.js finishes
+                    // The library may set position after initial render
+                    var timings = [0, 10, 50, 100, 200];
+                    timings.forEach(function(delay) {
+                        setTimeout(function() {
+                            repositionFilterBox($box, triangle);
+                        }, delay);
+                    });
+
+                    // Also reposition on any style changes to the box (in case library updates position)
+                    var styleObserver = new MutationObserver(function(styleMutations) {
+                        repositionFilterBox($box, triangle);
+                    });
+                    styleObserver.observe(node, { attributes: true, attributeFilter: ['style'] });
+
+                    // Disconnect the style observer when the filter box is removed
+                    var removalObserver = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.removedNodes.forEach(function(removedNode) {
+                                if (removedNode === node) {
+                                    styleObserver.disconnect();
+                                    removalObserver.disconnect();
+                                    lastClickedTriangle = null;
+                                }
+                            });
+                        });
+                    });
+                    removalObserver.observe(document.body, { childList: true, subtree: true });
+                }
+            });
+        });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
+
     // Store current data and settings for this pivot table
     window.pivotTableDatasales_pivot = {};
     window.pivotTableConfigsales_pivot = {"rendererName":"Table","rows":["Region"],"aggregatorName":"Sum","vals":["Sales"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Month"]};
+
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringsales_pivot(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
 
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTablesales_pivot(datasetName) {
@@ -783,10 +909,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringsales_pivot(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -873,6 +999,37 @@ $(function(){
     window.pivotTableDataperformance_heatmap = {};
     window.pivotTableConfigperformance_heatmap = {"rendererName":"Heatmap","rows":["Employee"],"aggregatorName":"Average","vals":["Score"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([50.0, 65.0, 75.0, 85.0, 100.0]).range(["#d73027", "#fee08b", "#ffffbf", "#d9ef8b", "#1a9850"]).clamp(true)}}},"cols":["Quarter"]};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringperformance_heatmap(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTableperformance_heatmap(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -891,10 +1048,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringperformance_heatmap(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -981,6 +1138,37 @@ $(function(){
     window.pivotTableDatarevenue_by_category = {};
     window.pivotTableConfigrevenue_by_category = {"rendererName":"Bar Chart","rows":["Category"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Quarter"]};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringrevenue_by_category(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTablerevenue_by_category(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -999,10 +1187,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringrevenue_by_category(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1089,6 +1277,37 @@ $(function(){
     window.pivotTableDatacustomer_revenue = {};
     window.pivotTableConfigcustomer_revenue = {"rendererName":"Heatmap","rows":["Country"],"aggregatorName":"Sum","vals":["Revenue"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["ProductType"],"exclusions":{"Country":["Test"]}};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringcustomer_revenue(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTablecustomer_revenue(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1107,10 +1326,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringcustomer_revenue(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1197,6 +1416,37 @@ $(function(){
     window.pivotTableDatasurvey_results = {};
     window.pivotTableConfigsurvey_results = {"rendererName":"Table Barchart","rows":["Age_Group","Gender"],"aggregatorName":"Average","vals":["Satisfaction"],"inclusions":{"Age_Group":["18-25","26-35","36-45"]},"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Product"]};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringsurvey_results(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTablesurvey_results(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1215,10 +1465,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringsurvey_results(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1305,6 +1555,37 @@ $(function(){
     window.pivotTableDatatransaction_analysis = {};
     window.pivotTableConfigtransaction_analysis = {"rendererName":"Heatmap","rows":["Customer_Type"],"aggregatorName":"Count","vals":["Amount"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 50.0, 100.0, 150.0]).range(["#f7fbff", "#9ecae1", "#4292c6", "#08519c"]).clamp(true)}}},"cols":["Transaction_Type"]};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringtransaction_analysis(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTabletransaction_analysis(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1323,10 +1604,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringtransaction_analysis(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1413,6 +1694,37 @@ $(function(){
     window.pivotTableDataReturns_Over_Last_Few_Days = {};
     window.pivotTableConfigReturns_Over_Last_Few_Days = {"rendererName":"Heatmap","rows":["Symbol"],"aggregatorName":"Average","vals":["Return"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}},"cols":["Date"],"exclusions":{"Symbol":["MSFT"]}};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringReturns_Over_Last_Few_Days(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTableReturns_Over_Last_Few_Days(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1431,10 +1743,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringReturns_Over_Last_Few_Days(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1521,6 +1833,37 @@ $(function(){
     window.pivotTableDataCorrelation_Matrix = {};
     window.pivotTableConfigCorrelation_Matrix = {"rendererName":"Heatmap","rows":["Symbol1"],"aggregatorName":"Average","vals":["Correlation"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-1.0, 0.0, 1.0]).range(["#FF4545", "#ffffff", "#4F92FF"]).clamp(true)}}},"cols":["Symbol2"]};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringCorrelation_Matrix(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTableCorrelation_Matrix(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1539,10 +1882,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringCorrelation_Matrix(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1629,6 +1972,37 @@ $(function(){
     window.pivotTableDatadataset_selector_demo = {};
     window.pivotTableConfigdataset_selector_demo = {"rendererName":"Heatmap","rows":["Category"],"aggregatorName":"Sum","rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([-2.5, -1.0, 0.0, 1.0, 2.5]).range(["#FF9999", "#FFFF99", "#FFFFFF", "#99FF99", "#99CCFF"]).clamp(true)}}}};
 
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringdataset_selector_demo(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTabledataset_selector_demo(datasetName) {
         loadDataset(datasetName).then(function(data) {
@@ -1647,10 +2021,10 @@ $(function(){
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToStringdataset_selector_demo(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -1733,6 +2107,145 @@ $(function(){
 
     // Load the initial dataset
     loadPivotTabledataset_selector_demo('multi_data.aa');
+    // Store current data and settings for this pivot table
+    window.pivotTableDataboxing_matches = {};
+    window.pivotTableConfigboxing_matches = {"rendererName":"Heatmap","rows":["city"],"aggregatorName":"Sum","vals":["ticketsales"],"rendererOptions":{ heatmap: { colorScaleGenerator: function(values) { return d3.scale.linear().domain([0.0, 2.5e7, 5.0e7, 7.5e7, 1.0e8]).range(["#f7fbff", "#9ecae1", "#4292c6", "#2171b5", "#084594"]).clamp(true)}}},"cols":["boxer1"]};
+
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToStringboxing_matches(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
+
+    // Function to load and render the pivot table with a specific dataset
+    function loadPivotTableboxing_matches(datasetName) {
+        loadDataset(datasetName).then(function(data) {
+            console.log('Loaded data for pivot table boxing_matches from dataset:', datasetName, data);
+
+            // Validate data
+            if (!data || data.length === 0) {
+                throw new Error('No data loaded for pivot table boxing_matches');
+            }
+
+            // Store the data
+            window.pivotTableDataboxing_matches[datasetName] = data;
+
+            // Convert data to array format expected by pivotUI
+            // First row is headers
+            var headers = Object.keys(data[0]);
+            var arrayData = [headers];
+
+            // Add data rows - convert Date objects to strings for proper display
+            data.forEach(function(row) {
+                var rowArray = headers.map(function(header) {
+                    return valueToStringboxing_matches(row[header]);
+                });
+                arrayData.push(rowArray);
+            });
+
+            console.log('Converted array data for boxing_matches:', arrayData.slice(0, 3));
+
+            // Save current pivot state if exists
+            var currentConfig = window.pivotTableConfigboxing_matches;
+            var pivotEl = $("#boxing_matches");
+            if (pivotEl.data('pivotUIOptions')) {
+                // Preserve current user selections
+                var opts = pivotEl.data('pivotUIOptions');
+                currentConfig = {
+                    rows: opts.rows,
+                    cols: opts.cols,
+                    vals: opts.vals,
+                    aggregatorName: opts.aggregatorName,
+                    rendererName: opts.rendererName,
+                    inclusions: opts.inclusions,
+                    exclusions: opts.exclusions,
+                    rendererOptions: opts.rendererOptions
+                };
+            }
+
+            // Render the pivot table
+            pivotEl.pivotUI(
+                arrayData,
+                $.extend({
+                    renderers: $.extend(
+                        $.pivotUtilities.renderers,
+                        $.pivotUtilities.c3_renderers,
+                        $.pivotUtilities.d3_renderers,
+                        $.pivotUtilities.export_renderers
+                    ),
+                    hiddenAttributes: [""]
+                }, currentConfig)
+            );
+
+            // Initialize totals visibility based on checkbox state
+            setTimeout(function() {
+                if (window.toggleTotals_boxing_matches) {
+                    window.toggleTotals_boxing_matches();
+                }
+            }, 100);
+        }).catch(function(error) {
+            console.error('Error loading data for pivot table boxing_matches:', error);
+            $("#boxing_matches").html('<div style="color: red; padding: 20px;">Error loading pivot table: ' + error.message + '</div>');
+        });
+    }
+
+    // Setup toggle for showing/hiding totals
+    window.toggleTotals_boxing_matches = function() {
+        const checkbox = document.getElementById('show_totals_checkbox_boxing_matches');
+        const showTotals = checkbox.checked;
+
+        // Find all total cells in the pivot table
+        const pivotContainer = document.getElementById('boxing_matches');
+        const totalCells = pivotContainer.querySelectorAll('.pvtTotal, .pvtGrandTotal');
+
+        totalCells.forEach(function(cell) {
+            cell.style.display = showTotals ? '' : 'none';
+        });
+
+        // Also hide/show total row headers (typically have "Totals" text)
+        const allCells = pivotContainer.querySelectorAll('th, td');
+        allCells.forEach(function(cell) {
+            if (cell.textContent.trim() === 'Totals' || cell.textContent.trim() === 'Total') {
+                cell.style.display = showTotals ? '' : 'none';
+            }
+        });
+    };
+
+    // Make dataset change handler global
+    window.changeDataset_boxing_matches = function() {
+        var select = document.getElementById('dataset_select_boxing_matches');
+        if (select) {
+            loadPivotTableboxing_matches(select.value);
+        }
+    };
+
+    // Load the initial dataset
+    loadPivotTableboxing_matches('boxing_data');
 
 
 });
@@ -1751,6 +2264,25 @@ GOOG,2023-01-03,-0.003
 MSFT,2023-01-01,0.008
 MSFT,2023-01-02,0.004
 MSFT,2023-01-03,-0.002
+
+</script><script type="text/plain" id="standalone_data" data-format="csv_embedded" data-src="">
+Region,Product,Revenue,Profit
+North,Widget,23165,9564
+South,Widget,48727,4977
+East,Widget,21807,3829
+West,Widget,32791,9520
+North,Gadget,45873,6042
+South,Gadget,14523,5324
+East,Gadget,11106,3462
+West,Gadget,32312,8471
+North,Gizmo,31766,6164
+South,Gizmo,16586,5711
+East,Gizmo,28994,5726
+West,Gizmo,46568,6473
+North,Thingamajig,41275,3025
+South,Thingamajig,29951,9073
+East,Thingamajig,45728,5264
+West,Thingamajig,11780,8689
 
 </script><script type="text/plain" id="sales_data" data-format="csv_embedded" data-src="">
 Region,Month,Product,Sales,Units
@@ -1840,6 +2372,232 @@ Eve,Q1,64.74262558759463,Engineering
 Eve,Q2,59.14071212211398,Engineering
 Eve,Q3,91.44220987535252,Engineering
 Eve,Q4,70.46725862427758,Engineering
+
+</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
+Category,Brand,Revenue,Quarter
+Electronics,Brand A,2651,Q1
+Clothing,Brand B,9493,Q2
+Home,Brand B,3239,Q3
+Sports,Brand D,3577,Q4
+Books,Brand A,7374,Q1
+Electronics,Brand A,4649,Q2
+Clothing,Brand C,5920,Q3
+Home,Brand D,2313,Q4
+Sports,Brand C,9404,Q1
+Books,Brand C,7841,Q2
+Electronics,Brand D,8621,Q3
+Clothing,Brand D,9082,Q4
+Home,Brand B,2221,Q1
+Sports,Brand B,1191,Q2
+Books,Brand C,9831,Q3
+Electronics,Brand A,6608,Q4
+Clothing,Brand D,2099,Q1
+Home,Brand D,1504,Q2
+Sports,Brand B,4720,Q3
+Books,Brand A,5018,Q4
+Electronics,Brand A,4698,Q1
+Clothing,Brand A,8817,Q2
+Home,Brand B,2536,Q3
+Sports,Brand C,5289,Q4
+Books,Brand A,2553,Q1
+Electronics,Brand D,5372,Q2
+Clothing,Brand A,7229,Q3
+Home,Brand C,4613,Q4
+Sports,Brand A,5211,Q1
+Books,Brand A,6563,Q2
+Electronics,Brand A,5442,Q3
+Clothing,Brand C,5407,Q4
+Home,Brand A,8034,Q1
+Sports,Brand A,5512,Q2
+Books,Brand A,5033,Q3
+Electronics,Brand B,2214,Q4
+Clothing,Brand D,3787,Q1
+Home,Brand D,8915,Q2
+Sports,Brand B,5484,Q3
+Books,Brand C,7547,Q4
+Electronics,Brand C,3404,Q1
+Clothing,Brand A,7259,Q2
+Home,Brand C,4975,Q3
+Sports,Brand C,9476,Q4
+Books,Brand B,4896,Q1
+Electronics,Brand A,1070,Q2
+Clothing,Brand D,1269,Q3
+Home,Brand C,1543,Q4
+Sports,Brand D,8416,Q1
+Books,Brand B,1126,Q2
+Electronics,Brand A,3393,Q3
+Clothing,Brand C,6439,Q4
+Home,Brand C,1075,Q1
+Sports,Brand D,3957,Q2
+Books,Brand B,4930,Q3
+Electronics,Brand D,6540,Q4
+Clothing,Brand D,7221,Q1
+Home,Brand C,5124,Q2
+Sports,Brand D,7953,Q3
+Books,Brand C,9923,Q4
+Electronics,Brand A,4848,Q1
+Clothing,Brand A,6058,Q2
+Home,Brand A,1749,Q3
+Sports,Brand D,6560,Q4
+Books,Brand B,4484,Q1
+Electronics,Brand C,1519,Q2
+Clothing,Brand C,9671,Q3
+Home,Brand B,7695,Q4
+Sports,Brand B,6522,Q1
+Books,Brand C,4684,Q2
+Electronics,Brand D,5906,Q3
+Clothing,Brand B,5720,Q4
+Home,Brand C,5531,Q1
+Sports,Brand C,7384,Q2
+Books,Brand A,7136,Q3
+Electronics,Brand B,9734,Q4
+Clothing,Brand B,3682,Q1
+Home,Brand A,5534,Q2
+Sports,Brand B,4455,Q3
+Books,Brand A,5349,Q4
+Electronics,Brand C,3616,Q1
+Clothing,Brand C,6984,Q2
+Home,Brand C,6219,Q3
+Sports,Brand A,6586,Q4
+Books,Brand A,7668,Q1
+Electronics,Brand C,1298,Q2
+Clothing,Brand A,8187,Q3
+Home,Brand C,6649,Q4
+Sports,Brand A,1280,Q1
+Books,Brand A,9133,Q2
+Electronics,Brand D,5805,Q3
+Clothing,Brand A,8108,Q4
+Home,Brand C,3546,Q1
+Sports,Brand C,3699,Q2
+Books,Brand B,3265,Q3
+Electronics,Brand B,6347,Q4
+Clothing,Brand C,7867,Q1
+Home,Brand D,5449,Q2
+Sports,Brand B,1920,Q3
+Books,Brand A,3207,Q4
+
+</script><script type="text/plain" id="customer_data" data-format="csv_embedded" data-src="">
+Country,ProductType,Channel,Revenue,Year
+UK,Standard,Wholesale,2302,2022
+USA,Budget,Online,2832,2023
+USA,Budget,Online,1162,2024
+Japan,Premium,Wholesale,2455,2022
+Japan,Standard,Wholesale,1522,2023
+Test,Standard,Retail,3820,2024
+Japan,Budget,Wholesale,3481,2022
+Germany,Budget,Retail,4701,2023
+Japan,Premium,Wholesale,1388,2024
+USA,Budget,Retail,3625,2022
+USA,Standard,Wholesale,836,2023
+Test,Standard,Wholesale,805,2024
+Test,Premium,Retail,3239,2022
+Test,Budget,Wholesale,2722,2023
+USA,Standard,Wholesale,2943,2024
+Germany,Standard,Online,4505,2022
+France,Budget,Wholesale,784,2023
+France,Standard,Wholesale,2461,2024
+France,Premium,Online,4104,2022
+UK,Premium,Online,1367,2023
+Test,Premium,Wholesale,4907,2024
+France,Premium,Online,793,2022
+Japan,Premium,Online,2633,2023
+USA,Premium,Retail,1534,2024
+Germany,Budget,Online,1117,2022
+UK,Standard,Retail,1470,2023
+USA,Premium,Retail,2309,2024
+USA,Premium,Wholesale,2991,2022
+Germany,Budget,Wholesale,1898,2023
+Germany,Budget,Wholesale,4334,2024
+France,Premium,Wholesale,4446,2022
+UK,Standard,Online,2277,2023
+Japan,Standard,Retail,1508,2024
+UK,Premium,Wholesale,4839,2022
+Test,Premium,Wholesale,4903,2023
+Test,Premium,Retail,1359,2024
+Test,Standard,Online,2590,2022
+Japan,Budget,Wholesale,2973,2023
+USA,Premium,Retail,3685,2024
+USA,Standard,Retail,4106,2022
+Test,Budget,Online,3642,2023
+UK,Premium,Wholesale,1395,2024
+USA,Budget,Online,859,2022
+Japan,Premium,Wholesale,4641,2023
+UK,Budget,Retail,3226,2024
+USA,Budget,Retail,1109,2022
+France,Budget,Retail,3787,2023
+France,Premium,Online,2931,2024
+France,Standard,Retail,4433,2022
+USA,Premium,Wholesale,4670,2023
+France,Standard,Online,4295,2024
+France,Standard,Online,1804,2022
+USA,Budget,Online,628,2023
+UK,Premium,Online,590,2024
+USA,Budget,Wholesale,4070,2022
+USA,Standard,Wholesale,3464,2023
+Japan,Premium,Retail,2104,2024
+France,Budget,Online,2881,2022
+USA,Standard,Online,1001,2023
+UK,Budget,Online,3180,2024
+Germany,Budget,Retail,3198,2022
+UK,Standard,Retail,3372,2023
+Japan,Premium,Retail,960,2024
+USA,Budget,Retail,3353,2022
+France,Standard,Wholesale,2349,2023
+UK,Budget,Wholesale,1425,2024
+France,Premium,Wholesale,2434,2022
+USA,Premium,Wholesale,2042,2023
+France,Standard,Wholesale,4505,2024
+Test,Budget,Wholesale,809,2022
+France,Budget,Retail,1523,2023
+UK,Standard,Wholesale,2929,2024
+Japan,Standard,Online,2475,2022
+Japan,Budget,Retail,2417,2023
+Japan,Standard,Online,2739,2024
+Germany,Standard,Online,3643,2022
+USA,Budget,Retail,4903,2023
+USA,Standard,Online,4778,2024
+USA,Standard,Online,1796,2022
+Test,Premium,Online,1406,2023
+Japan,Standard,Retail,4188,2024
+Japan,Premium,Online,1087,2022
+Japan,Standard,Retail,3613,2023
+UK,Budget,Retail,4177,2024
+UK,Premium,Wholesale,928,2022
+UK,Premium,Online,1506,2023
+UK,Standard,Online,3027,2024
+France,Premium,Wholesale,2367,2022
+Japan,Budget,Retail,4741,2023
+UK,Standard,Retail,2896,2024
+Test,Premium,Wholesale,1165,2022
+Japan,Premium,Wholesale,3250,2023
+USA,Premium,Online,2840,2024
+Japan,Standard,Retail,572,2022
+Germany,Premium,Retail,2107,2023
+Test,Standard,Wholesale,3447,2024
+USA,Premium,Online,2054,2022
+Test,Premium,Wholesale,2444,2023
+Germany,Premium,Wholesale,2945,2024
+UK,Standard,Retail,2868,2022
+UK,Premium,Online,4518,2023
+UK,Standard,Online,4745,2024
+France,Premium,Online,1751,2022
+France,Premium,Wholesale,4147,2023
+France,Premium,Wholesale,3610,2024
+Test,Standard,Wholesale,3949,2022
+France,Budget,Wholesale,2274,2023
+France,Premium,Wholesale,1930,2024
+USA,Premium,Wholesale,4890,2022
+France,Premium,Online,2284,2023
+UK,Budget,Online,2300,2024
+Germany,Budget,Wholesale,2769,2022
+Germany,Budget,Wholesale,588,2023
+USA,Standard,Online,1325,2024
+USA,Standard,Wholesale,1579,2022
+Test,Standard,Wholesale,4361,2023
+USA,Budget,Wholesale,502,2024
+UK,Budget,Online,2986,2022
+Test,Budget,Retail,2749,2023
+Test,Premium,Wholesale,1340,2024
 
 </script><script type="text/plain" id="survey_data" data-format="csv_embedded" data-src="">
 Age_Group,Gender,Satisfaction,Product,Region
@@ -2043,6 +2801,33 @@ Age_Group,Gender,Satisfaction,Product,Region
 56+,Other,5,Product C,North
 18-25,Male,5,Product C,West
 26-35,Female,2,Product A,East
+
+</script><script type="text/plain" id="correlations" data-format="csv_embedded" data-src="">
+Symbol1,Symbol2,Correlation
+RTX,GOOG,-0.85
+RTX,MSFT,-0.75
+GOOG,MSFT,0.8
+RTX,RTX,1.0
+GOOG,GOOG,1.0
+MSFT,MSFT,1.0
+GOOG,RTX,-0.85
+MSFT,RTX,-0.75
+MSFT,GOOG,0.8
+
+</script><script type="text/plain" id="multi_data.bb" data-format="csv_embedded" data-src="">
+Department,Month,Headcount,Budget
+HR,Jan,32,123281
+Engineering,Jan,26,167112
+Sales,Jan,31,186924
+Marketing,Jan,43,109581
+HR,Feb,88,114698
+Engineering,Feb,32,138637
+Sales,Feb,39,175779
+Marketing,Feb,61,99496
+HR,Mar,52,57926
+Engineering,Mar,80,199150
+Sales,Mar,63,113178
+Marketing,Mar,22,170410
 
 </script><script type="text/plain" id="transaction_data" data-format="csv_embedded" data-src="">
 Transaction_Type,Customer_Type,Payment_Method,Store,Amount
@@ -2547,277 +3332,23 @@ Exchange,VIP,Credit Card,Store 2,329
 Exchange,VIP,Credit Card,Store 3,51
 Cancel,New,PayPal,Store 2,261
 
-</script><script type="text/plain" id="standalone_data" data-format="csv_embedded" data-src="">
-Region,Product,Revenue,Profit
-North,Widget,23165,9564
-South,Widget,48727,4977
-East,Widget,21807,3829
-West,Widget,32791,9520
-North,Gadget,45873,6042
-South,Gadget,14523,5324
-East,Gadget,11106,3462
-West,Gadget,32312,8471
-North,Gizmo,31766,6164
-South,Gizmo,16586,5711
-East,Gizmo,28994,5726
-West,Gizmo,46568,6473
-North,Thingamajig,41275,3025
-South,Thingamajig,29951,9073
-East,Thingamajig,45728,5264
-West,Thingamajig,11780,8689
-
-</script><script type="text/plain" id="customer_data" data-format="csv_embedded" data-src="">
-Country,ProductType,Channel,Revenue,Year
-UK,Standard,Wholesale,2302,2022
-USA,Budget,Online,2832,2023
-USA,Budget,Online,1162,2024
-Japan,Premium,Wholesale,2455,2022
-Japan,Standard,Wholesale,1522,2023
-Test,Standard,Retail,3820,2024
-Japan,Budget,Wholesale,3481,2022
-Germany,Budget,Retail,4701,2023
-Japan,Premium,Wholesale,1388,2024
-USA,Budget,Retail,3625,2022
-USA,Standard,Wholesale,836,2023
-Test,Standard,Wholesale,805,2024
-Test,Premium,Retail,3239,2022
-Test,Budget,Wholesale,2722,2023
-USA,Standard,Wholesale,2943,2024
-Germany,Standard,Online,4505,2022
-France,Budget,Wholesale,784,2023
-France,Standard,Wholesale,2461,2024
-France,Premium,Online,4104,2022
-UK,Premium,Online,1367,2023
-Test,Premium,Wholesale,4907,2024
-France,Premium,Online,793,2022
-Japan,Premium,Online,2633,2023
-USA,Premium,Retail,1534,2024
-Germany,Budget,Online,1117,2022
-UK,Standard,Retail,1470,2023
-USA,Premium,Retail,2309,2024
-USA,Premium,Wholesale,2991,2022
-Germany,Budget,Wholesale,1898,2023
-Germany,Budget,Wholesale,4334,2024
-France,Premium,Wholesale,4446,2022
-UK,Standard,Online,2277,2023
-Japan,Standard,Retail,1508,2024
-UK,Premium,Wholesale,4839,2022
-Test,Premium,Wholesale,4903,2023
-Test,Premium,Retail,1359,2024
-Test,Standard,Online,2590,2022
-Japan,Budget,Wholesale,2973,2023
-USA,Premium,Retail,3685,2024
-USA,Standard,Retail,4106,2022
-Test,Budget,Online,3642,2023
-UK,Premium,Wholesale,1395,2024
-USA,Budget,Online,859,2022
-Japan,Premium,Wholesale,4641,2023
-UK,Budget,Retail,3226,2024
-USA,Budget,Retail,1109,2022
-France,Budget,Retail,3787,2023
-France,Premium,Online,2931,2024
-France,Standard,Retail,4433,2022
-USA,Premium,Wholesale,4670,2023
-France,Standard,Online,4295,2024
-France,Standard,Online,1804,2022
-USA,Budget,Online,628,2023
-UK,Premium,Online,590,2024
-USA,Budget,Wholesale,4070,2022
-USA,Standard,Wholesale,3464,2023
-Japan,Premium,Retail,2104,2024
-France,Budget,Online,2881,2022
-USA,Standard,Online,1001,2023
-UK,Budget,Online,3180,2024
-Germany,Budget,Retail,3198,2022
-UK,Standard,Retail,3372,2023
-Japan,Premium,Retail,960,2024
-USA,Budget,Retail,3353,2022
-France,Standard,Wholesale,2349,2023
-UK,Budget,Wholesale,1425,2024
-France,Premium,Wholesale,2434,2022
-USA,Premium,Wholesale,2042,2023
-France,Standard,Wholesale,4505,2024
-Test,Budget,Wholesale,809,2022
-France,Budget,Retail,1523,2023
-UK,Standard,Wholesale,2929,2024
-Japan,Standard,Online,2475,2022
-Japan,Budget,Retail,2417,2023
-Japan,Standard,Online,2739,2024
-Germany,Standard,Online,3643,2022
-USA,Budget,Retail,4903,2023
-USA,Standard,Online,4778,2024
-USA,Standard,Online,1796,2022
-Test,Premium,Online,1406,2023
-Japan,Standard,Retail,4188,2024
-Japan,Premium,Online,1087,2022
-Japan,Standard,Retail,3613,2023
-UK,Budget,Retail,4177,2024
-UK,Premium,Wholesale,928,2022
-UK,Premium,Online,1506,2023
-UK,Standard,Online,3027,2024
-France,Premium,Wholesale,2367,2022
-Japan,Budget,Retail,4741,2023
-UK,Standard,Retail,2896,2024
-Test,Premium,Wholesale,1165,2022
-Japan,Premium,Wholesale,3250,2023
-USA,Premium,Online,2840,2024
-Japan,Standard,Retail,572,2022
-Germany,Premium,Retail,2107,2023
-Test,Standard,Wholesale,3447,2024
-USA,Premium,Online,2054,2022
-Test,Premium,Wholesale,2444,2023
-Germany,Premium,Wholesale,2945,2024
-UK,Standard,Retail,2868,2022
-UK,Premium,Online,4518,2023
-UK,Standard,Online,4745,2024
-France,Premium,Online,1751,2022
-France,Premium,Wholesale,4147,2023
-France,Premium,Wholesale,3610,2024
-Test,Standard,Wholesale,3949,2022
-France,Budget,Wholesale,2274,2023
-France,Premium,Wholesale,1930,2024
-USA,Premium,Wholesale,4890,2022
-France,Premium,Online,2284,2023
-UK,Budget,Online,2300,2024
-Germany,Budget,Wholesale,2769,2022
-Germany,Budget,Wholesale,588,2023
-USA,Standard,Online,1325,2024
-USA,Standard,Wholesale,1579,2022
-Test,Standard,Wholesale,4361,2023
-USA,Budget,Wholesale,502,2024
-UK,Budget,Online,2986,2022
-Test,Budget,Retail,2749,2023
-Test,Premium,Wholesale,1340,2024
-
-</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
-Category,Brand,Revenue,Quarter
-Electronics,Brand A,2651,Q1
-Clothing,Brand B,9493,Q2
-Home,Brand B,3239,Q3
-Sports,Brand D,3577,Q4
-Books,Brand A,7374,Q1
-Electronics,Brand A,4649,Q2
-Clothing,Brand C,5920,Q3
-Home,Brand D,2313,Q4
-Sports,Brand C,9404,Q1
-Books,Brand C,7841,Q2
-Electronics,Brand D,8621,Q3
-Clothing,Brand D,9082,Q4
-Home,Brand B,2221,Q1
-Sports,Brand B,1191,Q2
-Books,Brand C,9831,Q3
-Electronics,Brand A,6608,Q4
-Clothing,Brand D,2099,Q1
-Home,Brand D,1504,Q2
-Sports,Brand B,4720,Q3
-Books,Brand A,5018,Q4
-Electronics,Brand A,4698,Q1
-Clothing,Brand A,8817,Q2
-Home,Brand B,2536,Q3
-Sports,Brand C,5289,Q4
-Books,Brand A,2553,Q1
-Electronics,Brand D,5372,Q2
-Clothing,Brand A,7229,Q3
-Home,Brand C,4613,Q4
-Sports,Brand A,5211,Q1
-Books,Brand A,6563,Q2
-Electronics,Brand A,5442,Q3
-Clothing,Brand C,5407,Q4
-Home,Brand A,8034,Q1
-Sports,Brand A,5512,Q2
-Books,Brand A,5033,Q3
-Electronics,Brand B,2214,Q4
-Clothing,Brand D,3787,Q1
-Home,Brand D,8915,Q2
-Sports,Brand B,5484,Q3
-Books,Brand C,7547,Q4
-Electronics,Brand C,3404,Q1
-Clothing,Brand A,7259,Q2
-Home,Brand C,4975,Q3
-Sports,Brand C,9476,Q4
-Books,Brand B,4896,Q1
-Electronics,Brand A,1070,Q2
-Clothing,Brand D,1269,Q3
-Home,Brand C,1543,Q4
-Sports,Brand D,8416,Q1
-Books,Brand B,1126,Q2
-Electronics,Brand A,3393,Q3
-Clothing,Brand C,6439,Q4
-Home,Brand C,1075,Q1
-Sports,Brand D,3957,Q2
-Books,Brand B,4930,Q3
-Electronics,Brand D,6540,Q4
-Clothing,Brand D,7221,Q1
-Home,Brand C,5124,Q2
-Sports,Brand D,7953,Q3
-Books,Brand C,9923,Q4
-Electronics,Brand A,4848,Q1
-Clothing,Brand A,6058,Q2
-Home,Brand A,1749,Q3
-Sports,Brand D,6560,Q4
-Books,Brand B,4484,Q1
-Electronics,Brand C,1519,Q2
-Clothing,Brand C,9671,Q3
-Home,Brand B,7695,Q4
-Sports,Brand B,6522,Q1
-Books,Brand C,4684,Q2
-Electronics,Brand D,5906,Q3
-Clothing,Brand B,5720,Q4
-Home,Brand C,5531,Q1
-Sports,Brand C,7384,Q2
-Books,Brand A,7136,Q3
-Electronics,Brand B,9734,Q4
-Clothing,Brand B,3682,Q1
-Home,Brand A,5534,Q2
-Sports,Brand B,4455,Q3
-Books,Brand A,5349,Q4
-Electronics,Brand C,3616,Q1
-Clothing,Brand C,6984,Q2
-Home,Brand C,6219,Q3
-Sports,Brand A,6586,Q4
-Books,Brand A,7668,Q1
-Electronics,Brand C,1298,Q2
-Clothing,Brand A,8187,Q3
-Home,Brand C,6649,Q4
-Sports,Brand A,1280,Q1
-Books,Brand A,9133,Q2
-Electronics,Brand D,5805,Q3
-Clothing,Brand A,8108,Q4
-Home,Brand C,3546,Q1
-Sports,Brand C,3699,Q2
-Books,Brand B,3265,Q3
-Electronics,Brand B,6347,Q4
-Clothing,Brand C,7867,Q1
-Home,Brand D,5449,Q2
-Sports,Brand B,1920,Q3
-Books,Brand A,3207,Q4
-
-</script><script type="text/plain" id="multi_data.bb" data-format="csv_embedded" data-src="">
-Department,Month,Headcount,Budget
-HR,Jan,32,123281
-Engineering,Jan,26,167112
-Sales,Jan,31,186924
-Marketing,Jan,43,109581
-HR,Feb,88,114698
-Engineering,Feb,32,138637
-Sales,Feb,39,175779
-Marketing,Feb,61,99496
-HR,Mar,52,57926
-Engineering,Mar,80,199150
-Sales,Mar,63,113178
-Marketing,Mar,22,170410
-
-</script><script type="text/plain" id="correlations" data-format="csv_embedded" data-src="">
-Symbol1,Symbol2,Correlation
-RTX,GOOG,-0.85
-RTX,MSFT,-0.75
-GOOG,MSFT,0.8
-RTX,RTX,1.0
-GOOG,GOOG,1.0
-MSFT,MSFT,1.0
-GOOG,RTX,-0.85
-MSFT,RTX,-0.75
-MSFT,GOOG,0.8
+</script><script type="text/plain" id="boxing_data" data-format="csv_embedded" data-src="">
+boxer1,boxer2,city,ticketsales,date_announced,datetime_fight_starts,time_of_stoppage
+Tyson Fury,Anthony Joshua,Riyadh,8.55e7,2024-08-15,2024-12-21T22:00:00.0,2024-12-21T20:45:32.0
+Canelo Alvarez,Jermall Charlo,Las Vegas,2.53e7,2024-06-01,2024-09-14T20:00:00.0,2024-09-15T07:12:18.0
+Oleksandr Usyk,Daniel Dubois,London,3.21e7,2024-07-20,2024-09-21T21:00:00.0,2024-09-21T22:28:45.0
+Naoya Inoue,Luis Nery,Tokyo,1.87e7,2024-03-10,2024-05-06T17:00:00.0,2024-05-06T09:52:11.0
+Terence Crawford,Errol Spence,Las Vegas,4.52e7,2024-05-05,2024-07-29T21:00:00.0,2024-07-30T06:18:33.0
+Tyson Fury,Deontay Wilder,Las Vegas,3.89e7,2023-08-01,2024-03-09T20:00:00.0,2024-03-10T05:45:00.0
+Canelo Alvarez,Dmitry Bivol,Las Vegas,2.84e7,2022-03-15,2022-05-07T21:00:00.0,2022-05-08T07:35:22.0
+Oleksandr Usyk,Tyson Fury,Riyadh,9.23e7,2024-10-01,2024-12-21T22:00:00.0,2024-12-21T21:15:00.0
+Naoya Inoue,Stephen Fulton,Tokyo,1.52e7,2024-01-08,2024-05-06T18:00:00.0,2024-05-06T10:28:44.0
+Terence Crawford,Israil Madrimov,Los Angeles,2.28e7,2024-06-25,2024-08-03T21:00:00.0,2024-08-04T07:05:17.0
+Gervonta Davis,Frank Martin,Las Vegas,1.95e7,2024-04-15,2024-06-15T22:00:00.0,2024-06-16T08:22:08.0
+Shakur Stevenson,Edwin De Los Santos,Newark,8.7e6,2024-02-28,2024-04-13T21:00:00.0,2024-04-14T04:08:55.0
+Devin Haney,Ryan Garcia,Las Vegas,3.56e7,2023-11-01,2023-04-22T21:00:00.0,2023-04-23T07:45:00.0
+Ryan Garcia,Devin Haney,Las Vegas,4.21e7,2024-01-20,2024-04-20T21:00:00.0,2024-04-21T07:32:19.0
+Tank Davis,Rolando Romero,Brooklyn,1.63e7,2023-03-10,2023-05-28T21:00:00.0,2023-05-29T04:18:42.0
 
 </script>
 
@@ -2844,6 +3375,13 @@ MSFT,GOOG,0.8
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>sales_pivot</h2>
     <p>Basic pivot table - drag fields to reorganize rows and columns</p>
     
@@ -2854,9 +3392,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="sales_pivot"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: sales_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>performance_heatmap</h2>
     <p>Custom color scale heatmap - green indicates good performance, red needs improvement</p>
     
@@ -2867,9 +3415,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="performance_heatmap"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: performance_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>revenue_by_category</h2>
     <p>Bar chart renderer - switch renderer in the dropdown to see other visualizations</p>
     
@@ -2880,9 +3438,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="revenue_by_category"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: product_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>customer_revenue</h2>
     <p>Exclusions feature - 'Test' country data is automatically filtered out</p>
     
@@ -2893,9 +3461,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="customer_revenue"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: customer_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>survey_results</h2>
     <p>Inclusions feature - only showing ages 18-45, filtering out older demographics</p>
     
@@ -2906,9 +3484,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="survey_results"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: survey_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>transaction_analysis</h2>
     <p>Count aggregation - showing transaction counts rather than sums or averages</p>
     
@@ -2919,9 +3507,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="transaction_analysis"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: transaction_data
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>Returns_Over_Last_Few_Days</h2>
     <p>Stock returns heatmap with MSFT excluded</p>
     
@@ -2932,9 +3530,19 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="Returns_Over_Last_Few_Days"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: stockReturns
+    </div>
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>Correlation_Matrix</h2>
     <p>Correlation matrix with custom red-white-blue color scale</p>
     
@@ -2945,6 +3553,9 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="Correlation_Matrix"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: correlations
+    </div>
 <br>
 <hr>
 <br>
@@ -2964,6 +3575,13 @@ MSFT,GOOG,0.8
 <br>
 <hr>
 <br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
     <h2>dataset_selector_demo</h2>
     <p>Dataset selection demo - use the dropdown above to switch between three different datasets. The pivot table will reload with the new data while preserving your row/column selections where possible.</p>
         <div style="margin-bottom: 10px;">
@@ -2982,6 +3600,46 @@ MSFT,GOOG,0.8
         </label>
     </div>
     <div id="dataset_selector_demo"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: multi_data.aa, multi_data.bb, standalone_data
+    </div>
+<br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Temporal Data in PivotTables</h2>
+<p>This example demonstrates handling of different temporal column types in PivotTable:</p>
+<ul>
+    <li><strong>Date</strong> (<code>date_announced</code>): Simple date without time component</li>
+    <li><strong>DateTime</strong> (<code>datetime_fight_starts</code>): Date with time, no timezone</li>
+    <li><strong>ZonedDateTime</strong> (<code>time_of_stoppage</code>): Date with time and timezone information</li>
+</ul>
+<p>Try dragging the temporal columns into the Rows or Columns area to see how they are displayed and aggregated.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+    <style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+
+    <h2>boxing_matches</h2>
+    <p>Boxing match data with Date, DateTime, and ZonedDateTime columns. Drag date_announced, datetime_fight_starts, or time_of_stoppage into rows/cols to pivot by temporal data.</p>
+    
+    <div style="margin-bottom: 10px;">
+        <label>
+            <input type="checkbox" id="show_totals_checkbox_boxing_matches"  onchange="toggleTotals_boxing_matches()" />
+            Show Totals
+        </label>
+    </div>
+    <div id="boxing_matches"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: boxing_data
+    </div>
 <br>
 <hr>
 <br>
@@ -3003,6 +3661,6 @@ MSFT,GOOG,0.8
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
 </body>
 </html>

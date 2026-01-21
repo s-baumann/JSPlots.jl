@@ -1,9 +1,54 @@
 
+# CSS fix for PivotTable filter box positioning
+# This is a known issue: https://github.com/nicolaskruchten/pivottable/issues/865
+# We use position:fixed to ensure the dropdown appears relative to the viewport,
+# not relative to a potentially scrolled parent. The JavaScript in make_html.jl
+# calculates the actual position based on the clicked triangle.
+const PIVOTTABLE_STYLE_FIXES = raw"""
+<style>
+    .pvtFilterBox {
+        z-index: 10000 !important;
+        position: fixed !important;
+    }
+</style>
+"""
+
 # Template for PivotTable with dataset switching support
 const pivottable_function_template = raw"""
     // Store current data and settings for this pivot table
     window.pivotTableData__NAME_OF_PLOT___ = {};
     window.pivotTableConfig__NAME_OF_PLOT___ = ___KEYARGS_LOCATION___;
+
+    // Helper function to convert values to strings suitable for PivotTable.js
+    // PivotTable.js expects string values, not Date objects
+    function valueToString__NAME_OF_PLOT___(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        if (value instanceof Date) {
+            // Check if this is a date-only value (time is midnight)
+            var hours = value.getHours();
+            var minutes = value.getMinutes();
+            var seconds = value.getSeconds();
+            var ms = value.getMilliseconds();
+
+            var year = value.getFullYear();
+            var month = String(value.getMonth() + 1).padStart(2, '0');
+            var day = String(value.getDate()).padStart(2, '0');
+
+            if (hours === 0 && minutes === 0 && seconds === 0 && ms === 0) {
+                // Date only: YYYY-MM-DD
+                return year + '-' + month + '-' + day;
+            } else {
+                // DateTime: YYYY-MM-DD HH:MM:SS
+                var h = String(hours).padStart(2, '0');
+                var m = String(minutes).padStart(2, '0');
+                var s = String(seconds).padStart(2, '0');
+                return year + '-' + month + '-' + day + ' ' + h + ':' + m + ':' + s;
+            }
+        }
+        return value;
+    }
 
     // Function to load and render the pivot table with a specific dataset
     function loadPivotTable__NAME_OF_PLOT___(datasetName) {
@@ -23,10 +68,10 @@ const pivottable_function_template = raw"""
             var headers = Object.keys(data[0]);
             var arrayData = [headers];
 
-            // Add data rows
+            // Add data rows - convert Date objects to strings for proper display
             data.forEach(function(row) {
                 var rowArray = headers.map(function(header) {
-                    return row[header];
+                    return valueToString__NAME_OF_PLOT___(row[header]);
                 });
                 arrayData.push(rowArray);
             });
@@ -112,6 +157,7 @@ const pivottable_function_template = raw"""
 """
 
 const PIVOTTABLE_IN_PAGE_TEMPLATE = raw"""
+    ___STYLE_FIXES___
     <h2>___TABLE_HEADING___</h2>
     <p>___NOTES___</p>
     ___DATASET_SELECTOR___
@@ -122,6 +168,9 @@ const PIVOTTABLE_IN_PAGE_TEMPLATE = raw"""
         </label>
     </div>
     <div id="__FUNCTION_NAME___"></div>
+    <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+        Data: ___DATASOURCE___
+    </div>
 """
 
 const DATASET_SELECTOR_TEMPLATE = raw"""
@@ -135,7 +184,8 @@ const DATASET_SELECTOR_TEMPLATE = raw"""
 
 function table_to_html(chart_title, notes, show_totals, data_labels::Vector{Symbol})
     chart_title_safe = replace(string(chart_title), " " => "_")
-    html_str = replace(PIVOTTABLE_IN_PAGE_TEMPLATE, "___TABLE_HEADING___" => string(chart_title))
+    html_str = replace(PIVOTTABLE_IN_PAGE_TEMPLATE, "___STYLE_FIXES___" => PIVOTTABLE_STYLE_FIXES)
+    html_str = replace(html_str, "___TABLE_HEADING___" => string(chart_title))
     html_str = replace(html_str, "__FUNCTION_NAME___" => chart_title_safe)
     html_str = replace(html_str, "___FUNCTION_NAME___" => chart_title_safe)
     html_str = replace(html_str, "___NOTES___" => notes)
@@ -151,6 +201,10 @@ function table_to_html(chart_title, notes, show_totals, data_labels::Vector{Symb
     else
         html_str = replace(html_str, "___DATASET_SELECTOR___" => "")
     end
+
+    # Add datasource info
+    datasource_str = join([string(label) for label in data_labels], ", ")
+    html_str = replace(html_str, "___DATASOURCE___" => datasource_str)
 
     return html_str
 end

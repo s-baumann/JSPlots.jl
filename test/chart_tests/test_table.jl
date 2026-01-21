@@ -14,18 +14,30 @@ using DataFrames
         tbl = Table(:test_table, table_df; notes="Employee data")
         @test tbl.chart_title == :test_table
         @test tbl.notes == "Employee data"
-        @test occursin("<table>", tbl.appearance_html)
+        @test occursin("<table id=\"table_test_table\">", tbl.appearance_html)
         @test occursin("Alice", tbl.appearance_html)
-        @test occursin("downloadTableCSV", tbl.functional_html)
+        @test occursin("sortTable", tbl.functional_html)
     end
 
     @testset "Table HTML structure" begin
         tbl = Table(:html_table, table_df)
         @test occursin("<thead>", tbl.appearance_html)
         @test occursin("<tbody>", tbl.appearance_html)
-        @test occursin("<th>name</th>", tbl.appearance_html)
+        @test occursin("<th>name<span class=\"sort-indicator\"></span></th>", tbl.appearance_html)
         @test occursin("<td>Alice</td>", tbl.appearance_html)
-        @test occursin("Download as CSV", tbl.appearance_html)
+        @test occursin("sort-indicator", tbl.appearance_html)
+    end
+
+    @testset "Table sorting functionality" begin
+        tbl = Table(:sortable_table, table_df)
+        # Check that sorting JavaScript is included
+        @test occursin("sortTable", tbl.functional_html)
+        @test occursin("sort-asc", tbl.functional_html)
+        @test occursin("sort-desc", tbl.functional_html)
+        # Check sort indicators are in headers
+        @test occursin("sort-indicator", tbl.appearance_html)
+        # Check numeric sorting support
+        @test occursin("parseFloat", tbl.functional_html)
     end
 
     @testset "Table with special characters" begin
@@ -46,7 +58,7 @@ using DataFrames
             b = ["x", "y", missing]
         )
         tbl = Table(:missing_table, missing_df)
-        @test occursin("<table>", tbl.appearance_html)
+        @test occursin("<table id=\"table_missing_table\">", tbl.appearance_html)
         # Missing values should be rendered as empty cells
         @test occursin("<td></td>", tbl.appearance_html)
     end
@@ -59,10 +71,9 @@ using DataFrames
 
             @test isfile(outfile)
             content = read(outfile, String)
-            @test occursin("<table>", content)
+            @test occursin("<table id=\"table_output_table\">", content)
             @test occursin("Alice", content)
-            @test occursin("downloadTableCSV", content)
-            @test occursin("window.downloadTableCSV_output_table = function()", content)
+            @test occursin("sortTable", content)
         end
     end
 
@@ -89,10 +100,9 @@ using DataFrames
             create_html(page, outfile)
 
             content = read(outfile, String)
-            @test occursin("table1", content)
-            @test occursin("table2", content)
-            @test occursin("downloadTableCSV_table1", content)
-            @test occursin("downloadTableCSV_table2", content)
+            @test occursin("table_table1", content)
+            @test occursin("table_table2", content)
+            @test occursin("sortTable", content)
         end
     end
 

@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Dates, StableRNGs
+using JSPlots, DataFrames, Dates, StableRNGs, TimeZones
 
 println("Creating PivotTable examples...")
 
@@ -223,6 +223,71 @@ dataset_selection_text = TextBlock("""
 <p><em>Try switching between the three datasets using the dropdown above the pivot table!</em></p>
 """)
 
+# Example 10: Boxing Match Data with Date/DateTime/ZonedDateTime Columns
+# This demonstrates handling of temporal columns in PivotTable
+boxing_df = DataFrame(
+    boxer1 = ["Tyson Fury", "Canelo Alvarez", "Oleksandr Usyk", "Naoya Inoue", "Terence Crawford",
+              "Tyson Fury", "Canelo Alvarez", "Oleksandr Usyk", "Naoya Inoue", "Terence Crawford",
+              "Gervonta Davis", "Shakur Stevenson", "Devin Haney", "Ryan Garcia", "Tank Davis"],
+    boxer2 = ["Anthony Joshua", "Jermall Charlo", "Daniel Dubois", "Luis Nery", "Errol Spence",
+              "Deontay Wilder", "Dmitry Bivol", "Tyson Fury", "Stephen Fulton", "Israil Madrimov",
+              "Frank Martin", "Edwin De Los Santos", "Ryan Garcia", "Devin Haney", "Rolando Romero"],
+    city = ["Riyadh", "Las Vegas", "London", "Tokyo", "Las Vegas",
+            "Las Vegas", "Las Vegas", "Riyadh", "Tokyo", "Los Angeles",
+            "Las Vegas", "Newark", "Las Vegas", "Las Vegas", "Brooklyn"],
+    ticketsales = [85.5e6, 25.3e6, 32.1e6, 18.7e6, 45.2e6,
+                   38.9e6, 28.4e6, 92.3e6, 15.2e6, 22.8e6,
+                   19.5e6, 8.7e6, 35.6e6, 42.1e6, 16.3e6],
+    date_announced = [Date(2024, 8, 15), Date(2024, 6, 1), Date(2024, 7, 20), Date(2024, 3, 10), Date(2024, 5, 5),
+                      Date(2023, 8, 1), Date(2022, 3, 15), Date(2024, 10, 1), Date(2024, 1, 8), Date(2024, 6, 25),
+                      Date(2024, 4, 15), Date(2024, 2, 28), Date(2023, 11, 1), Date(2024, 1, 20), Date(2023, 3, 10)],
+    datetime_fight_starts = [DateTime(2024, 12, 21, 22, 0, 0), DateTime(2024, 9, 14, 20, 0, 0),
+                             DateTime(2024, 9, 21, 21, 0, 0), DateTime(2024, 5, 6, 17, 0, 0),
+                             DateTime(2024, 7, 29, 21, 0, 0), DateTime(2024, 3, 9, 20, 0, 0),
+                             DateTime(2022, 5, 7, 21, 0, 0), DateTime(2024, 12, 21, 22, 0, 0),
+                             DateTime(2024, 5, 6, 18, 0, 0), DateTime(2024, 8, 3, 21, 0, 0),
+                             DateTime(2024, 6, 15, 22, 0, 0), DateTime(2024, 4, 13, 21, 0, 0),
+                             DateTime(2023, 4, 22, 21, 0, 0), DateTime(2024, 4, 20, 21, 0, 0),
+                             DateTime(2023, 5, 28, 21, 0, 0)],
+    time_of_stoppage = [ZonedDateTime(DateTime(2024, 12, 21, 23, 45, 32), tz"Asia/Riyadh"),
+                        ZonedDateTime(DateTime(2024, 9, 15, 0, 12, 18), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 9, 21, 23, 28, 45), tz"Europe/London"),
+                        ZonedDateTime(DateTime(2024, 5, 6, 18, 52, 11), tz"Asia/Tokyo"),
+                        ZonedDateTime(DateTime(2024, 7, 29, 23, 18, 33), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 3, 9, 21, 45, 0), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2022, 5, 8, 0, 35, 22), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 12, 22, 0, 15, 0), tz"Asia/Riyadh"),
+                        ZonedDateTime(DateTime(2024, 5, 6, 19, 28, 44), tz"Asia/Tokyo"),
+                        ZonedDateTime(DateTime(2024, 8, 4, 0, 5, 17), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 6, 16, 1, 22, 8), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 4, 14, 0, 8, 55), tz"America/New_York"),
+                        ZonedDateTime(DateTime(2023, 4, 23, 0, 45, 0), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2024, 4, 21, 0, 32, 19), tz"America/Los_Angeles"),
+                        ZonedDateTime(DateTime(2023, 5, 29, 0, 18, 42), tz"America/New_York")]
+)
+
+pivot10 = PivotTable(:boxing_matches, :boxing_data;
+    rows = [:city],
+    cols = [:boxer1],
+    vals = :ticketsales,
+    aggregatorName = :Sum,
+    rendererName = :Heatmap,
+    colour_map = Dict{Float64,String}([0.0, 25e6, 50e6, 75e6, 100e6] .=>
+                                      ["#f7fbff", "#9ecae1", "#4292c6", "#2171b5", "#084594"]),
+    notes = "Boxing match data with Date, DateTime, and ZonedDateTime columns. Drag date_announced, datetime_fight_starts, or time_of_stoppage into rows/cols to pivot by temporal data."
+)
+
+boxing_text = TextBlock("""
+<h2>Temporal Data in PivotTables</h2>
+<p>This example demonstrates handling of different temporal column types in PivotTable:</p>
+<ul>
+    <li><strong>Date</strong> (<code>date_announced</code>): Simple date without time component</li>
+    <li><strong>DateTime</strong> (<code>datetime_fight_starts</code>): Date with time, no timezone</li>
+    <li><strong>ZonedDateTime</strong> (<code>time_of_stoppage</code>): Date with time and timezone information</li>
+</ul>
+<p>Try dragging the temporal columns into the Rows or Columns area to see how they are displayed and aggregated.</p>
+""")
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -253,9 +318,10 @@ page = JSPlotPage(
         :stockReturns => stockReturns,
         :correlations => correlations,
         :multi_data => example_struct,  # Struct with DataFrames - extracted as :multi_data_aa, :multi_data_bb
-        :standalone_data => standalone_df
+        :standalone_data => standalone_df,
+        :boxing_data => boxing_df
     ),
-    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, dataset_selection_text, pivot9, conclusion],
+    [header, pivot1, pivot2, pivot3, pivot4, pivot5, pivot6, pivot7, pivot8, dataset_selection_text, pivot9, boxing_text, pivot10, conclusion],
     tab_title = "PivotTable Examples",
     dataformat = :csv_embedded
 )
@@ -279,3 +345,4 @@ println("  • Data filtering with exclusions and inclusions")
 println("  • Count aggregation")
 println("  • Stock returns and correlation matrices")
 println("  • Dataset selection with struct containing DataFrames")
+println("  • Boxing match data with Date/DateTime/ZonedDateTime columns")

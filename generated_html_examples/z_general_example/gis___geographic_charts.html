@@ -762,6 +762,101 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
+// Global fix for PivotTable.js filter box positioning issue
+// See: https://github.com/nicolaskruchten/pivottable/issues/865
+// The library calculates position incorrectly - we fix it by repositioning after creation
+(function() {
+    if (window._pvtFilterBoxFixApplied) return; // Only apply once
+    window._pvtFilterBoxFixApplied = true;
+
+    var lastClickedTriangle = null;
+
+    // Helper function to reposition the filter box
+    function repositionFilterBox($box, triangle) {
+        if (!triangle || !$box.length) return;
+
+        // Get triangle position relative to viewport
+        var triangleRect = triangle.getBoundingClientRect();
+
+        // Get box dimensions (use defaults if not yet rendered)
+        var boxWidth = $box.outerWidth() || 300;
+        var boxHeight = $box.outerHeight() || 400;
+
+        // Calculate position relative to viewport (for position:fixed)
+        var newLeft = triangleRect.left;
+        var newTop = triangleRect.bottom + 5;
+
+        // Adjust if it would go off the right edge
+        if (newLeft + boxWidth > window.innerWidth - 20) {
+            newLeft = triangleRect.right - boxWidth;
+        }
+
+        // Adjust if it would go off the bottom edge
+        if (newTop + boxHeight > window.innerHeight - 20) {
+            newTop = triangleRect.top - boxHeight - 5;
+        }
+
+        // Ensure minimum positions
+        if (newLeft < 10) newLeft = 10;
+        if (newTop < 10) newTop = 10;
+
+        // Use position:fixed for viewport-relative positioning
+        $box.css({
+            'position': 'fixed',
+            'left': newLeft + 'px',
+            'top': newTop + 'px'
+        });
+    }
+
+    // Capture which triangle was clicked
+    $(document).on('click', '.pvtTriangle', function(e) {
+        lastClickedTriangle = this;
+    });
+
+    // Watch for filter box creation and fix position
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1 && $(node).hasClass('pvtFilterBox')) {
+                    var $box = $(node);
+                    var triangle = lastClickedTriangle;
+
+                    // Apply the fix multiple times to ensure it sticks after PivotTable.js finishes
+                    // The library may set position after initial render
+                    var timings = [0, 10, 50, 100, 200];
+                    timings.forEach(function(delay) {
+                        setTimeout(function() {
+                            repositionFilterBox($box, triangle);
+                        }, delay);
+                    });
+
+                    // Also reposition on any style changes to the box (in case library updates position)
+                    var styleObserver = new MutationObserver(function(styleMutations) {
+                        repositionFilterBox($box, triangle);
+                    });
+                    styleObserver.observe(node, { attributes: true, attributeFilter: ['style'] });
+
+                    // Disconnect the style observer when the filter box is removed
+                    var removalObserver = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.removedNodes.forEach(function(removedNode) {
+                                if (removedNode === node) {
+                                    styleObserver.disconnect();
+                                    removalObserver.disconnect();
+                                    lastClickedTriangle = null;
+                                }
+                            });
+                        });
+                    });
+                    removalObserver.observe(document.body, { childList: true, subtree: true });
+                }
+            });
+        });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
+
 (function() {
     // Configuration
     const MODE = 'points';
@@ -2121,6 +2216,6 @@ Custom GeoJSON can also be provided via URL.</p>
 </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: countries_geo_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
 </body>
 </html>

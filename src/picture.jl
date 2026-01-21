@@ -4,6 +4,9 @@ const PICTURE_TEMPLATE = raw"""
         <h2>___PICTURE_TITLE___</h2>
         <p>___NOTES___</p>
         ___IMAGE_CONTENT___
+        <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+            ___FILE_LOCATION___
+        </div>
     </div>
 """
 
@@ -509,6 +512,15 @@ function generate_picture_html(pic::Picture, dataformat::Symbol, project_dir::St
         html = replace(html, "___NOTES___" => pic.notes)
         html = replace(html, "___IMAGE_CONTENT___" => image_html)
 
+        # Add file location info
+        if dataformat in [:csv_embedded, :json_embedded]
+            file_location = "Source: $(pic.image_path)"
+        else
+            ext = splitext(pic.image_path)[2]
+            file_location = "File: pictures/$(pic.chart_title)$(ext)"
+        end
+        html = replace(html, "___FILE_LOCATION___" => file_location)
+
         return html
     else
         # Filtered mode - generate hidden images + controls
@@ -568,8 +580,37 @@ function generate_picture_html(pic::Picture, dataformat::Symbol, project_dir::St
             end
         end
 
-        # Combine appearance HTML with hidden images
-        full_html = pic.appearance_html * "\n\n" * join(html_parts, "\n")
+        # Build file location pattern for filtered mode
+        # Get the pattern from the first file to show the structure
+        if !isempty(pic.file_mapping)
+            first_key = first(keys(pic.file_mapping))
+            first_filepath = pic.file_mapping[first_key]
+            ext = splitext(first_filepath)[2]
+
+            # Build pattern showing group placeholders
+            group_placeholders = ["{$(gn)}" for gn in pic.group_names]
+
+            # Determine the prefix from the original filename
+            filename = basename(first_filepath)
+            parts = split(splitext(filename)[1], "!")
+            prefix = parts[1]
+
+            if dataformat in [:csv_embedded, :json_embedded]
+                file_location = "Source: $(prefix)!" * join(group_placeholders, "!") * ext
+            else
+                file_location = "Files: pictures/$(prefix)!" * join(group_placeholders, "!") * ext
+            end
+        else
+            file_location = ""
+        end
+
+        # Combine appearance HTML with hidden images and file location
+        file_location_html = """
+        <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+            $file_location
+        </div>
+        """
+        full_html = pic.appearance_html * "\n\n" * join(html_parts, "\n") * "\n" * file_location_html
         return full_html
     end
 end

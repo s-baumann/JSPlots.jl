@@ -621,6 +621,10 @@ $options_html            </select>
         <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
             <strong>Keyboard shortcuts:</strong> ← Previous, → Next, Space Play/Pause
         </p>
+
+        <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+            ___FILE_LOCATION___
+        </div>
     </div>
     """
 
@@ -690,8 +694,35 @@ function generate_slides_html(slides::Slides, dataformat::Symbol, project_dir::S
         end
     end
 
-    # Replace placeholder in appearance_html
+    # Build file location pattern
+    file_location = ""
+    if !isempty(slides.file_mapping)
+        first_key = first(keys(slides.file_mapping))
+        first_filepath = slides.file_mapping[first_key]
+        ext = splitext(first_filepath)[2]
+        filename = basename(first_filepath)
+
+        # Parse the filename to find the prefix
+        parts = split(splitext(filename)[1], "!")
+        if length(parts) > 1
+            prefix = parts[1]
+        else
+            prefix = "slide"
+        end
+
+        # Build pattern with placeholders for groups and slide number
+        group_placeholders = ["{$(gn)}" for gn in slides.group_names]
+
+        if dataformat in [:csv_embedded, :json_embedded]
+            file_location = "Source: $(prefix)!" * join(group_placeholders, "!") * "!{slidenum}" * ext
+        else
+            file_location = "Files: slides/$(prefix)!" * join(group_placeholders, "!") * "!{slidenum}" * ext
+        end
+    end
+
+    # Replace placeholders in appearance_html
     html = replace(slides.appearance_html, "___SLIDE_IMAGES___" => images_html)
+    html = replace(html, "___FILE_LOCATION___" => file_location)
 
     return html
 end

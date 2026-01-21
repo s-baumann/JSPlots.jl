@@ -780,6 +780,101 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
+// Global fix for PivotTable.js filter box positioning issue
+// See: https://github.com/nicolaskruchten/pivottable/issues/865
+// The library calculates position incorrectly - we fix it by repositioning after creation
+(function() {
+    if (window._pvtFilterBoxFixApplied) return; // Only apply once
+    window._pvtFilterBoxFixApplied = true;
+
+    var lastClickedTriangle = null;
+
+    // Helper function to reposition the filter box
+    function repositionFilterBox($box, triangle) {
+        if (!triangle || !$box.length) return;
+
+        // Get triangle position relative to viewport
+        var triangleRect = triangle.getBoundingClientRect();
+
+        // Get box dimensions (use defaults if not yet rendered)
+        var boxWidth = $box.outerWidth() || 300;
+        var boxHeight = $box.outerHeight() || 400;
+
+        // Calculate position relative to viewport (for position:fixed)
+        var newLeft = triangleRect.left;
+        var newTop = triangleRect.bottom + 5;
+
+        // Adjust if it would go off the right edge
+        if (newLeft + boxWidth > window.innerWidth - 20) {
+            newLeft = triangleRect.right - boxWidth;
+        }
+
+        // Adjust if it would go off the bottom edge
+        if (newTop + boxHeight > window.innerHeight - 20) {
+            newTop = triangleRect.top - boxHeight - 5;
+        }
+
+        // Ensure minimum positions
+        if (newLeft < 10) newLeft = 10;
+        if (newTop < 10) newTop = 10;
+
+        // Use position:fixed for viewport-relative positioning
+        $box.css({
+            'position': 'fixed',
+            'left': newLeft + 'px',
+            'top': newTop + 'px'
+        });
+    }
+
+    // Capture which triangle was clicked
+    $(document).on('click', '.pvtTriangle', function(e) {
+        lastClickedTriangle = this;
+    });
+
+    // Watch for filter box creation and fix position
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1 && $(node).hasClass('pvtFilterBox')) {
+                    var $box = $(node);
+                    var triangle = lastClickedTriangle;
+
+                    // Apply the fix multiple times to ensure it sticks after PivotTable.js finishes
+                    // The library may set position after initial render
+                    var timings = [0, 10, 50, 100, 200];
+                    timings.forEach(function(delay) {
+                        setTimeout(function() {
+                            repositionFilterBox($box, triangle);
+                        }, delay);
+                    });
+
+                    // Also reposition on any style changes to the box (in case library updates position)
+                    var styleObserver = new MutationObserver(function(styleMutations) {
+                        repositionFilterBox($box, triangle);
+                    });
+                    styleObserver.observe(node, { attributes: true, attributeFilter: ['style'] });
+
+                    // Disconnect the style observer when the filter box is removed
+                    var removalObserver = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.removedNodes.forEach(function(removedNode) {
+                                if (removedNode === node) {
+                                    styleObserver.disconnect();
+                                    removalObserver.disconnect();
+                                    lastClickedTriangle = null;
+                                }
+                            });
+                        });
+                    });
+                    removalObserver.observe(document.body, { childList: true, subtree: true });
+                }
+            });
+        });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
+
 (function() {
     // Configuration
     const FILTER_COLS = [];
@@ -7934,6 +8029,9 @@ Month,Return,Stock,Strategy,Region
         <h2>example_visual</h2>
         <p>Example visualization image</p>
         <img src="data:image/jpeg;base64,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" alt="example_visual" />
+        <div class="jsplots-datasource" style="text-align: right; font-size: 0.85em; color: #666; margin-top: 8px; font-style: italic;">
+            Source: /home/stuart/Dropbox/library_julia/JSPlots.jl/examples/pictures/images.jpeg
+        </div>
     </div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">images.jpeg</p><br>
 <hr>
@@ -8682,6 +8780,6 @@ Month,Return,Stock,Strategy,Region
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
 </body>
 </html>

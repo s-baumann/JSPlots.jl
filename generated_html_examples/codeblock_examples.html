@@ -762,6 +762,101 @@ function loadDataset(dataLabel) {
 
 $(function(){
 
+// Global fix for PivotTable.js filter box positioning issue
+// See: https://github.com/nicolaskruchten/pivottable/issues/865
+// The library calculates position incorrectly - we fix it by repositioning after creation
+(function() {
+    if (window._pvtFilterBoxFixApplied) return; // Only apply once
+    window._pvtFilterBoxFixApplied = true;
+
+    var lastClickedTriangle = null;
+
+    // Helper function to reposition the filter box
+    function repositionFilterBox($box, triangle) {
+        if (!triangle || !$box.length) return;
+
+        // Get triangle position relative to viewport
+        var triangleRect = triangle.getBoundingClientRect();
+
+        // Get box dimensions (use defaults if not yet rendered)
+        var boxWidth = $box.outerWidth() || 300;
+        var boxHeight = $box.outerHeight() || 400;
+
+        // Calculate position relative to viewport (for position:fixed)
+        var newLeft = triangleRect.left;
+        var newTop = triangleRect.bottom + 5;
+
+        // Adjust if it would go off the right edge
+        if (newLeft + boxWidth > window.innerWidth - 20) {
+            newLeft = triangleRect.right - boxWidth;
+        }
+
+        // Adjust if it would go off the bottom edge
+        if (newTop + boxHeight > window.innerHeight - 20) {
+            newTop = triangleRect.top - boxHeight - 5;
+        }
+
+        // Ensure minimum positions
+        if (newLeft < 10) newLeft = 10;
+        if (newTop < 10) newTop = 10;
+
+        // Use position:fixed for viewport-relative positioning
+        $box.css({
+            'position': 'fixed',
+            'left': newLeft + 'px',
+            'top': newTop + 'px'
+        });
+    }
+
+    // Capture which triangle was clicked
+    $(document).on('click', '.pvtTriangle', function(e) {
+        lastClickedTriangle = this;
+    });
+
+    // Watch for filter box creation and fix position
+    var observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === 1 && $(node).hasClass('pvtFilterBox')) {
+                    var $box = $(node);
+                    var triangle = lastClickedTriangle;
+
+                    // Apply the fix multiple times to ensure it sticks after PivotTable.js finishes
+                    // The library may set position after initial render
+                    var timings = [0, 10, 50, 100, 200];
+                    timings.forEach(function(delay) {
+                        setTimeout(function() {
+                            repositionFilterBox($box, triangle);
+                        }, delay);
+                    });
+
+                    // Also reposition on any style changes to the box (in case library updates position)
+                    var styleObserver = new MutationObserver(function(styleMutations) {
+                        repositionFilterBox($box, triangle);
+                    });
+                    styleObserver.observe(node, { attributes: true, attributeFilter: ['style'] });
+
+                    // Disconnect the style observer when the filter box is removed
+                    var removalObserver = new MutationObserver(function(mutations) {
+                        mutations.forEach(function(mutation) {
+                            mutation.removedNodes.forEach(function(removedNode) {
+                                if (removedNode === node) {
+                                    styleObserver.disconnect();
+                                    removalObserver.disconnect();
+                                    lastClickedTriangle = null;
+                                }
+                            });
+                        });
+                    });
+                    removalObserver.observe(document.body, { childList: true, subtree: true });
+                }
+            });
+        });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+})();
+
 (function() {
     // Configuration
     const FILTER_COLS = [];
@@ -2272,7 +2367,7 @@ date,temperature,humidity,city
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#230">
+<div class="codeblock-container" id="##codeblock#277">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -2442,7 +2537,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#231">
+<div class="codeblock-container" id="##codeblock#278">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -2548,7 +2643,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#232">
+<div class="codeblock-container" id="##codeblock#279">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -2662,7 +2757,7 @@ create_html(scatter, &quot;output.html&quot;)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#233">
+<div class="codeblock-container" id="##codeblock#280">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -2754,7 +2849,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#234">
+<div class="codeblock-container" id="##codeblock#281">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -2929,7 +3024,7 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#235">
+<div class="codeblock-container" id="##codeblock#282">
     <div class="codeblock-header">
         <span class="codeblock-language">python</span>
     </div>
@@ -3044,7 +3139,7 @@ print(f&quot;Sorted array: {sorted_numbers}&quot;)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#236">
+<div class="codeblock-container" id="##codeblock#283">
     <div class="codeblock-header">
         <span class="codeblock-language">r</span>
     </div>
@@ -3150,7 +3245,7 @@ print(predictions)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#237">
+<div class="codeblock-container" id="##codeblock#284">
     <div class="codeblock-header">
         <span class="codeblock-language">sql</span>
     </div>
@@ -3268,7 +3363,7 @@ ORDER BY segment_revenue DESC;
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#238">
+<div class="codeblock-container" id="##codeblock#285">
     <div class="codeblock-header">
         <span class="codeblock-language">c++</span>
     </div>
@@ -3404,7 +3499,7 @@ int main() {
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#239">
+<div class="codeblock-container" id="##codeblock#286">
     <div class="codeblock-header">
         <span class="codeblock-language">javascript</span>
     </div>
@@ -3551,7 +3646,7 @@ displayTopUsers();
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#240">
+<div class="codeblock-container" id="##codeblock#287">
     <div class="codeblock-header">
         <span class="codeblock-language">rust</span>
     </div>
@@ -3704,7 +3799,7 @@ fn main() {
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#241">
+<div class="codeblock-container" id="##codeblock#288">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -3798,7 +3893,7 @@ end
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#242">
+<div class="codeblock-container" id="##codeblock#289">
     <div class="codeblock-header">
         <span class="codeblock-language">python</span>
     </div>
@@ -3889,7 +3984,7 @@ end
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#243">
+<div class="codeblock-container" id="##codeblock#290">
     <div class="codeblock-header">
         <span class="codeblock-language">c++</span>
     </div>
@@ -4007,6 +4102,6 @@ data = execute_codeblock(code_block)
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
 </body>
 </html>

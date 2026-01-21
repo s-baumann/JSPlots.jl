@@ -6,11 +6,6 @@ const TABLE_TEMPLATE = raw"""
         <div class="table-wrapper">
             ___TABLE_CONTENT___
         </div>
-        <div class="table-actions">
-            <button onclick="downloadTableCSV____TABLE_ID___()" class="download-csv-button">
-                📥 Download as CSV
-            </button>
-        </div>
     </div>
 """
 
@@ -58,6 +53,36 @@ const TABLE_STYLE = raw"""
             position: sticky;
             top: 0;
             z-index: 10;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .jsplots-table-container th:hover {
+            background-color: #e9ecef;
+        }
+
+        .jsplots-table-container th .sort-indicator {
+            margin-left: 8px;
+            font-size: 0.8em;
+            color: #6c757d;
+            display: inline-block;
+            width: 12px;
+        }
+
+        .jsplots-table-container th.sort-asc .sort-indicator::after {
+            content: "▲";
+            color: #0066cc;
+        }
+
+        .jsplots-table-container th.sort-desc .sort-indicator::after {
+            content: "▼";
+            color: #0066cc;
+        }
+
+        .jsplots-table-container th:not(.sort-asc):not(.sort-desc) .sort-indicator::after {
+            content: "⇅";
+            opacity: 0.4;
         }
 
         .jsplots-table-container td {
@@ -73,44 +98,17 @@ const TABLE_STYLE = raw"""
         .jsplots-table-container tr:last-child td {
             border-bottom: none;
         }
-
-        .table-actions {
-            text-align: center;
-            padding: 10px 0;
-        }
-
-        .download-csv-button {
-            background-color: #0066cc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            border-radius: 5px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .download-csv-button:hover {
-            background-color: #0052a3;
-        }
-
-        .download-csv-button:active {
-            background-color: #003d7a;
-            transform: translateY(1px);
-        }
     </style>
 """
 
 """
     Table(chart_title::Symbol, df::DataFrame; notes::String="")
 
-Create a Table display from a DataFrame with a download CSV button.
+Create a Table display from a DataFrame with sortable columns.
 
 The table is self-contained and does not require the DataFrame to be added
 to the JSPlotPage dataframes dictionary. The data is embedded directly in
-the HTML table, and users can download it as CSV using the button.
+the HTML table. Click column headers to sort.
 
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this table
@@ -135,33 +133,84 @@ struct Table <: JSPlotsType
         table_id = replace(string(chart_title), " " => "_")
 
         # Generate HTML table
-        table_html = dataframe_to_html_table(df)
+        table_html = dataframe_to_html_table(df, table_id)
 
         # Build appearance HTML
         appearance = replace(TABLE_TEMPLATE, "___TABLE_TITLE___" => string(chart_title))
         appearance = replace(appearance, "___NOTES___" => notes)
         appearance = replace(appearance, "___TABLE_CONTENT___" => table_html)
-        appearance = replace(appearance, "___TABLE_ID___" => table_id)
 
-        # Generate JavaScript for CSV download
-        csv_data = dataframe_to_csv_string(df)
-        # Escape for JavaScript string
-        csv_data_escaped = replace(csv_data, "\\" => "\\\\", "\"" => "\\\"", "\n" => "\\n", "\r" => "\\r")
-
+        # Generate JavaScript for sorting
         functional = """
-            window.downloadTableCSV_$(table_id) = function() {
-                const csvContent = "$(csv_data_escaped)";
-                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                const link = document.createElement('a');
-                const url = URL.createObjectURL(blob);
-                link.setAttribute('href', url);
-                link.setAttribute('download', '$(table_id).csv');
-                link.style.visibility = 'hidden';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-            };
+            // Table sorting functionality
+            (function() {
+                const table = document.getElementById('table_$(table_id)');
+                if (!table) return;
+
+                const headers = table.querySelectorAll('th');
+                let currentSortCol = -1;
+                let currentSortDir = 'none';
+
+                headers.forEach(function(header, colIndex) {
+                    header.addEventListener('click', function() {
+                        sortTable(colIndex);
+                    });
+                });
+
+                function sortTable(colIndex) {
+                    const tbody = table.querySelector('tbody');
+                    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+                    // Determine sort direction
+                    let sortDir;
+                    if (currentSortCol === colIndex) {
+                        // Cycle: none -> asc -> desc -> none
+                        if (currentSortDir === 'none' || currentSortDir === 'desc') {
+                            sortDir = 'asc';
+                        } else {
+                            sortDir = 'desc';
+                        }
+                    } else {
+                        sortDir = 'asc';
+                    }
+
+                    currentSortCol = colIndex;
+                    currentSortDir = sortDir;
+
+                    // Update header classes
+                    headers.forEach(function(h, i) {
+                        h.classList.remove('sort-asc', 'sort-desc');
+                        if (i === colIndex) {
+                            h.classList.add('sort-' + sortDir);
+                        }
+                    });
+
+                    // Sort rows
+                    rows.sort(function(a, b) {
+                        const aVal = a.cells[colIndex].textContent.trim();
+                        const bVal = b.cells[colIndex].textContent.trim();
+
+                        // Try numeric comparison first
+                        const aNum = parseFloat(aVal.replace(/,/g, ''));
+                        const bNum = parseFloat(bVal.replace(/,/g, ''));
+
+                        let comparison;
+                        if (!isNaN(aNum) && !isNaN(bNum)) {
+                            comparison = aNum - bNum;
+                        } else {
+                            // String comparison
+                            comparison = aVal.localeCompare(bVal);
+                        }
+
+                        return sortDir === 'asc' ? comparison : -comparison;
+                    });
+
+                    // Re-append sorted rows
+                    rows.forEach(function(row) {
+                        tbody.appendChild(row);
+                    });
+                }
+            })();
         """
 
         new(chart_title, df, notes, appearance, functional)
@@ -169,19 +218,19 @@ struct Table <: JSPlotsType
 end
 
 """
-    dataframe_to_html_table(df::DataFrame)
+    dataframe_to_html_table(df::DataFrame, table_id::String)
 
-Convert a DataFrame to an HTML table string.
+Convert a DataFrame to an HTML table string with sortable headers.
 """
-function dataframe_to_html_table(df::DataFrame)
+function dataframe_to_html_table(df::DataFrame, table_id::String)
     io = IOBuffer()
 
-    write(io, "<table>\n")
+    write(io, "<table id=\"table_$(table_id)\">\n")
 
-    # Header row
+    # Header row with sort indicators
     write(io, "  <thead>\n    <tr>")
     for col in names(df)
-        write(io, "<th>$(html_escape(col))</th>")
+        write(io, "<th>$(html_escape(col))<span class=\"sort-indicator\"></span></th>")
     end
     write(io, "</tr>\n  </thead>\n")
 
@@ -200,17 +249,6 @@ function dataframe_to_html_table(df::DataFrame)
 
     write(io, "</table>")
 
-    return String(take!(io))
-end
-
-"""
-    dataframe_to_csv_string(df::DataFrame)
-
-Convert a DataFrame to a CSV string for download.
-"""
-function dataframe_to_csv_string(df::DataFrame)
-    io = IOBuffer()
-    CSV.write(io, df)
     return String(take!(io))
 end
 
