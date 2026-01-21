@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Statistics, Random, StableRNGs
+using JSPlots, DataFrames, Dates, Statistics, Random, StableRNGs
 rng = StableRNG(444)
 
 println("Creating ScatterSurface3D examples...")
@@ -279,7 +279,12 @@ page = JSPlotPage(
     tab_title="ScatterSurface3D Examples"
 )
 
-create_html(page, "generated_html_examples/scattersurface3d_example.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="scattersurface3d_example.html",
+                               description="ScatterSurface3D Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "3D Charts", :page_type => "Chart Tutorial"))
+create_html(page, "generated_html_examples/scattersurface3d_example.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "="^60)
 println("ScatterSurface3D examples created successfully!")

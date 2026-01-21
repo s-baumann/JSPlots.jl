@@ -105,8 +105,9 @@ function waitForParquet() {
 
 // Centralized data loading function
 // Centralized date parsing function
-// Converts ISO date strings to JavaScript Date objects
+// Converts various date formats to JavaScript Date objects
 // This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
 function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
@@ -115,43 +116,119 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date and time columns
-    var firstRow = data[0];
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
     var dateColumns = [];
     var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
 
-    for (var key in firstRow) {
-        if (firstRow.hasOwnProperty(key)) {
-            var value = firstRow[key];
-            if (typeof value === 'string') {
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
-                    dateColumns.push(key);
+                    stringDateCount++;
                 } else if (timePattern.test(value)) {
-                    timeColumns.push(key);
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
                 }
             }
         }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
     }
 
-    // If no date or time columns found, return data unchanged
-    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
-
-    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    // Convert values in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
-                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
-                    newRow[key] = new Date(row[key]);
-                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
                     // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
-                    var parts = row[key].split(':');
+                    var parts = value.split(':');
                     var hours = parseInt(parts[0], 10);
                     var minutes = parseInt(parts[1], 10);
-                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    var seconds = parseFloat(parts[2]);
                     newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
                 } else {
-                    newRow[key] = row[key];
+                    newRow[key] = value;
                 }
             }
         }
@@ -917,15 +994,21 @@ report = Pages(coverpage, [page1, page2])
 create_html(report, "index.html")
 ```
 """
-function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
-    # Collect extra styles needed for TextBlock, Picture, and Table
+function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
+                     manifest::Union{String,Nothing}=nothing,
+                     manifest_entry::Union{ManifestEntry,Nothing}=nothing)
+    # Collect extra styles needed for TextBlock, Notes, Picture, and Table
     extra_styles = ""
     has_textblock = any(p -> isa(p, TextBlock), pt.pivot_tables)
+    has_notes = any(p -> isa(p, Notes), pt.pivot_tables)
     has_picture = any(p -> isa(p, Picture), pt.pivot_tables)
     has_table = any(p -> isa(p, Table), pt.pivot_tables)
 
     if has_textblock
         extra_styles *= TEXTBLOCK_STYLE
+    end
+    if has_notes
+        extra_styles *= NOTES_STYLE
     end
     if has_picture
         extra_styles *= PICTURE_STYLE
@@ -1023,6 +1106,13 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                     table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
                 end
                 # TextBlock has no functional HTML
+            elseif isa(pti, Notes)
+                # Generate Notes HTML and JavaScript based on dataformat
+                notes_result = generate_notes_html(pti, pt.dataformat, project_dir)
+                table_bit *= sp * notes_result.html
+                if !isempty(notes_result.js)
+                    functional_bit *= notes_result.js
+                end
             elseif isa(pti, Slides)
                 # Generate Slides HTML based on dataformat
                 functional_bit *= pti.functional_html
@@ -1121,6 +1211,13 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
                     table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
                 end
                 # TextBlock has no functional HTML
+            elseif isa(pti, Notes)
+                # Generate Notes HTML and JavaScript based on dataformat (embedded)
+                notes_result = generate_notes_html(pti, pt.dataformat, "")
+                table_bit *= sp * notes_result.html
+                if !isempty(notes_result.js)
+                    functional_bit *= notes_result.js
+                end
             elseif isa(pti, Slides)
                 # Generate Slides HTML based on dataformat (embedded)
                 functional_bit *= pti.functional_html
@@ -1166,6 +1263,11 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html")
         end
 
         println("Saved to $outfile_path")
+
+        # Add to manifest if specified
+        if manifest !== nothing && manifest_entry !== nothing
+            add_to_manifest(manifest, manifest_entry; fill_missing=true)
+        end
     end
 
     # Clean up temporary files for Picture and Slides objects
@@ -1225,11 +1327,15 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     # Collect extra styles
     extra_styles = ""
     has_textblock = any(p -> isa(p, TextBlock), page.pivot_tables)
+    has_notes = any(p -> isa(p, Notes), page.pivot_tables)
     has_picture = any(p -> isa(p, Picture), page.pivot_tables)
     has_table = any(p -> isa(p, Table), page.pivot_tables)
 
     if has_textblock
         extra_styles *= TEXTBLOCK_STYLE
+    end
+    if has_notes
+        extra_styles *= NOTES_STYLE
     end
     if has_picture
         extra_styles *= PICTURE_STYLE
@@ -1289,6 +1395,13 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
                 table_bit *= sp * generate_textblock_html(pti, :csv_embedded, "")
             else
                 table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
+            end
+        elseif isa(pti, Notes)
+            # Generate Notes HTML and JavaScript based on dataformat
+            notes_result = generate_notes_html(pti, dataformat, project_dir)
+            table_bit *= sp * notes_result.html
+            if !isempty(notes_result.js)
+                functional_bit *= notes_result.js
             end
         elseif isa(pti, Slides)
             # Slides always use external images in slides/ directory
@@ -1402,7 +1515,9 @@ function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dat
 end
 
 # Method for Pages - creates multiple HTML files with shared data in a flat structure
-function create_html(jsp::Pages, outfile_path::String="index.html")
+function create_html(jsp::Pages, outfile_path::String="index.html";
+                     manifest::Union{String,Nothing}=nothing,
+                     manifest_entry::Union{ManifestEntry,Nothing}=nothing)
     # Extract directory and base name
     original_dir = dirname(outfile_path)
     original_name = basename(outfile_path)
@@ -1505,5 +1620,10 @@ function create_html(jsp::Pages, outfile_path::String="index.html")
         println("  Data format: $(jsp.dataformat) (shared in data/ folder)")
     else
         println("  Data format: $(jsp.dataformat) (embedded in each HTML)")
+    end
+
+    # Add to manifest if specified
+    if manifest !== nothing && manifest_entry !== nothing
+        add_to_manifest(manifest, manifest_entry; fill_missing=true)
     end
 end

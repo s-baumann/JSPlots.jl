@@ -169,7 +169,12 @@ report1 = Pages(
     dataformat = :parquet  # Override all pages to use parquet format
 )
 
-create_html(report1, joinpath("generated_html_examples", "annual_report.html"))
+# Manifest entry for report index
+manifest_entry1 = ManifestEntry(path="../annual_report", html_filename="annual_report.html",
+                               description="Multi-Page Report (Manual LinkList)", date=today(),
+                               extra_columns=Dict(:chart_type => "Multi-Page Reports", :page_type => "Multi-Page Example"))
+create_html(report1, joinpath("generated_html_examples", "annual_report.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry1)
 
 println("\n" * "="^60)
 println("Manual LinkList example complete!")
@@ -278,7 +283,12 @@ report2 = Pages(
     dataformat = :parquet
 )
 
-create_html(report2, joinpath("generated_html_examples", "easy_report.html"))
+# Manifest entry for report index
+manifest_entry2 = ManifestEntry(path="../easy_report", html_filename="easy_report.html",
+                               description="Multi-Page Report (Easy Constructor)", date=today(),
+                               extra_columns=Dict(:chart_type => "Multi-Page Reports", :page_type => "Multi-Page Example"))
+create_html(report2, joinpath("generated_html_examples", "easy_report.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry2)
 
 println("\n" * "="^60)
 println("Easy constructor example complete!")
@@ -367,7 +377,12 @@ page_dataset = JSPlotPage(
     dataformat = :parquet
 )
 
-create_html(page_dataset, joinpath("generated_html_examples", "dataset_selection_parquet.html"))
+# Manifest entry for report index
+manifest_entry3 = ManifestEntry(path="../dataset_selection_parquet", html_filename="dataset_selection_parquet.html",
+                               description="Dataset Selection (Parquet)", date=today(),
+                               extra_columns=Dict(:chart_type => "Multi-Page Reports", :page_type => "Multi-Page Example"))
+create_html(page_dataset, joinpath("generated_html_examples", "dataset_selection_parquet.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry3)
 
 println("\n" * "="^60)
 println("Dataset selection (Parquet) example complete!")

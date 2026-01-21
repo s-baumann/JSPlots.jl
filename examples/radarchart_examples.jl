@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Statistics, Random, StableRNGs
+using JSPlots, DataFrames, Dates, Statistics, Random, StableRNGs
 
 println("Creating RadarChart examples...")
 
@@ -479,7 +479,12 @@ if !isdir(output_dir)
 end
 
 output_file = joinpath(output_dir, "radarchart_examples.html")
-create_html(page, output_file)
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="radarchart_examples.html",
+                               description="RadarChart Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Situational Charts", :page_type => "Chart Tutorial"))
+create_html(page, output_file;
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 println("Created: $output_file")
 
 println("\nRadarChart examples complete!")

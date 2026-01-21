@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, StableRNGs
+using JSPlots, DataFrames, Dates, StableRNGs
 
 println("Creating PieChart examples...")
 
@@ -320,7 +320,12 @@ page = JSPlotPage(
     tab_title = "PieChart Examples"
 )
 
-create_html(page, "generated_html_examples/piechart_examples.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="piechart_examples.html",
+                               description="PieChart Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "2D Charts", :page_type => "Chart Tutorial"))
+create_html(page, "generated_html_examples/piechart_examples.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "="^60)
 println("PieChart examples created successfully!")

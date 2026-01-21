@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ReportIndex & Example Files</title>
+    <meta charset="UTF-8">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+
+
+    <!-- Prism.js language components for CodeBlocks -->
+    
+
+</head>
+
+<body>
+
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+<script type="module">
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+await parquet.default();
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts various date formats to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
+    var dateColumns = [];
+    var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
+
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    stringDateCount++;
+                } else if (timePattern.test(value)) {
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
+                }
+            }
+        }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
+    }
+
+    // Convert values in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = value.split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
+                } else {
+                    newRow[key] = value;
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    const MANIFEST_FILE = 'manifest.csv';
+    const DEFAULT_GROUP_BY_1 = 'page_type';
+    const DEFAULT_GROUP_BY_2 = 'chart_type';
+    const DEFAULT_SORT_BY = 'description';
+
+    let allReports = [];
+    let allColumns = [];
+
+    // Load manifest CSV
+    async function loadManifest() {
+        try {
+            const response = await fetch(MANIFEST_FILE);
+            if (!response.ok) {
+                throw new Error('Manifest not found');
+            }
+            const csvText = await response.text();
+
+            // Parse CSV
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 1) {
+                throw new Error('Empty manifest');
+            }
+
+            // Parse header
+            allColumns = parseCSVLine(lines[0]);
+
+            // Parse data rows
+            allReports = [];
+            for (let i = 1; i < lines.length; i++) {
+                if (lines[i].trim() === '') continue;
+                const values = parseCSVLine(lines[i]);
+                const row = {};
+                for (let j = 0; j < allColumns.length; j++) {
+                    row[allColumns[j]] = values[j] || '';
+                }
+                allReports.push(row);
+            }
+
+            populateSelectors();
+            updateDisplay_examples_gallery();
+            updateStats();
+
+        } catch (error) {
+            document.getElementById('content_examples_gallery').innerHTML =
+                '<div class="reportindex-error-examples_gallery">' +
+                '<h3>Could not load manifest</h3>' +
+                '<p>Error: ' + error.message + '</p>' +
+                '<p>Make sure ' + MANIFEST_FILE + ' exists.</p>' +
+                '</div>';
+        }
+    }
+
+    // Simple CSV line parser (handles quoted fields)
+    function parseCSVLine(line) {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+            const char = line[i];
+            if (char === '"') {
+                if (inQuotes && line[i+1] === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (char === ',' && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        result.push(current.trim());
+        return result;
+    }
+
+    function populateSelectors() {
+        const groupby1 = document.getElementById('groupby1_examples_gallery');
+        const groupby2 = document.getElementById('groupby2_examples_gallery');
+        const sortby = document.getElementById('sortby_examples_gallery');
+
+        // Clear and repopulate
+        groupby1.innerHTML = '<option value="none">No grouping</option>';
+        groupby2.innerHTML = '<option value="none">No second grouping</option>';
+        sortby.innerHTML = '';
+
+        allColumns.forEach(col => {
+            groupby1.innerHTML += '<option value="' + col + '">' + col + '</option>';
+            groupby2.innerHTML += '<option value="' + col + '">' + col + '</option>';
+            sortby.innerHTML += '<option value="' + col + '">' + col + '</option>';
+        });
+
+        // Set defaults
+        if (DEFAULT_GROUP_BY_1 !== 'none') {
+            groupby1.value = DEFAULT_GROUP_BY_1;
+        }
+        if (DEFAULT_GROUP_BY_2 !== 'none') {
+            groupby2.value = DEFAULT_GROUP_BY_2;
+        }
+        sortby.value = DEFAULT_SORT_BY;
+    }
+
+    function updateStats() {
+        const statsDiv = document.getElementById('stats_examples_gallery');
+        if (allReports.length === 0) {
+            statsDiv.innerHTML = '';
+            return;
+        }
+
+        const uniqueDates = new Set(allReports.map(r => r.date ? r.date.substring(0, 7) : ''));
+
+        statsDiv.innerHTML =
+            '<div class="reportindex-stat-examples_gallery">' +
+            '<div class="reportindex-stat-value-examples_gallery">' + allReports.length + '</div>' +
+            '<div class="reportindex-stat-label-examples_gallery">Total Reports</div></div>' +
+            '<div class="reportindex-stat-examples_gallery">' +
+            '<div class="reportindex-stat-value-examples_gallery">' + uniqueDates.size + '</div>' +
+            '<div class="reportindex-stat-label-examples_gallery">Months</div></div>';
+    }
+
+    window.updateDisplay_examples_gallery = function() {
+        const groupBy1 = document.getElementById('groupby1_examples_gallery').value;
+        const groupBy2 = document.getElementById('groupby2_examples_gallery').value;
+        const sortBy = document.getElementById('sortby_examples_gallery').value;
+
+        if (allReports.length === 0) {
+            document.getElementById('content_examples_gallery').innerHTML =
+                '<div class="reportindex-empty-examples_gallery">No reports in manifest.</div>';
+            return;
+        }
+
+        // Sort reports
+        const sorted = [...allReports].sort((a, b) => {
+            const aVal = a[sortBy] || '';
+            const bVal = b[sortBy] || '';
+            // Try date comparison first
+            if (aVal.match(/^\d{4}-\d{2}-\d{2}/)) {
+                return bVal.localeCompare(aVal); // Descending for dates
+            }
+            return aVal.localeCompare(bVal);
+        });
+
+        let html = '';
+
+        if (groupBy1 === 'none') {
+            // No grouping - flat list
+            html = '<div class="reportindex-group-content-examples_gallery">';
+            html += '<ul class="reportindex-list-examples_gallery">';
+            sorted.forEach(report => {
+                html += renderReportItem(report);
+            });
+            html += '</ul></div>';
+        } else if (groupBy2 === 'none') {
+            // Single level grouping
+            const groups = groupReports(sorted, groupBy1);
+            const groupKeys = Object.keys(groups).sort((a, b) => {
+                if (a.match(/^\d{4}/)) return b.localeCompare(a);
+                return a.localeCompare(b);
+            });
+
+            groupKeys.forEach(key => {
+                html += renderGroup(key, groups[key], groups[key].length);
+            });
+        } else {
+            // Two level grouping
+            const groups1 = groupReports(sorted, groupBy1);
+            const groupKeys1 = Object.keys(groups1).sort((a, b) => {
+                if (a.match(/^\d{4}/)) return b.localeCompare(a);
+                return a.localeCompare(b);
+            });
+
+            groupKeys1.forEach(key1 => {
+                const subgroups = groupReports(groups1[key1], groupBy2);
+                const totalCount = groups1[key1].length;
+
+                html += '<div class="reportindex-group-examples_gallery">';
+                html += '<div class="reportindex-group-header-examples_gallery" onclick="toggleGroup_examples_gallery(this)">';
+                html += '<span>' + key1 + ' <span style="font-size:13px;font-weight:normal;">(' + totalCount + ')</span></span>';
+                html += '<span class="toggle">▼</span></div>';
+                html += '<div class="reportindex-group-content-examples_gallery">';
+
+                const subKeys = Object.keys(subgroups).sort((a, b) => {
+                    if (a.match(/^\d{4}/)) return b.localeCompare(a);
+                    return a.localeCompare(b);
+                });
+
+                subKeys.forEach(key2 => {
+                    html += renderSubgroup(key2, subgroups[key2]);
+                });
+
+                html += '</div></div>';
+            });
+        }
+
+        document.getElementById('content_examples_gallery').innerHTML = html;
+    };
+
+    function groupReports(reports, field) {
+        const groups = {};
+        reports.forEach(report => {
+            const key = report[field] || '(empty)';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(report);
+        });
+        return groups;
+    }
+
+    function renderGroup(title, reports, count) {
+        let html = '<div class="reportindex-group-examples_gallery">';
+        html += '<div class="reportindex-group-header-examples_gallery" onclick="toggleGroup_examples_gallery(this)">';
+        html += '<span>' + title + ' <span style="font-size:13px;font-weight:normal;">(' + count + ')</span></span>';
+        html += '<span class="toggle">▼</span></div>';
+        html += '<div class="reportindex-group-content-examples_gallery">';
+        html += '<ul class="reportindex-list-examples_gallery">';
+        reports.forEach(report => {
+            html += renderReportItem(report);
+        });
+        html += '</ul></div></div>';
+        return html;
+    }
+
+    function renderSubgroup(title, reports) {
+        let html = '<div class="reportindex-subgroup-examples_gallery">';
+        html += '<div class="reportindex-subgroup-header-examples_gallery" onclick="toggleSubgroup_examples_gallery(this)">';
+        html += '<span>' + title + '</span>';
+        html += '<span class="count">' + reports.length + '</span></div>';
+        html += '<div class="reportindex-subgroup-content-examples_gallery">';
+        html += '<ul class="reportindex-list-examples_gallery">';
+        reports.forEach(report => {
+            html += renderReportItem(report);
+        });
+        html += '</ul></div></div>';
+        return html;
+    }
+
+    function renderReportItem(report) {
+        const link = report.path + '/' + report.html_filename;
+        const displayText = report.date || report.path;
+        const description = report.description ? '<span class="reportindex-description-examples_gallery">- ' + report.description + '</span>' : '';
+
+        // Check if file exists by trying to fetch it (we'll mark as potentially missing)
+        // For now, we'll use a data attribute and check via JS
+        let html = '<li class="reportindex-item-examples_gallery" data-link="' + link + '">';
+        html += '<span>';
+        html += '<a class="reportindex-link-examples_gallery" href="' + link + '" data-check-exists="true">' + displayText + '</a>';
+        html += description;
+        html += '</span>';
+        html += '<span class="reportindex-meta-examples_gallery">' + report.path + '</span>';
+        html += '</li>';
+        return html;
+    }
+
+    window.toggleGroup_examples_gallery = function(header) {
+        header.classList.toggle('collapsed');
+        const content = header.nextElementSibling;
+        content.classList.toggle('hidden');
+    };
+
+    window.toggleSubgroup_examples_gallery = function(header) {
+        const content = header.nextElementSibling;
+        content.classList.toggle('hidden');
+    };
+
+    // Check for missing files after rendering
+    async function checkMissingFiles() {
+        const links = document.querySelectorAll('[data-check-exists="true"]');
+        for (const link of links) {
+            try {
+                const response = await fetch(link.href, { method: 'HEAD' });
+                if (!response.ok) {
+                    link.classList.remove('reportindex-link-examples_gallery');
+                    link.classList.add('reportindex-link-missing-examples_gallery');
+                }
+            } catch (e) {
+                link.classList.remove('reportindex-link-examples_gallery');
+                link.classList.add('reportindex-link-missing-examples_gallery');
+            }
+        }
+    }
+
+    // Load on startup
+    loadManifest().then(() => {
+        // Check for missing files after a short delay
+        setTimeout(checkMissingFiles, 500);
+    });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>ReportIndex & Example Files</h1>
+<p>ReportIndex creates interactive navigation for collections of HTML reports</p>
+
+    <div class="textblock-content">
+        <h2>ReportIndex</h2>
+<p>ReportIndex creates an interactive navigation component for browsing collections of HTML reports.
+It reads from a CSV manifest file containing metadata about each report page, and generates a
+searchable, sortable, and groupable index.</p>
+
+<h3>Manifest Format</h3>
+<p>The manifest CSV file should contain columns describing each report:</p>
+<ul>
+    <li><strong>path:</strong> Directory path to the HTML file</li>
+    <li><strong>html_filename:</strong> Name of the HTML file</li>
+    <li><strong>description:</strong> Human-readable description shown in the index</li>
+    <li><strong>date:</strong> Date the report was created/updated</li>
+    <li><strong>Additional columns:</strong> Any extra columns (like chart_type, page_type) can be used for grouping and filtering</li>
+</ul>
+
+<h3>Usage</h3>
+<pre><code># Create a manifest entry when generating HTML
+manifest_entry = ManifestEntry(
+    path="..",
+    html_filename="my_chart.html",
+    description="My Chart Example",
+    date=today(),
+    extra_columns=Dict(:chart_type => "2D Charts", :page_type => "Chart Tutorial")
+)
+create_html(page, "generated_html_examples/my_chart.html";
+    manifest="generated_html_examples/z_general_example/manifest.csv",
+    manifest_entry=manifest_entry)
+
+# Later, create an index page from the manifest
+index = ReportIndex(:my_index, "path/to/manifest.csv",
+    title = "My Reports",
+    default_group_by = :chart_type,
+    default_sort_by = :description
+)</code></pre>
+
+The useful feature of ReportIndex over LinkList is that because ReportIndex comes from an external csv file you can add to that external csv file on a regular basis. For instance you can do a new report every day. Then you can have a different document that will link to all of them.
+
+<h2>JSPlots Example Files</h2>
+<p>Below is an interactive index of all JSPlots example files generated using ReportIndex.
+Click on any link to view the example. Use the dropdowns to group and sort the examples.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<style>
+    .reportindex-container-examples_gallery {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .reportindex-container-examples_gallery h2 {
+        color: #2c3e50;
+        border-bottom: 3px solid #3498db;
+        padding-bottom: 10px;
+    }
+
+    .reportindex-controls-examples_gallery {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 8px;
+    }
+
+    .reportindex-controls-examples_gallery label {
+        font-weight: 600;
+        color: #495057;
+        margin-right: 5px;
+    }
+
+    .reportindex-controls-examples_gallery select {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        font-size: 14px;
+        min-width: 150px;
+    }
+
+    .reportindex-stats-examples_gallery {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    .reportindex-stat-examples_gallery {
+        background: white;
+        padding: 12px 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .reportindex-stat-value-examples_gallery {
+        font-size: 24px;
+        font-weight: 700;
+        color: #3498db;
+    }
+
+    .reportindex-stat-label-examples_gallery {
+        font-size: 11px;
+        color: #7f8c8d;
+        text-transform: uppercase;
+    }
+
+    .reportindex-group-examples_gallery {
+        margin-bottom: 25px;
+    }
+
+    .reportindex-group-header-examples_gallery {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 12px 20px;
+        border-radius: 8px 8px 0 0;
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .reportindex-group-header-examples_gallery:hover {
+        opacity: 0.95;
+    }
+
+    .reportindex-group-header-examples_gallery .toggle {
+        transition: transform 0.3s ease;
+    }
+
+    .reportindex-group-header-examples_gallery.collapsed .toggle {
+        transform: rotate(-90deg);
+    }
+
+    .reportindex-subgroup-examples_gallery {
+        border-bottom: 1px solid #ecf0f1;
+    }
+
+    .reportindex-subgroup-header-examples_gallery {
+        background-color: #f1f3f5;
+        padding: 10px 20px;
+        font-weight: 600;
+        color: #495057;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .reportindex-subgroup-header-examples_gallery:hover {
+        background-color: #e9ecef;
+    }
+
+    .reportindex-subgroup-header-examples_gallery .count {
+        background-color: #6c757d;
+        color: white;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: normal;
+    }
+
+    .reportindex-group-content-examples_gallery {
+        background: white;
+        border-radius: 0 0 8px 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+
+    .reportindex-group-content-examples_gallery.hidden {
+        display: none;
+    }
+
+    .reportindex-subgroup-content-examples_gallery.hidden {
+        display: none;
+    }
+
+    .reportindex-list-examples_gallery {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .reportindex-item-examples_gallery {
+        padding: 12px 20px 12px 30px;
+        border-bottom: 1px solid #f1f3f5;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: background-color 0.2s;
+    }
+
+    .reportindex-item-examples_gallery:last-child {
+        border-bottom: none;
+    }
+
+    .reportindex-item-examples_gallery:hover {
+        background-color: #f8f9fa;
+    }
+
+    .reportindex-link-examples_gallery {
+        color: #2980b9;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .reportindex-link-examples_gallery:hover {
+        color: #1a5276;
+        text-decoration: underline;
+    }
+
+    .reportindex-link-missing-examples_gallery {
+        color: #e74c3c;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .reportindex-link-missing-examples_gallery:hover {
+        color: #c0392b;
+        text-decoration: underline;
+    }
+
+    .reportindex-link-missing-examples_gallery::after {
+        content: " (missing)";
+        font-size: 11px;
+        font-weight: normal;
+    }
+
+    .reportindex-meta-examples_gallery {
+        color: #95a5a6;
+        font-size: 12px;
+    }
+
+    .reportindex-description-examples_gallery {
+        color: #7f8c8d;
+        font-size: 13px;
+        margin-left: 10px;
+    }
+
+    .reportindex-loading-examples_gallery {
+        text-align: center;
+        padding: 40px;
+        color: #7f8c8d;
+    }
+
+    .reportindex-error-examples_gallery {
+        text-align: center;
+        padding: 40px;
+        color: #e74c3c;
+        background-color: #fdf2f2;
+        border-radius: 8px;
+    }
+
+    .reportindex-empty-examples_gallery {
+        text-align: center;
+        padding: 40px;
+        color: #7f8c8d;
+    }
+</style>
+
+<div class="reportindex-container-examples_gallery">
+    <h2>Links to all example files</h2>
+
+    <div class="reportindex-controls-examples_gallery">
+        <div>
+            <label for="groupby1_examples_gallery">Group by:</label>
+            <select id="groupby1_examples_gallery" onchange="updateDisplay_examples_gallery()">
+                <option value="none">No grouping</option>
+            </select>
+        </div>
+        <div>
+            <label for="groupby2_examples_gallery">Then by:</label>
+            <select id="groupby2_examples_gallery" onchange="updateDisplay_examples_gallery()">
+                <option value="none">No second grouping</option>
+            </select>
+        </div>
+        <div>
+            <label for="sortby_examples_gallery">Sort by:</label>
+            <select id="sortby_examples_gallery" onchange="updateDisplay_examples_gallery()">
+            </select>
+        </div>
+    </div>
+
+    <div class="reportindex-stats-examples_gallery" id="stats_examples_gallery"></div>
+
+    <div id="content_examples_gallery">
+        <div class="reportindex-loading-examples_gallery">Loading reports...</div>
+    </div>
+</div>
+
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+</body>
+</html>

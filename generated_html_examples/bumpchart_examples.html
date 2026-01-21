@@ -61,8 +61,9 @@ function waitForParquet() {
 
 // Centralized data loading function
 // Centralized date parsing function
-// Converts ISO date strings to JavaScript Date objects
+// Converts various date formats to JavaScript Date objects
 // This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
 function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
@@ -71,43 +72,119 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date and time columns
-    var firstRow = data[0];
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
     var dateColumns = [];
     var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
 
-    for (var key in firstRow) {
-        if (firstRow.hasOwnProperty(key)) {
-            var value = firstRow[key];
-            if (typeof value === 'string') {
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
-                    dateColumns.push(key);
+                    stringDateCount++;
                 } else if (timePattern.test(value)) {
-                    timeColumns.push(key);
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
                 }
             }
         }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
     }
 
-    // If no date or time columns found, return data unchanged
-    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
-
-    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    // Convert values in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
-                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
-                    newRow[key] = new Date(row[key]);
-                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
                     // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
-                    var parts = row[key].split(':');
+                    var parts = value.split(':');
                     var hours = parseInt(parts[0], 10);
                     var minutes = parseInt(parts[1], 10);
-                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    var seconds = parseFloat(parts[2]);
                     newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
                 } else {
-                    newRow[key] = row[key];
+                    newRow[key] = value;
                 }
             }
         }
@@ -2546,133 +2623,133 @@ $(function(){
 
 <script type="text/plain" id="strategy_data" data-format="csv_embedded" data-src="">
 period,strategy,performance,volatility
-1,Growth,84.70960558505011,11.0
-2,Growth,87.08321332570117,20.0
-3,Growth,78.34985487653724,10.0
-4,Growth,79.27999858287826,9.0
-5,Growth,81.15610148803651,7.0
-6,Growth,77.18526663804982,20.0
-7,Growth,86.14427683943471,17.0
-8,Growth,85.65941536310766,18.0
-9,Growth,83.85800774473176,11.0
-10,Growth,84.671749661429,20.0
-11,Growth,86.30097787036956,18.0
-12,Growth,79.72088160896453,5.0
-1,Value,71.22565201366129,14.0
-2,Value,72.85917875258271,17.0
-3,Value,67.40829565346284,13.0
-4,Value,72.92025628726348,14.0
-5,Value,77.19949308495232,13.0
-6,Value,66.01202703525733,9.0
-7,Value,66.24205420107967,7.0
-8,Value,69.82011942136876,18.0
-9,Value,66.20379196909855,7.0
-10,Value,64.86092749397098,15.0
-11,Value,58.04786370991471,15.0
-12,Value,64.32751153901818,5.0
-1,Momentum,63.905294144317416,6.0
-2,Momentum,68.81942963445407,16.0
-3,Momentum,65.98401555489242,8.0
-4,Momentum,64.5474167717381,18.0
-5,Momentum,65.34651826257762,7.0
-6,Momentum,69.01489217546626,8.0
-7,Momentum,66.01978493437262,14.0
-8,Momentum,63.235427828948986,6.0
-9,Momentum,72.65067008904626,17.0
-10,Momentum,68.456053865593,19.0
-11,Momentum,57.71972429667031,16.0
-12,Momentum,64.06203584500253,10.0
-1,Quality,49.69824466929955,14.0
-2,Quality,51.47538590467049,5.0
-3,Quality,37.55807529759733,11.0
-4,Quality,32.05721613230104,13.0
-5,Quality,34.18084688480097,15.0
-6,Quality,42.45709319639006,13.0
-7,Quality,41.94472134924558,19.0
-8,Quality,48.83926321380057,9.0
-9,Quality,48.42688264668241,13.0
-10,Quality,37.279014606834586,9.0
-11,Quality,32.102860857203204,7.0
-12,Quality,35.921535672993826,5.0
-1,Income,84.1011925368584,6.0
-2,Income,88.59322314484135,5.0
-3,Income,84.12389586037357,8.0
-4,Income,85.98203347777341,18.0
-5,Income,88.77150779519678,15.0
-6,Income,83.76448105943258,9.0
-7,Income,75.80024456069258,5.0
-8,Income,71.00348095719967,16.0
-9,Income,73.16664468336809,13.0
-10,Income,72.51767051313584,14.0
-11,Income,79.1686946838975,16.0
-12,Income,85.56057552418388,19.0
+1,Growth,89.995954575193,10.0
+2,Growth,87.83165350870209,16.0
+3,Growth,89.16835988825044,6.0
+4,Growth,90.31153273383089,10.0
+5,Growth,87.66553045350742,9.0
+6,Growth,81.50020633296141,16.0
+7,Growth,82.72412824477081,18.0
+8,Growth,86.427894204448,5.0
+9,Growth,89.48422823171485,20.0
+10,Growth,85.86230223365376,12.0
+11,Growth,89.31628952231733,5.0
+12,Growth,86.86377263656068,15.0
+1,Value,67.31981214264084,13.0
+2,Value,62.94413961769224,18.0
+3,Value,64.81463186977193,8.0
+4,Value,69.08440208942753,7.0
+5,Value,71.06973313243594,6.0
+6,Value,76.32166394607566,6.0
+7,Value,66.10245394915448,17.0
+8,Value,68.2537592149184,5.0
+9,Value,63.21635127601016,13.0
+10,Value,57.68319636847176,9.0
+11,Value,53.898965620395415,16.0
+12,Value,58.20332338347642,18.0
+1,Momentum,96.04583495630754,5.0
+2,Momentum,90.91081317585883,19.0
+3,Momentum,97.4133740477776,6.0
+4,Momentum,103.72317640589438,20.0
+5,Momentum,101.53109179218605,7.0
+6,Momentum,97.96854947939524,11.0
+7,Momentum,96.02745301125978,19.0
+8,Momentum,97.51673125802472,6.0
+9,Momentum,103.14501543963345,14.0
+10,Momentum,100.30202637397198,8.0
+11,Momentum,102.15342317131588,5.0
+12,Momentum,102.23137670592995,8.0
+1,Quality,61.50503135430285,5.0
+2,Quality,65.5292225762161,12.0
+3,Quality,63.716575490984695,10.0
+4,Quality,62.01669543332338,19.0
+5,Quality,66.54183017441152,17.0
+6,Quality,61.72787276534295,11.0
+7,Quality,59.46975561783933,16.0
+8,Quality,62.1162566007772,19.0
+9,Quality,55.08425429265476,18.0
+10,Quality,59.900409639787696,19.0
+11,Quality,63.125442659061086,15.0
+12,Quality,68.65210871450604,5.0
+1,Income,87.68571554304177,14.0
+2,Income,96.30569068734503,19.0
+3,Income,104.55184893391683,10.0
+4,Income,95.37052463487812,13.0
+5,Income,96.3305786247718,11.0
+6,Income,92.77498915596088,16.0
+7,Income,92.24575396926726,15.0
+8,Income,90.53822702947352,18.0
+9,Income,96.6949273500691,18.0
+10,Income,95.80279953195225,17.0
+11,Income,95.40644805541122,17.0
+12,Income,94.27020396223577,13.0
 
 </script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
 quarter,product,region,sales,market_share
-Q1,Product A,North,337,21.0
-Q2,Product A,North,411,32.0
-Q3,Product A,North,338,33.0
-Q4,Product A,North,339,27.0
-Q1,Product B,North,502,35.0
-Q2,Product B,North,456,40.0
-Q3,Product B,North,447,17.0
-Q4,Product B,North,483,20.0
-Q1,Product C,North,244,36.0
-Q2,Product C,North,270,33.0
-Q3,Product C,North,285,13.0
-Q4,Product C,North,246,38.0
-Q1,Product D,North,223,27.0
-Q2,Product D,North,255,10.0
-Q3,Product D,North,293,24.0
-Q4,Product D,North,292,34.0
-Q1,Product A,South,294,38.0
-Q2,Product A,South,290,31.0
-Q3,Product A,South,245,30.0
-Q4,Product A,South,242,24.0
-Q1,Product B,South,188,40.0
-Q2,Product B,South,174,25.0
-Q3,Product B,South,173,25.0
-Q4,Product B,South,168,22.0
-Q1,Product C,South,170,24.0
-Q2,Product C,South,88,27.0
-Q3,Product C,South,118,28.0
-Q4,Product C,South,103,23.0
-Q1,Product D,South,173,29.0
-Q2,Product D,South,137,17.0
-Q3,Product D,South,145,39.0
-Q4,Product D,South,125,25.0
-Q1,Product A,East,153,34.0
-Q2,Product A,East,158,33.0
-Q3,Product A,East,122,25.0
-Q4,Product A,East,136,24.0
-Q1,Product B,East,434,40.0
-Q2,Product B,East,447,40.0
-Q3,Product B,East,487,21.0
-Q4,Product B,East,455,26.0
-Q1,Product C,East,176,29.0
-Q2,Product C,East,93,20.0
-Q3,Product C,East,128,36.0
-Q4,Product C,East,161,28.0
-Q1,Product D,East,536,23.0
-Q2,Product D,East,501,38.0
-Q3,Product D,East,531,39.0
-Q4,Product D,East,511,21.0
-Q1,Product A,West,256,32.0
-Q2,Product A,West,270,11.0
-Q3,Product A,West,310,12.0
-Q4,Product A,West,289,26.0
-Q1,Product B,West,198,19.0
-Q2,Product B,West,129,37.0
-Q3,Product B,West,181,26.0
-Q4,Product B,West,201,23.0
-Q1,Product C,West,448,25.0
-Q2,Product C,West,401,14.0
-Q3,Product C,West,403,35.0
-Q4,Product C,West,423,26.0
-Q1,Product D,West,467,37.0
-Q2,Product D,West,501,25.0
-Q3,Product D,West,519,16.0
-Q4,Product D,West,514,16.0
+Q1,Product A,North,152,24.0
+Q2,Product A,North,83,34.0
+Q3,Product A,North,96,10.0
+Q4,Product A,North,136,30.0
+Q1,Product B,North,367,18.0
+Q2,Product B,North,415,29.0
+Q3,Product B,North,350,12.0
+Q4,Product B,North,435,27.0
+Q1,Product C,North,138,18.0
+Q2,Product C,North,164,40.0
+Q3,Product C,North,119,36.0
+Q4,Product C,North,113,34.0
+Q1,Product D,North,161,26.0
+Q2,Product D,North,160,23.0
+Q3,Product D,North,168,14.0
+Q4,Product D,North,205,10.0
+Q1,Product A,South,196,19.0
+Q2,Product A,South,200,17.0
+Q3,Product A,South,187,32.0
+Q4,Product A,South,258,16.0
+Q1,Product B,South,371,18.0
+Q2,Product B,South,370,32.0
+Q3,Product B,South,407,29.0
+Q4,Product B,South,424,35.0
+Q1,Product C,South,91,40.0
+Q2,Product C,South,116,28.0
+Q3,Product C,South,157,30.0
+Q4,Product C,South,113,33.0
+Q1,Product D,South,226,12.0
+Q2,Product D,South,217,38.0
+Q3,Product D,South,246,32.0
+Q4,Product D,South,198,35.0
+Q1,Product A,East,345,35.0
+Q2,Product A,East,358,33.0
+Q3,Product A,East,380,37.0
+Q4,Product A,East,374,19.0
+Q1,Product B,East,181,34.0
+Q2,Product B,East,186,10.0
+Q3,Product B,East,243,21.0
+Q4,Product B,East,223,22.0
+Q1,Product C,East,145,28.0
+Q2,Product C,East,171,22.0
+Q3,Product C,East,204,23.0
+Q4,Product C,East,195,19.0
+Q1,Product D,East,191,15.0
+Q2,Product D,East,111,21.0
+Q3,Product D,East,110,14.0
+Q4,Product D,East,177,18.0
+Q1,Product A,West,377,23.0
+Q2,Product A,West,401,23.0
+Q3,Product A,West,385,33.0
+Q4,Product A,West,405,14.0
+Q1,Product B,West,178,24.0
+Q2,Product B,West,241,23.0
+Q3,Product B,West,222,22.0
+Q4,Product B,West,219,38.0
+Q1,Product C,West,157,31.0
+Q2,Product C,West,181,29.0
+Q3,Product C,West,146,39.0
+Q4,Product C,West,165,40.0
+Q1,Product D,West,292,19.0
+Q2,Product D,West,331,34.0
+Q3,Product D,West,306,25.0
+Q4,Product D,West,329,16.0
 
 </script><script type="text/plain" id="league.team_info" data-format="csv_embedded" data-src="">
 team,founded
@@ -2683,97 +2760,97 @@ Yellow Lions,1972
 
 </script><script type="text/plain" id="league.rankings" data-format="csv_embedded" data-src="">
 week,team,points
-1,Red Bulls,47.30165107713456
-2,Red Bulls,44.08907489292547
-3,Red Bulls,41.17211826064583
-4,Red Bulls,38.08775382051666
-5,Red Bulls,35.883942261388064
-6,Red Bulls,37.62615268761012
-7,Red Bulls,38.102807990405125
-8,Red Bulls,34.073917991334355
-9,Red Bulls,32.39026146798269
-10,Red Bulls,33.79299389964176
-1,Blue Tigers,37.18027839528716
-2,Blue Tigers,42.94901164154926
-3,Blue Tigers,45.320979908926475
-4,Blue Tigers,46.11877471843006
-5,Blue Tigers,46.242431948192916
-6,Blue Tigers,47.29437756141068
-7,Blue Tigers,49.28552175973231
-8,Blue Tigers,48.60219218666712
-9,Blue Tigers,49.2133390747181
-10,Blue Tigers,49.657765267170106
-1,Green Eagles,62.64019382385617
-2,Green Eagles,63.163770086778804
-3,Green Eagles,62.193935877961295
-4,Green Eagles,57.50189458470128
-5,Green Eagles,57.37697548641236
-6,Green Eagles,61.89970213270775
-7,Green Eagles,59.647043144008954
-8,Green Eagles,58.835336601378025
-9,Green Eagles,58.138567599648994
-10,Green Eagles,60.976918328223185
-1,Yellow Lions,55.25676141478553
-2,Yellow Lions,50.054101061937956
-3,Yellow Lions,48.89198996175021
-4,Yellow Lions,48.112460070947954
-5,Yellow Lions,47.93981978478317
-6,Yellow Lions,49.532193978020466
-7,Yellow Lions,49.04980368792597
-8,Yellow Lions,47.981311896535814
-9,Yellow Lions,52.61844477048482
-10,Yellow Lions,46.4486014007176
+1,Red Bulls,66.18442709921302
+2,Red Bulls,62.187674601792644
+3,Red Bulls,62.1419811427179
+4,Red Bulls,65.61488743674482
+5,Red Bulls,64.46361014864041
+6,Red Bulls,61.8450281241869
+7,Red Bulls,59.373852154610816
+8,Red Bulls,58.46114141833424
+9,Red Bulls,55.78392339282717
+10,Red Bulls,54.2103181344541
+1,Blue Tigers,62.14800457269164
+2,Blue Tigers,59.454965010537386
+3,Blue Tigers,59.79198085061719
+4,Blue Tigers,63.376734998578435
+5,Blue Tigers,63.20638287195633
+6,Blue Tigers,69.07983987404641
+7,Blue Tigers,67.153262726259
+8,Blue Tigers,65.98599681664992
+9,Blue Tigers,67.03722289540197
+10,Blue Tigers,70.30304709882428
+1,Green Eagles,69.88342153489108
+2,Green Eagles,71.59688042888533
+3,Green Eagles,68.63979457548453
+4,Green Eagles,77.89876871540477
+5,Green Eagles,80.16694017809637
+6,Green Eagles,79.36835275759024
+7,Green Eagles,75.0800237111024
+8,Green Eagles,75.97002004859758
+9,Green Eagles,79.38994256261148
+10,Green Eagles,77.3433193935684
+1,Yellow Lions,53.670251329993754
+2,Yellow Lions,50.7216649811709
+3,Yellow Lions,45.72686570273908
+4,Yellow Lions,49.98043199814488
+5,Yellow Lions,46.97996971035795
+6,Yellow Lions,46.414735366042216
+7,Yellow Lions,45.44896666411159
+8,Yellow Lions,53.58754896997926
+9,Yellow Lions,52.014197354472174
+10,Yellow Lions,52.34792399017293
 
 </script><script type="text/plain" id="company_performance" data-format="csv_embedded" data-src="">
 month,company,revenue,profit_margin
-2024-01-01,Alpha Corp,130.70596502116132,13.0
-2024-02-01,Alpha Corp,110.49793461421277,14.0
-2024-03-01,Alpha Corp,109.97559428118407,24.0
-2024-04-01,Alpha Corp,112.7527186946075,20.0
-2024-05-01,Alpha Corp,111.10170971712802,22.0
-2024-06-01,Alpha Corp,100.88647344777962,16.0
-2024-07-01,Alpha Corp,112.45159436311661,8.0
-2024-08-01,Alpha Corp,109.45640841210688,7.0
-2024-09-01,Alpha Corp,114.32483315343073,23.0
-2024-10-01,Alpha Corp,120.27331923414103,11.0
-2024-11-01,Alpha Corp,124.6835653475177,18.0
-2024-12-01,Alpha Corp,126.76619007240018,15.0
-2024-01-01,Beta Inc,121.68998364398375,21.0
-2024-02-01,Beta Inc,114.91610163515023,23.0
-2024-03-01,Beta Inc,107.08266174220508,8.0
-2024-04-01,Beta Inc,102.83146565610731,15.0
-2024-05-01,Beta Inc,102.99814384899774,25.0
-2024-06-01,Beta Inc,91.12702185609076,10.0
-2024-07-01,Beta Inc,89.13267713383165,21.0
-2024-08-01,Beta Inc,86.22308603707441,17.0
-2024-09-01,Beta Inc,78.28150825548707,10.0
-2024-10-01,Beta Inc,68.74316875993811,6.0
-2024-11-01,Beta Inc,72.26890736224429,10.0
-2024-12-01,Beta Inc,78.99851073640257,16.0
-2024-01-01,Gamma LLC,272.8168480199466,6.0
-2024-02-01,Gamma LLC,263.2762242798486,16.0
-2024-03-01,Gamma LLC,251.8743669447749,24.0
-2024-04-01,Gamma LLC,246.51242064543464,16.0
-2024-05-01,Gamma LLC,249.99800650910902,16.0
-2024-06-01,Gamma LLC,242.5195059578347,17.0
-2024-07-01,Gamma LLC,238.13505216329924,8.0
-2024-08-01,Gamma LLC,244.43312837378363,7.0
-2024-09-01,Gamma LLC,237.49865710616342,18.0
-2024-10-01,Gamma LLC,246.75072155796468,11.0
-2024-11-01,Gamma LLC,261.0027769609221,12.0
-2024-12-01,Gamma LLC,243.24446924167196,9.0
-2024-01-01,Delta Co,236.89414987749942,12.0
-2024-02-01,Delta Co,241.04878640715413,22.0
-2024-03-01,Delta Co,245.46384571303437,16.0
-2024-04-01,Delta Co,245.81024468955053,13.0
-2024-05-01,Delta Co,243.13720025256234,14.0
-2024-06-01,Delta Co,252.77929627505802,6.0
-2024-07-01,Delta Co,279.8824478743336,5.0
-2024-08-01,Delta Co,285.11859264064714,11.0
-2024-09-01,Delta Co,265.83191428638247,20.0
-2024-10-01,Delta Co,270.5670620730897,9.0
-2024-11-01,Delta Co,266.0498668518912,10.0
-2024-12-01,Delta Co,282.75109535889555,10.0
+2024-01-01,Alpha Corp,223.97052021174466,24.0
+2024-02-01,Alpha Corp,238.09533213520126,25.0
+2024-03-01,Alpha Corp,255.89563184609923,11.0
+2024-04-01,Alpha Corp,246.52623535008863,11.0
+2024-05-01,Alpha Corp,227.93771836171518,23.0
+2024-06-01,Alpha Corp,227.85360974759055,20.0
+2024-07-01,Alpha Corp,249.8812835987504,6.0
+2024-08-01,Alpha Corp,241.1386973144046,14.0
+2024-09-01,Alpha Corp,255.31993967033375,13.0
+2024-10-01,Alpha Corp,261.72674244020413,25.0
+2024-11-01,Alpha Corp,260.75674190816136,14.0
+2024-12-01,Alpha Corp,258.220012494718,16.0
+2024-01-01,Beta Inc,124.81069554784987,13.0
+2024-02-01,Beta Inc,135.5500348452114,20.0
+2024-03-01,Beta Inc,137.2683990898693,22.0
+2024-04-01,Beta Inc,147.79847982084854,20.0
+2024-05-01,Beta Inc,152.39011658148343,6.0
+2024-06-01,Beta Inc,148.07507127728422,5.0
+2024-07-01,Beta Inc,123.48810963436541,5.0
+2024-08-01,Beta Inc,115.31494183290717,15.0
+2024-09-01,Beta Inc,114.69897443280051,22.0
+2024-10-01,Beta Inc,120.46795574086373,17.0
+2024-11-01,Beta Inc,124.95428015726823,23.0
+2024-12-01,Beta Inc,120.93843137443591,12.0
+2024-01-01,Gamma LLC,167.584405258529,12.0
+2024-02-01,Gamma LLC,146.6666241040971,25.0
+2024-03-01,Gamma LLC,145.16195404509185,22.0
+2024-04-01,Gamma LLC,149.52594446094778,14.0
+2024-05-01,Gamma LLC,147.02490678483616,18.0
+2024-06-01,Gamma LLC,139.01288089832423,14.0
+2024-07-01,Gamma LLC,143.14161209668364,10.0
+2024-08-01,Gamma LLC,147.24394806846965,23.0
+2024-09-01,Gamma LLC,142.6786546368751,19.0
+2024-10-01,Gamma LLC,152.3659125406524,6.0
+2024-11-01,Gamma LLC,130.30801941885977,6.0
+2024-12-01,Gamma LLC,142.952801950328,25.0
+2024-01-01,Delta Co,214.74821519689158,24.0
+2024-02-01,Delta Co,229.74836806018993,20.0
+2024-03-01,Delta Co,232.19369230648982,12.0
+2024-04-01,Delta Co,237.3172960310103,11.0
+2024-05-01,Delta Co,239.8034622468403,11.0
+2024-06-01,Delta Co,247.5769655024284,17.0
+2024-07-01,Delta Co,243.5530769517876,24.0
+2024-08-01,Delta Co,232.20096867349153,7.0
+2024-09-01,Delta Co,224.2680242643483,23.0
+2024-10-01,Delta Co,218.52310203608096,19.0
+2024-11-01,Delta Co,217.4533404938818,9.0
+2024-12-01,Delta Co,220.51354277625407,20.0
 
 </script>
 

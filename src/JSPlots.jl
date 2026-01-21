@@ -473,6 +473,9 @@ console.log('Parquet-wasm library loaded successfully');
     include("textblock.jl")
     export TextBlock
 
+    include("notes.jl")
+    export Notes
+
     include("codeblock.jl")
     export CodeBlock, execute_codeblock
 
@@ -523,6 +526,9 @@ console.log('Parquet-wasm library loaded successfully');
 
     include("Pages.jl")
     export JSPlotPage, Pages, sanitize_filename, extract_dataframes_from_struct, is_struct_with_dataframes
+
+    include("reportindex.jl")
+    export ReportIndex, ManifestEntry, add_to_manifest, get_manifest_columns, MANIFEST_REQUIRED_COLS
 
     include("make_html.jl")
     export create_html

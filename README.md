@@ -21,8 +21,10 @@ The plot types are below. For each you can click on the name of the chart and se
 
 #### Text
 - **[TextBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html)** - Rich text and HTML content for annotations
+- **[Notes](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/notes_example/notes_examples.html)** - A block of text that is populated from a textfile, useful for embedding comments in JSPlots documents.
 - **[CodeBlock](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html)** - Display code in a nice format. There is proper syntax highlighting for several languages (Julia, Python, R, C++, C, Java, JavaScript, Rust, SQL, PostgreSQL) without others in black.
 - **[LinkList](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html)** - Styled lists of hyperlinks for multi-page navigation with optional subheadings
+- **[ReportIndex](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/reportindex__example_files.html)** - A sortable list of hyperlinks for multi-page navigation. Populated by an external manifest file.
 
 #### Tabular Data
 - **[Table](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html)** - Data tables

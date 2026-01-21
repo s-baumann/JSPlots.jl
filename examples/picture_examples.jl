@@ -3,6 +3,7 @@
 
 using JSPlots
 using DataFrames
+using Dates
 using VegaLite
 using StableRNGs
 
@@ -218,7 +219,12 @@ page = JSPlotPage(
 )
 
 output_path = "generated_html_examples/picture_examples.html"
-create_html(page, output_path)
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="picture_examples.html",
+                               description="Picture Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Images & Slides", :page_type => "Chart Tutorial"))
+create_html(page, output_path;
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("Created: $output_path")
 println()

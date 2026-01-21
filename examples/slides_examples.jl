@@ -338,7 +338,12 @@ page_embedded = JSPlotPage(
     tab_title = "Slides Examples (Embedded)"
 )
 
-create_html(page_embedded, "generated_html_examples/slides_examples_embedded.html")
+# Manifest entry for report index - embedded version
+manifest_entry_embedded = ManifestEntry(path="..", html_filename="slides_examples_embedded.html",
+                               description="Slides Examples (Embedded)", date=today(),
+                               extra_columns=Dict(:chart_type => "Images & Slides", :page_type => "Chart Tutorial"))
+create_html(page_embedded, "generated_html_examples/slides_examples_embedded.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry_embedded)
 
 # External version (with directory structure)
 page_external = JSPlotPage(
@@ -348,7 +353,12 @@ page_external = JSPlotPage(
     dataformat = :parquet
 )
 
-create_html(page_external, "generated_html_examples/slides_examples_external.html")
+# Manifest entry for report index - external version
+manifest_entry_external = ManifestEntry(path="../slides_examples_external", html_filename="slides_examples_external.html",
+                               description="Slides Examples (External)", date=today(),
+                               extra_columns=Dict(:chart_type => "Images & Slides", :page_type => "Chart Tutorial"))
+create_html(page_external, "generated_html_examples/slides_examples_external.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry_external)
 
 println("\n" * "="^60)
 println("Slides examples created successfully!")

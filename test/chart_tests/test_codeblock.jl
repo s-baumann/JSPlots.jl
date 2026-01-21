@@ -726,4 +726,169 @@ using DataFrames
             @test !occursin("prism-cpp.min.js", content)
         end
     end
+
+    @testset "File metadata display" begin
+        mktempdir() do tmpdir
+            # Create a test file
+            test_file = joinpath(tmpdir, "test_script.jl")
+            write(test_file, "x = 1 + 2")
+
+            cb = CodeBlock(test_file)
+
+            # Should contain file metadata section
+            @test occursin("codeblock-file-metadata", cb.appearance_html)
+
+            # Should contain file name
+            @test occursin("test_script.jl", cb.appearance_html)
+
+            # Should contain path
+            @test occursin("Path:", cb.appearance_html)
+            @test occursin(tmpdir, cb.appearance_html)
+
+            # Should contain modification time
+            @test occursin("Modified:", cb.appearance_html)
+        end
+    end
+
+    @testset "File metadata not shown for code strings" begin
+        code = "x = 1 + 2"
+        cb = CodeBlock(code, Val(:code))
+
+        # Should NOT contain actual file metadata content for code strings
+        # (CSS class definition is still in styles, but no actual div content)
+        @test !occursin("<div class=\"codeblock-file-metadata\">", cb.appearance_html)
+        @test !occursin("Path:", cb.appearance_html)
+        @test !occursin("Modified:", cb.appearance_html)
+    end
+
+    @testset "Vector of files constructor" begin
+        mktempdir() do tmpdir
+            # Create test files
+            julia_file = joinpath(tmpdir, "script.jl")
+            python_file = joinpath(tmpdir, "script.py")
+            sql_file = joinpath(tmpdir, "query.sql")
+
+            write(julia_file, "x = 1 + 2")
+            write(python_file, "x = 1 + 2")
+            write(sql_file, "SELECT 1 + 2")
+
+            # Test with auto-detected languages
+            cbs = CodeBlock([julia_file, python_file, sql_file])
+
+            @test length(cbs) == 3
+            @test cbs[1].language == "julia"
+            @test cbs[2].language == "python"
+            @test cbs[3].language == "sql"
+
+            # Each should have file metadata
+            for cb in cbs
+                @test occursin("codeblock-file-metadata", cb.appearance_html)
+                @test occursin("Modified:", cb.appearance_html)
+            end
+
+            # Each should have unique chart_title
+            @test cbs[1].chart_title != cbs[2].chart_title
+            @test cbs[2].chart_title != cbs[3].chart_title
+        end
+    end
+
+    @testset "Vector of files with explicit languages" begin
+        mktempdir() do tmpdir
+            file1 = joinpath(tmpdir, "file1.txt")
+            file2 = joinpath(tmpdir, "file2.txt")
+
+            write(file1, "print('hello')")
+            write(file2, "SELECT * FROM users")
+
+            cbs = CodeBlock([file1, file2], languages=["python", "sql"])
+
+            @test length(cbs) == 2
+            @test cbs[1].language == "python"
+            @test cbs[2].language == "sql"
+            @test occursin("language-python", cbs[1].appearance_html)
+            @test occursin("language-sql", cbs[2].appearance_html)
+        end
+    end
+
+    @testset "Vector of files with notes on last" begin
+        mktempdir() do tmpdir
+            file1 = joinpath(tmpdir, "file1.jl")
+            file2 = joinpath(tmpdir, "file2.jl")
+
+            write(file1, "x = 1")
+            write(file2, "y = 2")
+
+            cbs = CodeBlock([file1, file2], notes="This note should only appear on the last block")
+
+            # Notes should only be on the last CodeBlock
+            @test !occursin("This note should only appear", cbs[1].appearance_html)
+            @test occursin("This note should only appear", cbs[2].appearance_html)
+        end
+    end
+
+    @testset "Vector of files error handling" begin
+        # Empty vector
+        @test_throws ErrorException CodeBlock(String[])
+
+        # Mismatched languages length
+        mktempdir() do tmpdir
+            file1 = joinpath(tmpdir, "file1.jl")
+            write(file1, "x = 1")
+
+            @test_throws ErrorException CodeBlock([file1], languages=["julia", "python"])
+        end
+
+        # File not found
+        @test_throws ErrorException CodeBlock(["nonexistent_file.jl", "another_nonexistent.py"])
+    end
+
+    @testset "Language detection from extension" begin
+        @test JSPlots.detect_language_from_extension("test.jl") == "julia"
+        @test JSPlots.detect_language_from_extension("test.py") == "python"
+        @test JSPlots.detect_language_from_extension("test.r") == "r"
+        @test JSPlots.detect_language_from_extension("test.R") == "r"
+        @test JSPlots.detect_language_from_extension("test.cpp") == "c++"
+        @test JSPlots.detect_language_from_extension("test.cxx") == "c++"
+        @test JSPlots.detect_language_from_extension("test.c") == "c"
+        @test JSPlots.detect_language_from_extension("test.h") == "c"
+        @test JSPlots.detect_language_from_extension("test.hpp") == "c++"
+        @test JSPlots.detect_language_from_extension("test.java") == "java"
+        @test JSPlots.detect_language_from_extension("test.js") == "javascript"
+        @test JSPlots.detect_language_from_extension("test.ts") == "javascript"
+        @test JSPlots.detect_language_from_extension("test.sql") == "sql"
+        @test JSPlots.detect_language_from_extension("test.rs") == "rust"
+        @test JSPlots.detect_language_from_extension("test.unknown") == "plaintext"
+        @test JSPlots.detect_language_from_extension("test") == "plaintext"
+    end
+
+    @testset "Vector of files in JSPlotPage" begin
+        mktempdir() do tmpdir
+            # Create test files
+            julia_file = joinpath(tmpdir, "example.jl")
+            python_file = joinpath(tmpdir, "example.py")
+
+            write(julia_file, "function hello()\\n    println(\\\"Hello\\\")\\nend")
+            write(python_file, "def hello():\\n    print(\\\"Hello\\\")")
+
+            cbs = CodeBlock([julia_file, python_file])
+
+            # Can be used directly in JSPlotPage since it returns a vector
+            page = JSPlotPage(
+                Dict{Symbol, DataFrame}(),
+                cbs,  # Vector of CodeBlocks
+                tab_title="Code Files"
+            )
+
+            outfile = joinpath(tmpdir, "output.html")
+            create_html(page, outfile)
+
+            @test isfile(outfile)
+            content = read(outfile, String)
+
+            # Both code blocks should be in the HTML
+            @test occursin("example.jl", content)
+            @test occursin("example.py", content)
+            @test occursin("codeblock-file-metadata", content)
+        end
+    end
 end

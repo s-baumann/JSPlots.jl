@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, StableRNGs, Statistics
+using JSPlots, DataFrames, Dates, StableRNGs, Statistics
 
 rng = StableRNG(777)
 
@@ -683,7 +683,12 @@ page = JSPlotPage(
 )
 
 output_file = joinpath(output_dir, "corrplot_examples.html")
-create_html(page, output_file)
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="corrplot_examples.html",
+                               description="CorrPlot Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Variable Relationship Charts", :page_type => "Chart Tutorial"))
+create_html(page, output_file;
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 println("Created: $output_file")
 
 println("\nCorrPlot examples complete!")

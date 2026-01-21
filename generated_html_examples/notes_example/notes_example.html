@@ -1,0 +1,1635 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sales Analysis with Notes</title>
+    <meta charset="UTF-8">
+
+    <!-- External JavaScript libraries (loaded based on chart types used) -->
+        <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #$div_id {
+            width: 100%;
+            height: 600px;
+        }
+    </style>
+        <style>
+        .textblock-content {
+            padding: 20px;
+            margin: 10px 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .textblock-content h1 {
+            font-size: 2em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h2 {
+            font-size: 1.5em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content h3 {
+            font-size: 1.25em;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        .textblock-content p {
+            margin: 0.5em 0;
+        }
+
+        .textblock-content ul, .textblock-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .textblock-content code {
+            background-color: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .textblock-content pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        .textblock-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .textblock-content blockquote {
+            border-left: 4px solid #ddd;
+            padding-left: 1em;
+            margin-left: 0;
+            color: #666;
+        }
+
+        .textblock-content a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+
+        .textblock-content a:hover {
+            text-decoration: underline;
+        }
+
+        .textblock-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+
+        .textblock-content th, .textblock-content td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        .textblock-content th {
+            background-color: #f5f5f5;
+            font-weight: 600;
+        }
+    </style>
+<style>
+    .notes-container {
+        background-color: #fffde7;  /* Pale yellow background */
+        border: 1px solid #f9e79f;
+        border-radius: 8px;
+        padding: 16px 20px;
+        margin: 15px 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.6;
+        color: #333;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .notes-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #f9e79f;
+    }
+
+    .notes-heading {
+        font-size: 1.1em;
+        font-weight: 600;
+        color: #5d4e37;
+        margin: 0;
+    }
+
+    .notes-modified {
+        font-size: 0.85em;
+        color: #8d7f5e;
+        font-style: italic;
+    }
+
+    .notes-content {
+        white-space: pre-wrap;
+        font-size: 0.95em;
+    }
+
+    .notes-no-content {
+        color: #999;
+        font-style: italic;
+    }
+
+    .notes-file-info {
+        font-size: 0.8em;
+        color: #8d7f5e;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px dashed #f9e79f;
+    }
+</style>
+
+
+    <!-- Prism.js language components for CodeBlocks -->
+    
+
+</head>
+
+<body>
+
+<!-- Parquet support (loaded if using parquet dataformat) -->
+<script src="https://cdn.jsdelivr.net/npm/apache-arrow@14.0.1/Arrow.es2015.min.js"></script>
+<script type="module">
+import * as parquet from 'https://unpkg.com/parquet-wasm@0.6.1/esm/parquet_wasm.js';
+await parquet.default();
+window.parquetWasm = parquet;
+window.parquetReady = true;
+console.log('Parquet-wasm library loaded successfully');
+</script>
+
+<script>
+// Helper function to wait for parquet-wasm to be loaded
+function waitForParquet() {
+    return new Promise(function(resolve) {
+        if (window.parquetReady) {
+            resolve();
+            return;
+        }
+        var checkInterval = setInterval(function() {
+            if (window.parquetReady) {
+                clearInterval(checkInterval);
+                resolve();
+            }
+        }, 50);
+    });
+}
+
+// Centralized data loading function
+// Centralized date parsing function
+// Converts various date formats to JavaScript Date objects
+// This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
+function parseDatesInData(data) {
+    if (!data || data.length === 0) return data;
+
+    // Regex patterns for ISO date formats
+    var datePattern = /^\d{4}-\d{2}-\d{2}$/;  // YYYY-MM-DD
+    var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
+    var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
+
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
+    var dateColumns = [];
+    var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
+
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
+                if (datetimePattern.test(value) || datePattern.test(value)) {
+                    stringDateCount++;
+                } else if (timePattern.test(value)) {
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
+                }
+            }
+        }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
+    }
+
+    // Convert values in all rows
+    return data.map(function(row) {
+        var newRow = {};
+        for (var key in row) {
+            if (row.hasOwnProperty(key)) {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
+                    var parts = value.split(':');
+                    var hours = parseInt(parts[0], 10);
+                    var minutes = parseInt(parts[1], 10);
+                    var seconds = parseFloat(parts[2]);
+                    newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
+                } else {
+                    newRow[key] = value;
+                }
+            }
+        }
+        return newRow;
+    });
+}
+
+// Helper function to convert temporal values back to string format for categorical filtering
+// Takes a value and returns the appropriate string representation
+function temporalValueToString(value) {
+    if (value instanceof Date) {
+        // Convert Date to ISO string
+        var year = value.getFullYear();
+        var month = String(value.getMonth() + 1).padStart(2, '0');
+        var day = String(value.getDate()).padStart(2, '0');
+        var hours = String(value.getHours()).padStart(2, '0');
+        var minutes = String(value.getMinutes()).padStart(2, '0');
+        var seconds = String(value.getSeconds()).padStart(2, '0');
+
+        // Check if this is a date-only value (time is midnight UTC)
+        if (hours === '00' && minutes === '00' && seconds === '00') {
+            return year + '-' + month + '-' + day;
+        } else {
+            return year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds;
+        }
+    } else if (typeof value === 'number' && value >= 0 && value < 86400000) {
+        // Likely a Time value (milliseconds since midnight, less than 24 hours)
+        var totalSeconds = Math.floor(value / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+        var milliseconds = value % 1000;
+
+        var timeStr = String(hours).padStart(2, '0') + ':' +
+                      String(minutes).padStart(2, '0') + ':' +
+                      String(seconds).padStart(2, '0');
+
+        // Add decimal part if there are milliseconds
+        if (milliseconds > 0) {
+            timeStr += '.' + String(milliseconds);
+        }
+
+        return timeStr;
+    } else {
+        // Return as-is for other types
+        return String(value);
+    }
+}
+
+// Centralized observation counting and filtering function
+// Applies filters incrementally while updating observation count displays
+// Returns filtered data
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+    var totalObs = allData.length;
+
+    // Update total observation count
+    var totalObsElement = document.getElementById(chartTitle + '_total_obs');
+    if (totalObsElement) {
+        totalObsElement.textContent = totalObs + ' observations';
+    }
+
+    // Apply filters incrementally to track observation counts
+    var currentData = allData;
+
+    // Apply categorical filters and update counts
+    categoricalFilters.forEach(function(col) {
+        if (filters[col] && filters[col].length > 0) {
+            currentData = currentData.filter(function(row) {
+                var rowValueStr = temporalValueToString(row[col]);
+                return filters[col].includes(rowValueStr);
+            });
+        }
+
+        var countElement = document.getElementById(col + '_select_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    // Apply continuous filters and update counts
+    continuousFilters.forEach(function(col) {
+        if (rangeFilters[col]) {
+            var range = rangeFilters[col];
+            currentData = currentData.filter(function(row) {
+                var rawValue = row[col];
+                var value;
+                if (rawValue instanceof Date) {
+                    value = rawValue.getTime();
+                } else {
+                    value = parseFloat(rawValue);
+                }
+                return value >= range.min && value <= range.max;
+            });
+        }
+
+        var countElement = document.getElementById(col + '_range_' + chartTitle + '_obs_count');
+        if (countElement) {
+            var pct = totalObs > 0 ? Math.round((currentData.length / totalObs) * 100) : 100;
+            countElement.textContent = pct + '% (' + currentData.length + ') remaining';
+        }
+    });
+
+    return currentData;
+}
+
+// Axis transformation functions
+// These transform data values according to selected transformation type
+function applyAxisTransform(values, transformType) {
+    if (!values || values.length === 0) return [];
+
+    switch(transformType) {
+        case 'identity':
+            return values;
+
+        case 'log':
+            return values.map(function(v) {
+                return v > 0 ? Math.log(v) : NaN;
+            });
+
+        case 'z_score':
+            // Z-score standardization: (x - mean) / std
+            var numericVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals.length === 0) return values;
+
+            var mean = numericVals.reduce(function(a, b) { return a + b; }, 0) / numericVals.length;
+            var variance = numericVals.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean, 2);
+            }, 0) / numericVals.length;
+            var std = Math.sqrt(variance);
+
+            if (std === 0) return values;
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                return (v - mean) / std;
+            });
+
+        case 'quantile':
+            // Rank-based transformation to [0, 1]
+            // Create array of {value, originalIndex} pairs
+            var indexedValues = values.map(function(v, i) {
+                return { value: v, index: i };
+            });
+
+            // Filter out invalid values and sort
+            var validValues = indexedValues.filter(function(item) {
+                return !isNaN(item.value) && isFinite(item.value);
+            }).sort(function(a, b) {
+                return a.value - b.value;
+            });
+
+            if (validValues.length === 0) return values;
+
+            // Assign ranks (0 to 1)
+            var ranks = new Array(values.length).fill(NaN);
+            validValues.forEach(function(item, rank) {
+                // Map rank to [0, 1] where lowest = 0, highest = 1
+                ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+            });
+
+            return ranks;
+
+        case 'inverse_cdf':
+            // Z-score followed by normal CDF transformation to [0, 1]
+            var numericVals2 = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+            if (numericVals2.length === 0) return values;
+
+            var mean2 = numericVals2.reduce(function(a, b) { return a + b; }, 0) / numericVals2.length;
+            var variance2 = numericVals2.reduce(function(sum, v) {
+                return sum + Math.pow(v - mean2, 2);
+            }, 0) / numericVals2.length;
+            var std2 = Math.sqrt(variance2);
+
+            if (std2 === 0) return values.map(function() { return 0.5; });
+
+            return values.map(function(v) {
+                if (isNaN(v) || !isFinite(v)) return NaN;
+                var zscore = (v - mean2) / std2;
+                return normalCDF(zscore);
+            });
+
+        default:
+            return values;
+    }
+}
+
+// Normal CDF (cumulative distribution function) for standard normal
+function normalCDF(x) {
+    // Using error function approximation
+    var t = 1 / (1 + 0.2316419 * Math.abs(x));
+    var d = 0.3989423 * Math.exp(-x * x / 2);
+    var prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+    return x > 0 ? 1 - prob : prob;
+}
+
+// Inverse normal CDF (quantile function) for standard normal
+function inverseNormalCDF(p) {
+    // Rational approximation for inverse normal CDF
+    // Valid for 0 < p < 1
+    if (p <= 0 || p >= 1) {
+        return NaN;
+    }
+
+    var a = [0, -3.969683028665376e+01, 2.209460984245205e+02,
+             -2.759285104469687e+02, 1.383577518672690e+02,
+             -3.066479806614716e+01, 2.506628277459239e+00];
+    var b = [0, -5.447609879822406e+01, 1.615858368580409e+02,
+             -1.556989798598866e+02, 6.680131188771972e+01,
+             -1.328068155288572e+01];
+    var c = [0, -7.784894002430293e-03, -3.223964580411365e-01,
+             -2.400758277161838e+00, -2.549732539343734e+00,
+             4.374664141464968e+00, 2.938163982698783e+00];
+    var d = [0, 7.784695709041462e-03, 3.224671290700398e-01,
+             2.445134137142996e+00, 3.754408661907416e+00];
+
+    var q, r, result;
+
+    if (p < 0.02425) {
+        q = Math.sqrt(-2 * Math.log(p));
+        result = (((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                 ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else if (p > 0.97575) {
+        q = Math.sqrt(-2 * Math.log(1 - p));
+        result = -(((((c[1] * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) * q + c[6]) /
+                  ((((d[1] * q + d[2]) * q + d[3]) * q + d[4]) * q + 1);
+    } else {
+        q = p - 0.5;
+        r = q * q;
+        result = (((((a[1] * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * r + a[6]) * q /
+                 (((((b[1] * r + b[2]) * r + b[3]) * r + b[4]) * r + b[5]) * r + 1);
+    }
+
+    return result;
+}
+
+// Get axis label with transformation applied
+function getAxisLabel(originalLabel, transformType) {
+    switch(transformType) {
+        case 'log':
+            return 'log(' + originalLabel + ')';
+        case 'z_score':
+            return 'z(' + originalLabel + ')';
+        case 'quantile':
+            return 'quantile(' + originalLabel + ')';
+        case 'inverse_cdf':
+            return 'Φ(' + originalLabel + ')';
+        default:
+            return originalLabel;
+    }
+}
+
+// Setup aspect ratio control for a chart
+// This should be called after the chart is first rendered
+// Uses logarithmic scale for better precision at smaller aspect ratios
+function setupAspectRatioControl(chartId, updateCallback) {
+    var slider = document.getElementById(chartId + '_aspect_ratio_slider');
+    var label = document.getElementById(chartId + '_aspect_ratio_label');
+
+    if (!slider || !label) return; // Not all charts have aspect ratio control
+
+    slider.addEventListener('input', function() {
+        // Convert from log space to linear space
+        var logValue = parseFloat(this.value);
+        var aspectRatio = Math.exp(logValue);
+        label.textContent = aspectRatio.toFixed(2);
+
+        // Get current width of chart div
+        var chartDiv = document.getElementById(chartId);
+        if (!chartDiv) return;
+
+        var width = chartDiv.offsetWidth;
+        var height = width * aspectRatio;
+
+        // Update chart layout with new height
+        Plotly.relayout(chartId, { height: height });
+
+        // Call the optional callback if provided
+        if (updateCallback && typeof updateCallback === 'function') {
+            updateCallback(height);
+        }
+    });
+
+    // Trigger initial sizing
+    var initialLogValue = parseFloat(slider.value);
+    var initialAspectRatio = Math.exp(initialLogValue);
+    label.textContent = initialAspectRatio.toFixed(2);
+    var chartDiv = document.getElementById(chartId);
+    if (chartDiv) {
+        var width = chartDiv.offsetWidth;
+        var height = width * initialAspectRatio;
+        Plotly.relayout(chartId, { height: height });
+    }
+}
+
+// This function parses data from embedded or external sources and returns a Promise
+// Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
+// Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+function loadDataset(dataLabel) {
+    return new Promise(function(resolve, reject) {
+        var dataElement = document.getElementById(dataLabel);
+        if (!dataElement) {
+            reject(new Error('Data element not found: ' + dataLabel));
+            return;
+        }
+
+        var format = dataElement.getAttribute('data-format') || 'csv_embedded';
+        var dataSrc = dataElement.getAttribute('data-src');
+
+        // Handle external JSON files
+        if (format === 'json_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    // Parse dates in JSON data (centralized)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external JSON:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external Parquet files
+        if (format === 'parquet' && dataSrc) {
+            // Wait for parquet-wasm to be loaded first
+            waitForParquet()
+                .then(function() {
+                    return fetch(dataSrc);
+                })
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.arrayBuffer();
+                })
+                .then(function(arrayBuffer) {
+                    // Use parquet-wasm to read the file
+                    var uint8Array = new Uint8Array(arrayBuffer);
+
+                    // readParquet returns an Arrow Table
+                    var wasmTable = window.parquetWasm.readParquet(uint8Array);
+
+                    // Convert to Arrow IPC stream
+                    var ipcStream = wasmTable.intoIPCStream();
+
+                    // Use Apache Arrow JS to read the IPC stream
+                    var arrowTable = window.Arrow.tableFromIPC(ipcStream);
+
+                    // Convert Arrow Table to array of JavaScript objects
+                    var data = [];
+                    for (var i = 0; i < arrowTable.numRows; i++) {
+                        var row = {};
+                        arrowTable.schema.fields.forEach(function(field) {
+                            var column = arrowTable.getChild(field.name);
+                            var value = column.get(i);
+
+                            // Convert BigInt to Number (Arrow returns BigInt for Int64)
+                            if (typeof value === 'bigint') {
+                                value = Number(value);
+                            }
+
+                            row[field.name] = value;
+                        });
+                        data.push(row);
+                    }
+
+                    // Parse dates in Parquet data (centralized date handling)
+                    resolve(parseDatesInData(data));
+                })
+                .catch(function(error) {
+                    console.error('Error loading external Parquet:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle external CSV files
+        if (format === 'csv_external' && dataSrc) {
+            fetch(dataSrc)
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to load ' + dataSrc + ': ' + response.statusText);
+                    }
+                    return response.text();
+                })
+                .then(function(csvText) {
+                    Papa.parse(csvText, {
+                        header: true,
+                        dynamicTyping: true,
+                        skipEmptyLines: true,
+                        complete: function(results) {
+                            // Check for fatal errors only (not warnings)
+                            var fatalErrors = results.errors.filter(function(err) {
+                                return err.type !== 'Delimiter';
+                            });
+
+                            if (fatalErrors.length > 0) {
+                                console.error('CSV parsing errors:', fatalErrors);
+                                reject(fatalErrors);
+                            } else if (results.data && results.data.length > 0) {
+                                // Parse dates in CSV data (centralized)
+                                resolve(parseDatesInData(results.data));
+                            } else {
+                                reject(new Error('No data parsed from CSV'));
+                            }
+                        },
+                        error: function(error) {
+                            console.error('CSV parsing error:', error);
+                            reject(error);
+                        }
+                    });
+                })
+                .catch(function(error) {
+                    console.error('Error loading external CSV:', error);
+                    reject(error);
+                });
+            return;
+        }
+
+        // Handle embedded data
+        var dataText = dataElement.textContent.trim();
+
+        if (format === 'json_embedded') {
+            // Parse JSON data
+            try {
+                var data = JSON.parse(dataText);
+                // Parse dates in JSON data (centralized)
+                resolve(parseDatesInData(data));
+            } catch (error) {
+                console.error('JSON parsing error:', error);
+                reject(error);
+            }
+        } else if (format === 'csv_embedded') {
+            // Parse CSV data using PapaParse
+            Papa.parse(dataText, {
+                header: true,
+                dynamicTyping: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    // Check for fatal errors only (not warnings)
+                    // PapaParse includes non-fatal warnings in errors array
+                    var fatalErrors = results.errors.filter(function(err) {
+                        // Filter out delimiter detection warnings - these aren't fatal
+                        // (common for single-column CSVs)
+                        return err.type !== 'Delimiter';
+                    });
+
+                    if (fatalErrors.length > 0) {
+                        console.error('CSV parsing errors:', fatalErrors);
+                        reject(fatalErrors);
+                    } else if (results.data && results.data.length > 0) {
+                        // Parse dates in CSV data (centralized)
+                        resolve(parseDatesInData(results.data));
+                    } else {
+                        reject(new Error('No data parsed from CSV'));
+                    }
+                },
+                error: function(error) {
+                    console.error('CSV parsing error:', error);
+                    reject(error);
+                }
+            });
+        } else {
+            reject(new Error('Unsupported data format: ' + format));
+        }
+    });
+}
+
+$(function(){
+
+(function() {
+    const notesFile = 'notes/methodology.txt';
+    const template = `Data Sources:
+- Sales data from internal CRM
+
+Processing Steps:
+1. Aggregated daily totals
+2. Calculated cumulative sum
+
+Known Limitations:
+-
+`;
+    const contentDiv = document.getElementById('notes_contentmethodology');
+    const modifiedDiv = document.getElementById('notes_modifiedmethodology');
+
+    fetch(notesFile)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Notes file not found');
+            }
+            // Get last modified time from response headers if available
+            const lastModified = response.headers.get('Last-Modified');
+            return response.text().then(text => ({ text, lastModified }));
+        })
+        .then(({ text, lastModified }) => {
+            const content = text.trim();
+
+            // Check if content is just the template (no user edits)
+            if (content === template.trim() || content === '') {
+                contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            } else {
+                // Escape HTML and preserve newlines
+                const escaped = content
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+                contentDiv.textContent = content;
+            }
+
+            // Display modification time
+            if (lastModified) {
+                const date = new Date(lastModified);
+                modifiedDiv.textContent = 'Last modified: ' + date.toLocaleString();
+            } else {
+                // If no Last-Modified header, try to get file modification time via a second request
+                modifiedDiv.textContent = '';
+            }
+        })
+        .catch(error => {
+            console.warn('Could not load notes file:', error);
+            contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            modifiedDiv.textContent = 'File not found';
+        });
+})();
+(function() {
+    // Configuration
+    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const X_COLS = ['date'];
+    const Y_COLS = ['sales'];
+    const COLOR_COLS = [];
+    const COLOR_MAPS = {};
+    const DEFAULT_X_COL = 'date';
+    const DEFAULT_Y_COL = 'sales';
+    const DEFAULT_COLOR_COL = '__no_color__';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;  // Return all values when no aggregation
+        if (method === 'count') return [values.length];
+        if (method === 'sum') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
+        if (method === 'mean') {
+            const sum = values.reduce((a, b) => a + b, 0);
+            return [sum / values.length];
+        }
+        if (method === 'median') {
+            const sorted = [...values].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...values)];
+        if (method === 'max') return [Math.max(...values)];
+        return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare the actual Date objects
+                    const dateA = xOriginalValues[a];
+                    const dateB = xOriginalValues[b];
+                    return dateA - dateB;  // Date subtraction gives milliseconds difference
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_sales_trend = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_sales_trend');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_sales_trend');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_sales_trend');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_sales_trend');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_sales_trend');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_sales_trend' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_sales_trend');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_sales_trend');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_sales_trend');
+        const facet2Select = document.getElementById('facet2_select_sales_trend');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'sales_trend',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+
+                    // Check if values are Date objects
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
+
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: COLOR_MAP[group.color] || '#000000',
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('sales_trend', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+
+                        // Check if values are Date objects
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
+
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: COLOR_MAP[group.color] || '#000000',
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('sales_trend', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
+
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: COLOR_MAP[group.color] || '#000000',
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('sales_trend', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('sales_data').then(function(data) {
+        allData = data;
+        window.updateChart_sales_trend();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('sales_trend');
+    }).catch(function(error) {
+        console.error('Error loading data for chart sales_trend:', error);
+    });
+})();
+(function() {
+    const notesFile = 'notes/observations.txt';
+    const template = `Key Observations:
+-
+-
+-
+
+Questions to investigate:
+1.
+2.
+`;
+    const contentDiv = document.getElementById('notes_contentobservations');
+    const modifiedDiv = document.getElementById('notes_modifiedobservations');
+
+    fetch(notesFile)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Notes file not found');
+            }
+            // Get last modified time from response headers if available
+            const lastModified = response.headers.get('Last-Modified');
+            return response.text().then(text => ({ text, lastModified }));
+        })
+        .then(({ text, lastModified }) => {
+            const content = text.trim();
+
+            // Check if content is just the template (no user edits)
+            if (content === template.trim() || content === '') {
+                contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            } else {
+                // Escape HTML and preserve newlines
+                const escaped = content
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+                contentDiv.textContent = content;
+            }
+
+            // Display modification time
+            if (lastModified) {
+                const date = new Date(lastModified);
+                modifiedDiv.textContent = 'Last modified: ' + date.toLocaleString();
+            } else {
+                // If no Last-Modified header, try to get file modification time via a second request
+                modifiedDiv.textContent = '';
+            }
+        })
+        .catch(error => {
+            console.warn('Could not load notes file:', error);
+            contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            modifiedDiv.textContent = 'File not found';
+        });
+})();
+(function() {
+    const notesFile = 'notes/conclusions.txt';
+    const template = `Summary:
+
+
+Recommendations:
+1.
+2.
+
+Next Steps:
+-
+`;
+    const contentDiv = document.getElementById('notes_contentconclusions');
+    const modifiedDiv = document.getElementById('notes_modifiedconclusions');
+
+    fetch(notesFile)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Notes file not found');
+            }
+            // Get last modified time from response headers if available
+            const lastModified = response.headers.get('Last-Modified');
+            return response.text().then(text => ({ text, lastModified }));
+        })
+        .then(({ text, lastModified }) => {
+            const content = text.trim();
+
+            // Check if content is just the template (no user edits)
+            if (content === template.trim() || content === '') {
+                contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            } else {
+                // Escape HTML and preserve newlines
+                const escaped = content
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+                contentDiv.textContent = content;
+            }
+
+            // Display modification time
+            if (lastModified) {
+                const date = new Date(lastModified);
+                modifiedDiv.textContent = 'Last modified: ' + date.toLocaleString();
+            } else {
+                // If no Last-Modified header, try to get file modification time via a second request
+                modifiedDiv.textContent = '';
+            }
+        })
+        .catch(error => {
+            console.warn('Could not load notes file:', error);
+            contentDiv.innerHTML = '<span class="notes-no-content">No notes provided</span>';
+            modifiedDiv.textContent = 'File not found';
+        });
+})();
+
+
+});
+</script>
+
+<!-- DATASETS -->
+
+<script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script>
+
+<!-- ACTUAL CONTENT -->
+
+<h1>Q1 2024 Sales Analysis</h1>
+<p></p>
+
+    <div class="textblock-content">
+        <h1>Sales Analysis Report</h1><p>This report analyzes quarterly sales trends with space for analyst commentary.</p>
+    </div>
+<br>
+<hr>
+<br>
+<div class="notes-container" id="notes_containermethodology">
+    <div class="notes-header">
+        <h4 class="notes-heading">Methodology</h4>
+        <span class="notes-modified" id="notes_modifiedmethodology">Loading...</span>
+    </div>
+    <div class="notes-content" id="notes_contentmethodology">Loading notes...</div>
+    <div class="notes-file-info">
+        Edit file: <code>notes/methodology.txt</code>
+    </div>
+</div>
+<br>
+<hr>
+<br>
+<h2>Quarterly Sales Trend</h2>
+<p>Daily cumulative sales data</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_sales_trend">Aggregator: </label>
+                <select id="aggregator_select_sales_trend" onchange="updateChart_sales_trend()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+                <option value="sum">sum</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_sales_trend_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">date</span>
+    </div>
+    <div>
+        <label for="x_transform_select_sales_trend">X Transform: </label>
+        <select id="x_transform_select_sales_trend" style="padding: 5px 10px;" onchange="updateChart_sales_trend()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">sales</span>
+    </div>
+    <div>
+        <label for="y_transform_select_sales_trend">Y Transform: </label>
+        <select id="y_transform_select_sales_trend" style="padding: 5px 10px;" onchange="updateChart_sales_trend()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="sales_trend_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="sales_trend_aspect_ratio_label">0.4</span>
+    <input type="range" id="sales_trend_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="sales_trend"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
+<hr>
+<br>
+<div class="notes-container" id="notes_containerobservations">
+    <div class="notes-header">
+        <h4 class="notes-heading">Analysis Notes</h4>
+        <span class="notes-modified" id="notes_modifiedobservations">Loading...</span>
+    </div>
+    <div class="notes-content" id="notes_contentobservations">Loading notes...</div>
+    <div class="notes-file-info">
+        Edit file: <code>notes/observations.txt</code>
+    </div>
+</div>
+<br>
+<hr>
+<br>
+<div class="notes-container" id="notes_containerconclusions">
+    <div class="notes-header">
+        <h4 class="notes-heading">Conclusions</h4>
+        <span class="notes-modified" id="notes_modifiedconclusions">Loading...</span>
+    </div>
+    <div class="notes-content" id="notes_contentconclusions">Loading notes...</div>
+    <div class="notes-file-info">
+        Edit file: <code>notes/conclusions.txt</code>
+    </div>
+</div>
+
+
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
+</body>
+</html>

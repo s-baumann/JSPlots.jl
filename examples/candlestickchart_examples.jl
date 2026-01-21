@@ -159,7 +159,12 @@ page = JSPlotPage(
 
 # Save to file
 output_path = "generated_html_examples/candlestickchart_examples.html"
-create_html(page, output_path)
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="candlestickchart_examples.html",
+                               description="CandlestickChart Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Financial Charts", :page_type => "Chart Tutorial"))
+create_html(page, output_path;
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("✓ CandlestickChart examples saved to: $output_path")
 println("Open this file in a web browser to view the interactive examples.")

@@ -3,6 +3,7 @@
 
 using JSPlots
 using DataFrames
+using Dates
 using Random
 using LinearAlgebra
 
@@ -98,8 +99,8 @@ distance_rows = []
 for i in 1:n_assets
     for j in (i+1):n_assets
         push!(distance_rows, (
-            entity1 = asset_names[i],
-            entity2 = asset_names[j],
+            node1 = asset_names[i],
+            node2 = asset_names[j],
             distance = 1 - abs(true_corr[i, j])
         ))
     end
@@ -212,6 +213,81 @@ chart5 = TSNEPlot(:minimal_tsne, minimal_df, :minimal_data;
 )
 
 # ============================================================================
+# Example 6: Continuous Color Gradient
+# ============================================================================
+# Demonstrates continuous coloring based on numeric values
+
+Random.seed!(456)
+
+# Create data with continuous metrics that can be colored
+n_items = 60
+gradient_df = DataFrame(
+    item = ["Item_$(lpad(i, 2, '0'))" for i in 1:n_items],
+    # Create clusters with different value ranges
+    cluster = repeat(["A", "B", "C"], inner=20),
+    # Numeric features for positioning
+    feature_x = vcat(randn(20) .* 2, randn(20) .* 2 .+ 6, randn(20) .* 2 .+ 3),
+    feature_y = vcat(randn(20) .* 2 .+ 5, randn(20) .* 2, randn(20) .* 2 .+ 8),
+    # Continuous metrics for coloring
+    temperature = vcat(
+        rand(20) .* 20 .+ 10,   # Cluster A: 10-30 (cool)
+        rand(20) .* 20 .+ 50,   # Cluster B: 50-70 (warm)
+        rand(20) .* 20 .+ 30    # Cluster C: 30-50 (medium)
+    ),
+    performance_score = rand(n_items) .* 100,  # 0-100 performance
+    risk_level = rand(n_items)  # 0-1 risk metric
+)
+
+# Define color gradients for the continuous metrics
+# Temperature: blue (cold) -> yellow -> red (hot)
+temp_gradient = Dict(
+    0.0 => "#3498db",   # Blue (cold)
+    25.0 => "#2ecc71",  # Green
+    50.0 => "#f1c40f",  # Yellow
+    75.0 => "#e67e22",  # Orange
+    100.0 => "#e74c3c"  # Red (hot)
+)
+
+# Performance: red (bad) -> yellow -> green (good)
+perf_gradient = Dict(
+    0.0 => "#e74c3c",   # Red (poor)
+    50.0 => "#f1c40f",  # Yellow (average)
+    100.0 => "#27ae60"  # Green (excellent)
+)
+
+# Risk: green (safe) -> red (risky)
+risk_gradient = Dict(
+    0.0 => "#27ae60",   # Green (low risk)
+    0.5 => "#f39c12",   # Orange (medium)
+    1.0 => "#c0392b"    # Red (high risk)
+)
+
+# Combined colour_map for multiple columns
+colour_map = Dict(
+    "temperature" => temp_gradient,
+    "performance_score" => perf_gradient,
+    "risk_level" => risk_gradient
+)
+
+chart6 = TSNEPlot(:gradient_tsne, gradient_df, :gradient_data;
+    entity_col = :item,
+    feature_cols = [:feature_x, :feature_y],
+    color_cols = [:cluster, :temperature, :performance_score, :risk_level],
+    tooltip_cols = [:temperature, :performance_score, :risk_level],
+    colour_map = colour_map,
+    extrapolate_colors = true,
+    perplexity = 10.0,
+    learning_rate = 150.0,
+    title = "Example 6: Continuous Color Gradients",
+    notes = """Points can be colored by continuous numeric values with smooth gradients.
+    Select different color columns to see:
+    • temperature: blue→green→yellow→orange→red (cold to hot)
+    • performance_score: red→yellow→green (poor to excellent)
+    • risk_level: green→orange→red (safe to risky)
+    • cluster: categorical coloring for comparison"""
+)
+
+# ============================================================================
 # Create Pages
 # ============================================================================
 
@@ -255,6 +331,14 @@ page5 = JSPlotPage(
     dataformat = :csv_external
 )
 
+page6 = JSPlotPage(
+    Dict{Symbol, Any}(:gradient_data => gradient_df),
+    [chart6];
+    tab_title = "Continuous Colors",
+    page_header = "t-SNE: Continuous Color Gradients",
+    dataformat = :csv_external
+)
+
 # Create multi-page report
 report = Pages(
     [TextBlock("""
@@ -271,9 +355,10 @@ report = Pages(
         <li><strong>Color by:</strong> Change node coloring without affecting positions</li>
         <li><strong>Perplexity:</strong> Controls local vs global structure (lower = more local)</li>
         <li><strong>Learning Rate:</strong> Controls step size (higher = faster but less stable)</li>
+        <li><strong>Continuous Color Gradients:</strong> Numeric columns can display smooth color transitions</li>
     </ul>
     """)],
-    [page1, page2, page3, page4, page5];
+    [page1, page2, page3, page4, page5, page6];
     tab_title = "t-SNE Examples",
     page_header = "t-SNE Visualization Examples",
     dataformat = :csv_external
@@ -281,7 +366,12 @@ report = Pages(
 
 # Generate HTML
 output_path = "generated_html_examples/tsneplot_examples.html"
-create_html(report, output_path)
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="../tsneplot_examples", html_filename="tsneplot_examples.html",
+                               description="TSNEPlot Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Variable Relationship Charts", :page_type => "Chart Tutorial"))
+create_html(report, output_path;
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("TSNEPlot examples created at: $output_path")
 println("Done!")

@@ -1,4 +1,4 @@
-using RefinedSlippage, LinearAlgebra, DataFrames, DataFramesMeta, Random, HighFrequencyCovariance, StableRNGs, Statistics, Distributions
+using RefinedSlippage, LinearAlgebra, DataFrames, DataFramesMeta, Random, HighFrequencyCovariance, StableRNGs, Statistics, Distributions, Dates
 
 # =============================================================================
 # Configuration
@@ -176,7 +176,12 @@ page = JSPlotPage(
 #   └── open.sh, open.bat, README.md
 output_dir = "generated_html_examples"
 mkpath(output_dir)
-create_html(page, joinpath(output_dir, "execution_analysis.html"))
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="../execution_analysis", html_filename="execution_analysis.html",
+                               description="ExecutionPlot Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Financial Charts", :page_type => "Chart Tutorial"))
+create_html(page, joinpath(output_dir, "execution_analysis.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "=" ^ 80)
 println("ExecutionPlot example created successfully!")

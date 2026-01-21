@@ -161,8 +161,9 @@ function waitForParquet() {
 
 // Centralized data loading function
 // Centralized date parsing function
-// Converts ISO date strings to JavaScript Date objects
+// Converts various date formats to JavaScript Date objects
 // This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
 function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
@@ -171,43 +172,119 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date and time columns
-    var firstRow = data[0];
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
     var dateColumns = [];
     var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
 
-    for (var key in firstRow) {
-        if (firstRow.hasOwnProperty(key)) {
-            var value = firstRow[key];
-            if (typeof value === 'string') {
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
-                    dateColumns.push(key);
+                    stringDateCount++;
                 } else if (timePattern.test(value)) {
-                    timeColumns.push(key);
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
                 }
             }
         }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
     }
 
-    // If no date or time columns found, return data unchanged
-    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
-
-    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    // Convert values in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
-                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
-                    newRow[key] = new Date(row[key]);
-                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
                     // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
-                    var parts = row[key].split(':');
+                    var parts = value.split(':');
                     var hours = parseInt(parts[0], 10);
                     var minutes = parseInt(parts[1], 10);
-                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    var seconds = parseFloat(parts[2]);
                     newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
                 } else {
-                    newRow[key] = row[key];
+                    newRow[key] = value;
                 }
             }
         }
@@ -2173,6 +2250,27 @@ date,temperature,humidity,city
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#230">
     <div class="codeblock-header">
@@ -2191,6 +2289,7 @@ date,temperature,humidity,city
         category = repeat([&quot;Tech&quot;, &quot;Finance&quot;], inner=25)
     )
 end</code></pre>
+    
     <div class="codeblock-notes">This function generates random walk stock price data</div>
 </div>
 <br>
@@ -2321,6 +2420,27 @@ end</code></pre>
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#231">
     <div class="codeblock-header">
@@ -2338,6 +2458,7 @@ end</code></pre>
         title = &quot;Sales by Product&quot;
     ), df
 end</code></pre>
+    
     <div class="codeblock-notes">This function creates a pie chart showing sales by product</div>
 </div>
 <br>
@@ -2405,6 +2526,27 @@ end</code></pre>
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#232">
     <div class="codeblock-header">
@@ -2434,6 +2576,7 @@ scatter = ScatterPlot(:my_scatter, df, :my_data;
 # Step 3: Export to HTML
 create_html(scatter, &quot;output.html&quot;)
 </code></pre>
+    
     
 </div>
 <br>
@@ -2497,6 +2640,27 @@ create_html(scatter, &quot;output.html&quot;)
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#233">
     <div class="codeblock-header">
@@ -2512,6 +2676,7 @@ create_html(scatter, &quot;output.html&quot;)
     )
     return df
 end</code></pre>
+    
     <div class="codeblock-notes">Generate synthetic weather data for analysis</div>
 </div>
 <br>
@@ -2567,6 +2732,27 @@ end</code></pre>
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#234">
     <div class="codeblock-header">
@@ -2580,6 +2766,7 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
     notes = &quot;Temperature (°C) and Humidity (%)&quot;
 )
 </code></pre>
+    
     <div class="codeblock-notes">Code to create the weather visualization</div>
 </div>
 <br>
@@ -2720,6 +2907,27 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#235">
     <div class="codeblock-header">
@@ -2756,6 +2964,7 @@ numbers = [64, 34, 25, 12, 22, 11, 90]
 sorted_numbers = merge_sort(numbers)
 print(f&quot;Sorted array: {sorted_numbers}&quot;)
 </code></pre>
+    
     <div class="codeblock-notes">Python merge sort implementation</div>
 </div>
 <br>
@@ -2813,6 +3022,27 @@ print(f&quot;Sorted array: {sorted_numbers}&quot;)
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#236">
     <div class="codeblock-header">
@@ -2840,6 +3070,7 @@ new_data &lt;- data.frame(cyl = c(4, 6, 8), hp = c(110, 150, 200), wt = c(2.5, 3
 predictions &lt;- predict(model, newdata = new_data)
 print(predictions)
 </code></pre>
+    
     <div class="codeblock-notes">R linear regression analysis on mtcars dataset</div>
 </div>
 <br>
@@ -2897,6 +3128,27 @@ print(predictions)
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#237">
     <div class="codeblock-header">
@@ -2936,6 +3188,7 @@ FROM customer_segments
 GROUP BY segment
 ORDER BY segment_revenue DESC;
 </code></pre>
+    
     <div class="codeblock-notes">SQL customer segmentation and analytics query</div>
 </div>
 <br>
@@ -2992,6 +3245,27 @@ ORDER BY segment_revenue DESC;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #24292e;
+}
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
 }
 </style>
 <div class="codeblock-container" id="##codeblock#238">
@@ -3050,6 +3324,7 @@ int main() {
     return 0;
 }
 </code></pre>
+    
     <div class="codeblock-notes">C++ template stack implementation</div>
 </div>
 <br>
@@ -3106,6 +3381,27 @@ int main() {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #24292e;
+}
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
 }
 </style>
 <div class="codeblock-container" id="##codeblock#239">
@@ -3175,6 +3471,7 @@ async function displayTopUsers() {
 
 displayTopUsers();
 </code></pre>
+    
     <div class="codeblock-notes">Modern JavaScript with async/await and array methods</div>
 </div>
 <br>
@@ -3231,6 +3528,27 @@ displayTopUsers();
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #24292e;
+}
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
 }
 </style>
 <div class="codeblock-container" id="##codeblock#240">
@@ -3306,6 +3624,7 @@ fn main() {
     }
 }
 </code></pre>
+    
     <div class="codeblock-notes">Demonstrates Rust's ownership, pattern matching, and functional iterators</div>
 </div>
 <br>
@@ -3363,6 +3682,27 @@ fn main() {
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#241">
     <div class="codeblock-header">
@@ -3386,6 +3726,7 @@ fn main() {
     return nothing  # Not found
 end
 </code></pre>
+    
     <div class="codeblock-notes">Binary search in Julia</div>
 </div>
 <br>
@@ -3435,6 +3776,27 @@ end
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#242">
     <div class="codeblock-header">
@@ -3455,6 +3817,7 @@ end
 
     return None  # Not found
 </code></pre>
+    
     <div class="codeblock-notes">Binary search in Python</div>
 </div>
 <br>
@@ -3504,6 +3867,27 @@ end
     font-size: 14px;
     color: #24292e;
 }
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
+}
 </style>
 <div class="codeblock-container" id="##codeblock#243">
     <div class="codeblock-header">
@@ -3528,6 +3912,7 @@ end
     return -1;  // Not found
 }
 </code></pre>
+    
     <div class="codeblock-notes">Binary search in C++</div>
 </div>
 <br>

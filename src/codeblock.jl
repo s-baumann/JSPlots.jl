@@ -37,6 +37,7 @@ const CODEBLOCK_TEMPLATE = """
         <span class="codeblock-language">___LANGUAGE_DISPLAY___</span>
     </div>
     <pre><code class="___LANGUAGE_CLASS___">___CODE_CONTENT___</code></pre>
+    ___FILE_METADATA___
     ___NOTES_SECTION___
 </div>
 """
@@ -85,6 +86,27 @@ const CODEBLOCK_STYLE = """
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #24292e;
+}
+
+.codeblock-file-metadata {
+    padding: 8px 16px;
+    background-color: #f1f3f5;
+    border-top: 1px solid #e1e4e8;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 11px;
+    color: #6a737d;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.codeblock-file-metadata span {
+    white-space: nowrap;
+}
+
+.codeblock-file-metadata .file-label {
+    color: #959da5;
+    margin-right: 4px;
 }
 </style>
 """
@@ -267,11 +289,35 @@ $(func)"""
 end
 
 """
-    generate_codeblock_html(code::String, language::String, notes::String, chart_title::Symbol) -> String
+    generate_file_metadata_html(file_path::String) -> String
+
+Generate HTML for displaying file metadata (path, name, modification time).
+"""
+function generate_file_metadata_html(file_path::String)
+    if !isfile(file_path)
+        return ""
+    end
+
+    file_name = basename(file_path)
+    abs_path = abspath(file_path)
+    mod_time = Dates.unix2datetime(mtime(file_path))
+    mod_time_str = Dates.format(mod_time, "yyyy-mm-dd HH:MM:SS")
+
+    return """
+    <div class="codeblock-file-metadata">
+        <span><span class="file-label">File:</span>$(file_name)</span>
+        <span><span class="file-label">Path:</span>$(abs_path)</span>
+        <span><span class="file-label">Modified:</span>$(mod_time_str)</span>
+    </div>
+    """
+end
+
+"""
+    generate_codeblock_html(code::String, language::String, notes::String, chart_title::Symbol; file_path::Union{String, Nothing}=nothing) -> String
 
 Generate HTML for displaying a code block with syntax highlighting.
 """
-function generate_codeblock_html(code::String, language::String, notes::String, chart_title::Symbol)
+function generate_codeblock_html(code::String, language::String, notes::String, chart_title::Symbol; file_path::Union{String, Nothing}=nothing)
     # Escape HTML in code
     code_escaped = replace(code, "&" => "&amp;")
     code_escaped = replace(code_escaped, "<" => "&lt;")
@@ -287,6 +333,13 @@ function generate_codeblock_html(code::String, language::String, notes::String, 
         "language-plaintext"
     end
 
+    # Generate file metadata section if file path provided
+    file_metadata_html = if !isnothing(file_path) && isfile(file_path)
+        generate_file_metadata_html(file_path)
+    else
+        ""
+    end
+
     # Generate notes section if provided
     notes_html = if isempty(notes)
         ""
@@ -299,6 +352,7 @@ function generate_codeblock_html(code::String, language::String, notes::String, 
     html = replace(html, "___CODE_CONTENT___" => code_escaped)
     html = replace(html, "___LANGUAGE_DISPLAY___" => language)
     html = replace(html, "___LANGUAGE_CLASS___" => lang_class)
+    html = replace(html, "___FILE_METADATA___" => file_metadata_html)
     html = replace(html, "___NOTES_SECTION___" => notes_html)
 
     return CODEBLOCK_STYLE * html
@@ -365,7 +419,7 @@ function CodeBlock(file_path::String; language::String="julia", notes::String=""
     end
 
     code_content = read(file_path, String)
-    appearance_html = generate_codeblock_html(code_content, language, notes, chart_title)
+    appearance_html = generate_codeblock_html(code_content, language, notes, chart_title; file_path=file_path)
 
     # Only Julia files can be executable
     exec = if lowercase(language) == "julia" && executable
@@ -375,6 +429,109 @@ function CodeBlock(file_path::String; language::String="julia", notes::String=""
     end
 
     return CodeBlock(chart_title, code_content, language, exec, notes, appearance_html, "")
+end
+
+# Mapping of file extensions to languages
+const EXTENSION_TO_LANGUAGE = Dict(
+    ".jl" => "julia",
+    ".py" => "python",
+    ".r" => "r",
+    ".R" => "r",
+    ".cpp" => "c++",
+    ".cxx" => "c++",
+    ".cc" => "c++",
+    ".c" => "c",
+    ".h" => "c",
+    ".hpp" => "c++",
+    ".java" => "java",
+    ".js" => "javascript",
+    ".ts" => "javascript",
+    ".sql" => "sql",
+    ".rs" => "rust"
+)
+
+"""
+    detect_language_from_extension(file_path::String) -> String
+
+Detect programming language from file extension.
+Returns "plaintext" if extension is not recognized.
+"""
+function detect_language_from_extension(file_path::String)
+    ext = splitext(file_path)[2]
+    return get(EXTENSION_TO_LANGUAGE, ext, "plaintext")
+end
+
+"""
+    CodeBlock(file_paths::Vector{String}; languages::Union{Vector{String}, Nothing}=nothing, notes::String="", chart_title::Symbol=gensym("codeblock"))
+
+Create a Vector of CodeBlocks from multiple source files.
+
+Languages are auto-detected from file extensions if not specified.
+Each file will be displayed with its file metadata (path, name, modification time).
+
+# Parameters
+- `file_paths::Vector{String}`: Paths to the source files
+- `languages::Union{Vector{String}, Nothing}`: Programming languages for each file (default: auto-detect from extension)
+- `notes::String`: Optional notes to display on the last CodeBlock (default: "")
+- `chart_title::Symbol`: Base identifier - each CodeBlock gets a unique suffix (default: auto-generated)
+
+# Supported file extensions
+- `.jl` → Julia
+- `.py` → Python
+- `.r`, `.R` → R
+- `.cpp`, `.cxx`, `.cc`, `.hpp` → C++
+- `.c`, `.h` → C
+- `.java` → Java
+- `.js`, `.ts` → JavaScript
+- `.sql` → SQL
+- `.rs` → Rust
+
+# Examples
+```julia
+# Auto-detect languages from extensions
+cbs = CodeBlock(["src/main.jl", "lib/utils.py", "queries/data.sql"])
+
+# Specify languages explicitly
+cbs = CodeBlock(["file1.txt", "file2.txt"], languages=["julia", "python"])
+
+# Add to a page
+page = JSPlotPage(Dict{Symbol,Any}(), cbs)
+```
+"""
+function CodeBlock(file_paths::Vector{String}; languages::Union{Vector{String}, Nothing}=nothing, notes::String="", chart_title::Symbol=gensym("codeblock"))
+    if isempty(file_paths)
+        error("file_paths cannot be empty")
+    end
+
+    # Validate languages if provided
+    if !isnothing(languages) && length(languages) != length(file_paths)
+        error("Length of languages ($(length(languages))) must match length of file_paths ($(length(file_paths)))")
+    end
+
+    codeblocks = CodeBlock[]
+
+    for (i, file_path) in enumerate(file_paths)
+        if !isfile(file_path)
+            error("File not found: $(file_path)")
+        end
+
+        # Determine language
+        lang = if !isnothing(languages)
+            languages[i]
+        else
+            detect_language_from_extension(file_path)
+        end
+
+        # Only add notes to the last CodeBlock
+        file_notes = (i == length(file_paths)) ? notes : ""
+
+        # Create unique chart title for each file
+        file_chart_title = Symbol(string(chart_title) * "_" * string(i))
+
+        push!(codeblocks, CodeBlock(file_path; language=lang, notes=file_notes, chart_title=file_chart_title, executable=false))
+    end
+
+    return codeblocks
 end
 
 """

@@ -12,7 +12,6 @@ You can see below an overview of all of the plots that are available. You can al
 All of this documentation was made in JSPlots.jl itself. <a href=\"https://github.com/s-baumann/JSPlots.jl/blob/main/examples/z_general_tutorial.jl\" style=\"color: blue; font-weight: bold;\">See here for the script that generates it</a>.
 """)
 
-
 ### Theoretical Pages
 
 
@@ -443,6 +442,65 @@ pages_theory_page = JSPlotPage(
     dataformat = :csv_embedded
 )
 
+# ReportIndex page - explaining what it is and showing all examples
+reportindex_theory = TextBlock("""
+<h2>ReportIndex</h2>
+<p>ReportIndex creates an interactive navigation component for browsing collections of HTML reports.
+It reads from a CSV manifest file containing metadata about each report page, and generates a
+searchable, sortable, and groupable index.</p>
+
+<h3>Manifest Format</h3>
+<p>The manifest CSV file should contain columns describing each report:</p>
+<ul>
+    <li><strong>path:</strong> Directory path to the HTML file</li>
+    <li><strong>html_filename:</strong> Name of the HTML file</li>
+    <li><strong>description:</strong> Human-readable description shown in the index</li>
+    <li><strong>date:</strong> Date the report was created/updated</li>
+    <li><strong>Additional columns:</strong> Any extra columns (like chart_type, page_type) can be used for grouping and filtering</li>
+</ul>
+
+<h3>Usage</h3>
+<pre><code># Create a manifest entry when generating HTML
+manifest_entry = ManifestEntry(
+    path="..",
+    html_filename="my_chart.html",
+    description="My Chart Example",
+    date=today(),
+    extra_columns=Dict(:chart_type => "2D Charts", :page_type => "Chart Tutorial")
+)
+create_html(page, "generated_html_examples/my_chart.html";
+    manifest="generated_html_examples/z_general_example/manifest.csv",
+    manifest_entry=manifest_entry)
+
+# Later, create an index page from the manifest
+index = ReportIndex(:my_index, "path/to/manifest.csv",
+    title = "My Reports",
+    default_group_by = :chart_type,
+    default_sort_by = :description
+)</code></pre>
+
+The useful feature of ReportIndex over LinkList is that because ReportIndex comes from an external csv file you can add to that external csv file on a regular basis. For instance you can do a new report every day. Then you can have a different document that will link to all of them.
+
+<h2>JSPlots Example Files</h2>
+<p>Below is an interactive index of all JSPlots example files generated using ReportIndex.
+Click on any link to view the example. Use the dropdowns to group and sort the examples.</p>
+""")
+
+examples_index = ReportIndex(:examples_gallery, "manifest.csv",
+    title = "Links to all example files",
+    default_group_by = :page_type,
+    default_then_group_by = :chart_type,
+    default_sort_by = :description
+)
+
+reportindex_theory_page = JSPlotPage(
+    Dict{Symbol, Any}(),
+    [reportindex_theory, examples_index],
+    tab_title="ReportIndex & Example Files",
+    page_header = "ReportIndex & Example Files",
+    notes = "ReportIndex creates interactive navigation for collections of HTML reports",
+    dataformat = :csv_embedded
+)
 
 
 ### Plot Types
@@ -608,6 +666,21 @@ You can write whatever HTML you want and put it in a TextBlock which will put it
     <p> See here for <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html" style="color: blue; font-weight: bold;">TextBlock examples</a>.</p>
 </div>
 """)
+
+# Notes
+notes_explanation = TextBlock("""
+<h1>Notes</h1>
+<p><strong>Notes</strong> provides editable text areas for adding commentary to your visualizations. When using external data formats (parquet, csv_external, json_external), Notes creates text files that you can edit after generating the HTML. Your edits will appear in the document when refreshed.</p>
+<p> The idea is sometimes you will want to make a report, interpret it, and then store your observations as part of the report. You can always do this directly by editing the HTML but note is designed to make it easier.</p>
+<p>After generating the HTML, edit the text file in the <code>notes/</code> folder and refresh the page to see your notes.</p>
+<p>See the <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/notes_example/notes_example.html" style="color: blue; font-weight: bold;">Notes example</a> for a demonstration.</p>
+""")
+
+notes_example = Notes(
+    template = "Add your observations about this tutorial here...",
+    heading = "Tutorial Notes",
+    textfilename = "tutorial_notes.txt"
+)
 
 # ===== 2D Plotting =====
 plotting_2d_section = TextBlock("<h1>Two-Dimensional Plots</h1>")
@@ -1675,18 +1748,27 @@ all_data = Dict{Symbol, Any}(
 # Merge execution data into all_data
 merge!(all_data, exec_data_dict)
 
+text_plot_page =  JSPlotPage(
+    all_data,
+    [textblock_example,
+        notes_explanation,
+        notes_example,
+        code_chart,
+        linklist_intro,
+        linklist_chart],
+    tab_title="Text Data",
+    page_header = "Text Data",
+    notes = "This shows examples of TextBlock, Notes, LinkList, CodeBlock.",
+    dataformat = :parquet)
+
 tabular_plot_page =  JSPlotPage(
     all_data,
     [dataset_intro,
-        code_chart,
         pivot_chart,
-        table_chart,
-        linklist_intro,
-        linklist_chart,
-        textblock_example],
-    tab_title="Tabular and Text Data",
-    page_header = "Tabular and Text Data",
-    notes = "This shows examples of TextBlock, LinkList, CodeBlock, DataTable and PivotTable.",
+        table_chart],
+    tab_title="Tabular Data",
+    page_header = "Tabular Data",
+    notes = "This shows examples of DataTable and PivotTable.",
     dataformat = :parquet
 )
 
@@ -1763,8 +1845,8 @@ gis_plot_page = JSPlotPage(
     dataformat = :parquet
 )
 
-subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page],
-    "Plot Types" => JSPlotPage[tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page, financial_plot_page, gis_plot_page])
+subpages = OrderedCollections.OrderedDict{String, Vector{JSPlotPage}}("Coding Practices" => JSPlotPage[coding_practices_theory_page, dataformat_theory_page, pages_theory_page, reportindex_theory_page],
+    "Plot Types" => JSPlotPage[text_plot_page, tabular_plot_page, two_d_plot_page, distributional_plot_page, three_d_plot_page, images_page, variable_relationships_page, situational_plot_page, financial_plot_page, gis_plot_page])
 
 
 # Create final Pages object with all pages including the new theoretical ones
@@ -1777,7 +1859,12 @@ pagess = Pages(
 )
 
 # Generate HTML
-create_html(pagess, "generated_html_examples/z_general_example.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path=".", html_filename="z_general_example.html",
+                               description="JSPlots.jl Documentation", date=today(),
+                               extra_columns=Dict(:chart_type => "Documentation", :page_type => "Documentation"))
+create_html(pagess, "generated_html_examples/z_general_example.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "="^70)
 println("Comprehensive Tutorial created successfully!")

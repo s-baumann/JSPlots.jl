@@ -58,6 +58,10 @@ using Random
         include("chart_tests/test_textblock.jl")
     end
 
+    @testset "Notes Tests" begin
+        include("chart_tests/test_notes.jl")
+    end
+
     @testset "CodeBlock Tests" begin
         include("chart_tests/test_codeblock.jl")
     end
@@ -128,6 +132,10 @@ using Random
 
     @testset "Pages Tests" begin
         include("chart_tests/test_pages.jl")
+    end
+
+    @testset "ReportIndex Tests" begin
+        include("chart_tests/test_reportindex.jl")
     end
 
     @testset "Data Formats and HTML Generation Tests" begin

@@ -18,9 +18,11 @@ allowing users to interactively adjust parameters and observe the optimization p
 - `entity_col::Symbol`: Column identifying each entity/point (default: `:entity`)
 - `label_col::Union{Symbol, Nothing}`: Column for display labels (default: uses entity_col)
 - `feature_cols::Union{Vector{Symbol}, Nothing}`: Initial columns for distance calculation (default: all numeric)
-- `distance_matrix::Bool`: If true, df is a distance/proximity matrix (default: `false`)
+- `distance_matrix::Bool`: If true, df is a distance/proximity matrix with columns `node1`, `node2`, `distance` (default: `false`)
 - `color_cols::Vector{Symbol}`: Columns available for coloring nodes (default: `Symbol[]`)
 - `tooltip_cols::Vector{Symbol}`: Additional columns to show in tooltips (default: `Symbol[]`)
+- `colour_map::Union{Missing,Dict{Float64,String},Dict{String,Dict{Float64,String}}}`: Color gradient for continuous variables (default: `missing`)
+- `extrapolate_colors::Bool`: Whether to extrapolate colors beyond gradient stops (default: `false`, clamps to min/max colors)
 - `perplexity::Float64`: t-SNE perplexity parameter (default: `30.0`)
 - `learning_rate::Float64`: t-SNE learning rate (default: `200.0`)
 - `title::String`: Chart title (default: `"t-SNE Visualization"`)
@@ -33,8 +35,14 @@ allowing users to interactively adjust parameters and observe the optimization p
 - Step forward one iteration at a time
 - Run until convergence with adjustable threshold
 - Drag nodes to manually reposition
-- Color nodes by categorical variables
+- Color nodes by categorical or continuous variables (with gradient support)
 - Hover tooltips with entity details
+
+# Data Format for Distance Matrix
+When `distance_matrix=true`, the DataFrame should have columns:
+- `node1`: First node/entity name
+- `node2`: Second node/entity name
+- `distance`: Distance or dissimilarity value between the nodes
 
 # Example
 ```julia
@@ -68,6 +76,8 @@ struct TSNEPlot <: JSPlotsType
                       distance_matrix::Bool = false,
                       color_cols::Vector{Symbol} = Symbol[],
                       tooltip_cols::Vector{Symbol} = Symbol[],
+                      colour_map::Union{Missing,Dict{Float64,String},Dict{String,Dict{Float64,String}}} = missing,
+                      extrapolate_colors::Bool = false,
                       perplexity::Float64 = 30.0,
                       learning_rate::Float64 = 200.0,
                       title::String = "t-SNE Visualization",
@@ -78,13 +88,13 @@ struct TSNEPlot <: JSPlotsType
 
         # Validate based on data format
         if distance_matrix
-            required_cols = [:entity1, :entity2, :distance]
+            required_cols = [:node1, :node2, :distance]
             for col in required_cols
                 if !(col in df_col_names)
-                    error("Distance matrix must have column: $col")
+                    error("Distance matrix must have columns: node1, node2, distance. Missing: $col")
                 end
             end
-            entities = unique(vcat(df.entity1, df.entity2))
+            entities = unique(vcat(df.node1, df.node2))
             all_numeric_cols = Symbol[]
             initial_feature_cols = Symbol[]
         else
@@ -147,6 +157,40 @@ struct TSNEPlot <: JSPlotsType
 
         all_tooltip_cols = vcat(valid_color_cols, valid_tooltip_cols)
 
+        # Detect continuous vs discrete color columns
+        continuous_cols = Symbol[]
+        discrete_cols = Symbol[]
+        for col in valid_color_cols
+            if col in df_col_names
+                col_values = df[!, col]
+                non_missing = filter(x -> !ismissing(x), col_values)
+                if !isempty(non_missing) && all(x -> x isa Number, non_missing)
+                    push!(continuous_cols, col)
+                else
+                    push!(discrete_cols, col)
+                end
+            else
+                push!(discrete_cols, col)
+            end
+        end
+
+        # Validate colour_map structure if provided
+        if !ismissing(colour_map)
+            if colour_map isa Dict{Float64,String}
+                if length(colour_map) < 2
+                    error("colour_map must have at least 2 gradient stops")
+                end
+            elseif colour_map isa Dict{String,Dict{Float64,String}}
+                for (var_name, gradient) in colour_map
+                    if length(gradient) < 2
+                        error("colour_map gradient for variable '$var_name' must have at least 2 stops")
+                    end
+                end
+            else
+                error("colour_map must be Dict{Float64,String} or Dict{String,Dict{Float64,String}}")
+            end
+        end
+
         # JSON for JS
         all_numeric_cols_json = JSON.json([String(c) for c in all_numeric_cols])
         initial_feature_cols_json = JSON.json([String(c) for c in initial_feature_cols])
@@ -154,14 +198,16 @@ struct TSNEPlot <: JSPlotsType
         # Build HTML
         appearance_html = build_tsne_appearance_html(
             chart_title_str, title, notes,
-            valid_color_cols, perplexity, learning_rate, all_tooltip_cols, distance_matrix
+            valid_color_cols, perplexity, learning_rate, all_tooltip_cols, distance_matrix,
+            continuous_cols, discrete_cols
         )
 
         functional_html = build_tsne_functional_html(
             chart_title_str, data_label,
             String(entity_col), String(actual_label_col),
             all_numeric_cols_json, initial_feature_cols_json, distance_matrix,
-            valid_color_cols, perplexity, learning_rate, all_tooltip_cols
+            valid_color_cols, perplexity, learning_rate, all_tooltip_cols,
+            continuous_cols, discrete_cols, colour_map, extrapolate_colors
         )
 
         return new(chart_title, data_label, functional_html, appearance_html)
@@ -169,18 +215,30 @@ struct TSNEPlot <: JSPlotsType
 end
 
 function build_tsne_appearance_html(chart_title_str, title, notes,
-                                     color_cols, perplexity, learning_rate, tooltip_cols, distance_matrix)
+                                     color_cols, perplexity, learning_rate, tooltip_cols, distance_matrix,
+                                     continuous_cols, discrete_cols)
 
-    # Color selector
+    # Color selector with continuous/discrete indicators
     color_selector_html = if !isempty(color_cols)
-        options = join(["""<option value="$col">$col</option>"""
-                       for col in color_cols], "\n                ")
+        discrete_options = join(["""<option value="$col">$col (discrete)</option>"""
+                                for col in discrete_cols], "\n                ")
+        continuous_options = join(["""<option value="$col">$col (continuous)</option>"""
+                                   for col in continuous_cols], "\n                ")
+
+        all_options = if !isempty(discrete_options) && !isempty(continuous_options)
+            discrete_options * "\n                " * continuous_options
+        elseif !isempty(discrete_options)
+            discrete_options
+        else
+            continuous_options
+        end
+
         """
         <div style="margin-bottom: 10px;">
             <label for="color_select_$chart_title_str"><strong>Color nodes by:</strong></label>
             <select id="color_select_$chart_title_str" onchange="updateColors_$chart_title_str()">
                 <option value="none">None (uniform color)</option>
-                $options
+                $all_options
             </select>
         </div>
         """
@@ -392,11 +450,25 @@ end
 function build_tsne_functional_html(chart_title_str, data_label,
                                      entity_col, label_col,
                                      all_numeric_cols_json, initial_feature_cols_json, distance_matrix,
-                                     color_cols, perplexity, learning_rate, tooltip_cols)
+                                     color_cols, perplexity, learning_rate, tooltip_cols,
+                                     continuous_cols, discrete_cols, colour_map, extrapolate_colors)
 
     has_colors = !isempty(color_cols)
     color_cols_json = JSON.json([String(c) for c in color_cols])
     tooltip_cols_json = JSON.json([String(c) for c in tooltip_cols])
+
+    # Color configuration for continuous support
+    continuous_cols_json = JSON.json([String(c) for c in continuous_cols])
+    discrete_cols_json = JSON.json([String(c) for c in discrete_cols])
+
+    # Convert colour_map to JSON
+    colour_map_json = if ismissing(colour_map)
+        "null"
+    elseif colour_map isa Dict{Float64,String}
+        JSON.json(colour_map)
+    else  # Dict{String,Dict{Float64,String}}
+        JSON.json(colour_map)
+    end
 
     return """
     (function() {
@@ -410,6 +482,12 @@ function build_tsne_functional_html(chart_title_str, data_label,
         const TOOLTIP_COLS = $tooltip_cols_json;
         const INITIAL_PERPLEXITY = $perplexity;
         const INITIAL_LEARNING_RATE = $learning_rate;
+
+        // Color configuration for continuous support
+        const continuousCols = $continuous_cols_json;
+        const discreteCols = $discrete_cols_json;
+        const colourMap = $colour_map_json;
+        const extrapolateColors = $extrapolate_colors;
 
         // State
         let rawData = null;
@@ -462,8 +540,8 @@ function build_tsne_functional_html(chart_title_str, data_label,
             if (IS_DISTANCE_MATRIX) {
                 const entitySet = new Set();
                 rawData.forEach(function(row) {
-                    entitySet.add(row.entity1);
-                    entitySet.add(row.entity2);
+                    entitySet.add(row.node1);
+                    entitySet.add(row.node2);
                 });
                 entities = Array.from(entitySet).sort();
             } else {
@@ -578,8 +656,8 @@ function build_tsne_functional_html(chart_title_str, data_label,
 
             if (IS_DISTANCE_MATRIX) {
                 rawData.forEach(function(row) {
-                    const i = entityMap[row.entity1];
-                    const j = entityMap[row.entity2];
+                    const i = entityMap[row.node1];
+                    const j = entityMap[row.node2];
                     if (i !== undefined && j !== undefined) {
                         distanceMatrix[i][j] = row.distance;
                         distanceMatrix[j][i] = row.distance;
@@ -1124,11 +1202,14 @@ function build_tsne_functional_html(chart_title_str, data_label,
             const colorSelect = document.getElementById('color_select_$chart_title_str');
             const colorBy = colorSelect ? colorSelect.value : 'none';
 
-            // Build color map
+            // Check if this is a continuous or discrete column
+            const isContinuous = continuousCols.includes(colorBy);
+
+            // Build color map for discrete coloring
             const colorPalette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                                   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
             let colorMap = {};
-            if (colorBy !== 'none' && !IS_DISTANCE_MATRIX) {
+            if (colorBy !== 'none' && !IS_DISTANCE_MATRIX && !isContinuous) {
                 const uniqueValues = [];
                 const seen = new Set();
                 rawData.forEach(function(row) {
@@ -1141,6 +1222,27 @@ function build_tsne_functional_html(chart_title_str, data_label,
                 uniqueValues.forEach(function(val, idx) {
                     colorMap[val] = colorPalette[idx % colorPalette.length];
                 });
+            }
+
+            // Build continuous color scale if needed
+            let continuousColorScale = null;
+            if (colorBy !== 'none' && isContinuous && !IS_DISTANCE_MATRIX) {
+                // Get gradient for this variable
+                let gradient = null;
+                if (colourMap) {
+                    const keys = Object.keys(colourMap);
+                    if (keys.length > 0) {
+                        if (!isNaN(parseFloat(keys[0]))) {
+                            gradient = colourMap;
+                        } else {
+                            gradient = colourMap[colorBy];
+                        }
+                    }
+                }
+                if (!gradient) {
+                    gradient = { "-2": "#FF0000", "0": "#FFFFFF", "2": "#0000FF" };
+                }
+                continuousColorScale = { gradient: gradient };
             }
 
             // Get entity data
@@ -1156,13 +1258,27 @@ function build_tsne_functional_html(chart_title_str, data_label,
 
             // Prepare node data
             const nodeData = entities.map(function(entity, idx) {
+                let nodeColor = '#3498db';
+                if (colorBy !== 'none' && entityData[entity]) {
+                    const colorValue = entityData[entity][colorBy];
+                    if (isContinuous && continuousColorScale) {
+                        // Use continuous color interpolation
+                        if (typeof colorValue === 'number' && !isNaN(colorValue)) {
+                            nodeColor = interpolateColor_$chart_title_str(colorValue, continuousColorScale.gradient);
+                        } else {
+                            nodeColor = '#CCCCCC';  // Gray for missing values
+                        }
+                    } else {
+                        // Use discrete color map
+                        nodeColor = colorMap[colorValue] || '#3498db';
+                    }
+                }
                 return {
                     entity: entity,
                     label: IS_DISTANCE_MATRIX ? entity : (entityData[entity] ? entityData[entity][LABEL_COL] : entity) || entity,
                     x: toScreenX(positions[idx].x),
                     y: toScreenY(positions[idx].y),
-                    color: (colorBy !== 'none' && entityData[entity]) ?
-                           (colorMap[entityData[entity][colorBy]] || '#3498db') : '#3498db',
+                    color: nodeColor,
                     data: entityData[entity] || {}
                 };
             });
@@ -1245,6 +1361,75 @@ function build_tsne_functional_html(chart_title_str, data_label,
             if (tooltipDiv) {
                 tooltipDiv.style.display = 'none';
             }
+        }
+
+        // Color interpolation functions for continuous coloring
+        function interpolateColor_$chart_title_str(value, gradient) {
+            // Convert gradient object to sorted array of stops
+            const stopPairs = Object.keys(gradient)
+                .map(function(k) { return { stop: parseFloat(k), color: gradient[k] }; })
+                .sort(function(a, b) { return a.stop - b.stop; });
+            const stops = stopPairs.map(function(p) { return p.stop; });
+            const colors = stopPairs.map(function(p) { return p.color; });
+
+            // Handle values below minimum stop
+            if (value < stops[0]) {
+                if (!extrapolateColors) {
+                    return colors[0];
+                } else {
+                    if (stops.length > 1) {
+                        const t = (value - stops[0]) / (stops[1] - stops[0]);
+                        return interpolateBetweenColors_$chart_title_str(colors[0], colors[1], t);
+                    }
+                    return colors[0];
+                }
+            }
+
+            // Handle values above maximum stop
+            if (value > stops[stops.length - 1]) {
+                if (!extrapolateColors) {
+                    return colors[colors.length - 1];
+                } else {
+                    if (stops.length > 1) {
+                        const n = stops.length - 1;
+                        const t = (value - stops[n]) / (stops[n] - stops[n - 1]);
+                        return interpolateBetweenColors_$chart_title_str(colors[n], colors[n - 1], -t);
+                    }
+                    return colors[colors.length - 1];
+                }
+            }
+
+            // Find surrounding stops for values within range
+            for (let i = 0; i < stops.length - 1; i++) {
+                if (value >= stops[i] && value <= stops[i + 1]) {
+                    const t = (value - stops[i]) / (stops[i + 1] - stops[i]);
+                    return interpolateBetweenColors_$chart_title_str(colors[i], colors[i + 1], t);
+                }
+            }
+
+            return colors[0];  // Fallback
+        }
+
+        // Linear interpolation between two hex colors
+        function interpolateBetweenColors_$chart_title_str(color1, color2, t) {
+            const c1 = parseHexColor_$chart_title_str(color1);
+            const c2 = parseHexColor_$chart_title_str(color2);
+
+            const r = Math.round(c1.r + (c2.r - c1.r) * t);
+            const g = Math.round(c1.g + (c2.g - c1.g) * t);
+            const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+        }
+
+        // Parse hex color to RGB
+        function parseHexColor_$chart_title_str(hex) {
+            const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})\$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : {r: 0, g: 0, b: 0};
         }
     })();
     """

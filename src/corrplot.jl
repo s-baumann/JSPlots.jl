@@ -908,20 +908,56 @@ function build_corrplot_functional_html(chart_title_str, data_label, scenarios,
 
                 // Ensure minimum y-axis range to prevent dendrogram from being crushed
                 const minYRange = 0.1;  // Minimum height range
-                const yAxisMax = Math.max(maxHeight * 1.15, minYRange);
 
-                // Log warning if heights are very small (indicates highly correlated variables)
-                if (maxHeight < 0.01) {
-                    console.warn('Dendrogram heights are very small (maxHeight=' + maxHeight + '). This may indicate highly correlated variables.');
+                // If maxHeight is too small, scale the shapes so dendrogram is visible
+                // This happens when all variables are highly correlated
+                let scaledShapes = shapes;
+                let displayMaxHeight = maxHeight;
+
+                if (maxHeight < minYRange && maxHeight > 0) {
+                    // Scale factor to make dendrogram fill the visible area
+                    const scaleFactor = (minYRange * 0.9) / maxHeight;  // 0.9 to leave some margin
+                    displayMaxHeight = minYRange;
+
+                    // Scale all y coordinates in shapes
+                    scaledShapes = shapes.map(function(shape) {
+                        return {
+                            type: shape.type,
+                            x0: shape.x0,
+                            y0: shape.y0 * scaleFactor,
+                            x1: shape.x1,
+                            y1: shape.y1 * scaleFactor,
+                            line: shape.line
+                        };
+                    });
+
+                    console.info('Dendrogram heights scaled for visibility (original maxHeight=' + maxHeight.toFixed(6) + ', scale=' + scaleFactor.toFixed(2) + ')');
+                } else if (maxHeight === 0 && shapes.length > 0) {
+                    // All heights are exactly zero - assign arbitrary heights for visibility
+                    displayMaxHeight = minYRange;
+                    console.warn('All dendrogram heights are zero. Variables may be perfectly correlated or identical.');
                 }
 
+                const yAxisMax = Math.max(displayMaxHeight * 1.15, minYRange);
+                const wasScaled = (maxHeight < minYRange && maxHeight > 0);
+
+                // Log warning if original heights were very small
+                if (maxHeight < 0.01 && maxHeight > 0) {
+                    console.warn('Dendrogram heights are very small (maxHeight=' + maxHeight.toFixed(6) + '). This indicates highly correlated variables. Heights have been scaled for visibility.');
+                }
+
+                const yAxisTitle = wasScaled ? 'Height (scaled for visibility)' : 'Height';
+                const chartTitle = wasScaled
+                    ? 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage) - Note: Heights scaled due to high correlation'
+                    : 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)';
+
                 const dendroLayout = {
-                    title: 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)',
+                    title: chartTitle,
                     xaxis: {visible: false, range: [-0.5, n - 0.5]},
-                    yaxis: {title: 'Height', range: [0, yAxisMax]},
+                    yaxis: {title: yAxisTitle, range: [0, yAxisMax]},
                     margin: {l: 80, r: 50, b: 120, t: 50},
                     showlegend: false,
-                    shapes: shapes,
+                    shapes: scaledShapes,
                     height: 400
                 };
 

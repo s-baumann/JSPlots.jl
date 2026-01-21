@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, Random, StableRNGs
+using JSPlots, DataFrames, Dates, Random, StableRNGs
 
 rng = StableRNG(888)
 
@@ -332,8 +332,12 @@ page = JSPlotPage(
     ]
 )
 
-# Save as HTML
-create_html(page, "generated_html_examples/boxandwhiskers_examples.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="boxandwhiskers_examples.html",
+                               description="BoxAndWhiskers Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Distributional Charts", :page_type => "Chart Tutorial"))
+create_html(page, "generated_html_examples/boxandwhiskers_examples.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("BoxAndWhiskers examples created successfully!")
 println("Open generated_html_examples/boxandwhiskers_examples.html in a web browser to view.")

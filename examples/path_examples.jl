@@ -270,7 +270,12 @@ page = JSPlotPage(
     tab_title = "Path Chart Examples"
 )
 
-create_html(page, "generated_html_examples/path_examples.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="path_examples.html",
+                               description="Path Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Situational Charts", :page_type => "Chart Tutorial"))
+create_html(page, "generated_html_examples/path_examples.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "="^60)
 println("Path chart examples created successfully!")

@@ -1,4 +1,4 @@
-using JSPlots, DataFrames, OrderedCollections
+using JSPlots, DataFrames, Dates, OrderedCollections
 
 println("Creating LinkList examples...")
 
@@ -213,7 +213,12 @@ page = JSPlotPage(
 println("Generating HTML file...")
 output_dir = "generated_html_examples"
 mkpath(output_dir)
-create_html(page, joinpath(output_dir, "linklist_examples.html"))
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="linklist_examples.html",
+                               description="LinkList Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Text & Code", :page_type => "Chart Tutorial"))
+create_html(page, joinpath(output_dir, "linklist_examples.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("✓ LinkList examples created successfully!")
 println("  Output: $(joinpath(output_dir, "linklist_examples.html"))")

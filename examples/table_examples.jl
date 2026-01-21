@@ -190,7 +190,12 @@ page = JSPlotPage(
     tab_title = "Table Examples"
 )
 
-create_html(page, "generated_html_examples/table_examples.html")
+# Manifest entry for report index
+manifest_entry = ManifestEntry(path="..", html_filename="table_examples.html",
+                               description="Table Examples", date=today(),
+                               extra_columns=Dict(:chart_type => "Tables", :page_type => "Chart Tutorial"))
+create_html(page, "generated_html_examples/table_examples.html";
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
 
 println("\n" * "="^60)
 println("Table examples created successfully!")
