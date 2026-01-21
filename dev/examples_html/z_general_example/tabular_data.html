@@ -1,15 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Tabular and Text Data</title>
+    <title>Tabular Data</title>
     <meta charset="UTF-8">
 
     <!-- External JavaScript libraries (loaded based on chart types used) -->
         <link rel="stylesheet" href="https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/c3/0.4.11/c3.min.js"></script>
@@ -219,7 +217,7 @@
 
 
     <!-- Prism.js language components for CodeBlocks -->
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-julia.min.js"></script>
+    
 
 </head>
 
@@ -254,8 +252,9 @@ function waitForParquet() {
 
 // Centralized data loading function
 // Centralized date parsing function
-// Converts ISO date strings to JavaScript Date objects
+// Converts various date formats to JavaScript Date objects
 // This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
 function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
@@ -264,43 +263,119 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date and time columns
-    var firstRow = data[0];
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
     var dateColumns = [];
     var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
 
-    for (var key in firstRow) {
-        if (firstRow.hasOwnProperty(key)) {
-            var value = firstRow[key];
-            if (typeof value === 'string') {
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
-                    dateColumns.push(key);
+                    stringDateCount++;
                 } else if (timePattern.test(value)) {
-                    timeColumns.push(key);
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
                 }
             }
         }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
     }
 
-    // If no date or time columns found, return data unchanged
-    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
-
-    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    // Convert values in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
-                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
-                    newRow[key] = new Date(row[key]);
-                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
                     // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
-                    var parts = row[key].split(':');
+                    var parts = value.split(':');
                     var hours = parseInt(parts[0], 10);
                     var minutes = parseInt(parts[1], 10);
-                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    var seconds = parseFloat(parts[2]);
                     newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
                 } else {
-                    newRow[key] = row[key];
+                    newRow[key] = value;
                 }
             }
         }
@@ -910,8 +985,8 @@ $(function(){
 
 <!-- ACTUAL CONTENT -->
 
-<h1>Tabular and Text Data</h1>
-<p>This shows examples of TextBlock, LinkList, CodeBlock, DataTable and PivotTable.</p>
+<h1>Tabular Data</h1>
+<p>This shows examples of DataTable and PivotTable.</p>
 
     <div class="textblock-content">
         <h2>Dataset Generation</h2>
@@ -919,130 +994,6 @@ $(function(){
 <p> The code that generates this dataset is shown below as the example of the CodeBlock type.</p>
 
     </div>
-<br>
-<hr>
-<br>
-<style>
-.codeblock-container {
-    margin: 20px 0;
-    border: 1px solid #e1e4e8;
-    border-radius: 6px;
-    overflow: hidden;
-    background-color: #ffffff;
-}
-
-.codeblock-header {
-    background-color: #f6f8fa;
-    padding: 8px 16px;
-    border-bottom: 1px solid #e1e4e8;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-}
-
-.codeblock-language {
-    font-size: 12px;
-    font-weight: 600;
-    color: #586069;
-    text-transform: uppercase;
-}
-
-.codeblock-container pre {
-    margin: 0;
-    padding: 16px;
-    overflow-x: auto;
-    background-color: #f6f8fa;
-}
-
-.codeblock-container code {
-    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-    font-size: 13px;
-    line-height: 1.6;
-}
-
-.codeblock-notes {
-    padding: 12px 16px;
-    background-color: #fffbdd;
-    border-top: 1px solid #e1e4e8;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    font-size: 14px;
-    color: #24292e;
-}
-</style>
-<div class="codeblock-container" id="##codeblock#225">
-    <div class="codeblock-header">
-        <span class="codeblock-language">Julia</span>
-    </div>
-    <pre><code class="language-julia">function generate_comprehensive_data()
-    rng = StableRNG(42)
-
-    # Time period: One year of daily data
-    start_date = Date(2024, 1, 1)
-    dates = start_date:Day(1):(start_date + Day(700))
-    n = length(dates)
-
-    # Product categories
-    products = [&quot;Laptop&quot;, &quot;Tablet&quot;, &quot;Phone&quot;]
-    regions = [&quot;North&quot;, &quot;South&quot;, &quot;West&quot;]
-    segments = [&quot;Enterprise&quot;, &quot;SMB&quot;, &quot;Consumer&quot;]
-
-    # Generate sales data
-    records = DataFrame[]
-
-    for (i, date) in enumerate(dates)
-        for product in products
-            for region in regions
-                # Base sales with trends and seasonality
-                base = 10000 + 1000 * sin(2π * i / 365)
-                trend = i * 10
-
-                # Product-specific multipliers
-                product_mult = Dict(
-                    &quot;Laptop&quot; =&gt; 3.0, &quot;Tablet&quot; =&gt; 2.0, &quot;Phone&quot; =&gt; 4.0
-                )[product]
-
-                # Region-specific multipliers
-                region_mult = Dict(&quot;North&quot; =&gt; 1.2, &quot;South&quot; =&gt; 1.0, &quot;West&quot; =&gt; 1.1)[region]
-
-                sales = (base + trend) * product_mult * region_mult * (1 + 0.2 * randn(rng))
-                quantity = round(Int, sales / (100 + 50 * randn(rng)))
-                cost = sales * (0.6 + 0.1 * randn(rng))
-                profit = sales - cost
-
-                # Customer metrics
-                customers = round(Int, quantity * (0.3 + 0.1 * randn(rng)))
-                satisfaction = 3.5 + 1.0 * randn(rng)
-
-                # Geographic coordinates
-                lat = 35.0 + Dict(&quot;North&quot; =&gt; 10, &quot;South&quot; =&gt; -10, &quot;West&quot; =&gt; 0)[region] + randn(rng)
-                lon = -95.0 + Dict(&quot;North&quot; =&gt; 0, &quot;South&quot; =&gt; 0, &quot;West&quot; =&gt; -15)[region] + randn(rng)
-
-                # Random segment assignment
-                segment = rand(rng, segments)
-
-                push!(records, DataFrame(
-                    date = date,
-                    product = product,
-                    region = region,
-                    segment = segment,
-                    sales = max(0, sales),
-                    quantity = max(0, quantity),
-                    cost = max(0, cost),
-                    profit = profit,
-                    customers = max(0, customers),
-                    satisfaction = clamp(satisfaction, 1, 5),
-                    latitude = lat,
-                    longitude = lon,
-                    month = month(date),
-                    quarter = (month(date) - 1) ÷ 3 + 1,
-                    day_of_year = dayofyear(date)
-                ))
-            end
-        end
-    end
-
-    return vcat(records...)
-end</code></pre>
-    <div class="codeblock-notes"> We can use a CodeBlock to show code snippets with syntax highlighting. We have correct Syntax highlighting for Julia, Python, R, JavaScript, Java, C, C++, SQL, pl/pgsql, Rust. For anything else it will all be black.</div>
-</div>
 <br>
 <hr>
 <br>
@@ -1087,90 +1038,7 @@ end</code></pre>
             </button>
         </div>
     </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: Table</p><br>
-<hr>
-<br>
-    <div class="textblock-content">
-        <h1>LinkList</h1>
-
-    </div>
-<br>
-<hr>
-<br>
-<div style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; background-color: #f9f9f9;">
-    <h3>Pages</h3>
-        <h4 style="margin-top: 15px; margin-bottom: 5px;">OverView</h4>
-    <ul>
-        <li><strong><a href="https://github.com/s-baumann/JSPlots.jl">GitHub Repository</a></strong>: Source code</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/z_general_example/z_general_example.html">Documentation</a></strong>: General tutorial and overview</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/annual_report.html">Pages</a></strong>: Multi-page reports with navigation</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Tabular Data and Text</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/pivottable_examples.html">PivotTable</a></strong>: Interactive drag-and-drop pivot tables</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/table_examples.html">Table</a></strong>: Sortable data tables with CSV download</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html">TextBlock</a></strong>: Rich text and HTML content</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/codeblock_examples.html">CodeBlock</a></strong>: Syntax-highlighted code blocks</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html">LinkList</a></strong>: Navigation and link lists</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Multimedia</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/picture_examples.html">Picture</a></strong>: Display images, GIFs, and filtered charts from VegaLite, Plots.jl, or Makie</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/slides_examples_embedded.html">Slides</a></strong>: Slideshows and animations</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">2D Plots</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html">LineChart</a></strong>: Time series and trend visualization</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html">AreaChart</a></strong>: Stacked area charts</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html">ScatterPlot</a></strong>: 2D scatter plots with marginal distributions</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html">Path</a></strong>: Trajectory visualization with direction arrows</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Distributional Plots</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html">DistPlot</a></strong>: Histogram, box plot, and rug plot combined</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html">KernelDensity</a></strong>: Smooth kernel density estimation</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html">PieChart</a></strong>: Pie charts with faceting and filtering</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html">BoxAndWhiskers</a></strong>: Make horizontal Box and Whiskers plots showing distribution statistics (min, Q1, median, Q3, max) with mean and standard deviation overlays for grouped data.</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">3D Plots</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html">Scatter3D</a></strong>: 3D scatter plots with PCA eigenvectors</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/surface3d_examples.html">Surface3D</a></strong>: 3D surface visualization</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html">ScatterSurface3D</a></strong>: 3D scatter with fitted surfaces</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Variable Relationships</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html">CorrPlot</a></strong>: Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations.</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html">Graph</a></strong>: Network graphs showing relationships between entities with adjustable cutoffs and layouts</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html">TSNEPlot</a></strong>: Interactive t-SNE dimensionality reduction with feature selection and configurable parameters</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Situational Charts</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html">Waterfall</a></strong>: Make Waterfall plots showing how positive and negative elements add up to an aggregate.</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html">SanKey</a></strong>: Make SanKey plots showing how individuals change affiliation over multiple waves.</li>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html">BumpChart</a></strong>: Rankings over time with dense ranking and cross-facet highlighting</li>
-    </ul>
-    <h4 style="margin-top: 15px; margin-bottom: 5px;">Financial Charts</h4>
-    <ul>
-        <li><strong><a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html">CandlestickChart</a></strong>: Candlestick candlestick charts with volume, renormalization, and time range controls</li>
-    </ul>
-
-    <div style="padding: 12px; background-color: #fffbdd; border-top: 1px solid #ddd; margin-top: 10px; font-size: 14px;">A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html" style="color: blue; font-weight: bold;">See here for LinkList examples</a></div>
-</div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: no_data.parquet</p><br>
-<hr>
-<br>
-    <div class="textblock-content">
-        <h1>TextBlock</h1>
-You can write whatever HTML you want and put it in a TextBlock which will put it in the resultant HTML.
-<div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px;">
-    <p><strong>TextBlock</strong> allows you to add rich text, HTML, and annotations to your reports.</p>
-    <p>You can include <em>formatting</em>, <strong>styled text</strong>, and even <code>inline code</code>.</p>
-    <p> See here for <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/textblock_examples.html" style="color: blue; font-weight: bold;">TextBlock examples</a>.</p>
-</div>
-
-    </div>
-
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: Table</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.0.</small></p>
 </body>

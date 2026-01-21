@@ -69,8 +69,9 @@ function waitForParquet() {
 
 // Centralized data loading function
 // Centralized date parsing function
-// Converts ISO date strings to JavaScript Date objects
+// Converts various date formats to JavaScript Date objects
 // This is the ONLY place in the package where date parsing happens
+// Handles: ISO strings, Date objects (from Arrow/Parquet), timestamps, and day counts
 function parseDatesInData(data) {
     if (!data || data.length === 0) return data;
 
@@ -79,43 +80,119 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Check first row to identify date and time columns
-    var firstRow = data[0];
+    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
+    var MIN_TIMESTAMP_MS = 0;
+    var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
+
+    // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
+    // Reasonable range: 0 (1970-01-01) to ~47500 (~2100-01-01)
+    var MIN_DAYS = 0;
+    var MAX_DAYS = 50000;
+    var MS_PER_DAY = 86400000;
+
+    // Scan multiple rows to better detect column types (some rows might have missing values)
+    var rowsToCheck = Math.min(10, data.length);
     var dateColumns = [];
     var timeColumns = [];
+    var timestampColumns = [];
+    var dayCountColumns = [];
+    var alreadyDateColumns = [];
 
-    for (var key in firstRow) {
-        if (firstRow.hasOwnProperty(key)) {
-            var value = firstRow[key];
-            if (typeof value === 'string') {
+    // Helper to check if a numeric value looks like a timestamp (milliseconds since epoch)
+    function looksLikeTimestamp(value) {
+        return typeof value === 'number' && value >= MIN_TIMESTAMP_MS && value <= MAX_TIMESTAMP_MS && value > MAX_DAYS;
+    }
+
+    // Helper to check if a numeric value looks like a day count since epoch
+    function looksLikeDayCount(value) {
+        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+    }
+
+    // Build list of keys from first row
+    var keys = Object.keys(data[0]);
+
+    // Check each column across multiple rows
+    keys.forEach(function(key) {
+        var stringDateCount = 0;
+        var timeCount = 0;
+        var timestampCount = 0;
+        var dayCountCount = 0;
+        var alreadyDateCount = 0;
+        var nonNullCount = 0;
+
+        for (var i = 0; i < rowsToCheck; i++) {
+            var value = data[i][key];
+            if (value === null || value === undefined) continue;
+            nonNullCount++;
+
+            if (value instanceof Date) {
+                alreadyDateCount++;
+            } else if (typeof value === 'string') {
                 if (datetimePattern.test(value) || datePattern.test(value)) {
-                    dateColumns.push(key);
+                    stringDateCount++;
                 } else if (timePattern.test(value)) {
-                    timeColumns.push(key);
+                    timeCount++;
+                }
+            } else if (typeof value === 'number') {
+                if (looksLikeTimestamp(value)) {
+                    timestampCount++;
+                } else if (looksLikeDayCount(value)) {
+                    dayCountCount++;
                 }
             }
         }
+
+        // Classify column if majority of non-null values match a pattern
+        var threshold = nonNullCount * 0.5;
+        if (alreadyDateCount > threshold) {
+            alreadyDateColumns.push(key);
+        } else if (stringDateCount > threshold) {
+            dateColumns.push(key);
+        } else if (timeCount > threshold) {
+            timeColumns.push(key);
+        } else if (timestampCount > threshold) {
+            timestampColumns.push(key);
+        } else if (dayCountCount > threshold && dayCountCount >= 3) {
+            // Be more conservative with day counts - require at least 3 matches
+            dayCountColumns.push(key);
+        }
+    });
+
+    // If no date/time columns found, return data unchanged
+    if (dateColumns.length === 0 && timeColumns.length === 0 &&
+        timestampColumns.length === 0 && dayCountColumns.length === 0 &&
+        alreadyDateColumns.length === 0) {
+        return data;
     }
 
-    // If no date or time columns found, return data unchanged
-    if (dateColumns.length === 0 && timeColumns.length === 0) return data;
-
-    // Convert date strings to Date objects and time strings to milliseconds in all rows
+    // Convert values in all rows
     return data.map(function(row) {
         var newRow = {};
         for (var key in row) {
             if (row.hasOwnProperty(key)) {
-                if (dateColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
-                    newRow[key] = new Date(row[key]);
-                } else if (timeColumns.indexOf(key) !== -1 && typeof row[key] === 'string') {
+                var value = row[key];
+
+                if (alreadyDateColumns.indexOf(key) !== -1) {
+                    // Already a Date object - keep as is
+                    newRow[key] = value;
+                } else if (dateColumns.indexOf(key) !== -1 && typeof value === 'string') {
+                    // ISO date string - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (timeColumns.indexOf(key) !== -1 && typeof value === 'string') {
                     // Convert HH:MM:SS or HH:MM:SS.sss to milliseconds since midnight
-                    var parts = row[key].split(':');
+                    var parts = value.split(':');
                     var hours = parseInt(parts[0], 10);
                     var minutes = parseInt(parts[1], 10);
-                    var seconds = parseFloat(parts[2]);  // Use parseFloat to handle decimal seconds
+                    var seconds = parseFloat(parts[2]);
                     newRow[key] = (hours * 3600 + minutes * 60 + seconds) * 1000;
+                } else if (timestampColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Timestamp in milliseconds - convert to Date
+                    newRow[key] = new Date(value);
+                } else if (dayCountColumns.indexOf(key) !== -1 && typeof value === 'number') {
+                    // Day count since epoch - convert to Date
+                    newRow[key] = new Date(value * MS_PER_DAY);
                 } else {
-                    newRow[key] = row[key];
+                    newRow[key] = value;
                 }
             }
         }
@@ -1004,20 +1081,56 @@ $(function(){
 
             // Ensure minimum y-axis range to prevent dendrogram from being crushed
             const minYRange = 0.1;  // Minimum height range
-            const yAxisMax = Math.max(maxHeight * 1.15, minYRange);
 
-            // Log warning if heights are very small (indicates highly correlated variables)
-            if (maxHeight < 0.01) {
-                console.warn('Dendrogram heights are very small (maxHeight=' + maxHeight + '). This may indicate highly correlated variables.');
+            // If maxHeight is too small, scale the shapes so dendrogram is visible
+            // This happens when all variables are highly correlated
+            let scaledShapes = shapes;
+            let displayMaxHeight = maxHeight;
+
+            if (maxHeight < minYRange && maxHeight > 0) {
+                // Scale factor to make dendrogram fill the visible area
+                const scaleFactor = (minYRange * 0.9) / maxHeight;  // 0.9 to leave some margin
+                displayMaxHeight = minYRange;
+
+                // Scale all y coordinates in shapes
+                scaledShapes = shapes.map(function(shape) {
+                    return {
+                        type: shape.type,
+                        x0: shape.x0,
+                        y0: shape.y0 * scaleFactor,
+                        x1: shape.x1,
+                        y1: shape.y1 * scaleFactor,
+                        line: shape.line
+                    };
+                });
+
+                console.info('Dendrogram heights scaled for visibility (original maxHeight=' + maxHeight.toFixed(6) + ', scale=' + scaleFactor.toFixed(2) + ')');
+            } else if (maxHeight === 0 && shapes.length > 0) {
+                // All heights are exactly zero - assign arbitrary heights for visibility
+                displayMaxHeight = minYRange;
+                console.warn('All dendrogram heights are zero. Variables may be perfectly correlated or identical.');
             }
 
+            const yAxisMax = Math.max(displayMaxHeight * 1.15, minYRange);
+            const wasScaled = (maxHeight < minYRange && maxHeight > 0);
+
+            // Log warning if original heights were very small
+            if (maxHeight < 0.01 && maxHeight > 0) {
+                console.warn('Dendrogram heights are very small (maxHeight=' + maxHeight.toFixed(6) + '). This indicates highly correlated variables. Heights have been scaled for visibility.');
+            }
+
+            const yAxisTitle = wasScaled ? 'Height (scaled for visibility)' : 'Height';
+            const chartTitle = wasScaled
+                ? 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage) - Note: Heights scaled due to high correlation'
+                : 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)';
+
             const dendroLayout = {
-                title: 'Hierarchical Clustering Dendrogram (' + linkageMethod + ' linkage)',
+                title: chartTitle,
                 xaxis: {visible: false, range: [-0.5, n - 0.5]},
-                yaxis: {title: 'Height', range: [0, yAxisMax]},
+                yaxis: {title: yAxisTitle, range: [0, yAxisMax]},
                 margin: {l: 80, r: 50, b: 120, t: 50},
                 showlegend: false,
-                shapes: shapes,
+                shapes: scaledShapes,
                 height: 400
             };
 
@@ -1709,6 +1822,12 @@ $(function(){
     const INITIAL_PERPLEXITY = 5.0;
     const INITIAL_LEARNING_RATE = 200.0;
 
+    // Color configuration for continuous support
+    const continuousCols = [];
+    const discreteCols = ["sector"];
+    const colourMap = null;
+    const extrapolateColors = false;
+
     // State
     let rawData = null;
     let entities = [];
@@ -1760,8 +1879,8 @@ $(function(){
         if (IS_DISTANCE_MATRIX) {
             const entitySet = new Set();
             rawData.forEach(function(row) {
-                entitySet.add(row.entity1);
-                entitySet.add(row.entity2);
+                entitySet.add(row.node1);
+                entitySet.add(row.node2);
             });
             entities = Array.from(entitySet).sort();
         } else {
@@ -1876,8 +1995,8 @@ $(function(){
 
         if (IS_DISTANCE_MATRIX) {
             rawData.forEach(function(row) {
-                const i = entityMap[row.entity1];
-                const j = entityMap[row.entity2];
+                const i = entityMap[row.node1];
+                const j = entityMap[row.node2];
                 if (i !== undefined && j !== undefined) {
                     distanceMatrix[i][j] = row.distance;
                     distanceMatrix[j][i] = row.distance;
@@ -2422,11 +2541,14 @@ $(function(){
         const colorSelect = document.getElementById('color_select_stock_tsne');
         const colorBy = colorSelect ? colorSelect.value : 'none';
 
-        // Build color map
+        // Check if this is a continuous or discrete column
+        const isContinuous = continuousCols.includes(colorBy);
+
+        // Build color map for discrete coloring
         const colorPalette = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                               '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
         let colorMap = {};
-        if (colorBy !== 'none' && !IS_DISTANCE_MATRIX) {
+        if (colorBy !== 'none' && !IS_DISTANCE_MATRIX && !isContinuous) {
             const uniqueValues = [];
             const seen = new Set();
             rawData.forEach(function(row) {
@@ -2439,6 +2561,27 @@ $(function(){
             uniqueValues.forEach(function(val, idx) {
                 colorMap[val] = colorPalette[idx % colorPalette.length];
             });
+        }
+
+        // Build continuous color scale if needed
+        let continuousColorScale = null;
+        if (colorBy !== 'none' && isContinuous && !IS_DISTANCE_MATRIX) {
+            // Get gradient for this variable
+            let gradient = null;
+            if (colourMap) {
+                const keys = Object.keys(colourMap);
+                if (keys.length > 0) {
+                    if (!isNaN(parseFloat(keys[0]))) {
+                        gradient = colourMap;
+                    } else {
+                        gradient = colourMap[colorBy];
+                    }
+                }
+            }
+            if (!gradient) {
+                gradient = { "-2": "#FF0000", "0": "#FFFFFF", "2": "#0000FF" };
+            }
+            continuousColorScale = { gradient: gradient };
         }
 
         // Get entity data
@@ -2454,13 +2597,27 @@ $(function(){
 
         // Prepare node data
         const nodeData = entities.map(function(entity, idx) {
+            let nodeColor = '#3498db';
+            if (colorBy !== 'none' && entityData[entity]) {
+                const colorValue = entityData[entity][colorBy];
+                if (isContinuous && continuousColorScale) {
+                    // Use continuous color interpolation
+                    if (typeof colorValue === 'number' && !isNaN(colorValue)) {
+                        nodeColor = interpolateColor_stock_tsne(colorValue, continuousColorScale.gradient);
+                    } else {
+                        nodeColor = '#CCCCCC';  // Gray for missing values
+                    }
+                } else {
+                    // Use discrete color map
+                    nodeColor = colorMap[colorValue] || '#3498db';
+                }
+            }
             return {
                 entity: entity,
                 label: IS_DISTANCE_MATRIX ? entity : (entityData[entity] ? entityData[entity][LABEL_COL] : entity) || entity,
                 x: toScreenX(positions[idx].x),
                 y: toScreenY(positions[idx].y),
-                color: (colorBy !== 'none' && entityData[entity]) ?
-                       (colorMap[entityData[entity][colorBy]] || '#3498db') : '#3498db',
+                color: nodeColor,
                 data: entityData[entity] || {}
             };
         });
@@ -2543,6 +2700,75 @@ $(function(){
         if (tooltipDiv) {
             tooltipDiv.style.display = 'none';
         }
+    }
+
+    // Color interpolation functions for continuous coloring
+    function interpolateColor_stock_tsne(value, gradient) {
+        // Convert gradient object to sorted array of stops
+        const stopPairs = Object.keys(gradient)
+            .map(function(k) { return { stop: parseFloat(k), color: gradient[k] }; })
+            .sort(function(a, b) { return a.stop - b.stop; });
+        const stops = stopPairs.map(function(p) { return p.stop; });
+        const colors = stopPairs.map(function(p) { return p.color; });
+
+        // Handle values below minimum stop
+        if (value < stops[0]) {
+            if (!extrapolateColors) {
+                return colors[0];
+            } else {
+                if (stops.length > 1) {
+                    const t = (value - stops[0]) / (stops[1] - stops[0]);
+                    return interpolateBetweenColors_stock_tsne(colors[0], colors[1], t);
+                }
+                return colors[0];
+            }
+        }
+
+        // Handle values above maximum stop
+        if (value > stops[stops.length - 1]) {
+            if (!extrapolateColors) {
+                return colors[colors.length - 1];
+            } else {
+                if (stops.length > 1) {
+                    const n = stops.length - 1;
+                    const t = (value - stops[n]) / (stops[n] - stops[n - 1]);
+                    return interpolateBetweenColors_stock_tsne(colors[n], colors[n - 1], -t);
+                }
+                return colors[colors.length - 1];
+            }
+        }
+
+        // Find surrounding stops for values within range
+        for (let i = 0; i < stops.length - 1; i++) {
+            if (value >= stops[i] && value <= stops[i + 1]) {
+                const t = (value - stops[i]) / (stops[i + 1] - stops[i]);
+                return interpolateBetweenColors_stock_tsne(colors[i], colors[i + 1], t);
+            }
+        }
+
+        return colors[0];  // Fallback
+    }
+
+    // Linear interpolation between two hex colors
+    function interpolateBetweenColors_stock_tsne(color1, color2, t) {
+        const c1 = parseHexColor_stock_tsne(color1);
+        const c2 = parseHexColor_stock_tsne(color2);
+
+        const r = Math.round(c1.r + (c2.r - c1.r) * t);
+        const g = Math.round(c1.g + (c2.g - c1.g) * t);
+        const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+        return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+
+    // Parse hex color to RGB
+    function parseHexColor_stock_tsne(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : {r: 0, g: 0, b: 0};
     }
 })();
 
@@ -2812,7 +3038,7 @@ $(function(){
     <label for="color_select_stock_tsne"><strong>Color nodes by:</strong></label>
     <select id="color_select_stock_tsne" onchange="updateColors_stock_tsne()">
         <option value="none">None (uniform color)</option>
-        <option value="sector">sector</option>
+        <option value="sector">sector (discrete)</option>
     </select>
 </div>
 
