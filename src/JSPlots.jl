@@ -512,6 +512,9 @@ console.log('Parquet-wasm library loaded successfully');
     include("candlestickchart.jl")
     export CandlestickChart
 
+    include("cumplot.jl")
+    export CumPlot
+
     include("bumpchart.jl")
     export BumpChart
 

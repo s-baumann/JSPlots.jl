@@ -14,6 +14,10 @@ using Random
         include("chart_tests/test_linechart.jl")
     end
 
+    @testset "CumPlot Tests" begin
+        include("chart_tests/test_cumplot.jl")
+    end
+
     @testset "AreaChart Tests" begin
         include("chart_tests/test_areachart.jl")
     end

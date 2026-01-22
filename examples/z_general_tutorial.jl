@@ -633,7 +633,8 @@ od["Multimedia"] = [
 od["2D Plots"] = [("LineChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html", "Time series and trend visualization"),
     ("AreaChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/areachart_examples.html", "Stacked area charts"),
     ("ScatterPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html", "2D scatter plots with marginal distributions"),
-    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows")]
+    ("Path", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html", "Trajectory visualization with direction arrows"),
+    ("CumPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html", "Cumulative performance comparison with range controls")]
 od["Distributional Plots"] = [
     ("DistPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html", "Histogram, box plot, and rug plot combined"),
     ("KernelDensity", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html", "Smooth kernel density estimation"),
@@ -753,6 +754,41 @@ path_chart = Path(:path, df_business_path, :business_path_data;
     show_arrows=true,
     use_alpharange=true,
     notes="A Path chart shows trajectories through metric space over time. This example uses business data (Sales/Cost/Profit by Product/Region/Segment over 12 months) - the same dataset that will be used later in the Slides examples. Each path traces how a product's metrics evolve month-by-month. By default, it shows the North region and Consumer segment, with paths colored by Product. Use the filters to explore different regions and segments. The arrows and alpha gradient show the direction of time progression. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html\" style=\"color: blue; font-weight: bold;\">See here for Path examples</a>")
+
+# CumPlot - Strategy Performance Comparison
+# Create strategy performance data
+rng_cumplot = StableRNG(456)
+strategies = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon"]
+dates_cumplot = collect(Date(2022, 1, 1):Day(1):Date(2023, 12, 31))
+n_days = length(dates_cumplot)
+
+strategy_df = DataFrame()
+for (idx, strategy) in enumerate(strategies)
+    base_return = randn(rng_cumplot) * 0.0001
+    volatility = 0.01 + rand(rng_cumplot) * 0.02
+    daily_pnl = base_return .+ volatility .* randn(rng_cumplot, n_days)
+    daily_pnl_gross = daily_pnl .+ abs.(randn(rng_cumplot, n_days) .* 0.001)
+
+    append!(strategy_df, DataFrame(
+        date = dates_cumplot,
+        daily_pnl = daily_pnl,
+        daily_pnl_gross = daily_pnl_gross,
+        daily_return = 1 .+ daily_pnl,
+        strategy = fill(strategy, n_days),
+        asset_class = fill(idx <= 3 ? "Equities" : "Fixed Income", n_days),
+        region = fill(idx <= 2 ? "US" : (idx <= 4 ? "Europe" : "Asia"), n_days)
+    ))
+end
+
+cum_plot = CumPlot(:cum_plot, strategy_df, :strategy_data,
+    x_col = :date,
+    y_cols = [:daily_pnl, :daily_pnl_gross, :daily_return],
+    color_cols = [:strategy, :asset_class, :region],
+    facet_cols = [:asset_class, :region],
+    filters = [:asset_class, :region],
+    title = "Strategy Performance Comparison",
+    notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
+)
 
 # More Exotic Plot Types
 # Corrplot.
@@ -1742,7 +1778,8 @@ all_data = Dict{Symbol, Any}(
     :stock_corr_data => stock_corr_data,
     :tsne_stock_data => tsne_stock_data,
     :cities_geo_data => cities_geo_df,
-    :countries_geo_data => countries_geo_df
+    :countries_geo_data => countries_geo_df,
+    :strategy_data => strategy_df
 )
 
 # Merge execution data into all_data
@@ -1774,10 +1811,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, cum_plot],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot and Path.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and CumPlot.",
     dataformat = :parquet
 )
 

@@ -983,17 +983,6 @@ $(function(){
             // No aggregation - return all rows with duplicates
             xValues = groupData.map(row => row[xCol]);
             yValues = groupData.map(row => row[yCol]);
-            // Debug logging
-            if (groupData.length > 0) {
-                console.log('DEBUG aggregateGroupData:', {
-                    yCol: yCol,
-                    firstRow: groupData[0],
-                    firstYValue: yValues[0],
-                    yValueType: typeof yValues[0],
-                    yValuesLength: yValues.length,
-                    sampleYValues: yValues.slice(0, 5)
-                });
-            }
         } else {
             // Group by x value and aggregate y values
             // Keep track of original x values (including Date objects)
@@ -1165,9 +1154,7 @@ $(function(){
                 // Apply Y axis transformation
                 // Special handling for cumulative transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
-                    console.log('DEBUG before cumsum:', {yValues: yValues.slice(0, 5), length: yValues.length});
                     yValues = computeCumulativeSum(yValues);
-                    console.log('DEBUG after cumsum:', {yValues: yValues.slice(0, 5)});
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
                 } else {
@@ -2975,6 +2962,477 @@ $(function(){
         console.error('Error loading data for chart path:', error);
     });
 })();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['region', 'asset_class'];
+    const CATEGORICAL_FILTERS = ['region', 'asset_class'];
+    const CONTINUOUS_FILTERS = [];
+    const X_COL = 'date';
+    const Y_COLS = ['daily_pnl', 'daily_pnl_gross', 'daily_return'];
+    const COLOR_COLS = ['strategy', 'asset_class', 'region'];
+    const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Delta': '#ab63fa', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'US': '#636efa'}};
+    const DEFAULT_Y_COL = 'daily_pnl';
+    const DEFAULT_COLOR_COL = 'strategy';
+    const DEFAULT_TRANSFORM = 'cumulative';
+
+    let allData = [];
+
+    // Chart state
+    window.cumChartState_cum_plot = {
+        uniqueXValues: [],
+        startIdx: 0,
+        duration: 0,  // in units
+        step: 0,      // in units
+        timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
+        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+    };
+
+    // Determine time unit based on data span
+    function determineTimeUnit(xValues) {
+        if (xValues.length < 2) return { unit: 'units', multiplier: 1 };
+
+        const first = xValues[0];
+        const last = xValues[xValues.length - 1];
+
+        // Check if values are dates (timestamps in ms)
+        const isDate = first > 946684800000; // After year 2000
+
+        if (!isDate) {
+            return { unit: 'units', multiplier: 1 };
+        }
+
+        const spanMs = last - first;
+        const spanSeconds = spanMs / 1000;
+        const spanMinutes = spanSeconds / 60;
+        const spanHours = spanMinutes / 60;
+        const spanDays = spanHours / 24;
+
+        if (spanDays > 3) {
+            return { unit: 'days', multiplier: 24 * 60 * 60 * 1000 };
+        } else if (spanHours > 3) {
+            return { unit: 'hours', multiplier: 60 * 60 * 1000 };
+        } else if (spanMinutes > 3) {
+            return { unit: 'minutes', multiplier: 60 * 1000 };
+        } else if (spanSeconds > 3) {
+            return { unit: 'seconds', multiplier: 1000 };
+        } else {
+            return { unit: 'units', multiplier: 1 };
+        }
+    }
+
+    // Step forward/backward
+    window.stepRange_cum_plot = function(direction) {
+        const state = window.cumChartState_cum_plot;
+        const stepInput = document.getElementById('step_input_cum_plot');
+        const step = parseFloat(stepInput.value) || state.step;
+
+        const stepInUnits = step * state.unitMultiplier;
+        const numPoints = state.uniqueXValues.length;
+
+        if (direction === 'forward') {
+            // Find new start index
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX + stepInUnits;
+            let newStartIdx = state.startIdx;
+            for (let i = state.startIdx; i < numPoints; i++) {
+                if (state.uniqueXValues[i] >= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+                newStartIdx = i;
+            }
+            state.startIdx = Math.min(newStartIdx, numPoints - 1);
+        } else {
+            // Find new start index going backward
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX - stepInUnits;
+            let newStartIdx = 0;
+            for (let i = state.startIdx; i >= 0; i--) {
+                if (state.uniqueXValues[i] <= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+            }
+            state.startIdx = Math.max(newStartIdx, 0);
+        }
+
+        window.updateChart_cum_plot(true);
+    };
+
+    // Update duration from input
+    window.updateDuration_cum_plot = function() {
+        window.updateChart_cum_plot(true);
+    };
+
+    // Make it global so inline onchange can see it
+    window.updateChart_cum_plot = function(preserveRange) {
+        const state = window.cumChartState_cum_plot;
+
+        // Get current Y column
+        const yColSelect = document.getElementById('y_col_select_cum_plot');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current Y transform
+        const yTransformSelect = document.getElementById('y_transform_select_cum_plot');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_cum_plot');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_cum_plot' + '_slider');
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_cum_plot');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_cum_plot');
+        const facet2Select = document.getElementById('facet2_select_cum_plot');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'cum_plot',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Sort data by X
+        filteredData.sort((a, b) => {
+            const aVal = a[X_COL];
+            const bVal = b[X_COL];
+            if (aVal instanceof Date && bVal instanceof Date) {
+                return aVal - bVal;
+            }
+            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+        });
+
+        // Get unique X values
+        const uniqueXValues = [...new Set(filteredData.map(row => {
+            const v = row[X_COL];
+            return v instanceof Date ? v.getTime() : v;
+        }))].sort((a, b) => a - b);
+
+        state.uniqueXValues = uniqueXValues;
+
+        // Determine time unit on first load or when data changes significantly
+        if (!preserveRange || state.timeUnit === undefined) {
+            const unitInfo = determineTimeUnit(uniqueXValues);
+            state.timeUnit = unitInfo.unit;
+            state.unitMultiplier = unitInfo.multiplier;
+
+            // Update unit labels
+            const unitLabel = document.getElementById('unit_label_cum_plot');
+            const unitLabel2 = document.getElementById('unit_label2_cum_plot');
+            if (unitLabel) {
+                unitLabel.textContent = state.timeUnit;
+            }
+            if (unitLabel2) {
+                unitLabel2.textContent = state.timeUnit;
+            }
+
+            // Set default duration (full span) and step (1/5 of duration)
+            if (uniqueXValues.length >= 2) {
+                const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
+                state.duration = totalSpan / state.unitMultiplier;
+                state.step = state.duration / 5;
+            } else {
+                state.duration = 1;
+                state.step = 1;
+            }
+
+            // Update input fields
+            const durationInput = document.getElementById('duration_input_cum_plot');
+            const stepInput = document.getElementById('step_input_cum_plot');
+            if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
+            if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
+
+            state.startIdx = 0;
+        }
+
+        // Read duration from input
+        const durationInput = document.getElementById('duration_input_cum_plot');
+        const duration = parseFloat(durationInput.value) || state.duration;
+        const durationInUnits = duration * state.unitMultiplier;
+
+        // Calculate end index based on start and duration
+        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+        const endX = startX + durationInUnits;
+
+        // Find end index
+        let endIdx = state.startIdx;
+        for (let i = state.startIdx; i < uniqueXValues.length; i++) {
+            if (uniqueXValues[i] <= endX) {
+                endIdx = i;
+            } else {
+                break;
+            }
+        }
+
+        // Update interval display
+        updateIntervalDisplay_cum_plot(startX, uniqueXValues[endIdx], state.timeUnit, state.unitMultiplier);
+
+        // Get unique facet values if faceting is selected
+        let facet1Values = facet1 ? [...new Set(filteredData.map(r => String(r[facet1])))] : [null];
+        let facet2Values = facet2 ? [...new Set(filteredData.map(r => String(r[facet2])))] : [null];
+        facet1Values.sort();
+        facet2Values.sort();
+
+        const nRows = facet2Values.length;
+        const nCols = facet1Values.length;
+        const hasFacets = facet1 !== null || facet2 !== null;
+
+        // Group FULL data by color (for computing cumulative on full range)
+        const fullGroupedData = {};
+        filteredData.forEach(row => {
+            const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+            const f1Val = facet1 ? String(row[facet1]) : '';
+            const f2Val = facet2 ? String(row[facet2]) : '';
+            const fullKey = colorVal + '|' + f1Val + '|' + f2Val;
+            if (!fullGroupedData[fullKey]) {
+                fullGroupedData[fullKey] = {
+                    color: colorVal,
+                    facet1: f1Val,
+                    facet2: f2Val,
+                    rows: []
+                };
+            }
+            fullGroupedData[fullKey].rows.push(row);
+        });
+
+        // Compute cumulative on FULL data for each group, then extract range and normalize
+        const mainTraces = [];
+
+        for (let fullKey in fullGroupedData) {
+            const groupInfo = fullGroupedData[fullKey];
+            const group = groupInfo.rows;
+            if (group.length === 0) continue;
+
+            // Sort by X within group
+            group.sort((a, b) => {
+                const aVal = a[X_COL];
+                const bVal = b[X_COL];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const fullXValues = group.map(row => row[X_COL]);
+            const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
+            let fullYValues = group.map(row => parseFloat(row[Y_COL]));
+
+            // Apply cumulative transform on FULL data
+            if (Y_TRANSFORM === 'cumulative') {
+                fullYValues = computeCumulativeSum(fullYValues);
+            } else if (Y_TRANSFORM === 'cumprod') {
+                fullYValues = computeCumulativeProduct(fullYValues);
+            }
+
+            // Extract range for main chart
+            const rangeIndices = [];
+            for (let i = 0; i < fullXNumeric.length; i++) {
+                if (fullXNumeric[i] >= startX && fullXNumeric[i] <= endX) {
+                    rangeIndices.push(i);
+                }
+            }
+
+            if (rangeIndices.length > 0) {
+                const rangeXValues = rangeIndices.map(i => fullXValues[i]);
+                let rangeYValues = rangeIndices.map(i => fullYValues[i]);
+
+                // Normalize: divide all values by the FIRST value in the range
+                const firstVal = rangeYValues[0];
+                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
+                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                }
+
+                // Determine which subplot this trace belongs to
+                let xAxisNum = 1;
+                let yAxisNum = 1;
+                if (hasFacets) {
+                    const f1Idx = facet1 ? facet1Values.indexOf(groupInfo.facet1) : 0;
+                    const f2Idx = facet2 ? facet2Values.indexOf(groupInfo.facet2) : 0;
+                    const plotIdx = f2Idx * nCols + f1Idx + 1;
+                    xAxisNum = plotIdx;
+                    yAxisNum = plotIdx;
+                }
+
+                mainTraces.push({
+                    x: rangeXValues,
+                    y: rangeYValues,
+                    type: 'scatter',
+                    mode: 0 > 0 ? 'lines+markers' : 'lines',
+                    name: groupInfo.color,
+                    legendgroup: groupInfo.color,
+                    showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
+                    line: {
+                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        width: 2
+                    },
+                    marker: { size: 0 },
+                    xaxis: xAxisNum === 1 ? 'x' : 'x' + xAxisNum,
+                    yaxis: yAxisNum === 1 ? 'y' : 'y' + yAxisNum
+                });
+            }
+        }
+
+        // Build layout
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                y: 1.02,
+                x: 0.5,
+                xanchor: 'center'
+            },
+            annotations: []
+        };
+
+        // Setup axes based on faceting
+        if (!hasFacets) {
+            layout.xaxis = {
+                title: X_COL,
+                domain: [0, 1],
+                anchor: 'y'
+            };
+            layout.yaxis = {
+                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                domain: [0, 1],
+                anchor: 'x'
+            };
+        } else {
+            // Faceted layout
+            const gapX = 0.05;
+            const gapY = 0.08;
+            const plotWidth = (1 - gapX * (nCols - 1)) / nCols;
+            const plotHeight = (1 - gapY * (nRows - 1)) / nRows;
+
+            for (let row = 0; row < nRows; row++) {
+                for (let col = 0; col < nCols; col++) {
+                    const plotIdx = row * nCols + col + 1;
+                    const x0 = col * (plotWidth + gapX);
+                    const x1 = x0 + plotWidth;
+                    const y1 = 1 - row * (plotHeight + gapY);
+                    const y0 = y1 - plotHeight;
+
+                    const xAxisName = plotIdx === 1 ? 'xaxis' : 'xaxis' + plotIdx;
+                    const yAxisName = plotIdx === 1 ? 'yaxis' : 'yaxis' + plotIdx;
+
+                    layout[xAxisName] = {
+                        domain: [x0, x1],
+                        anchor: plotIdx === 1 ? 'y' : 'y' + plotIdx,
+                        showticklabels: row === nRows - 1
+                    };
+                    layout[yAxisName] = {
+                        domain: [y0, y1],
+                        anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
+                        showticklabels: col === 0,
+                        title: col === 0 && row === Math.floor(nRows / 2) ?
+                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                    };
+
+                    // Add facet label annotation
+                    let facetLabel = '';
+                    if (facet1 && facet2) {
+                        facetLabel = facet1Values[col] + ' / ' + facet2Values[row];
+                    } else if (facet1) {
+                        facetLabel = facet1Values[col];
+                    } else if (facet2) {
+                        facetLabel = facet2Values[row];
+                    }
+
+                    layout.annotations.push({
+                        text: '<b>' + facetLabel + '</b>',
+                        x: (x0 + x1) / 2,
+                        y: y1 + 0.02,
+                        xref: 'paper',
+                        yref: 'paper',
+                        showarrow: false,
+                        font: { size: 11 }
+                    });
+                }
+            }
+        }
+
+        Plotly.newPlot('cum_plot', mainTraces, layout, {responsive: true});
+    };
+
+    function updateIntervalDisplay_cum_plot(startX, endX, timeUnit, unitMultiplier) {
+        const displayDiv = document.getElementById('interval_display_cum_plot');
+        if (!displayDiv) return;
+
+        const isDate = startX > 946684800000;
+
+        if (isDate) {
+            const startDate = new Date(startX);
+            const endDate = new Date(endX);
+
+            const formatDate = (d) => {
+                if (timeUnit === 'days') {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0');
+                } else {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0') + ' ' +
+                           String(d.getHours()).padStart(2, '0') + ':' +
+                           String(d.getMinutes()).padStart(2, '0') + ':' +
+                           String(d.getSeconds()).padStart(2, '0');
+                }
+            };
+
+            const durationUnits = Math.round((endX - startX) / unitMultiplier * 100) / 100;
+
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + formatDate(startDate) +
+                                   ' &nbsp; <strong>End:</strong> ' + formatDate(endDate) +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        } else {
+            const durationUnits = Math.round((endX - startX) * 100) / 100;
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + startX +
+                                   ' &nbsp; <strong>End:</strong> ' + endX +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        }
+    }
+
+    // Load and parse data using centralized parser
+    loadDataset('strategy_data').then(function(data) {
+        allData = data;
+        window.updateChart_cum_plot(false);
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('cum_plot');
+    }).catch(function(error) {
+        console.error('Error loading data for chart cum_plot:', error);
+    });
+})();
 
 
 });
@@ -2982,12 +3440,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="strategy_data" data-format="parquet" data-src="data/strategy_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>2D Charts</h1>
-<p>This shows examples of LinePlot, AreaChart, ScatterPlot and Path.</p>
+<p>This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and CumPlot.</p>
 
     <div class="textblock-content">
         <h1>Two-Dimensional Plots</h1>
@@ -3458,7 +3916,128 @@ $(function(){
 
 <!-- Chart -->
 <div id="path"></div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_path_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_path_data.parquet</p><br>
+<hr>
+<br>
+<h2>Strategy Performance Comparison</h2>
+<p>CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html" style="color: blue; font-weight: bold;">See here for CumPlot examples</a></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="cum_plot_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_cum_plot">region: </label>
+                <select id="region_select_cum_plot" multiple onchange="updateChart_cum_plot(true)">
+                <option value="Asia" selected>Asia</option>
+                <option value="Europe" selected>Europe</option>
+                <option value="US" selected>US</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_cum_plot_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="asset_class_select_cum_plot">asset_class: </label>
+                <select id="asset_class_select_cum_plot" multiple onchange="updateChart_cum_plot(true)">
+                <option value="Equities" selected>Equities</option>
+                <option value="Fixed Income" selected>Fixed Income</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="asset_class_select_cum_plot_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_cum_plot">Color by: </label>
+                <select id="color_col_select_cum_plot" onchange="updateChart_cum_plot(true)">
+                <option value="strategy" selected>strategy</option>
+                <option value="asset_class">asset_class</option>
+                <option value="region">region</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_cum_plot_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+    <div>
+        <label for="y_col_select_cum_plot">Y Variable: </label>
+        <select id="y_col_select_cum_plot" style="padding: 5px 10px;" onchange="updateChart_cum_plot(true)">
+            <option value="daily_pnl" selected>daily_pnl</option>
+<option value="daily_pnl_gross">daily_pnl_gross</option>
+<option value="daily_return">daily_return</option>
+        </select>
+    </div>
+        <div>
+            <label for="y_transform_select_cum_plot">Transform: </label>
+            <select id="y_transform_select_cum_plot" style="padding: 5px 10px;" onchange="updateChart_cum_plot(true)">
+                <option value="cumulative" selected>cumulative</option>
+<option value="cumprod">cumprod</option>
+            </select>
+        </div>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="stepRange_cum_plot('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Duration:</label>
+            <input type="number" id="duration_input_cum_plot" style="width: 80px; padding: 5px;" onchange="updateDuration_cum_plot()">
+            <span id="unit_label_cum_plot">days</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Step:</label>
+            <input type="number" id="step_input_cum_plot" style="width: 80px; padding: 5px;">
+            <span>(<span id="unit_label2_cum_plot">days</span>)</span>
+        </div>
+        <button onclick="stepRange_cum_plot('forward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Step Forward &rarr;</button>
+    </div>
+    <div id="interval_display_cum_plot" style="font-family: monospace; background: #f5f5f5; padding: 8px 15px; border-radius: 4px; margin-bottom: 10px;">
+        <strong>Start:</strong> -- &nbsp; <strong>End:</strong> -- &nbsp; <strong>Duration:</strong> --
+    </div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+    <div>
+        <label for="facet1_select_cum_plot">Facet 1: </label>
+        <select id="facet1_select_cum_plot" style="padding: 5px 10px;" onchange="updateChart_cum_plot(true)">
+            <option value="None" selected>None</option>
+<option value="asset_class">asset_class</option>
+<option value="region">region</option>
+        </select>
+    </div>
+    <div>
+        <label for="facet2_select_cum_plot">Facet 2: </label>
+        <select id="facet2_select_cum_plot" style="padding: 5px 10px;" onchange="updateChart_cum_plot(true)">
+            <option value="None" selected>None</option>
+<option value="asset_class">asset_class</option>
+<option value="region">region</option>
+        </select>
+    </div>
+</div>
+
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="cum_plot_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="cum_plot_aspect_ratio_label">0.5</span>
+    <input type="range" id="cum_plot_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.6931471805599453"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="cum_plot"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: strategy_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.2.</small></p>
 </body>
