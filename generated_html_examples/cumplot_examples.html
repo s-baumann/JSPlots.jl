@@ -925,12 +925,12 @@ $(function(){
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -941,7 +941,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -977,12 +979,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_strategy_comparison = function() {
+        const state = window.cumChartState_strategy_comparison;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_strategy_comparison');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_strategy_comparison(true);
+    };
+
     // Step forward/backward
     window.stepRange_strategy_comparison = function(direction) {
         const state = window.cumChartState_strategy_comparison;
+        const durationInput = document.getElementById('duration_input_strategy_comparison');
         const stepInput = document.getElementById('step_input_strategy_comparison');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_strategy_comparison(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -1025,13 +1072,12 @@ $(function(){
     window.updateChart_strategy_comparison = function(preserveRange) {
         const state = window.cumChartState_strategy_comparison;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_strategy_comparison');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_strategy_comparison');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -1113,33 +1159,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_strategy_comparison');
             const stepInput = document.getElementById('step_input_strategy_comparison');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_strategy_comparison');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_strategy_comparison');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -1396,12 +1452,12 @@ $(function(){
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl', 'daily_pnl_gross', 'daily_return'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -1412,7 +1468,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -1448,12 +1506,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_multi_y_vars = function() {
+        const state = window.cumChartState_multi_y_vars;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_multi_y_vars');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_multi_y_vars(true);
+    };
+
     // Step forward/backward
     window.stepRange_multi_y_vars = function(direction) {
         const state = window.cumChartState_multi_y_vars;
+        const durationInput = document.getElementById('duration_input_multi_y_vars');
         const stepInput = document.getElementById('step_input_multi_y_vars');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_multi_y_vars(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -1496,13 +1599,12 @@ $(function(){
     window.updateChart_multi_y_vars = function(preserveRange) {
         const state = window.cumChartState_multi_y_vars;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_multi_y_vars');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_multi_y_vars');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -1584,33 +1686,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_multi_y_vars');
             const stepInput = document.getElementById('step_input_multi_y_vars');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_multi_y_vars');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_multi_y_vars');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -1867,12 +1979,12 @@ $(function(){
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
     const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'Global': '#ab63fa', 'US': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -1883,7 +1995,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -1919,12 +2033,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_multi_color_cols = function() {
+        const state = window.cumChartState_multi_color_cols;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_multi_color_cols');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_multi_color_cols(true);
+    };
+
     // Step forward/backward
     window.stepRange_multi_color_cols = function(direction) {
         const state = window.cumChartState_multi_color_cols;
+        const durationInput = document.getElementById('duration_input_multi_color_cols');
         const stepInput = document.getElementById('step_input_multi_color_cols');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_multi_color_cols(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -1967,13 +2126,12 @@ $(function(){
     window.updateChart_multi_color_cols = function(preserveRange) {
         const state = window.cumChartState_multi_color_cols;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_multi_color_cols');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_multi_color_cols');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -2055,33 +2213,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_multi_color_cols');
             const stepInput = document.getElementById('step_input_multi_color_cols');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_multi_color_cols');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_multi_color_cols');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -2338,12 +2506,12 @@ $(function(){
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl', 'daily_pnl_gross'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -2354,7 +2522,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -2390,12 +2560,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_faceted_view = function() {
+        const state = window.cumChartState_faceted_view;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_faceted_view');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_faceted_view(true);
+    };
+
     // Step forward/backward
     window.stepRange_faceted_view = function(direction) {
         const state = window.cumChartState_faceted_view;
+        const durationInput = document.getElementById('duration_input_faceted_view');
         const stepInput = document.getElementById('step_input_faceted_view');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_faceted_view(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -2438,13 +2653,12 @@ $(function(){
     window.updateChart_faceted_view = function(preserveRange) {
         const state = window.cumChartState_faceted_view;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_faceted_view');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_faceted_view');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -2526,33 +2740,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_faceted_view');
             const stepInput = document.getElementById('step_input_faceted_view');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_faceted_view');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_faceted_view');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -2809,12 +3033,12 @@ $(function(){
     const CATEGORICAL_FILTERS = ['region', 'asset_class'];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl', 'daily_pnl_gross'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -2825,7 +3049,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -2861,12 +3087,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_filtered_strategies = function() {
+        const state = window.cumChartState_filtered_strategies;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_filtered_strategies');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_filtered_strategies(true);
+    };
+
     // Step forward/backward
     window.stepRange_filtered_strategies = function(direction) {
         const state = window.cumChartState_filtered_strategies;
+        const durationInput = document.getElementById('duration_input_filtered_strategies');
         const stepInput = document.getElementById('step_input_filtered_strategies');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_filtered_strategies(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -2909,13 +3180,12 @@ $(function(){
     window.updateChart_filtered_strategies = function(preserveRange) {
         const state = window.cumChartState_filtered_strategies;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_filtered_strategies');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_filtered_strategies');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -2997,33 +3267,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_filtered_strategies');
             const stepInput = document.getElementById('step_input_filtered_strategies');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_filtered_strategies');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_filtered_strategies');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -3280,12 +3560,12 @@ $(function(){
     const CATEGORICAL_FILTERS = ['region', 'asset_class', 'risk_level'];
     const CONTINUOUS_FILTERS = [];
     const X_COL = 'date';
-    const Y_COLS = ['daily_pnl', 'daily_pnl_gross', 'daily_return'];
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
     const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'Global': '#ab63fa', 'US': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
-    const DEFAULT_Y_COL = 'daily_pnl';
     const DEFAULT_COLOR_COL = 'strategy';
-    const DEFAULT_TRANSFORM = 'cumulative';
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
 
     let allData = [];
 
@@ -3296,7 +3576,9 @@ $(function(){
         duration: 0,  // in units
         step: 0,      // in units
         timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-        unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
     };
 
     // Determine time unit based on data span
@@ -3332,12 +3614,57 @@ $(function(){
         }
     }
 
+    // Reset to show full range
+    window.resetRange_full_featured = function() {
+        const state = window.cumChartState_full_featured;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_full_featured');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_full_featured(true);
+    };
+
     // Step forward/backward
     window.stepRange_full_featured = function(direction) {
         const state = window.cumChartState_full_featured;
+        const durationInput = document.getElementById('duration_input_full_featured');
         const stepInput = document.getElementById('step_input_full_featured');
-        const step = parseFloat(stepInput.value) || state.step;
 
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_full_featured(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
         const stepInUnits = step * state.unitMultiplier;
         const numPoints = state.uniqueXValues.length;
 
@@ -3380,13 +3707,12 @@ $(function(){
     window.updateChart_full_featured = function(preserveRange) {
         const state = window.cumChartState_full_featured;
 
-        // Get current Y column
-        const yColSelect = document.getElementById('y_col_select_full_featured');
-        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-        // Get current Y transform
+        // Get current Y transform selection (combined column + transform)
         const yTransformSelect = document.getElementById('y_transform_select_full_featured');
-        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
         const filters = {};
@@ -3468,33 +3794,43 @@ $(function(){
                 unitLabel2.textContent = state.timeUnit;
             }
 
-            // Set default duration (full span) and step (1/5 of duration)
+            // Set total duration and default step/duration fractions
             if (uniqueXValues.length >= 2) {
                 const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                state.duration = totalSpan / state.unitMultiplier;
-                state.step = state.duration / 5;
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
             } else {
+                state.totalDuration = 1;
                 state.duration = 1;
                 state.step = 1;
             }
 
-            // Update input fields
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
             const durationInput = document.getElementById('duration_input_full_featured');
             const stepInput = document.getElementById('step_input_full_featured');
             if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
             if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-            state.startIdx = 0;
         }
 
-        // Read duration from input
-        const durationInput = document.getElementById('duration_input_full_featured');
-        const duration = parseFloat(durationInput.value) || state.duration;
-        const durationInUnits = duration * state.unitMultiplier;
-
-        // Calculate end index based on start and duration
-        const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-        const endX = startX + durationInUnits;
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_full_featured');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
 
         // Find end index
         let endIdx = state.startIdx;
@@ -11068,10 +11404,10 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <p>CumPlot is designed for comparing cumulative performance of multiple strategies over time.</p>
 <ul>
     <li><strong>Normalized view:</strong> All lines start at 1 at the selected start date</li>
-    <li><strong>Range selector:</strong> Drag the highlighted region to change the time window</li>
-    <li><strong>Left edge:</strong> Shifts the entire window (changes start date, lines renormalize)</li>
-    <li><strong>Right edge:</strong> Adjusts only the end date (start stays fixed)</li>
-    <li><strong>Transforms:</strong> Choose between cumulative sum and cumulative product</li>
+    <li><strong>Initial view:</strong> Shows entire data range on page load</li>
+    <li><strong>Step Forward/Back:</strong> Navigate through intervals of specified duration</li>
+    <li><strong>Reset:</strong> Return to full data view</li>
+    <li><strong>Metrics:</strong> Each metric includes its transform (cumulative or cumprod)</li>
 </ul>
 
     </div>
@@ -11080,28 +11416,20 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <br>
     <div class="textblock-content">
         <h2>Example 1: Basic Strategy Comparison</h2>
-<p>Simple example with strategies colored by name.</p>
+<p>Simple example with strategies colored by name, using cumulative sum of daily PnL.</p>
 
     </div>
 <br>
 <hr>
 <br>
 <h2>Strategy Performance Comparison</h2>
-<p>Compare 10 different strategies. Drag the selector to see performance over different periods. All lines are normalized to start at 1 at the beginning of the selected range.</p>
+<p>Compare 10 different strategies. Use Step Forward/Back to see performance over different periods. All lines are normalized to start at 1 at the beginning of the selected range.</p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
-    <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
-        <div>
-            <label for="y_transform_select_strategy_comparison">Transform: </label>
-            <select id="y_transform_select_strategy_comparison" style="padding: 5px 10px;" onchange="updateChart_strategy_comparison(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+    <input type="hidden" id="y_transform_select_strategy_comparison" value="0">    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_strategy_comparison()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_strategy_comparison('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11135,37 +11463,30 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 2: Multiple Y Variables</h2>
-<p>Choose between different PnL metrics: net PnL, gross PnL, or daily returns.</p>
+        <h2>Example 2: Multiple Metrics</h2>
+<p>Choose between different PnL metrics with appropriate transforms: cumulative for PnL, cumprod for returns.</p>
 
     </div>
 <br>
 <hr>
 <br>
 <h2>Strategy Performance - Multiple Metrics</h2>
-<p>Use the Y Variable dropdown to switch between daily_pnl (net), daily_pnl_gross (before costs), or daily_return (for cumprod transform).</p>
+<p>Use the Metric dropdown to switch between daily_pnl (cumulative), daily_pnl_gross (cumulative), or daily_return (cumprod for wealth growth).</p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
     <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
     <div>
-        <label for="y_col_select_multi_y_vars">Y Variable: </label>
-        <select id="y_col_select_multi_y_vars" style="padding: 5px 10px;" onchange="updateChart_multi_y_vars(true)">
-            <option value="daily_pnl" selected>daily_pnl</option>
-<option value="daily_pnl_gross">daily_pnl_gross</option>
-<option value="daily_return">daily_return</option>
+        <label for="y_transform_select_multi_y_vars">Metric: </label>
+        <select id="y_transform_select_multi_y_vars" style="padding: 5px 10px;" onchange="updateChart_multi_y_vars(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_pnl_gross (cumulative)</option>
+<option value="2">daily_return (cumprod)</option>
         </select>
     </div>
-        <div>
-            <label for="y_transform_select_multi_y_vars">Transform: </label>
-            <select id="y_transform_select_multi_y_vars" style="padding: 5px 10px;" onchange="updateChart_multi_y_vars(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_multi_y_vars()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_multi_y_vars('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11226,16 +11547,8 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
                 <span id="color_col_select_multi_color_cols_obs_count" style="font-size: 0.9em; color: #666;"></span>
             </div>
         </div>
-        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
-        <div>
-            <label for="y_transform_select_multi_color_cols">Transform: </label>
-            <select id="y_transform_select_multi_color_cols" style="padding: 5px 10px;" onchange="updateChart_multi_color_cols(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <input type="hidden" id="y_transform_select_multi_color_cols" value="0">    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_multi_color_cols()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_multi_color_cols('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11296,21 +11609,14 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
         </div>
         <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
     <div>
-        <label for="y_col_select_faceted_view">Y Variable: </label>
-        <select id="y_col_select_faceted_view" style="padding: 5px 10px;" onchange="updateChart_faceted_view(true)">
-            <option value="daily_pnl" selected>daily_pnl</option>
-<option value="daily_pnl_gross">daily_pnl_gross</option>
+        <label for="y_transform_select_faceted_view">Metric: </label>
+        <select id="y_transform_select_faceted_view" style="padding: 5px 10px;" onchange="updateChart_faceted_view(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_pnl_gross (cumulative)</option>
         </select>
     </div>
-        <div>
-            <label for="y_transform_select_faceted_view">Transform: </label>
-            <select id="y_transform_select_faceted_view" style="padding: 5px 10px;" onchange="updateChart_faceted_view(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_faceted_view()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_faceted_view('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11424,21 +11730,14 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
         </div>
         <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
     <div>
-        <label for="y_col_select_filtered_strategies">Y Variable: </label>
-        <select id="y_col_select_filtered_strategies" style="padding: 5px 10px;" onchange="updateChart_filtered_strategies(true)">
-            <option value="daily_pnl" selected>daily_pnl</option>
-<option value="daily_pnl_gross">daily_pnl_gross</option>
+        <label for="y_transform_select_filtered_strategies">Metric: </label>
+        <select id="y_transform_select_filtered_strategies" style="padding: 5px 10px;" onchange="updateChart_filtered_strategies(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_pnl_gross (cumulative)</option>
         </select>
     </div>
-        <div>
-            <label for="y_transform_select_filtered_strategies">Transform: </label>
-            <select id="y_transform_select_filtered_strategies" style="padding: 5px 10px;" onchange="updateChart_filtered_strategies(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_filtered_strategies()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_filtered_strategies('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11473,14 +11772,14 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <br>
     <div class="textblock-content">
         <h2>Example 6: All Features Combined</h2>
-<p>Multiple Y variables, multiple color options, faceting, and filters all available.</p>
+<p>Multiple metrics with transforms, multiple color options, faceting, and filters all available.</p>
 
     </div>
 <br>
 <hr>
 <br>
 <h2>Full Featured Cumulative Chart</h2>
-<p>All options available: Y variable selection, color by options, faceting, and filters. Experiment with different combinations to analyze strategy performance.</p>
+<p>All options available: metric selection (with transform), color by options, faceting, and filters. Experiment with different combinations to analyze strategy performance.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
@@ -11547,22 +11846,15 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
         </div>
         <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
     <div>
-        <label for="y_col_select_full_featured">Y Variable: </label>
-        <select id="y_col_select_full_featured" style="padding: 5px 10px;" onchange="updateChart_full_featured(true)">
-            <option value="daily_pnl" selected>daily_pnl</option>
-<option value="daily_pnl_gross">daily_pnl_gross</option>
-<option value="daily_return">daily_return</option>
+        <label for="y_transform_select_full_featured">Metric: </label>
+        <select id="y_transform_select_full_featured" style="padding: 5px 10px;" onchange="updateChart_full_featured(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_pnl_gross (cumulative)</option>
+<option value="2">daily_return (cumprod)</option>
         </select>
     </div>
-        <div>
-            <label for="y_transform_select_full_featured">Transform: </label>
-            <select id="y_transform_select_full_featured" style="padding: 5px 10px;" onchange="updateChart_full_featured(true)">
-                <option value="cumulative" selected>cumulative</option>
-<option value="cumprod">cumprod</option>
-            </select>
-        </div>
-    </div>
-    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_full_featured()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
         <button onclick="stepRange_full_featured('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
         <div style="display: flex; align-items: center; gap: 5px;">
             <label>Duration:</label>
@@ -11620,18 +11912,19 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
     <div class="textblock-content">
         <h2>Key Features</h2>
 <ul>
-    <li><strong>Renormalization:</strong> When you move the left edge of the selector, all lines
-        are renormalized so they start at 1.0 at the new start date. This lets you compare
+    <li><strong>Renormalization:</strong> When stepping through intervals, all lines
+        are renormalized so they start at 1.0 at the interval start date. This lets you compare
         relative performance from any starting point.</li>
-    <li><strong>Selector behavior:</strong>
+    <li><strong>Navigation:</strong>
         <ul>
-            <li>Drag the <strong>left edge</strong> to shift the entire window (both edges move together)</li>
-            <li>Drag the <strong>right edge</strong> to extend or shrink the period (left edge stays fixed)</li>
-            <li>Drag the <strong>middle</strong> to pan the window without changing its width</li>
-            <li>Click <strong>outside</strong> the range to jump there</li>
+            <li><strong>Reset:</strong> Show the entire data range</li>
+            <li><strong>Step Forward:</strong> Move to next interval (first click switches from full view to interval mode)</li>
+            <li><strong>Step Back:</strong> Move to previous interval</li>
+            <li><strong>Duration:</strong> Adjust the interval width in time units</li>
+            <li><strong>Step:</strong> Adjust how far each step moves</li>
         </ul>
     </li>
-    <li><strong>Transforms:</strong>
+    <li><strong>Metric transforms:</strong>
         <ul>
             <li><code>cumulative</code>: Sum daily PnL to see total profit/loss over time</li>
             <li><code>cumprod</code>: Multiply daily returns (1 + r) to see wealth growth</li>
@@ -11642,6 +11935,6 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.2.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
 </body>
 </html>

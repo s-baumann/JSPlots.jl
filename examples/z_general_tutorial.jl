@@ -782,7 +782,11 @@ end
 
 cum_plot = CumPlot(:cum_plot, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl, :daily_pnl_gross, :daily_return],
+    y_transforms = [
+        (:daily_pnl, "cumulative"),
+        (:daily_pnl_gross, "cumulative"),
+        (:daily_return, "cumprod")
+    ],
     color_cols = [:strategy, :asset_class, :region],
     facet_cols = [:asset_class, :region],
     filters = [:asset_class, :region],

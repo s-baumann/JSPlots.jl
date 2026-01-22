@@ -12,7 +12,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:test_cumchart, df, :test_df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             color_cols = [:strategy],
             title = "Test Cumulative Chart"
         )
@@ -23,7 +23,7 @@ include("test_data.jl")
         @test occursin("pnl", chart.functional_html)
     end
 
-    @testset "Multiple Y columns" begin
+    @testset "Multiple y_transforms" begin
         df = DataFrame(
             date = Date(2024, 1, 1):Day(1):Date(2024, 1, 30),
             pnl = randn(30),
@@ -33,13 +33,19 @@ include("test_data.jl")
         )
         chart = CumPlot(:multi_y, df, :df;
             x_col = :date,
-            y_cols = [:pnl, :pnl_gross, :returns],
+            y_transforms = [
+                (:pnl, "cumulative"),
+                (:pnl_gross, "cumulative"),
+                (:returns, "cumprod")
+            ],
             color_cols = [:strategy],
-            title = "Multiple Y Variables"
+            title = "Multiple Y Transforms"
         )
         @test occursin("pnl", chart.functional_html)
         @test occursin("pnl_gross", chart.functional_html)
         @test occursin("returns", chart.functional_html)
+        @test occursin("cumulative", chart.functional_html)
+        @test occursin("cumprod", chart.functional_html)
     end
 
     @testset "Multiple color columns" begin
@@ -51,7 +57,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:multi_color, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             color_cols = [:strategy, :region],
             title = "Multiple Colors"
         )
@@ -66,7 +72,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:no_color, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             title = "No Color"
         )
         @test occursin("__no_color__", chart.functional_html)
@@ -81,7 +87,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:with_filters, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             color_cols = [:strategy],
             filters = Dict{Symbol,Any}(:region => ["US"]),
             title = "With Filters"
@@ -98,7 +104,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:with_facets, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             color_cols = [:strategy],
             facet_cols = [:asset_class],
             title = "Faceted Chart"
@@ -106,28 +112,26 @@ include("test_data.jl")
         @test occursin("asset_class", chart.appearance_html)
     end
 
-    @testset "Default transform cumulative" begin
+    @testset "Single y_transform with cumulative" begin
         df = DataFrame(
             date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
             pnl = randn(10)
         )
         chart = CumPlot(:default_cum, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
-            default_transform = "cumulative"
+            y_transforms = [(:pnl, "cumulative")]
         )
         @test occursin("cumulative", chart.functional_html)
     end
 
-    @testset "Default transform cumprod" begin
+    @testset "Single y_transform with cumprod" begin
         df = DataFrame(
             date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
             returns = 1 .+ randn(10) .* 0.01
         )
         chart = CumPlot(:default_cumprod, df, :df;
             x_col = :date,
-            y_cols = [:returns],
-            default_transform = "cumprod"
+            y_transforms = [(:returns, "cumprod")]
         )
         @test occursin("cumprod", chart.functional_html)
     end
@@ -136,8 +140,7 @@ include("test_data.jl")
         df = DataFrame(date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10), pnl = randn(10))
         @test_throws ErrorException CumPlot(:bad_transform, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
-            default_transform = "invalid"
+            y_transforms = [(:pnl, "invalid")]
         )
     end
 
@@ -145,15 +148,15 @@ include("test_data.jl")
         df = DataFrame(date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10), pnl = randn(10))
         @test_throws ErrorException CumPlot(:bad_x, df, :df;
             x_col = :nonexistent,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
     end
 
-    @testset "Invalid y_cols error" begin
+    @testset "Invalid y_transforms column error" begin
         df = DataFrame(date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10), pnl = randn(10))
         @test_throws ErrorException CumPlot(:bad_y, df, :df;
             x_col = :date,
-            y_cols = [:nonexistent]
+            y_transforms = [(:nonexistent, "cumulative")]
         )
     end
 
@@ -164,7 +167,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:custom_style, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             line_width = 3,
             marker_size = 8
         )
@@ -180,7 +183,7 @@ include("test_data.jl")
         notes = "This chart shows cumulative performance."
         chart = CumPlot(:with_notes, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             notes = notes
         )
         @test occursin(notes, chart.appearance_html)
@@ -194,7 +197,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:numeric_x, df, :df;
             x_col = :x,
-            y_cols = [:y],
+            y_transforms = [(:y, "cumulative")],
             color_cols = [:group],
             title = "Numeric X Axis"
         )
@@ -211,7 +214,7 @@ include("test_data.jl")
 
             chart = CumPlot(:page_cumchart, df, :test_data;
                 x_col = :date,
-                y_cols = [:pnl],
+                y_transforms = [(:pnl, "cumulative")],
                 color_cols = [:strategy],
                 title = "Cumulative Test"
             )
@@ -234,7 +237,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:dep_test, df, :my_data;
             x_col = :date,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
         deps = JSPlots.dependencies(chart)
         @test deps == [:my_data]
@@ -248,7 +251,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:js_dep_test, df, :df;
             x_col = :date,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
         js_deps = JSPlots.js_dependencies(chart)
         @test length(js_deps) > 0
@@ -262,7 +265,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:controls_test, df, :df;
             x_col = :date,
-            y_cols = [:pnl],
+            y_transforms = [(:pnl, "cumulative")],
             title = "Controls Test"
         )
         @test occursin("duration_input", chart.appearance_html)
@@ -278,7 +281,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:interval_test, df, :df;
             x_col = :date,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
         @test occursin("interval_display", chart.appearance_html)
     end
@@ -290,7 +293,7 @@ include("test_data.jl")
         )
         chart = CumPlot(:unit_test, df, :df;
             x_col = :date,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
         @test occursin("determineTimeUnit", chart.functional_html)
         @test occursin("days", chart.functional_html)
@@ -299,16 +302,45 @@ include("test_data.jl")
         @test occursin("seconds", chart.functional_html)
     end
 
-    @testset "Transform options in appearance HTML" begin
+    @testset "Metric dropdown shown for multiple transforms" begin
+        df = DataFrame(
+            date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
+            pnl = randn(10),
+            returns = 1 .+ randn(10) .* 0.01
+        )
+        chart = CumPlot(:multi_transform_options, df, :df;
+            x_col = :date,
+            y_transforms = [(:pnl, "cumulative"), (:returns, "cumprod")]
+        )
+        @test occursin("Metric", chart.appearance_html)
+        @test occursin("pnl (cumulative)", chart.appearance_html)
+        @test occursin("returns (cumprod)", chart.appearance_html)
+    end
+
+    @testset "No metric dropdown for single transform" begin
         df = DataFrame(
             date = Date(2024, 1, 1):Day(1):Date(2024, 1, 10),
             pnl = randn(10)
         )
-        chart = CumPlot(:transform_options, df, :df;
+        chart = CumPlot(:single_transform, df, :df;
             x_col = :date,
-            y_cols = [:pnl]
+            y_transforms = [(:pnl, "cumulative")]
         )
-        @test occursin("cumulative", chart.appearance_html)
-        @test occursin("cumprod", chart.appearance_html)
+        # Should have hidden input, not a visible dropdown with "Metric" label
+        @test !occursin("Metric:", chart.appearance_html)
+        @test occursin("type=\"hidden\"", chart.appearance_html)
+    end
+
+    @testset "Reset button in HTML" begin
+        df = DataFrame(
+            date = Date(2024, 1, 1):Day(1):Date(2024, 1, 30),
+            pnl = randn(30)
+        )
+        chart = CumPlot(:reset_test, df, :df;
+            x_col = :date,
+            y_transforms = [(:pnl, "cumulative")]
+        )
+        @test occursin("Reset", chart.appearance_html)
+        @test occursin("resetRange_", chart.functional_html)
     end
 end

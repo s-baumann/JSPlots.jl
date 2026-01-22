@@ -50,41 +50,45 @@ header = TextBlock("""
 <p>CumPlot is designed for comparing cumulative performance of multiple strategies over time.</p>
 <ul>
     <li><strong>Normalized view:</strong> All lines start at 1 at the selected start date</li>
-    <li><strong>Range selector:</strong> Drag the highlighted region to change the time window</li>
-    <li><strong>Left edge:</strong> Shifts the entire window (changes start date, lines renormalize)</li>
-    <li><strong>Right edge:</strong> Adjusts only the end date (start stays fixed)</li>
-    <li><strong>Transforms:</strong> Choose between cumulative sum and cumulative product</li>
+    <li><strong>Initial view:</strong> Shows entire data range on page load</li>
+    <li><strong>Step Forward/Back:</strong> Navigate through intervals of specified duration</li>
+    <li><strong>Reset:</strong> Return to full data view</li>
+    <li><strong>Metrics:</strong> Each metric includes its transform (cumulative or cumprod)</li>
 </ul>
 """)
 
 # Example 1: Basic strategy comparison
 example1_intro = TextBlock("""
 <h2>Example 1: Basic Strategy Comparison</h2>
-<p>Simple example with strategies colored by name.</p>
+<p>Simple example with strategies colored by name, using cumulative sum of daily PnL.</p>
 """)
 
 chart1 = CumPlot(:strategy_comparison, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl],
+    y_transforms = [(:daily_pnl, "cumulative")],
     color_cols = [:strategy],
     title = "Strategy Performance Comparison",
-    notes = "Compare 10 different strategies. Drag the selector to see performance over different periods. " *
+    notes = "Compare 10 different strategies. Use Step Forward/Back to see performance over different periods. " *
             "All lines are normalized to start at 1 at the beginning of the selected range."
 )
 
-# Example 2: Multiple Y variables
+# Example 2: Multiple metrics with different transforms
 example2_intro = TextBlock("""
-<h2>Example 2: Multiple Y Variables</h2>
-<p>Choose between different PnL metrics: net PnL, gross PnL, or daily returns.</p>
+<h2>Example 2: Multiple Metrics</h2>
+<p>Choose between different PnL metrics with appropriate transforms: cumulative for PnL, cumprod for returns.</p>
 """)
 
 chart2 = CumPlot(:multi_y_vars, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl, :daily_pnl_gross, :daily_return],
+    y_transforms = [
+        (:daily_pnl, "cumulative"),
+        (:daily_pnl_gross, "cumulative"),
+        (:daily_return, "cumprod")
+    ],
     color_cols = [:strategy],
     title = "Strategy Performance - Multiple Metrics",
-    notes = "Use the Y Variable dropdown to switch between daily_pnl (net), daily_pnl_gross (before costs), " *
-            "or daily_return (for cumprod transform)."
+    notes = "Use the Metric dropdown to switch between daily_pnl (cumulative), daily_pnl_gross (cumulative), " *
+            "or daily_return (cumprod for wealth growth)."
 )
 
 # Example 3: Multiple color column options
@@ -95,7 +99,7 @@ example3_intro = TextBlock("""
 
 chart3 = CumPlot(:multi_color_cols, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl],
+    y_transforms = [(:daily_pnl, "cumulative")],
     color_cols = [:strategy, :asset_class, :region, :risk_level],
     title = "Performance by Different Groupings",
     notes = "Use the 'Color by' dropdown to group strategies by: strategy name, asset_class (Equities vs Fixed Income), " *
@@ -110,7 +114,7 @@ example4_intro = TextBlock("""
 
 chart4 = CumPlot(:faceted_view, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl, :daily_pnl_gross],
+    y_transforms = [(:daily_pnl, "cumulative"), (:daily_pnl_gross, "cumulative")],
     color_cols = [:strategy, :risk_level],
     facet_cols = [:asset_class, :region],
     title = "Faceted Strategy Performance",
@@ -126,7 +130,7 @@ example5_intro = TextBlock("""
 
 chart5 = CumPlot(:filtered_strategies, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl, :daily_pnl_gross],
+    y_transforms = [(:daily_pnl, "cumulative"), (:daily_pnl_gross, "cumulative")],
     color_cols = [:strategy, :risk_level],
     filters = [:asset_class, :region],
     title = "Filtered Strategy Performance",
@@ -137,17 +141,21 @@ chart5 = CumPlot(:filtered_strategies, strategy_df, :strategy_data,
 # Example 6: Full featured
 example6_intro = TextBlock("""
 <h2>Example 6: All Features Combined</h2>
-<p>Multiple Y variables, multiple color options, faceting, and filters all available.</p>
+<p>Multiple metrics with transforms, multiple color options, faceting, and filters all available.</p>
 """)
 
 chart6 = CumPlot(:full_featured, strategy_df, :strategy_data,
     x_col = :date,
-    y_cols = [:daily_pnl, :daily_pnl_gross, :daily_return],
+    y_transforms = [
+        (:daily_pnl, "cumulative"),
+        (:daily_pnl_gross, "cumulative"),
+        (:daily_return, "cumprod")
+    ],
     color_cols = [:strategy, :asset_class, :region, :risk_level],
     facet_cols = [:asset_class, :region, :risk_level],
     filters = [:asset_class, :region, :risk_level],
     title = "Full Featured Cumulative Chart",
-    notes = "All options available: Y variable selection, color by options, faceting, and filters. " *
+    notes = "All options available: metric selection (with transform), color by options, faceting, and filters. " *
             "Experiment with different combinations to analyze strategy performance."
 )
 
@@ -155,18 +163,19 @@ chart6 = CumPlot(:full_featured, strategy_df, :strategy_data,
 conclusion = TextBlock("""
 <h2>Key Features</h2>
 <ul>
-    <li><strong>Renormalization:</strong> When you move the left edge of the selector, all lines
-        are renormalized so they start at 1.0 at the new start date. This lets you compare
+    <li><strong>Renormalization:</strong> When stepping through intervals, all lines
+        are renormalized so they start at 1.0 at the interval start date. This lets you compare
         relative performance from any starting point.</li>
-    <li><strong>Selector behavior:</strong>
+    <li><strong>Navigation:</strong>
         <ul>
-            <li>Drag the <strong>left edge</strong> to shift the entire window (both edges move together)</li>
-            <li>Drag the <strong>right edge</strong> to extend or shrink the period (left edge stays fixed)</li>
-            <li>Drag the <strong>middle</strong> to pan the window without changing its width</li>
-            <li>Click <strong>outside</strong> the range to jump there</li>
+            <li><strong>Reset:</strong> Show the entire data range</li>
+            <li><strong>Step Forward:</strong> Move to next interval (first click switches from full view to interval mode)</li>
+            <li><strong>Step Back:</strong> Move to previous interval</li>
+            <li><strong>Duration:</strong> Adjust the interval width in time units</li>
+            <li><strong>Step:</strong> Adjust how far each step moves</li>
         </ul>
     </li>
-    <li><strong>Transforms:</strong>
+    <li><strong>Metric transforms:</strong>
         <ul>
             <li><code>cumulative</code>: Sum daily PnL to see total profit/loss over time</li>
             <li><code>cumprod</code>: Multiply daily returns (1 + r) to see wealth growth</li>

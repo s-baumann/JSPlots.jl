@@ -8,6 +8,9 @@ This chart is designed for comparing multiple strategies' cumulative performance
 The main chart shows cumulative or cumulative product of Y values, normalized so all lines
 start at 1 at the selected start date. Text inputs control the duration and step size.
 
+On initial load, the entire data range is shown. Use "Step Forward" to view the first interval,
+then subsequent intervals. Use "Reset" to return to the full view.
+
 # Arguments
 - `chart_title::Symbol`: Unique identifier for this chart
 - `df::DataFrame`: DataFrame containing the data
@@ -15,12 +18,15 @@ start at 1 at the selected start date. Text inputs control the duration and step
 
 # Keyword Arguments
 - `x_col::Symbol`: Column for x-axis (must be Date, DateTime, or numeric) (default: `:date`)
-- `y_cols::Vector{Symbol}`: Columns available for y-axis values (like daily PnL) (default: `[:pnl]`)
+- `y_transforms::Vector{Tuple{Symbol, String}}`: Y column and transform pairs. Each tuple is
+  (column, transform) where transform is "cumulative" or "cumprod".
+  (default: `[(:pnl, "cumulative")]`)
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (like strategy name) (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
-- `default_transform::String`: Default Y transform - "cumulative" or "cumprod" (default: `"cumulative"`)
+- `default_duration_fraction::Float64`: Default duration as fraction of total span (default: `0.2` = 1/5)
+- `default_step_fraction::Float64`: Default step size as fraction of total span (default: `0.2` = 1/5)
 - `title::String`: Chart title (default: `"Cumulative Chart"`)
 - `line_width::Int`: Width of lines (default: `2`)
 - `marker_size::Int`: Size of markers (default: `0` - no markers)
@@ -28,12 +34,19 @@ start at 1 at the selected start date. Text inputs control the duration and step
 
 # Examples
 ```julia
-# Compare strategy performance
+# Compare strategy performance with cumulative sum
 cc = CumPlot(:strategy_comparison, df, :pnl_data,
     x_col=:date,
-    y_cols=[:daily_pnl],
+    y_transforms=[(:daily_pnl, "cumulative")],
     color_cols=[:strategy],
     title="Strategy Performance Comparison"
+)
+
+# Multiple metrics with different transforms
+cc = CumPlot(:multi_metric, df, :pnl_data,
+    x_col=:date,
+    y_transforms=[(:profit_usd, "cumulative"), (:return_pct, "cumprod")],
+    color_cols=[:strategy]
 )
 ```
 """
@@ -44,12 +57,13 @@ struct CumPlot <: JSPlotsType
     appearance_html::String
     function CumPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_col::Symbol=:date,
-                            y_cols::Vector{Symbol}=[:pnl],
+                            y_transforms::Vector{Tuple{Symbol, String}}=[(:pnl, "cumulative")],
                             color_cols::Vector{Symbol}=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
-                            default_transform::String="cumulative",
+                            default_duration_fraction::Float64=0.2,
+                            default_step_fraction::Float64=0.2,
                             title::String="Cumulative Chart",
                             line_width::Int=2,
                             marker_size::Int=0,
@@ -61,17 +75,26 @@ struct CumPlot <: JSPlotsType
         # Validate x_col exists
         validate_column(df, x_col, "x_col")
 
-        # Validate columns exist in dataframe
-        valid_y_cols = validate_and_filter_columns(y_cols, df, "y_cols")
+        # Validate y_transforms
+        valid_transforms = ["cumulative", "cumprod"]
+        validated_y_transforms = Tuple{Symbol, String}[]
+        df_columns = Symbol.(names(df))
+        for (col, transform) in y_transforms
+            if !(transform in valid_transforms)
+                error("Transform '$transform' for column '$col' must be one of: $(join(valid_transforms, ", "))")
+            end
+            if col in df_columns
+                push!(validated_y_transforms, (col, transform))
+            else
+                @warn "Column $col not found in DataFrame, skipping"
+            end
+        end
+        if isempty(validated_y_transforms)
+            error("No valid y_transforms found. At least one (column, transform) tuple must reference an existing column.")
+        end
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
-
-        # Validate default_transform
-        valid_transforms = ["cumulative", "cumprod"]
-        if !(default_transform in valid_transforms)
-            error("default_transform must be one of: $(join(valid_transforms, ", "))")
-        end
 
         # Get unique values for each filter column
         filter_options = build_filter_options(normalized_filters, df)
@@ -91,8 +114,13 @@ struct CumPlot <: JSPlotsType
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
-        y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
+
+        # Build y_transforms as JavaScript array of objects
+        y_transforms_js = "[" * join([
+            "{col: '$(col)', transform: '$(transform)', label: '$(col) ($(transform))'}"
+            for (col, transform) in validated_y_transforms
+        ], ", ") * "]"
 
         # Create color maps as nested JavaScript object
         color_maps_js = "{" * join([
@@ -101,7 +129,6 @@ struct CumPlot <: JSPlotsType
         ], ", ") * "}"
 
         # Default columns
-        default_y_col = string(valid_y_cols[1])
         default_color_col = select_default_column(valid_color_cols, "__no_color__")
         x_col_str = string(x_col)
 
@@ -112,12 +139,12 @@ struct CumPlot <: JSPlotsType
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
             const X_COL = '$x_col_str';
-            const Y_COLS = $y_cols_js;
+            const Y_TRANSFORMS = $y_transforms_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
-            const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
-            const DEFAULT_TRANSFORM = '$default_transform';
+            const DEFAULT_DURATION_FRACTION = $default_duration_fraction;
+            const DEFAULT_STEP_FRACTION = $default_step_fraction;
 
             let allData = [];
 
@@ -128,7 +155,9 @@ struct CumPlot <: JSPlotsType
                 duration: 0,  // in units
                 step: 0,      // in units
                 timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
-                unitMultiplier: 1  // milliseconds per unit (or 1 for numeric)
+                unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+                showingFullRange: true,  // true when showing entire plot
+                totalDuration: 0  // full span in units
             };
 
             // Determine time unit based on data span
@@ -164,12 +193,57 @@ struct CumPlot <: JSPlotsType
                 }
             }
 
+            // Reset to show full range
+            window.resetRange_$chart_title = function() {
+                const state = window.cumChartState_$chart_title;
+                state.showingFullRange = true;
+                state.startIdx = 0;
+
+                // Update duration input to show full span
+                const durationInput = document.getElementById('duration_input_$chart_title');
+                if (durationInput) {
+                    durationInput.value = Math.round(state.totalDuration * 100) / 100;
+                }
+
+                window.updateChart_$chart_title(true);
+            };
+
             // Step forward/backward
             window.stepRange_$chart_title = function(direction) {
                 const state = window.cumChartState_$chart_title;
+                const durationInput = document.getElementById('duration_input_$chart_title');
                 const stepInput = document.getElementById('step_input_$chart_title');
-                const step = parseFloat(stepInput.value) || state.step;
 
+                // If currently showing full range, switch to interval mode
+                if (state.showingFullRange) {
+                    state.showingFullRange = false;
+                    // Set duration to the configured fraction
+                    const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+                    if (durationInput) {
+                        durationInput.value = Math.round(intervalDuration * 100) / 100;
+                    }
+
+                    if (direction === 'forward') {
+                        // Start from beginning with the interval duration
+                        state.startIdx = 0;
+                    } else {
+                        // Start from end minus duration
+                        const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                        const startX = endX - intervalDuration * state.unitMultiplier;
+                        let newStartIdx = 0;
+                        for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                            if (state.uniqueXValues[i] <= startX) {
+                                newStartIdx = i;
+                                break;
+                            }
+                        }
+                        state.startIdx = newStartIdx;
+                    }
+                    window.updateChart_$chart_title(true);
+                    return;
+                }
+
+                const step = parseFloat(stepInput.value) || state.step;
                 const stepInUnits = step * state.unitMultiplier;
                 const numPoints = state.uniqueXValues.length;
 
@@ -212,13 +286,12 @@ struct CumPlot <: JSPlotsType
             window.updateChart_$chart_title = function(preserveRange) {
                 const state = window.cumChartState_$chart_title;
 
-                // Get current Y column
-                const yColSelect = document.getElementById('y_col_select_$chart_title');
-                const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
-
-                // Get current Y transform
+                // Get current Y transform selection (combined column + transform)
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
-                const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : DEFAULT_TRANSFORM;
+                const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+                const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+                const Y_COL = selectedYTransform.col;
+                const Y_TRANSFORM = selectedYTransform.transform;
 
                 // Get current filter values
                 const filters = {};
@@ -300,33 +373,43 @@ struct CumPlot <: JSPlotsType
                         unitLabel2.textContent = state.timeUnit;
                     }
 
-                    // Set default duration (full span) and step (1/5 of duration)
+                    // Set total duration and default step/duration fractions
                     if (uniqueXValues.length >= 2) {
                         const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
-                        state.duration = totalSpan / state.unitMultiplier;
-                        state.step = state.duration / 5;
+                        state.totalDuration = totalSpan / state.unitMultiplier;
+                        state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                        state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
                     } else {
+                        state.totalDuration = 1;
                         state.duration = 1;
                         state.step = 1;
                     }
 
-                    // Update input fields
+                    // Start showing full range
+                    state.showingFullRange = true;
+                    state.startIdx = 0;
+
+                    // Update input fields with default fraction values
                     const durationInput = document.getElementById('duration_input_$chart_title');
                     const stepInput = document.getElementById('step_input_$chart_title');
                     if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
                     if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
-
-                    state.startIdx = 0;
                 }
 
-                // Read duration from input
-                const durationInput = document.getElementById('duration_input_$chart_title');
-                const duration = parseFloat(durationInput.value) || state.duration;
-                const durationInUnits = duration * state.unitMultiplier;
-
-                // Calculate end index based on start and duration
-                const startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
-                const endX = startX + durationInUnits;
+                // Calculate start and end based on whether showing full range or interval
+                let startX, endX;
+                if (state.showingFullRange) {
+                    // Show entire data range
+                    startX = uniqueXValues[0];
+                    endX = uniqueXValues[uniqueXValues.length - 1];
+                } else {
+                    // Read duration from input and calculate range
+                    const durationInput = document.getElementById('duration_input_$chart_title');
+                    const duration = parseFloat(durationInput.value) || state.duration;
+                    const durationInUnits = duration * state.unitMultiplier;
+                    startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+                    endX = startX + durationInUnits;
+                }
 
                 // Find end index
                 let endIdx = state.startIdx;
@@ -579,39 +662,31 @@ struct CumPlot <: JSPlotsType
         })();
         """
 
-        # Build Y column dropdown
-        y_col_options = join(["""<option value="$(col)"$(string(col) == default_y_col ? " selected" : "")>$(col)</option>"""
-                            for col in valid_y_cols], "\n")
+        # Build Y transform dropdown (combined column + transform)
+        y_transform_options = join([
+            """<option value="$(i-1)"$(i == 1 ? " selected" : "")>$(col) ($(transform))</option>"""
+            for (i, (col, transform)) in enumerate(validated_y_transforms)
+        ], "\n")
 
-        y_col_html = if length(valid_y_cols) > 1
+        # Only show dropdown if more than one option
+        y_transform_html = if length(validated_y_transforms) > 1
             """
             <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
                 <div>
-                    <label for="y_col_select_$chart_title_str">Y Variable: </label>
-                    <select id="y_col_select_$chart_title_str" style="padding: 5px 10px;" onchange="$update_function">
-                        $y_col_options
+                    <label for="y_transform_select_$chart_title_str">Metric: </label>
+                    <select id="y_transform_select_$chart_title_str" style="padding: 5px 10px;" onchange="$update_function">
+                        $y_transform_options
                     </select>
                 </div>
-            """
+            </div>"""
         else
-            "<div style=\"display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;\">\n"
+            # Hidden input to store the single value
+            """<input type="hidden" id="y_transform_select_$chart_title_str" value="0">"""
         end
 
-        # Y transform dropdown (only cumulative and cumprod)
-        y_transform_options_html = join([
-            """<option value="cumulative"$(default_transform == "cumulative" ? " selected" : "")>cumulative</option>""",
-            """<option value="cumprod"$(default_transform == "cumprod" ? " selected" : "")>cumprod</option>"""
-        ], "\n")
-
-        axes_html = y_col_html * """
-                <div>
-                    <label for="y_transform_select_$chart_title_str">Transform: </label>
-                    <select id="y_transform_select_$chart_title_str" style="padding: 5px 10px;" onchange="$update_function">
-                        $y_transform_options_html
-                    </select>
-                </div>
-            </div>
+        axes_html = y_transform_html * """
             <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+                <button onclick="resetRange_$chart_title_str()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
                 <button onclick="stepRange_$chart_title_str('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
                 <div style="display: flex; align-items: center; gap: 5px;">
                     <label>Duration:</label>
