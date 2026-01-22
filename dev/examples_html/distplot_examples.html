@@ -164,8 +164,9 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
-    var MIN_TIMESTAMP_MS = 0;
+    // Timestamp range for reasonable dates (2000-01-01 to 2100-01-01 in milliseconds)
+    // Using year 2000 as minimum to avoid false positives with regular numeric values
+    var MIN_TIMESTAMP_MS = 946684800000;  // 2000-01-01
     var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
 
     // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
@@ -188,8 +189,11 @@ function parseDatesInData(data) {
     }
 
     // Helper to check if a numeric value looks like a day count since epoch
+    // DISABLED: This was too aggressive and incorrectly converted normal numeric values
+    // (like Month=1, Year=2022, Sales=120) to dates. Only enable for columns with
+    // explicit date-like names if needed in the future.
     function looksLikeDayCount(value) {
-        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+        return false;  // Disabled - too many false positives
     }
 
     // Build list of keys from first row
@@ -459,9 +463,71 @@ function applyAxisTransform(values, transformType) {
                 return normalCDF(zscore);
             });
 
+        case 'cumulative':
+        case 'cumprod':
+            // These are handled specially in chart code (computed per group)
+            // Here they act as identity
+            return values;
+
         default:
             return values;
     }
+}
+
+// Compute cumulative sum of values
+// Returns array of same length: [y[0], y[0]+y[1], y[0]+y[1]+y[2], ...]
+function computeCumulativeSum(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var sum = 0;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            sum += v;
+        }
+        result.push(sum);
+    }
+    return result;
+}
+
+// Compute cumulative product of values
+// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+function computeCumulativeProduct(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var product = 1;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            product *= v;
+        }
+        result.push(product);
+    }
+    return result;
+}
+
+// Compute quantile transformation of values (rank-based, maps to [0, 1])
+function computeQuantileTransform(values) {
+    if (!values || values.length === 0) return [];
+
+    var indexedValues = values.map(function(v, i) {
+        return { value: parseFloat(v), index: i };  // Explicitly convert to number
+    });
+
+    var validValues = indexedValues.filter(function(item) {
+        return !isNaN(item.value) && isFinite(item.value);
+    }).sort(function(a, b) {
+        return a.value - b.value;
+    });
+
+    if (validValues.length === 0) return values;
+
+    var ranks = new Array(values.length).fill(NaN);
+    validValues.forEach(function(item, rank) {
+        ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+    });
+
+    return ranks;
 }
 
 // Normal CDF (cumulative distribution function) for standard normal
@@ -524,6 +590,10 @@ function getAxisLabel(originalLabel, transformType) {
             return 'quantile(' + originalLabel + ')';
         case 'inverse_cdf':
             return 'Φ(' + originalLabel + ')';
+        case 'cumulative':
+            return 'cumulative(' + originalLabel + ')';
+        case 'cumprod':
+            return 'cumprod(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -9120,20 +9190,10 @@ measurement,time_point
     </button>
 </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">value</span>
-    </div>
-    <div>
-        <label for="x_transform_select_simple_dist">X Transform: </label>
-        <select id="x_transform_select_simple_dist" style="padding: 5px 10px;" onchange="updatePlotWithFilters_simple_dist()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -9174,20 +9234,10 @@ measurement,time_point
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
     <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">value</span>
-    </div>
-    <div>
-        <label for="x_transform_select_multi_group_dist">X Transform: </label>
-        <select id="x_transform_select_multi_group_dist" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_group_dist()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -9308,20 +9358,10 @@ measurement,time_point
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
     <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">score</span>
-    </div>
-    <div>
-        <label for="x_transform_select_filtered_dist">X Transform: </label>
-        <select id="x_transform_select_filtered_dist" style="padding: 5px 10px;" onchange="updatePlotWithFilters_filtered_dist()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -9383,23 +9423,13 @@ measurement,time_point
 
 </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label for="x_col_select_multi_dropdown">X: </label>
         <select id="x_col_select_multi_dropdown" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dropdown()">
             <option value="height" selected>height</option>
 <option value="weight">weight</option>
 <option value="age_value">age_value</option>
-        </select>
-    </div>
-    <div>
-        <label for="x_transform_select_multi_dropdown">X Transform: </label>
-        <select id="x_transform_select_multi_dropdown" style="padding: 5px 10px;" onchange="updatePlotWithFilters_multi_dropdown()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -9441,20 +9471,10 @@ measurement,time_point
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
     <h4 style="margin-top: 0;">Plot Attributes</h4>
     <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">measurement</span>
-    </div>
-    <div>
-        <label for="x_transform_select_custom_appearance">X Transform: </label>
-        <select id="x_transform_select_custom_appearance" style="padding: 5px 10px;" onchange="updatePlotWithFilters_custom_appearance()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -9774,20 +9794,10 @@ measurement,time_point
     </button>
 </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">value</span>
-    </div>
-    <div>
-        <label for="x_transform_select_datetime_filters">X Transform: </label>
-        <select id="x_transform_select_datetime_filters" style="padding: 5px 10px;" onchange="updatePlotWithFilters_datetime_filters()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -10107,20 +10117,10 @@ measurement,time_point
     </button>
 </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">value</span>
-    </div>
-    <div>
-        <label for="x_transform_select_datetime_sliders">X Transform: </label>
-        <select id="x_transform_select_datetime_sliders" style="padding: 5px 10px;" onchange="updatePlotWithFilters_datetime_sliders()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
 </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
@@ -10191,23 +10191,13 @@ Charts reference the responses DataFrame using <code>Symbol("survey.responses")<
 
 </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label for="x_col_select_struct_dist">X: </label>
         <select id="x_col_select_struct_dist" style="padding: 5px 10px;" onchange="updatePlotWithFilters_struct_dist()">
             <option value="satisfaction_score" selected>satisfaction_score</option>
 <option value="recommendation_score">recommendation_score</option>
 <option value="response_time">response_time</option>
-        </select>
-    </div>
-    <div>
-        <label for="x_transform_select_struct_dist">X Transform: </label>
-        <select id="x_transform_select_struct_dist" style="padding: 5px 10px;" onchange="updatePlotWithFilters_struct_dist()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
         </select>
     </div>
 </div>
@@ -10254,6 +10244,6 @@ Charts reference the responses DataFrame using <code>Symbol("survey.responses")<
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.2.</small></p>
 </body>
 </html>

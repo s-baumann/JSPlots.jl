@@ -170,8 +170,9 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
-    var MIN_TIMESTAMP_MS = 0;
+    // Timestamp range for reasonable dates (2000-01-01 to 2100-01-01 in milliseconds)
+    // Using year 2000 as minimum to avoid false positives with regular numeric values
+    var MIN_TIMESTAMP_MS = 946684800000;  // 2000-01-01
     var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
 
     // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
@@ -194,8 +195,11 @@ function parseDatesInData(data) {
     }
 
     // Helper to check if a numeric value looks like a day count since epoch
+    // DISABLED: This was too aggressive and incorrectly converted normal numeric values
+    // (like Month=1, Year=2022, Sales=120) to dates. Only enable for columns with
+    // explicit date-like names if needed in the future.
     function looksLikeDayCount(value) {
-        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+        return false;  // Disabled - too many false positives
     }
 
     // Build list of keys from first row
@@ -465,9 +469,71 @@ function applyAxisTransform(values, transformType) {
                 return normalCDF(zscore);
             });
 
+        case 'cumulative':
+        case 'cumprod':
+            // These are handled specially in chart code (computed per group)
+            // Here they act as identity
+            return values;
+
         default:
             return values;
     }
+}
+
+// Compute cumulative sum of values
+// Returns array of same length: [y[0], y[0]+y[1], y[0]+y[1]+y[2], ...]
+function computeCumulativeSum(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var sum = 0;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            sum += v;
+        }
+        result.push(sum);
+    }
+    return result;
+}
+
+// Compute cumulative product of values
+// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+function computeCumulativeProduct(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var product = 1;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            product *= v;
+        }
+        result.push(product);
+    }
+    return result;
+}
+
+// Compute quantile transformation of values (rank-based, maps to [0, 1])
+function computeQuantileTransform(values) {
+    if (!values || values.length === 0) return [];
+
+    var indexedValues = values.map(function(v, i) {
+        return { value: parseFloat(v), index: i };  // Explicitly convert to number
+    });
+
+    var validValues = indexedValues.filter(function(item) {
+        return !isNaN(item.value) && isFinite(item.value);
+    }).sort(function(a, b) {
+        return a.value - b.value;
+    });
+
+    if (validValues.length === 0) return values;
+
+    var ranks = new Array(values.length).fill(NaN);
+    validValues.forEach(function(item, rank) {
+        ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+    });
+
+    return ranks;
 }
 
 // Normal CDF (cumulative distribution function) for standard normal
@@ -530,6 +596,10 @@ function getAxisLabel(originalLabel, transformType) {
             return 'quantile(' + originalLabel + ')';
         case 'inverse_cdf':
             return 'Φ(' + originalLabel + ')';
+        case 'cumulative':
+            return 'cumulative(' + originalLabel + ')';
+        case 'cumprod':
+            return 'cumprod(' + originalLabel + ')';
         default:
             return originalLabel;
     }
