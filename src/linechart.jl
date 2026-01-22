@@ -123,23 +123,28 @@ struct LineChart <: JSPlotsType
                 if (values.length === 0) return null;
                 if (method === 'none') return values;  // Return all values when no aggregation
                 if (method === 'count') return [values.length];
+
+                // Convert all values to numbers for numeric operations
+                const numericValues = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && isFinite(v));
+                if (numericValues.length === 0) return [NaN];
+
                 if (method === 'sum') {
-                    const sum = values.reduce((a, b) => a + b, 0);
+                    const sum = numericValues.reduce((a, b) => a + b, 0);
                     return [sum];
                 }
                 if (method === 'mean') {
-                    const sum = values.reduce((a, b) => a + b, 0);
-                    return [sum / values.length];
+                    const sum = numericValues.reduce((a, b) => a + b, 0);
+                    return [sum / numericValues.length];
                 }
                 if (method === 'median') {
-                    const sorted = [...values].sort((a, b) => a - b);
+                    const sorted = [...numericValues].sort((a, b) => a - b);
                     const mid = Math.floor(sorted.length / 2);
                     return sorted.length % 2 === 0 ?
                         [(sorted[mid - 1] + sorted[mid]) / 2] :
                         [sorted[mid]];
                 }
-                if (method === 'min') return [Math.min(...values)];
-                if (method === 'max') return [Math.max(...values)];
+                if (method === 'min') return [Math.min(...numericValues)];
+                if (method === 'max') return [Math.max(...numericValues)];
                 return values;
             }
 
@@ -156,6 +161,17 @@ struct LineChart <: JSPlotsType
                     // No aggregation - return all rows with duplicates
                     xValues = groupData.map(row => row[xCol]);
                     yValues = groupData.map(row => row[yCol]);
+                    // Debug logging
+                    if (groupData.length > 0) {
+                        console.log('DEBUG aggregateGroupData:', {
+                            yCol: yCol,
+                            firstRow: groupData[0],
+                            firstYValue: yValues[0],
+                            yValueType: typeof yValues[0],
+                            yValuesLength: yValues.length,
+                            sampleYValues: yValues.slice(0, 5)
+                        });
+                    }
                 } else {
                     // Group by x value and aggregate y values
                     // Keep track of original x values (including Date objects)
@@ -218,10 +234,7 @@ struct LineChart <: JSPlotsType
                 const yColSelect = document.getElementById('y_col_select_$chart_title');
                 const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-                // Get current axis transformations
-                const xTransformSelect = document.getElementById('x_transform_select_$chart_title');
-                const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
-
+                // Get current Y axis transformation
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
@@ -240,7 +253,8 @@ struct LineChart <: JSPlotsType
                 // Read continuous filters (range sliders)
                 CONTINUOUS_FILTERS.forEach(col => {
                     const slider = \$('#' + col + '_range_$chart_title' + '_slider');
-                    if (slider.length > 0) {
+                    // Check slider is initialized before reading values
+                    if (slider.length > 0 && slider.hasClass('ui-slider')) {
                         rangeFilters[col] = {
                             min: slider.slider("values", 0),
                             max: slider.slider("values", 1)
@@ -326,9 +340,17 @@ struct LineChart <: JSPlotsType
                         let xValues = result.xValues;
                         let yValues = result.yValues;
 
-                        // Apply axis transformations
-                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        // Apply Y axis transformation
+                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        if (Y_TRANSFORM === 'cumulative') {
+                            console.log('DEBUG before cumsum:', {yValues: yValues.slice(0, 5), length: yValues.length});
+                            yValues = computeCumulativeSum(yValues);
+                            console.log('DEBUG after cumsum:', {yValues: yValues.slice(0, 5)});
+                        } else if (Y_TRANSFORM === 'cumprod') {
+                            yValues = computeCumulativeProduct(yValues);
+                        } else {
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        }
 
                         traces.push({
                             x: xValues,
@@ -345,8 +367,12 @@ struct LineChart <: JSPlotsType
                     }
 
                     const layout = {
-                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
-                        yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                        xaxis: { title: X_COL },
+                        yaxis: {
+                            title: getAxisLabel(Y_COL, Y_TRANSFORM),
+                            // Force linear type for cumulative transforms to prevent auto-date detection
+                            type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        },
                         hovermode: 'closest',
                         showlegend: true
                     };
@@ -422,9 +448,15 @@ struct LineChart <: JSPlotsType
                             let xValues = result.xValues;
                             let yValues = result.yValues;
 
-                            // Apply axis transformations
-                            xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                            // Apply Y axis transformation
+                            // Special handling for cumulative transforms (computed per group after aggregation)
+                            if (Y_TRANSFORM === 'cumulative') {
+                                yValues = computeCumulativeSum(yValues);
+                            } else if (Y_TRANSFORM === 'cumprod') {
+                                yValues = computeCumulativeProduct(yValues);
+                            } else {
+                                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                            }
 
                             const legendGroup = group.color;
 
@@ -448,12 +480,13 @@ struct LineChart <: JSPlotsType
 
                         // Add axis configuration
                         layout[xaxis] = {
-                            title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                            title: row === nRows ? X_COL : '',
                             anchor: yaxis
                         };
                         layout[yaxis] = {
                             title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
-                            anchor: xaxis
+                            anchor: xaxis,
+                            type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
                         };
 
                         // Add annotation for facet label
@@ -543,9 +576,15 @@ struct LineChart <: JSPlotsType
                                 let xValues = result.xValues;
                                 let yValues = result.yValues;
 
-                                // Apply axis transformations
-                                xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                                // Apply Y axis transformation
+                                // Special handling for cumulative transforms (computed per group after aggregation)
+                                if (Y_TRANSFORM === 'cumulative') {
+                                    yValues = computeCumulativeSum(yValues);
+                                } else if (Y_TRANSFORM === 'cumprod') {
+                                    yValues = computeCumulativeProduct(yValues);
+                                } else {
+                                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                                }
 
                                 const legendGroup = group.color;
 
@@ -569,12 +608,13 @@ struct LineChart <: JSPlotsType
 
                             // Add axis configuration
                             layout[xaxis] = {
-                                title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                                title: rowIdx === nRows - 1 ? X_COL : '',
                                 anchor: yaxis
                             };
                             layout[yaxis] = {
                                 title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
-                                anchor: xaxis
+                                anchor: xaxis,
+                                type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
                             };
 
                             // Add annotations for facet labels

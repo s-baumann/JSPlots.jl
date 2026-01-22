@@ -170,8 +170,9 @@ function parseDatesInData(data) {
     var datetimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;  // YYYY-MM-DDTHH:MM:SS
     var timePattern = /^\d{2}:\d{2}:\d{2}(\.\d+)?$/;  // HH:MM:SS or HH:MM:SS.sss
 
-    // Timestamp range for reasonable dates (1970-01-01 to 2100-01-01 in milliseconds)
-    var MIN_TIMESTAMP_MS = 0;
+    // Timestamp range for reasonable dates (2000-01-01 to 2100-01-01 in milliseconds)
+    // Using year 2000 as minimum to avoid false positives with regular numeric values
+    var MIN_TIMESTAMP_MS = 946684800000;  // 2000-01-01
     var MAX_TIMESTAMP_MS = 4102444800000;  // 2100-01-01
 
     // Day count range (for dates stored as days since epoch, e.g., from some Parquet files)
@@ -194,8 +195,11 @@ function parseDatesInData(data) {
     }
 
     // Helper to check if a numeric value looks like a day count since epoch
+    // DISABLED: This was too aggressive and incorrectly converted normal numeric values
+    // (like Month=1, Year=2022, Sales=120) to dates. Only enable for columns with
+    // explicit date-like names if needed in the future.
     function looksLikeDayCount(value) {
-        return typeof value === 'number' && value >= MIN_DAYS && value <= MAX_DAYS && Number.isInteger(value);
+        return false;  // Disabled - too many false positives
     }
 
     // Build list of keys from first row
@@ -465,9 +469,71 @@ function applyAxisTransform(values, transformType) {
                 return normalCDF(zscore);
             });
 
+        case 'cumulative':
+        case 'cumprod':
+            // These are handled specially in chart code (computed per group)
+            // Here they act as identity
+            return values;
+
         default:
             return values;
     }
+}
+
+// Compute cumulative sum of values
+// Returns array of same length: [y[0], y[0]+y[1], y[0]+y[1]+y[2], ...]
+function computeCumulativeSum(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var sum = 0;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            sum += v;
+        }
+        result.push(sum);
+    }
+    return result;
+}
+
+// Compute cumulative product of values
+// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+function computeCumulativeProduct(values) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+    var product = 1;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);  // Explicitly convert to number
+        if (!isNaN(v) && isFinite(v)) {
+            product *= v;
+        }
+        result.push(product);
+    }
+    return result;
+}
+
+// Compute quantile transformation of values (rank-based, maps to [0, 1])
+function computeQuantileTransform(values) {
+    if (!values || values.length === 0) return [];
+
+    var indexedValues = values.map(function(v, i) {
+        return { value: parseFloat(v), index: i };  // Explicitly convert to number
+    });
+
+    var validValues = indexedValues.filter(function(item) {
+        return !isNaN(item.value) && isFinite(item.value);
+    }).sort(function(a, b) {
+        return a.value - b.value;
+    });
+
+    if (validValues.length === 0) return values;
+
+    var ranks = new Array(values.length).fill(NaN);
+    validValues.forEach(function(item, rank) {
+        ranks[item.index] = validValues.length === 1 ? 0.5 : rank / (validValues.length - 1);
+    });
+
+    return ranks;
 }
 
 // Normal CDF (cumulative distribution function) for standard normal
@@ -530,6 +596,10 @@ function getAxisLabel(originalLabel, transformType) {
             return 'quantile(' + originalLabel + ')';
         case 'inverse_cdf':
             return 'Φ(' + originalLabel + ')';
+        case 'cumulative':
+            return 'cumulative(' + originalLabel + ')';
+        case 'cumprod':
+            return 'cumprod(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -875,23 +945,28 @@ $(function(){
         if (values.length === 0) return null;
         if (method === 'none') return values;  // Return all values when no aggregation
         if (method === 'count') return [values.length];
+
+        // Convert all values to numbers for numeric operations
+        const numericValues = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && isFinite(v));
+        if (numericValues.length === 0) return [NaN];
+
         if (method === 'sum') {
-            const sum = values.reduce((a, b) => a + b, 0);
+            const sum = numericValues.reduce((a, b) => a + b, 0);
             return [sum];
         }
         if (method === 'mean') {
-            const sum = values.reduce((a, b) => a + b, 0);
-            return [sum / values.length];
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum / numericValues.length];
         }
         if (method === 'median') {
-            const sorted = [...values].sort((a, b) => a - b);
+            const sorted = [...numericValues].sort((a, b) => a - b);
             const mid = Math.floor(sorted.length / 2);
             return sorted.length % 2 === 0 ?
                 [(sorted[mid - 1] + sorted[mid]) / 2] :
                 [sorted[mid]];
         }
-        if (method === 'min') return [Math.min(...values)];
-        if (method === 'max') return [Math.max(...values)];
+        if (method === 'min') return [Math.min(...numericValues)];
+        if (method === 'max') return [Math.max(...numericValues)];
         return values;
     }
 
@@ -908,6 +983,17 @@ $(function(){
             // No aggregation - return all rows with duplicates
             xValues = groupData.map(row => row[xCol]);
             yValues = groupData.map(row => row[yCol]);
+            // Debug logging
+            if (groupData.length > 0) {
+                console.log('DEBUG aggregateGroupData:', {
+                    yCol: yCol,
+                    firstRow: groupData[0],
+                    firstYValue: yValues[0],
+                    yValueType: typeof yValues[0],
+                    yValuesLength: yValues.length,
+                    sampleYValues: yValues.slice(0, 5)
+                });
+            }
         } else {
             // Group by x value and aggregate y values
             // Keep track of original x values (including Date objects)
@@ -970,10 +1056,7 @@ $(function(){
         const yColSelect = document.getElementById('y_col_select_metrics_h1');
         const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
 
-        // Get current axis transformations
-        const xTransformSelect = document.getElementById('x_transform_select_metrics_h1');
-        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
-
+        // Get current Y axis transformation
         const yTransformSelect = document.getElementById('y_transform_select_metrics_h1');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
@@ -992,7 +1075,8 @@ $(function(){
         // Read continuous filters (range sliders)
         CONTINUOUS_FILTERS.forEach(col => {
             const slider = $('#' + col + '_range_metrics_h1' + '_slider');
-            if (slider.length > 0) {
+            // Check slider is initialized before reading values
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
                 rangeFilters[col] = {
                     min: slider.slider("values", 0),
                     max: slider.slider("values", 1)
@@ -1078,9 +1162,17 @@ $(function(){
                 let xValues = result.xValues;
                 let yValues = result.yValues;
 
-                // Apply axis transformations
-                xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                // Apply Y axis transformation
+                // Special handling for cumulative transforms (computed per group after aggregation)
+                if (Y_TRANSFORM === 'cumulative') {
+                    console.log('DEBUG before cumsum:', {yValues: yValues.slice(0, 5), length: yValues.length});
+                    yValues = computeCumulativeSum(yValues);
+                    console.log('DEBUG after cumsum:', {yValues: yValues.slice(0, 5)});
+                } else if (Y_TRANSFORM === 'cumprod') {
+                    yValues = computeCumulativeProduct(yValues);
+                } else {
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                }
 
                 traces.push({
                     x: xValues,
@@ -1097,8 +1189,12 @@ $(function(){
             }
 
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
-                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: getAxisLabel(Y_COL, Y_TRANSFORM),
+                    // Force linear type for cumulative transforms to prevent auto-date detection
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                },
                 hovermode: 'closest',
                 showlegend: true
             };
@@ -1174,9 +1270,15 @@ $(function(){
                     let xValues = result.xValues;
                     let yValues = result.yValues;
 
-                    // Apply axis transformations
-                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    // Apply Y axis transformation
+                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    if (Y_TRANSFORM === 'cumulative') {
+                        yValues = computeCumulativeSum(yValues);
+                    } else if (Y_TRANSFORM === 'cumprod') {
+                        yValues = computeCumulativeProduct(yValues);
+                    } else {
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    }
 
                     const legendGroup = group.color;
 
@@ -1200,12 +1302,13 @@ $(function(){
 
                 // Add axis configuration
                 layout[xaxis] = {
-                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                    title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
-                    anchor: xaxis
+                    anchor: xaxis,
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -1295,9 +1398,15 @@ $(function(){
                         let xValues = result.xValues;
                         let yValues = result.yValues;
 
-                        // Apply axis transformations
-                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
-                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        // Apply Y axis transformation
+                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        if (Y_TRANSFORM === 'cumulative') {
+                            yValues = computeCumulativeSum(yValues);
+                        } else if (Y_TRANSFORM === 'cumprod') {
+                            yValues = computeCumulativeProduct(yValues);
+                        } else {
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        }
 
                         const legendGroup = group.color;
 
@@ -1321,12 +1430,13 @@ $(function(){
 
                     // Add axis configuration
                     layout[xaxis] = {
-                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                        title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
-                        anchor: xaxis
+                        anchor: xaxis,
+                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -1426,20 +1536,10 @@ $(function(){
             </div>
         </div>
         <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
     <div>
         <label>X: </label>
         <span style="font-weight: bold;">Month</span>
-    </div>
-    <div>
-        <label for="x_transform_select_metrics_h1">X Transform: </label>
-        <select id="x_transform_select_metrics_h1" style="padding: 5px 10px;" onchange="updateChart_metrics_h1()">
-            <option value="identity" selected>identity</option>
-<option value="log">log</option>
-<option value="z_score">z_score</option>
-<option value="quantile">quantile</option>
-<option value="inverse_cdf">inverse_cdf</option>
-        </select>
     </div>
     <div>
         <label>Y: </label>
@@ -1453,6 +1553,8 @@ $(function(){
 <option value="z_score">z_score</option>
 <option value="quantile">quantile</option>
 <option value="inverse_cdf">inverse_cdf</option>
+<option value="cumulative">cumulative</option>
+<option value="cumprod">cumprod</option>
         </select>
     </div>
 </div>
@@ -1471,6 +1573,6 @@ $(function(){
 <div id="metrics_h1"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: metrics_data2.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.1.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.2.</small></p>
 </body>
 </html>

@@ -903,20 +903,20 @@ function build_axis_controls_html(chart_title_safe::String,
         return ""
     end
 
-    # Transform options
-    transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf"]
+    # Y transform options (includes cumulative options - cumsum computed per group in X-order)
+    y_transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf", "cumulative", "cumprod"]
     transform_default = "identity"
 
     axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"
-    axes_html *= "<div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 10px;\">\n"
 
-    # X axis row
+    # Put X, Y, and Y Transform on the same line (3 columns)
+    axes_html *= "<div style=\"display: flex; gap: 15px; flex-wrap: wrap; align-items: center;\">\n"
+
+    # X variable
     if !isempty(x_cols)
         default_x_str = string(isnothing(default_x) ? x_cols[1] : default_x)
 
-        # Left column: X dimension
         if length(x_cols) > 1
-            # Multiple options - show dropdown
             x_options = join(["""<option value="$(col)"$(string(col) == default_x_str ? " selected" : "")>$(col)</option>"""
                             for col in x_cols], "\n")
             axes_html *= """
@@ -928,7 +928,6 @@ function build_axis_controls_html(chart_title_safe::String,
                 </div>
             """
         else
-            # Single option - show as text
             axes_html *= """
                 <div>
                     <label>X: </label>
@@ -936,27 +935,13 @@ function build_axis_controls_html(chart_title_safe::String,
                 </div>
             """
         end
-
-        # Right column: X transform
-        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
-                              for opt in transform_options], "\n")
-        axes_html *= """
-            <div>
-                <label for="x_transform_select_$chart_title_safe">X Transform: </label>
-                <select id="x_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
-                    $transform_opts
-                </select>
-            </div>
-        """
     end
 
-    # Y axis row
+    # Y variable
     if !isempty(y_cols)
         default_y_str = string(isnothing(default_y) ? y_cols[1] : default_y)
 
-        # Left column: Y dimension
         if length(y_cols) > 1
-            # Multiple options - show dropdown
             y_options = join(["""<option value="$(col)"$(string(col) == default_y_str ? " selected" : "")>$(col)</option>"""
                             for col in y_cols], "\n")
             axes_html *= """
@@ -968,7 +953,6 @@ function build_axis_controls_html(chart_title_safe::String,
                 </div>
             """
         else
-            # Single option - show as text
             axes_html *= """
                 <div>
                     <label>Y: </label>
@@ -977,26 +961,24 @@ function build_axis_controls_html(chart_title_safe::String,
             """
         end
 
-        # Right column: Y transform
-        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
-                              for opt in transform_options], "\n")
+        # Y transform (on same line)
+        y_transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                              for opt in y_transform_options], "\n")
         axes_html *= """
             <div>
                 <label for="y_transform_select_$chart_title_safe">Y Transform: </label>
                 <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
-                    $transform_opts
+                    $y_transform_opts
                 </select>
             </div>
         """
     end
 
-    # Z axis row (for 3D charts)
+    # Z variable (for 3D charts) - no transform, just variable selection
     if !isempty(z_cols)
         default_z_str = string(isnothing(default_z) ? z_cols[1] : default_z)
 
-        # Left column: Z dimension
         if length(z_cols) > 1
-            # Multiple options - show dropdown
             z_options = join(["""<option value="$(col)"$(string(col) == default_z_str ? " selected" : "")>$(col)</option>"""
                             for col in z_cols], "\n")
             axes_html *= """
@@ -1008,7 +990,6 @@ function build_axis_controls_html(chart_title_safe::String,
                 </div>
             """
         else
-            # Single option - show as text
             axes_html *= """
                 <div>
                     <label>Z: </label>
@@ -1016,18 +997,6 @@ function build_axis_controls_html(chart_title_safe::String,
                 </div>
             """
         end
-
-        # Right column: Z transform
-        transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
-                              for opt in transform_options], "\n")
-        axes_html *= """
-            <div>
-                <label for="z_transform_select_$chart_title_safe">Z Transform: </label>
-                <select id="z_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
-                    $transform_opts
-                </select>
-            </div>
-        """
     end
 
     axes_html *= "</div>\n"
