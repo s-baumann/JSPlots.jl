@@ -897,19 +897,26 @@ function build_axis_controls_html(chart_title_safe::String,
                                   z_cols::Vector{Symbol}=Symbol[],
                                   default_x::Union{Symbol,Nothing}=nothing,
                                   default_y::Union{Symbol,Nothing}=nothing,
-                                  default_z::Union{Symbol,Nothing}=nothing)::String
+                                  default_z::Union{Symbol,Nothing}=nothing,
+                                  include_x_transform::Bool=false,
+                                  include_y_transform::Bool=true,
+                                  include_cumulative::Bool=true)::String
 
     if isempty(x_cols) && isempty(y_cols) && isempty(z_cols)
         return ""
     end
 
-    # Y transform options (includes cumulative options - cumsum computed per group in X-order)
-    y_transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf", "cumulative", "cumprod"]
+    # Base transform options
+    base_transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf"]
+    # Cumulative options only for certain chart types (like LineChart)
+    cumulative_options = include_cumulative ? ["cumulative", "cumprod"] : String[]
+    y_transform_options = vcat(base_transform_options, cumulative_options)
+    x_transform_options = base_transform_options  # X never has cumulative
     transform_default = "identity"
 
     axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"
 
-    # Put X, Y, and Y Transform on the same line (3 columns)
+    # Put X, Y, transforms on the same line
     axes_html *= "<div style=\"display: flex; gap: 15px; flex-wrap: wrap; align-items: center;\">\n"
 
     # X variable
@@ -932,6 +939,20 @@ function build_axis_controls_html(chart_title_safe::String,
                 <div>
                     <label>X: </label>
                     <span style="font-weight: bold;">$default_x_str</span>
+                </div>
+            """
+        end
+
+        # X transform (if enabled)
+        if include_x_transform
+            x_transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                                  for opt in x_transform_options], "\n")
+            axes_html *= """
+                <div>
+                    <label for="x_transform_select_$chart_title_safe">X Transform: </label>
+                    <select id="x_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                        $x_transform_opts
+                    </select>
                 </div>
             """
         end
@@ -961,17 +982,19 @@ function build_axis_controls_html(chart_title_safe::String,
             """
         end
 
-        # Y transform (on same line)
-        y_transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
-                              for opt in y_transform_options], "\n")
-        axes_html *= """
-            <div>
-                <label for="y_transform_select_$chart_title_safe">Y Transform: </label>
-                <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
-                    $y_transform_opts
-                </select>
-            </div>
-        """
+        # Y transform (if enabled)
+        if include_y_transform
+            y_transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
+                                  for opt in y_transform_options], "\n")
+            axes_html *= """
+                <div>
+                    <label for="y_transform_select_$chart_title_safe">Y Transform: </label>
+                    <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                        $y_transform_opts
+                    </select>
+                </div>
+            """
+        end
     end
 
     # Z variable (for 3D charts) - no transform, just variable selection

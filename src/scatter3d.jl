@@ -116,6 +116,7 @@ $style_html        </div>
         end
 
         # Build axis controls HTML (X, Y, and Z dimensions + transforms)
+        # Scatter3D uses both X and Y transforms, but NOT cumulative/cumprod
         axes_html = build_axis_controls_html(
             string(chart_title_safe),
             "updatePlotWithFilters_$(chart_title_safe)()";
@@ -124,7 +125,10 @@ $style_html        </div>
             z_cols = dimensions,
             default_x = Symbol(default_x_col),
             default_y = Symbol(default_y_col),
-            default_z = Symbol(default_z_col)
+            default_z = Symbol(default_z_col),
+            include_x_transform = true,
+            include_y_transform = true,
+            include_cumulative = false
         )
         plot_attributes_html *= axes_html
 

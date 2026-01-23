@@ -712,6 +712,25 @@ scatter_chart = ScatterPlot(:scatter, df, :sales_data, [:profit, :sales, :quanti
     default_facet_cols=nothing,
     notes="Scatter plots show x vs y. There is a density colouring that can be applied or not depending on a slider. In addition the marginal distributions appear on the edges of the plot in cases when you do not apply faceting. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatterplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for ScatterPlot examples</a>")
 
+# ScatterPlot with Expression Mode
+# This enables custom X-axis expressions with functions like z-score, quantile, OLS, PCA, and clamp
+scatter_expr_chart = ScatterPlot(:scatter_expr, df, :sales_data, [:profit, :sales, :quantity, :customers, :cost, :satisfaction];
+    expression_mode=true,
+    default_x_expr="z(:profit, [:product])",
+    color_cols=[:product, :region, :segment],
+    filters=[:product, :region],
+    title="ScatterPlot with Expression Mode",
+    notes="""Expression mode allows typing custom formulas for the X axis. Available functions:
+    <ul>
+        <li><code>z(expr, [groups])</code> - Z-score within groups (e.g., <code>z(:profit, [:product])</code>)</li>
+        <li><code>q(expr, [groups])</code> - Quantile rank (0-1) within groups</li>
+        <li><code>r(y, x)</code> - OLS residual (y minus fitted value from regressing y on x)</li>
+        <li><code>f(y, x)</code> - OLS fitted value (predicted y from regressing y on x)</li>
+        <li><code>PCA1(:v1, :v2)</code> / <code>PCA2(:v1, :v2)</code> - Principal component projections</li>
+        <li><code>c(expr, min, max)</code> - Clamp values between min and max (use <code>Inf</code>/<code>-Inf</code> for one-sided bounds)</li>
+    </ul>
+    Try expressions like: <code>:profit + :sales</code>, <code>z(:profit, [:product, :region])</code>, <code>r(:profit, :sales)</code>, <code>c(:profit, -500, 500)</code>""")
+
 
 # Path - Business Performance Trajectories
 # Create business metrics dataset (same as used in Slides examples)
@@ -791,7 +810,7 @@ cum_plot = CumPlot(:cum_plot, strategy_df, :strategy_data,
     facet_cols = [:asset_class, :region],
     filters = [:asset_class, :region],
     title = "Strategy Performance Comparison",
-    notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
+    notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. For 'cumprod' transforms, values are treated as returns and compounded correctly: cumprod(1+r) - 1. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
 )
 
 # More Exotic Plot Types
@@ -1815,10 +1834,10 @@ tabular_plot_page =  JSPlotPage(
 
 two_d_plot_page =  JSPlotPage(
     all_data,
-    [plotting_2d_section, line_chart, area_chart, scatter_chart, path_chart, cum_plot],
+    [plotting_2d_section, line_chart, area_chart, scatter_chart, scatter_expr_chart, path_chart, cum_plot],
     tab_title="2D Charts",
     page_header = "2D Charts",
-    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and CumPlot.",
+    notes = "This shows examples of LinePlot, AreaChart, ScatterPlot (standard and expression mode), Path, and CumPlot.",
     dataformat = :parquet
 )
 

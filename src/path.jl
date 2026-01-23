@@ -799,13 +799,17 @@ normalized_filters = normalize_filters(filters, df)
         end
 
         # Build axis controls HTML (X and Y dimensions + transforms)
+        # Path uses both X and Y transforms, but NOT cumulative/cumprod
         axes_html = build_axis_controls_html(
             chart_title_str,
             update_function;
             x_cols = valid_x_cols,
             y_cols = valid_y_cols,
             default_x = Symbol(default_x_col),
-            default_y = Symbol(default_y_col)
+            default_y = Symbol(default_y_col),
+            include_x_transform = true,
+            include_y_transform = true,
+            include_cumulative = false
         )
 
         # Build faceting dropdowns using html_controls abstraction

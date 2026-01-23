@@ -490,8 +490,10 @@ function computeCumulativeSum(values) {
     return result;
 }
 
-// Compute cumulative product of values
-// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+// Compute cumulative product of values for returns data
+// For returns r_i, computes: cumprod(1 + r_i) - 1
+// This converts returns to growth factors, compounds them, then converts back to cumulative return
+// Example: returns [0.1, 0.2, -0.1] -> (1+r): [1.1, 1.2, 0.9] -> cumprod: [1.1, 1.32, 1.188] -> result: [0.1, 0.32, 0.188]
 function computeCumulativeProduct(values) {
     if (!values || values.length === 0) return [];
     var result = [];
@@ -499,9 +501,9 @@ function computeCumulativeProduct(values) {
     for (var i = 0; i < values.length; i++) {
         var v = parseFloat(values[i]);  // Explicitly convert to number
         if (!isNaN(v) && isFinite(v)) {
-            product *= v;
+            product *= (1 + v);  // Convert return to growth factor and multiply
         }
-        result.push(product);
+        result.push(product - 1);  // Convert back to cumulative return
     }
     return result;
 }
@@ -598,6 +600,554 @@ function getAxisLabel(originalLabel, transformType) {
             return originalLabel;
     }
 }
+
+// =============================================================================
+// Expression Parser for ScatterTwo
+// Supports: +, -, *, /, variable references (:var or var), and functions:
+//   z(expr, [groups]) - z-score within groups
+//   q(expr, [groups]) - quantile within groups
+//   PCA1(var1, var2) - projection on first principal component
+//   PCA2(var1, var2) - projection on second principal component
+// =============================================================================
+
+// Tokenizer for expression parsing
+function tokenizeExpression(expr) {
+    var tokens = [];
+    var i = 0;
+    while (i < expr.length) {
+        var ch = expr[i];
+
+        // Skip whitespace
+        if (/\s/.test(ch)) { i++; continue; }
+
+        // Operators and punctuation
+        if ('+-*/(),[]'.indexOf(ch) !== -1) {
+            tokens.push({ type: 'punct', value: ch });
+            i++;
+            continue;
+        }
+
+        // Numbers
+        if (/[0-9.]/.test(ch)) {
+            var num = '';
+            while (i < expr.length && /[0-9.]/.test(expr[i])) {
+                num += expr[i++];
+            }
+            tokens.push({ type: 'number', value: parseFloat(num) });
+            continue;
+        }
+
+        // Variable with colon prefix :varname
+        if (ch === ':') {
+            i++; // skip colon
+            var name = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                name += expr[i++];
+            }
+            tokens.push({ type: 'variable', value: name });
+            continue;
+        }
+
+        // Identifiers (function names or variable names without colon)
+        if (/[a-zA-Z_]/.test(ch)) {
+            var ident = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                ident += expr[i++];
+            }
+            // Check if it's a function (followed by open paren)
+            var j = i;
+            while (j < expr.length && /\s/.test(expr[j])) j++;
+            if (j < expr.length && expr[j] === '(') {
+                tokens.push({ type: 'function', value: ident });
+            } else {
+                tokens.push({ type: 'variable', value: ident });
+            }
+            continue;
+        }
+
+        // Unknown character - skip
+        i++;
+    }
+    return tokens;
+}
+
+// Simple recursive descent parser
+function parseExpression(tokens, pos) {
+    return parseAddSub(tokens, pos);
+}
+
+function parseAddSub(tokens, pos) {
+    var result = parseMulDiv(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '+' || tokens[pos].value === '-')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseMulDiv(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseMulDiv(tokens, pos) {
+    var result = parseUnary(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '*' || tokens[pos].value === '/')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseUnary(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseUnary(tokens, pos) {
+    if (pos < tokens.length && tokens[pos].type === 'punct' && tokens[pos].value === '-') {
+        pos++;
+        var result = parseUnary(tokens, pos);
+        return { node: { type: 'unary', op: '-', arg: result.node }, pos: result.pos };
+    }
+    return parsePrimary(tokens, pos);
+}
+
+function parsePrimary(tokens, pos) {
+    if (pos >= tokens.length) {
+        return { node: { type: 'number', value: 0 }, pos: pos };
+    }
+
+    var token = tokens[pos];
+
+    // Number literal
+    if (token.type === 'number') {
+        return { node: { type: 'number', value: token.value }, pos: pos + 1 };
+    }
+
+    // Variable reference
+    if (token.type === 'variable') {
+        return { node: { type: 'variable', name: token.value }, pos: pos + 1 };
+    }
+
+    // Function call
+    if (token.type === 'function') {
+        var funcName = token.value;
+        pos++; // skip function name
+        if (pos < tokens.length && tokens[pos].value === '(') {
+            pos++; // skip (
+            var args = [];
+            while (pos < tokens.length && tokens[pos].value !== ')') {
+                // Check for array literal [...]
+                if (tokens[pos].value === '[') {
+                    pos++; // skip [
+                    var arrayItems = [];
+                    while (pos < tokens.length && tokens[pos].value !== ']') {
+                        if (tokens[pos].type === 'variable') {
+                            arrayItems.push(tokens[pos].value);
+                        }
+                        pos++;
+                        if (pos < tokens.length && tokens[pos].value === ',') pos++;
+                    }
+                    if (pos < tokens.length && tokens[pos].value === ']') pos++;
+                    args.push({ type: 'array', items: arrayItems });
+                } else {
+                    var argResult = parseExpression(tokens, pos);
+                    args.push(argResult.node);
+                    pos = argResult.pos;
+                }
+                if (pos < tokens.length && tokens[pos].value === ',') pos++;
+            }
+            if (pos < tokens.length && tokens[pos].value === ')') pos++;
+            return { node: { type: 'function', name: funcName, args: args }, pos: pos };
+        }
+    }
+
+    // Parenthesized expression
+    if (token.type === 'punct' && token.value === '(') {
+        pos++; // skip (
+        var result = parseExpression(tokens, pos);
+        pos = result.pos;
+        if (pos < tokens.length && tokens[pos].value === ')') pos++;
+        return { node: result.node, pos: pos };
+    }
+
+    // Default: return 0
+    return { node: { type: 'number', value: 0 }, pos: pos + 1 };
+}
+
+// Evaluate parsed expression against data
+// Returns an array of values, one per data row
+function evaluateExpression(node, data) {
+    if (!node) return data.map(function() { return 0; });
+
+    switch (node.type) {
+        case 'number':
+            return data.map(function() { return node.value; });
+
+        case 'variable':
+            return data.map(function(row) {
+                var val = row[node.name];
+                return (typeof val === 'number') ? val : parseFloat(val) || 0;
+            });
+
+        case 'binary':
+            var left = evaluateExpression(node.left, data);
+            var right = evaluateExpression(node.right, data);
+            return left.map(function(l, i) {
+                var r = right[i];
+                switch (node.op) {
+                    case '+': return l + r;
+                    case '-': return l - r;
+                    case '*': return l * r;
+                    case '/': return r !== 0 ? l / r : NaN;
+                    default: return 0;
+                }
+            });
+
+        case 'unary':
+            var arg = evaluateExpression(node.arg, data);
+            if (node.op === '-') {
+                return arg.map(function(v) { return -v; });
+            }
+            return arg;
+
+        case 'function':
+            return evaluateFunction(node.name, node.args, data);
+
+        default:
+            return data.map(function() { return 0; });
+    }
+}
+
+// Evaluate function calls
+function evaluateFunction(name, args, data) {
+    var lowerName = name.toLowerCase();
+
+    // z(expr, [groups]) - z-score within groups
+    if (lowerName === 'z') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedZScore(values, data, groupCols);
+    }
+
+    // q(expr, [groups]) - quantile within groups
+    if (lowerName === 'q') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedQuantile(values, data, groupCols);
+    }
+
+    // PCA1(var1, var2) - first principal component
+    if (lowerName === 'pca1') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 1);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // PCA2(var1, var2) - second principal component
+    if (lowerName === 'pca2') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 2);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // r(y, x) - OLS residual (y - fitted)
+    if (lowerName === 'r') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSResidual(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // f(y, x) - OLS fitted value
+    if (lowerName === 'f') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSFitted(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // c(expr, min, max) - clamp values between min and max
+    // Use Infinity or -Infinity to only set one bound
+    if (lowerName === 'c') {
+        if (args.length >= 3) {
+            var values = evaluateExpression(args[0], data);
+            var minVal = evaluateExpression(args[1], data);
+            var maxVal = evaluateExpression(args[2], data);
+
+            // Get min/max bounds (they're arrays from evaluateExpression, but should be constant)
+            var lo = minVal[0];
+            var hi = maxVal[0];
+
+            return values.map(function(v) {
+                if (isNaN(v)) return v;
+                if (v < lo) return lo;
+                if (v > hi) return hi;
+                return v;
+            });
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // Unknown function - return zeros
+    return data.map(function() { return 0; });
+}
+
+// Compute z-score within groups
+function computeGroupedZScore(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global z-score
+        var validVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) return values;
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        if (std === 0) return values.map(function() { return 0; });
+        return values.map(function(v) { return (v - mean) / std; });
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute z-score within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var validVals = g.values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) {
+            g.indices.forEach(function(i) { result[i] = NaN; });
+            return;
+        }
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = std === 0 ? 0 : (g.values[j] - mean) / std;
+        });
+    });
+    return result;
+}
+
+// Compute quantile within groups
+function computeGroupedQuantile(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global quantile
+        return computeQuantileTransform(values);
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute quantile within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var quantiles = computeQuantileTransform(g.values);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = quantiles[j];
+        });
+    });
+    return result;
+}
+
+// Compute PCA projection
+// component: 1 for first PC, 2 for second PC
+function computePCA(v1, v2, component) {
+    var n = v1.length;
+    if (n === 0) return [];
+
+    // Filter valid pairs
+    var validIndices = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            validIndices.push(i);
+        }
+    }
+
+    if (validIndices.length < 2) {
+        return v1.map(function() { return 0; });
+    }
+
+    // Compute means
+    var mean1 = 0, mean2 = 0;
+    validIndices.forEach(function(i) {
+        mean1 += v1[i];
+        mean2 += v2[i];
+    });
+    mean1 /= validIndices.length;
+    mean2 /= validIndices.length;
+
+    // Compute covariance matrix elements
+    var cov11 = 0, cov12 = 0, cov22 = 0;
+    validIndices.forEach(function(i) {
+        var d1 = v1[i] - mean1;
+        var d2 = v2[i] - mean2;
+        cov11 += d1 * d1;
+        cov12 += d1 * d2;
+        cov22 += d2 * d2;
+    });
+    cov11 /= validIndices.length;
+    cov12 /= validIndices.length;
+    cov22 /= validIndices.length;
+
+    // Compute eigenvalues and eigenvectors of 2x2 covariance matrix
+    // Using closed-form solution for 2x2 symmetric matrix
+    var trace = cov11 + cov22;
+    var det = cov11 * cov22 - cov12 * cov12;
+    var discriminant = Math.sqrt(Math.max(0, trace * trace / 4 - det));
+    var lambda1 = trace / 2 + discriminant; // larger eigenvalue
+    var lambda2 = trace / 2 - discriminant; // smaller eigenvalue
+
+    // Eigenvector for lambda1 (first PC)
+    var ev1_x, ev1_y;
+    if (Math.abs(cov12) > 1e-10) {
+        ev1_x = lambda1 - cov22;
+        ev1_y = cov12;
+    } else {
+        ev1_x = 1;
+        ev1_y = 0;
+    }
+    var norm1 = Math.sqrt(ev1_x * ev1_x + ev1_y * ev1_y);
+    if (norm1 > 0) { ev1_x /= norm1; ev1_y /= norm1; }
+
+    // Eigenvector for lambda2 (second PC) - perpendicular to first
+    var ev2_x = -ev1_y;
+    var ev2_y = ev1_x;
+
+    // Choose eigenvector based on component
+    var ev_x = component === 1 ? ev1_x : ev2_x;
+    var ev_y = component === 1 ? ev1_y : ev2_y;
+
+    // Project all points onto the principal component
+    var result = new Array(n);
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            result[i] = (v1[i] - mean1) * ev_x + (v2[i] - mean2) * ev_y;
+        } else {
+            result[i] = NaN;
+        }
+    }
+    return result;
+}
+
+// Compute OLS regression coefficients (y = alpha + beta * x)
+// Returns {alpha, beta} or null if regression fails
+function computeOLSCoefficients(y, x) {
+    var n = y.length;
+    if (n === 0 || n !== x.length) return null;
+
+    // Filter to valid pairs only
+    var validPairs = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(y[i]) && isFinite(y[i]) && !isNaN(x[i]) && isFinite(x[i])) {
+            validPairs.push({ y: y[i], x: x[i] });
+        }
+    }
+
+    if (validPairs.length < 2) return null;
+
+    // Compute means
+    var sumX = 0, sumY = 0;
+    validPairs.forEach(function(p) {
+        sumX += p.x;
+        sumY += p.y;
+    });
+    var meanX = sumX / validPairs.length;
+    var meanY = sumY / validPairs.length;
+
+    // Compute beta = Cov(x,y) / Var(x)
+    var covXY = 0, varX = 0;
+    validPairs.forEach(function(p) {
+        var dx = p.x - meanX;
+        var dy = p.y - meanY;
+        covXY += dx * dy;
+        varX += dx * dx;
+    });
+
+    if (varX === 0) return null; // x has no variance
+
+    var beta = covXY / varX;
+    var alpha = meanY - beta * meanX;
+
+    return { alpha: alpha, beta: beta };
+}
+
+// Compute OLS residuals: r(y, x) = y - fitted = y - (alpha + beta * x)
+function computeOLSResidual(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return y.map(function(yi, i) {
+        if (isNaN(yi) || !isFinite(yi) || isNaN(x[i]) || !isFinite(x[i])) {
+            return NaN;
+        }
+        var fitted = coef.alpha + coef.beta * x[i];
+        return yi - fitted;
+    });
+}
+
+// Compute OLS fitted values: f(y, x) = alpha + beta * x
+function computeOLSFitted(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return x.map(function(xi, i) {
+        if (isNaN(y[i]) || !isFinite(y[i]) || isNaN(xi) || !isFinite(xi)) {
+            return NaN;
+        }
+        return coef.alpha + coef.beta * xi;
+    });
+}
+
+// Main function to evaluate an expression string against data
+function evaluateExpressionString(exprString, data) {
+    if (!exprString || exprString.trim() === '') {
+        return data.map(function() { return 0; });
+    }
+    try {
+        var tokens = tokenizeExpression(exprString);
+        var parseResult = parseExpression(tokens, 0);
+        return evaluateExpression(parseResult.node, data);
+    } catch (e) {
+        console.error('Expression parsing error:', e);
+        return data.map(function() { return 0; });
+    }
+}
+
+// =============================================================================
+// End Expression Parser
+// =============================================================================
 
 // Setup aspect ratio control for a chart
 // This should be called after the chart is first rendered
@@ -1399,7 +1949,7 @@ $(function(){
     let manualOrder = [];
     let corrDataRaw = null;
     let allVars = [];
-    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-8,-5],[-10,-3],[2,-1],[-4,-9],[1,3],[-11,-2],[-7,-6],[4,5],[6,8],[9,7]],"heights":[0.19399598155895273,0.20286332551306788,0.29615164079773204,0.3042877630527557,0.33991122148431974,0.37152807603081517,0.37240823002207646,0.3995954037141018,0.5124450264257902,0.6562669702023001],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,4,9,8,5,10,3,1,7,6]},"ordering":["days_to_close","conversion_rate","avg_deal_size","cac","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"average":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-11,-2],[5,4],[-9,-4],[7,6],[-7,-6],[8,9]],"heights":[0.20286332551306788,0.3175614671183398,0.19399598155895273,0.3975746920188046,0.37152807603081517,0.5846834028589516,0.3042877630527557,0.6273341731835458,0.37240823002207646,0.6831241641784164],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[9,4,11,2,8,5,10,3,1,7,6]},"ordering":["cac","avg_deal_size","days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"complete":{"tree":{"merges":[[-3,-10],[-1,1],[-5,-8],[2,3],[-6,-7],[-2,-11],[-9,-4],[7,5],[8,6],[4,9]],"heights":[0.20286332551306788,0.3389712934389476,0.19399598155895273,0.44597504634899765,0.37240823002207646,0.37152807603081517,0.3042877630527557,0.6831667115401164,0.7016033079536863,0.7067816693226947],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[1,3,10,5,8,9,4,6,7,2,11]},"ordering":["leads","units_sold","inventory_level","revenue","marketing_spend","cac","avg_deal_size","customer_satisfaction","response_time_hours","conversion_rate","days_to_close"]},"ward":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[-4,-9],[3,2],[-11,-2],[-7,-6],[6,5],[7,4],[8,9]],"heights":[0.20286332551306788,0.34835859656753276,0.19399598155895273,0.3042877630527557,0.5427613412295804,0.37152807603081517,0.37240823002207646,0.8648328115759938,0.8909549468100205,1.0376830048682468],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]}},"pearson":{"single":{"tree":{"merges":[[-10,-3],[-8,-5],[1,-1],[-4,-9],[2,3],[-2,-11],[-7,-6],[4,5],[6,8],[9,7]],"heights":[0.2219164540914155,0.24339205376017872,0.3243660449597351,0.33186227000014773,0.3516942415382746,0.36369857385709375,0.37302684270538883,0.43730529449412003,0.5003739716733764,0.6564367999240709],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[2,11,4,9,8,5,10,3,1,7,6]},"ordering":["conversion_rate","days_to_close","avg_deal_size","cac","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"average":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-11,-2],[5,4],[-9,-4],[7,6],[-7,-6],[8,9]],"heights":[0.2219164540914155,0.34729170864162484,0.24339205376017872,0.4113220165146511,0.36369857385709375,0.581578991658579,0.33186227000014773,0.6364956186790365,0.37302684270538883,0.6850898500888736],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[9,4,11,2,8,5,10,3,1,7,6]},"ordering":["cac","avg_deal_size","days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"complete":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-7,-6],[-11,-2],[-4,-9],[6,4],[5,7],[8,9]],"heights":[0.2219164540914155,0.37021737232351465,0.24339205376017872,0.4779393586773545,0.37302684270538883,0.36369857385709375,0.33186227000014773,0.7013259057705994,0.7037646534044483,0.7070693477332165],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]},"ward":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[-4,-9],[3,2],[-11,-2],[-7,-6],[6,5],[7,4],[8,9]],"heights":[0.2219164540914155,0.38092061954751594,0.24339205376017872,0.33186227000014773,0.5451175840076863,0.36369857385709375,0.37302684270538883,0.8521670591965149,0.8987193038046111,1.0334537833429818],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]}}}};
+    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-8,-5],[-10,-3],[2,-1],[-4,-9],[1,3],[-11,-2],[-7,-6],[4,5],[6,8],[9,7]],"heights":[0.19399598155895273,0.20286332551306788,0.29615164079773204,0.3042877630527557,0.33991122148431974,0.37152807603081517,0.37240823002207646,0.3995954037141018,0.5124450264257902,0.6562669702023001],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,4,9,8,5,10,3,1,7,6]},"ordering":["days_to_close","conversion_rate","avg_deal_size","cac","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"average":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-11,-2],[5,4],[-9,-4],[7,6],[-7,-6],[8,9]],"heights":[0.20286332551306788,0.3175614671183398,0.19399598155895273,0.3975746920188046,0.37152807603081517,0.5846834028589516,0.3042877630527557,0.6273341731835458,0.37240823002207646,0.6831241641784164],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[9,4,11,2,8,5,10,3,1,7,6]},"ordering":["cac","avg_deal_size","days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"complete":{"tree":{"merges":[[-3,-10],[-1,1],[-5,-8],[2,3],[-6,-7],[-2,-11],[-9,-4],[7,5],[8,6],[4,9]],"heights":[0.20286332551306788,0.3389712934389476,0.19399598155895273,0.44597504634899765,0.37240823002207646,0.37152807603081517,0.3042877630527557,0.6831667115401164,0.7016033079536863,0.7067816693226947],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[1,3,10,5,8,9,4,6,7,2,11]},"ordering":["leads","units_sold","inventory_level","revenue","marketing_spend","cac","avg_deal_size","customer_satisfaction","response_time_hours","conversion_rate","days_to_close"]},"ward":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[-4,-9],[3,2],[-11,-2],[-7,-6],[6,5],[7,4],[8,9]],"heights":[0.20286332551306788,0.34835859656753276,0.19399598155895273,0.3042877630527557,0.5427613412295804,0.37152807603081517,0.37240823002207646,0.8648328115759938,0.8909549468100205,1.0376830048682468],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]}},"pearson":{"single":{"tree":{"merges":[[-10,-3],[-8,-5],[1,-1],[-4,-9],[2,3],[-2,-11],[-7,-6],[4,5],[6,8],[9,7]],"heights":[0.2219164540914155,0.2433920537601785,0.3243660449597351,0.3318622700001477,0.3516942415382746,0.3636985738570939,0.37302684270538883,0.43730529449412003,0.5003739716733765,0.6564367999240709],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[2,11,4,9,8,5,10,3,1,7,6]},"ordering":["conversion_rate","days_to_close","avg_deal_size","cac","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"average":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-11,-2],[5,4],[-9,-4],[7,6],[-7,-6],[8,9]],"heights":[0.2219164540914155,0.34729170864162484,0.2433920537601785,0.41132201651465106,0.3636985738570939,0.581578991658579,0.3318622700001477,0.6364956186790365,0.37302684270538883,0.6850898500888736],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[9,4,11,2,8,5,10,3,1,7,6]},"ordering":["cac","avg_deal_size","days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction"]},"complete":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[3,2],[-7,-6],[-11,-2],[-4,-9],[6,4],[5,7],[8,9]],"heights":[0.2219164540914155,0.37021737232351465,0.2433920537601785,0.4779393586773545,0.37302684270538883,0.3636985738570939,0.3318622700001477,0.7013259057705994,0.7037646534044483,0.7070693477332165],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]},"ward":{"tree":{"merges":[[-10,-3],[1,-1],[-8,-5],[-4,-9],[3,2],[-11,-2],[-7,-6],[6,5],[7,4],[8,9]],"heights":[0.2219164540914155,0.38092061954751594,0.2433920537601785,0.3318622700001477,0.5451175840076863,0.3636985738570939,0.37302684270538883,0.8521670591965149,0.8987193038046112,1.0334537833429818],"labels":["leads","conversion_rate","units_sold","avg_deal_size","revenue","customer_satisfaction","response_time_hours","marketing_spend","cac","inventory_level","days_to_close"],"order":[11,2,8,5,10,3,1,7,6,4,9]},"ordering":["days_to_close","conversion_rate","marketing_spend","revenue","inventory_level","units_sold","leads","response_time_hours","customer_satisfaction","avg_deal_size","cac"]}}}};
 
     // Load correlation data
     loadDataset('sales_corr_data').then(function(data) {
@@ -1871,7 +2421,7 @@ $(function(){
     let manualOrder = [];
     let corrDataRaw = null;
     let allVars = [];
-    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-9,-8],[1,-10],[-2,-1],[-5,-4],[3,-3],[4,5],[6,2],[-7,7],[8,-6]],"heights":[0.06129326477375323,0.310871867345014,0.4747099972828397,0.49243971824839666,0.49477947927613414,0.643592837305256,0.6514727540450395,0.6569275952459322,0.6574363403644464],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[7,5,4,2,1,3,9,8,10,6]},"ordering":["conductivity","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence","ph"]},"average":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[2,4],[-5,-4],[-6,6],[7,5],[8,-7]],"heights":[0.4747099972828397,0.5303971208241363,0.06129326477375323,0.3120249161881653,0.6647412812289154,0.49243971824839666,0.6599476863180188,0.6800998345542837,0.689032794139345],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,5,4,3,1,2,9,8,10,7]},"ordering":["ph","thermal_conductivity","heat_capacity","surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity"]},"complete":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[-4,-5],[2,4],[5,-6],[-7,7],[6,8]],"heights":[0.4747099972828397,0.5660147623721383,0.06129326477375323,0.3131779650313167,0.49243971824839666,0.6788608801540542,0.6624590322715912,0.6962799582748376,0.7062072266953675],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[3,1,2,9,8,10,7,4,5,6]},"ordering":["surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity","heat_capacity","thermal_conductivity","ph"]},"ward":{"tree":{"merges":[[-2,-1],[1,-3],[-9,-8],[-5,-4],[3,-10],[-6,-7],[6,4],[7,2],[8,5]],"heights":[0.4747099972828397,0.549244726010676,0.06129326477375323,0.49243971824839666,0.35855573582026723,0.6880257291790371,0.7319692195167485,0.8721729179605634,1.0322747448356147],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,7,5,4,2,1,3,9,8,10]},"ordering":["ph","conductivity","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence"]}},"pearson":{"single":{"tree":{"merges":[[-9,-8],[1,-10],[-2,-1],[-5,-4],[3,-3],[4,5],[6,2],[-6,7],[8,-7]],"heights":[0.06547971736006426,0.33301224583484473,0.4639895296443402,0.46848602309586923,0.48708563547979145,0.6412353986016225,0.6516565767017967,0.6619996719933288,0.66475243208192],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,5,4,2,1,3,9,8,10,7]},"ordering":["ph","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence","conductivity"]},"average":{"tree":{"merges":[[-2,-1],[1,-3],[-8,-9],[-10,3],[-5,-4],[4,2],[5,-6],[6,7],[8,-7]],"heights":[0.4639895296443402,0.5239517874427168,0.06547971736006426,0.3353189866050176,0.46848602309586923,0.6632737732088475,0.6650291818674074,0.6777064151526419,0.691203899567516],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[10,8,9,2,1,3,5,4,6,7]},"ordering":["fluorescence","absorbance_280","absorbance_260","viscosity","density","surface_tension","thermal_conductivity","heat_capacity","ph","conductivity"]},"complete":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[-5,-4],[2,4],[5,-6],[-7,7],[6,8]],"heights":[0.4639895296443402,0.5608179394056421,0.06547971736006426,0.33762572737519037,0.46848602309586923,0.6759467022259054,0.668058691741486,0.690544756251168,0.706775767231652],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[3,1,2,9,8,10,7,5,4,6]},"ordering":["surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity","thermal_conductivity","heat_capacity","ph"]},"ward":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[-4,-5],[3,-10],[-7,-6],[6,4],[7,2],[8,5]],"heights":[0.4639895296443402,0.5441360342415333,0.06547971736006426,0.46848602309586923,0.38535221202497894,0.683793965060933,0.7470744598718048,0.8783034370431667,1.0228156579997523],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[7,6,4,5,3,1,2,9,8,10]},"ordering":["conductivity","ph","heat_capacity","thermal_conductivity","surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence"]}}}};
+    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-9,-8],[1,-10],[-2,-1],[-5,-4],[3,-3],[4,5],[6,2],[-7,7],[8,-6]],"heights":[0.06129326477375323,0.310871867345014,0.4747099972828397,0.49243971824839666,0.49477947927613414,0.643592837305256,0.6514727540450395,0.6569275952459322,0.6574363403644464],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[7,5,4,2,1,3,9,8,10,6]},"ordering":["conductivity","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence","ph"]},"average":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[2,4],[-5,-4],[-6,6],[7,5],[8,-7]],"heights":[0.4747099972828397,0.5303971208241363,0.06129326477375323,0.3120249161881653,0.6647412812289154,0.49243971824839666,0.6599476863180188,0.6800998345542837,0.689032794139345],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,5,4,3,1,2,9,8,10,7]},"ordering":["ph","thermal_conductivity","heat_capacity","surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity"]},"complete":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[-4,-5],[2,4],[5,-6],[-7,7],[6,8]],"heights":[0.4747099972828397,0.5660147623721383,0.06129326477375323,0.3131779650313167,0.49243971824839666,0.6788608801540542,0.6624590322715912,0.6962799582748376,0.7062072266953675],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[3,1,2,9,8,10,7,4,5,6]},"ordering":["surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity","heat_capacity","thermal_conductivity","ph"]},"ward":{"tree":{"merges":[[-2,-1],[1,-3],[-9,-8],[-5,-4],[3,-10],[-6,-7],[6,4],[7,2],[8,5]],"heights":[0.4747099972828397,0.549244726010676,0.06129326477375323,0.49243971824839666,0.35855573582026723,0.6880257291790371,0.7319692195167485,0.8721729179605634,1.0322747448356147],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,7,5,4,2,1,3,9,8,10]},"ordering":["ph","conductivity","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence"]}},"pearson":{"single":{"tree":{"merges":[[-9,-8],[1,-10],[-2,-1],[-5,-4],[3,-3],[4,5],[6,2],[-6,7],[8,-7]],"heights":[0.06547971736006342,0.3330122458348446,0.4639895296443402,0.46848602309586923,0.48708563547979145,0.6412353986016225,0.6516565767017967,0.6619996719933288,0.66475243208192],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[6,5,4,2,1,3,9,8,10,7]},"ordering":["ph","thermal_conductivity","heat_capacity","viscosity","density","surface_tension","absorbance_260","absorbance_280","fluorescence","conductivity"]},"average":{"tree":{"merges":[[-2,-1],[1,-3],[-8,-9],[-10,3],[-5,-4],[4,2],[5,-6],[6,7],[8,-7]],"heights":[0.4639895296443402,0.5239517874427168,0.06547971736006342,0.3353189866050175,0.46848602309586923,0.6632737732088475,0.6650291818674074,0.6777064151526419,0.691203899567516],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[10,8,9,2,1,3,5,4,6,7]},"ordering":["fluorescence","absorbance_280","absorbance_260","viscosity","density","surface_tension","thermal_conductivity","heat_capacity","ph","conductivity"]},"complete":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[3,-10],[-5,-4],[2,4],[5,-6],[-7,7],[6,8]],"heights":[0.4639895296443402,0.5608179394056421,0.06547971736006342,0.3376257273751904,0.46848602309586923,0.6759467022259054,0.668058691741486,0.6905447562511678,0.706775767231652],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[3,1,2,9,8,10,7,5,4,6]},"ordering":["surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence","conductivity","thermal_conductivity","heat_capacity","ph"]},"ward":{"tree":{"merges":[[-1,-2],[-3,1],[-9,-8],[-4,-5],[3,-10],[-7,-6],[6,4],[7,2],[8,5]],"heights":[0.4639895296443402,0.5441360342415333,0.06547971736006342,0.46848602309586923,0.38535221202497894,0.6837939650609329,0.7470744598718048,0.8783034370431667,1.0228156579997523],"labels":["density","viscosity","surface_tension","heat_capacity","thermal_conductivity","ph","conductivity","absorbance_280","absorbance_260","fluorescence"],"order":[7,6,4,5,3,1,2,9,8,10]},"ordering":["conductivity","ph","heat_capacity","thermal_conductivity","surface_tension","density","viscosity","absorbance_260","absorbance_280","fluorescence"]}}}};
 
     // Load correlation data
     loadDataset('science_corr_data').then(function(data) {
@@ -2343,7 +2893,7 @@ $(function(){
     let manualOrder = [];
     let corrDataRaw = null;
     let allVars = [];
-    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-5,-4],[-7,-6],[-2,-1],[2,-8],[-11,4],[1,5],[6,-9],[3,7],[8,-10],[9,-3]],"heights":[0.0721400038060409,0.258540476647803,0.37168976016964805,0.4171253354066015,0.50098992150922,0.5222840571985444,0.576492636868834,0.5985115460345359,0.6245805036067659,0.6505377680434195],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,5,4,11,7,6,8,9,10,3]},"ordering":["diastolic_bp","systolic_bp","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl","triglycerides","bmi","heart_rate"]},"average":{"tree":{"merges":[[-1,-2],[-6,-7],[-8,2],[-4,-5],[-11,4],[3,5],[-10,-9],[7,6],[8,-3],[1,9]],"heights":[0.37168976016964805,0.258540476647803,0.43156941900695783,0.0721400038060409,0.5235654710481157,0.6275147308875146,0.6510666281333277,0.6666134615821943,0.6726899501819239,0.6761724675333409],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,10,9,8,6,7,11,4,5,3]},"ordering":["systolic_bp","diastolic_bp","bmi","triglycerides","hdl","cholesterol_total","ldl","cardiovascular_risk","glucose","hba1c","heart_rate"]},"complete":{"tree":{"merges":[[-1,-2],[-7,-6],[-5,-4],[3,-11],[2,-8],[-9,-10],[4,5],[6,-3],[1,8],[9,7]],"heights":[0.37168976016964805,0.258540476647803,0.0721400038060409,0.5248468848976869,0.44601350260731415,0.6510666281333277,0.6798982117512236,0.6841733707790282,0.6989394309717161,0.704946538638144],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,9,10,3,5,4,11,7,6,8]},"ordering":["systolic_bp","diastolic_bp","triglycerides","bmi","heart_rate","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl"]},"ward":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-8,2],[-11,3],[-10,-9],[-3,6],[7,1],[8,5],[9,4]],"heights":[0.37168976016964805,0.258540476647803,0.0721400038060409,0.4757450303916149,0.6031267411945909,0.6510666281333277,0.6814483188991488,0.8380640403663033,0.8888095680087659,0.9395734062979479],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[3,10,9,2,1,11,4,5,8,6,7]},"ordering":["heart_rate","bmi","triglycerides","diastolic_bp","systolic_bp","cardiovascular_risk","glucose","hba1c","hdl","cholesterol_total","ldl"]}},"pearson":{"single":{"tree":{"merges":[[-5,-4],[-7,-6],[-2,-1],[2,-8],[-11,4],[1,5],[6,-9],[3,7],[8,-10],[9,-3]],"heights":[0.09451900133381225,0.264723349005477,0.3693464147811833,0.4098689605923968,0.504104184909024,0.5204806844060164,0.5654976273741966,0.5859067388561577,0.6219329616296174,0.6541297718844162],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,5,4,11,7,6,8,9,10,3]},"ordering":["diastolic_bp","systolic_bp","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl","triglycerides","bmi","heart_rate"]},"average":{"tree":{"merges":[[-1,-2],[-6,-7],[-8,2],[-5,-4],[4,-11],[3,-9],[5,6],[1,7],[-10,-3],[8,9]],"heights":[0.3693464147811833,0.264723349005477,0.42178295709653213,0.09451900133381225,0.521939294180157,0.628185659274811,0.6421229831041038,0.6706671589181477,0.6587120319548656,0.6764005855105442],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,5,4,11,8,6,7,9,10,3]},"ordering":["systolic_bp","diastolic_bp","hba1c","glucose","cardiovascular_risk","hdl","cholesterol_total","ldl","triglycerides","bmi","heart_rate"]},"complete":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-11,3],[-8,2],[-10,-9],[5,4],[-3,6],[1,7],[9,8]],"heights":[0.3693464147811833,0.264723349005477,0.09451900133381225,0.5233979039542979,0.4336969536006675,0.6499605113124806,0.6796720781377817,0.6789359268227311,0.697825911866925,0.7035477976671929],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,8,6,7,11,4,5,3,10,9]},"ordering":["diastolic_bp","systolic_bp","hdl","cholesterol_total","ldl","cardiovascular_risk","glucose","hba1c","heart_rate","bmi","triglycerides"]},"ward":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-8,2],[-11,3],[-10,-9],[-3,6],[7,1],[8,5],[9,4]],"heights":[0.3693464147811833,0.264723349005477,0.09451900133381225,0.46263476354841976,0.6002102897579241,0.6499605113124806,0.6750956478603399,0.8408459399531633,0.8836326615726421,0.9470010086527058],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[3,10,9,2,1,11,4,5,8,6,7]},"ordering":["heart_rate","bmi","triglycerides","diastolic_bp","systolic_bp","cardiovascular_risk","glucose","hba1c","hdl","cholesterol_total","ldl"]}}}};
+    const dendroOrderings = {"default":{"spearman":{"single":{"tree":{"merges":[[-5,-4],[-7,-6],[-2,-1],[2,-8],[-11,4],[1,5],[6,-9],[3,7],[8,-10],[9,-3]],"heights":[0.0721400038060409,0.258540476647803,0.37168976016964805,0.4171253354066015,0.50098992150922,0.5222840571985444,0.576492636868834,0.5985115460345359,0.6245805036067659,0.6505377680434195],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,5,4,11,7,6,8,9,10,3]},"ordering":["diastolic_bp","systolic_bp","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl","triglycerides","bmi","heart_rate"]},"average":{"tree":{"merges":[[-1,-2],[-6,-7],[-8,2],[-4,-5],[-11,4],[3,5],[-10,-9],[7,6],[8,-3],[1,9]],"heights":[0.37168976016964805,0.258540476647803,0.43156941900695783,0.0721400038060409,0.5235654710481157,0.6275147308875146,0.6510666281333277,0.6666134615821943,0.6726899501819239,0.6761724675333409],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,10,9,8,6,7,11,4,5,3]},"ordering":["systolic_bp","diastolic_bp","bmi","triglycerides","hdl","cholesterol_total","ldl","cardiovascular_risk","glucose","hba1c","heart_rate"]},"complete":{"tree":{"merges":[[-1,-2],[-7,-6],[-5,-4],[3,-11],[2,-8],[-9,-10],[4,5],[6,-3],[1,8],[9,7]],"heights":[0.37168976016964805,0.258540476647803,0.0721400038060409,0.5248468848976869,0.44601350260731415,0.6510666281333277,0.6798982117512236,0.6841733707790282,0.6989394309717161,0.704946538638144],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,9,10,3,5,4,11,7,6,8]},"ordering":["systolic_bp","diastolic_bp","triglycerides","bmi","heart_rate","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl"]},"ward":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-8,2],[-11,3],[-10,-9],[-3,6],[7,1],[8,5],[9,4]],"heights":[0.37168976016964805,0.258540476647803,0.0721400038060409,0.4757450303916149,0.6031267411945909,0.6510666281333277,0.6814483188991488,0.8380640403663033,0.8888095680087659,0.9395734062979479],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[3,10,9,2,1,11,4,5,8,6,7]},"ordering":["heart_rate","bmi","triglycerides","diastolic_bp","systolic_bp","cardiovascular_risk","glucose","hba1c","hdl","cholesterol_total","ldl"]}},"pearson":{"single":{"tree":{"merges":[[-5,-4],[-7,-6],[-2,-1],[2,-8],[-11,4],[1,5],[6,-9],[3,7],[8,-10],[9,-3]],"heights":[0.09451900133381196,0.264723349005477,0.3693464147811833,0.40986896059239697,0.5041041849090239,0.5204806844060164,0.5654976273741966,0.5859067388561576,0.6219329616296173,0.6541297718844162],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,5,4,11,7,6,8,9,10,3]},"ordering":["diastolic_bp","systolic_bp","hba1c","glucose","cardiovascular_risk","ldl","cholesterol_total","hdl","triglycerides","bmi","heart_rate"]},"average":{"tree":{"merges":[[-1,-2],[-6,-7],[-8,2],[-5,-4],[4,-11],[3,-9],[5,6],[1,7],[-10,-3],[8,9]],"heights":[0.3693464147811833,0.264723349005477,0.42178295709653224,0.09451900133381196,0.521939294180157,0.628185659274811,0.6421229831041038,0.6706671589181477,0.6587120319548656,0.6764005855105442],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[1,2,5,4,11,8,6,7,9,10,3]},"ordering":["systolic_bp","diastolic_bp","hba1c","glucose","cardiovascular_risk","hdl","cholesterol_total","ldl","triglycerides","bmi","heart_rate"]},"complete":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-11,3],[-8,2],[-10,-9],[5,4],[-3,6],[1,7],[9,8]],"heights":[0.3693464147811833,0.264723349005477,0.09451900133381196,0.5233979039542979,0.4336969536006675,0.6499605113124806,0.6796720781377817,0.6789359268227311,0.697825911866925,0.7035477976671929],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[2,1,8,6,7,11,4,5,3,10,9]},"ordering":["diastolic_bp","systolic_bp","hdl","cholesterol_total","ldl","cardiovascular_risk","glucose","hba1c","heart_rate","bmi","triglycerides"]},"ward":{"tree":{"merges":[[-2,-1],[-6,-7],[-4,-5],[-8,2],[-11,3],[-10,-9],[-3,6],[7,1],[8,5],[9,4]],"heights":[0.3693464147811833,0.264723349005477,0.09451900133381196,0.46263476354842,0.6002102897579241,0.6499605113124806,0.6750956478603399,0.8408459399531633,0.8836326615726421,0.9470010086527058],"labels":["systolic_bp","diastolic_bp","heart_rate","glucose","hba1c","cholesterol_total","ldl","hdl","triglycerides","bmi","cardiovascular_risk"],"order":[3,10,9,2,1,11,4,5,8,6,7]},"ordering":["heart_rate","bmi","triglycerides","diastolic_bp","systolic_bp","cardiovascular_risk","glucose","hba1c","hdl","cholesterol_total","ldl"]}}}};
 
     // Load correlation data
     loadDataset('patient_corr_data').then(function(data) {
@@ -2815,7 +3365,7 @@ $(function(){
     let manualOrder = [];
     let corrDataRaw = null;
     let allVars = [];
-    const dendroOrderings = {"Asia-Pacific":{"spearman":{"single":{"tree":{"merges":[[-3,-4],[-1,-5],[-6,2],[-2,3],[-8,4],[5,1],[6,-7]],"heights":[0.4486593683802176,0.45986195641697736,0.4678087843175146,0.5175307182270754,0.5618833479726371,0.5620934301677918,0.5998674530076287],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,3,4,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-2,-6],[2,1],[-8,3],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.5610338174468064,0.5968914536733573,0.4486593683802176,0.6185803912021874,0.6339488010253039],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,4,3,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Interest_Rate","Inflation","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[1,-8],[2,3],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.6078233849649336,0.6216960731431576,0.4486593683802176,0.6372933293967463,0.6738675736161398],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,6,1,5,8,4,3,7]},"ordering":["Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Interest_Rate","Inflation","Exports"]},"ward":{"tree":{"merges":[[-1,-5],[-2,-6],[-8,2],[3,1],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.6107812081945799,0.647253757200492,0.4486593683802176,0.6660010682943291,0.7937474497632118],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,4,3,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Interest_Rate","Inflation","Exports"]}},"pearson":{"single":{"tree":{"merges":[[-5,-1],[-4,-3],[1,-6],[3,-2],[2,4],[5,-8],[6,-7]],"heights":[0.4291344744385165,0.45229158056494884,0.4597644331306119,0.515351661894731,0.558031255996206,0.5622023648373778,0.6157984175535481],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,5,1,6,2,8,7]},"ordering":["Interest_Rate","Inflation","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-8,-2],[3,2],[-3,-4],[4,5],[6,-7]],"heights":[0.4291344744385165,0.5069845182955165,0.5622023648373778,0.5945253753728695,0.45229158056494884,0.6230148921858623,0.6333909464384576],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,3,4,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-4,-3],[1,-8],[2,4],[3,-7],[5,6]],"heights":[0.4291344744385165,0.515351661894731,0.45229158056494884,0.6037743992929715,0.6288814303045819,0.6421901844337001,0.6653774055834251],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,6,1,5,8,4,3,7]},"ordering":["Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Interest_Rate","Inflation","Exports"]},"ward":{"tree":{"merges":[[-5,-1],[-6,-2],[-4,-3],[2,-8],[4,1],[3,-7],[5,6]],"heights":[0.4291344744385165,0.515351661894731,0.45229158056494884,0.6146785568920026,0.6569173972832316,0.677904657563522,0.7683723088463473],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[6,2,8,5,1,4,3,7]},"ordering":["Consumer_Confidence","Unemployment","Imports","Manufacturing_Index","GDP_Growth","Interest_Rate","Inflation","Exports"]}}},"Europe":{"spearman":{"single":{"tree":{"merges":[[-4,-3],[-5,-1],[2,-6],[1,-8],[4,3],[-7,5],[6,-2]],"heights":[0.38888651878762337,0.41149872849840313,0.43608821203467824,0.5099162522867212,0.5121280679645308,0.5171078358762107,0.519950608540751],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,4,3,8,5,1,6,2]},"ordering":["Exports","Interest_Rate","Inflation","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment"]},"average":{"tree":{"merges":[[-5,-1],[1,-6],[-3,-4],[-8,2],[4,-2],[-7,5],[6,3]],"heights":[0.41149872849840313,0.4970058242741554,0.38888651878762337,0.5414388676471155,0.5518798426200744,0.5752462889955391,0.6053280365255339],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,5,1,6,2,3,4]},"ordering":["Exports","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Inflation","Interest_Rate"]},"complete":{"tree":{"merges":[[-5,-1],[-6,-2],[-3,-4],[-8,2],[1,4],[5,-7],[6,3]],"heights":[0.41149872849840313,0.519950608540751,0.38888651878762337,0.5545586042098345,0.5918955156189478,0.6166176904749661,0.6785764544866345],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[5,1,8,6,2,7,3,4]},"ordering":["Manufacturing_Index","GDP_Growth","Imports","Consumer_Confidence","Unemployment","Exports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-5,-1],[-6,-2],[-3,-4],[-8,2],[1,4],[5,-7],[6,3]],"heights":[0.41149872849840313,0.519950608540751,0.38888651878762337,0.5619451450063874,0.5946482157136438,0.6071929198300965,0.7892698562818304],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[5,1,8,6,2,7,3,4]},"ordering":["Manufacturing_Index","GDP_Growth","Imports","Consumer_Confidence","Unemployment","Exports","Inflation","Interest_Rate"]}},"pearson":{"single":{"tree":{"merges":[[-4,-3],[-5,-1],[2,-6],[1,-8],[4,3],[-7,5],[6,-2]],"heights":[0.3613741002755835,0.41492842515484984,0.41987858789989696,0.5027581354428353,0.5173055892353512,0.5204858435051641,0.5267261727461623],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,4,3,8,5,1,6,2]},"ordering":["Exports","Interest_Rate","Inflation","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-3,-4],[2,-8],[-2,-7],[5,4],[6,3]],"heights":[0.41492842515484984,0.4843739814445039,0.3613741002755835,0.5445358407864055,0.5578747658376122,0.5683273710091392,0.6017199977635513],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,7,6,1,5,8,3,4]},"ordering":["Unemployment","Exports","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Inflation","Interest_Rate"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-3,-4],[2,-8],[-7,1],[4,3],[5,6]],"heights":[0.41492842515484984,0.5267261727461623,0.3613741002755835,0.552170296928797,0.5833227403069647,0.6260947855273009,0.6783746765988353],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,1,5,2,6,8,3,4]},"ordering":["Exports","GDP_Growth","Manufacturing_Index","Unemployment","Consumer_Confidence","Imports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-5,-1],[1,-6],[-3,-4],[-8,-2],[4,-7],[5,2],[6,3]],"heights":[0.41492842515484984,0.5108638568653472,0.3613741002755835,0.552170296928797,0.5721709562443266,0.6454303683958624,0.7899607011588891],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,7,5,1,6,3,4]},"ordering":["Imports","Unemployment","Exports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Inflation","Interest_Rate"]}}},"North America":{"spearman":{"single":{"tree":{"merges":[[-1,-5],[-6,1],[-4,-3],[-2,2],[4,-8],[3,5],[6,-7]],"heights":[0.317684867841114,0.3489838214281353,0.38064682632242264,0.43334437384543956,0.4472097131510389,0.45561371795664485,0.5218072416290208],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"average":{"tree":{"merges":[[-5,-1],[1,-6],[-2,-8],[2,3],[-4,-3],[5,4],[6,-7]],"heights":[0.317684867841114,0.3957531245737584,0.4541595000085512,0.48327001859604635,0.38064682632242264,0.5324087760731642,0.558176994270854],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,5,1,6,2,8,7]},"ordering":["Interest_Rate","Inflation","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-3,-4],[-8,2],[4,1],[-7,5],[6,3]],"heights":[0.317684867841114,0.43334437384543956,0.38064682632242264,0.5061946974644175,0.5352690466376263,0.57572004756201,0.6259349559397497],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,2,6,1,5,3,4]},"ordering":["Exports","Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-1,-5],[-6,1],[-2,-8],[-3,-4],[-7,3],[5,2],[6,4]],"heights":[0.317684867841114,0.42202209185904543,0.4541595000085512,0.38064682632242264,0.5660108767632491,0.6085152101077445,0.6975122720629723],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,2,8,6,1,5,3,4]},"ordering":["Exports","Unemployment","Imports","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]}},"pearson":{"single":{"tree":{"merges":[[-1,-5],[-6,1],[-4,-3],[-2,2],[4,-8],[3,5],[6,-7]],"heights":[0.32177370299673297,0.35445086049843233,0.3702323089775271,0.43964143084108753,0.4661582668552554,0.4715502457125766,0.5105015376331837],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-2,2],[-4,-3],[3,-8],[4,5],[6,-7]],"heights":[0.32177370299673297,0.39323515090573596,0.47261500357442393,0.3702323089775271,0.5031613600853732,0.5408450316599354,0.5598192153516252],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"complete":{"tree":{"merges":[[-5,-1],[1,-6],[-2,-8],[-3,-4],[2,3],[-7,5],[6,4]],"heights":[0.32177370299673297,0.4320194413130396,0.4844952770585619,0.3702323089775271,0.5337098935475846,0.5744021679165184,0.6343096436809688],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,5,1,6,2,8,3,4]},"ordering":["Exports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-1,-5],[-6,1],[-8,-2],[-3,-4],[-7,3],[5,2],[6,4]],"heights":[0.32177370299673297,0.41673896882852635,0.4844952770585619,0.3702323089775271,0.5665734552707259,0.6058392838772951,0.7149550492409893],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,2,6,1,5,3,4]},"ordering":["Exports","Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]}}}};
+    const dendroOrderings = {"Asia-Pacific":{"spearman":{"single":{"tree":{"merges":[[-3,-4],[-1,-5],[-6,2],[-2,3],[-8,4],[5,1],[6,-7]],"heights":[0.4486593683802176,0.45986195641697736,0.4678087843175146,0.5175307182270754,0.5618833479726371,0.5620934301677918,0.5998674530076287],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,3,4,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-2,-6],[2,1],[-8,3],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.5610338174468064,0.5968914536733573,0.4486593683802176,0.6185803912021874,0.6339488010253039],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,4,3,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Interest_Rate","Inflation","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[1,-8],[2,3],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.6078233849649336,0.6216960731431576,0.4486593683802176,0.6372933293967463,0.6738675736161398],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,6,1,5,8,4,3,7]},"ordering":["Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Interest_Rate","Inflation","Exports"]},"ward":{"tree":{"merges":[[-1,-5],[-2,-6],[-8,2],[3,1],[-4,-3],[5,-7],[4,6]],"heights":[0.45986195641697736,0.5175307182270754,0.6107812081945799,0.647253757200492,0.4486593683802176,0.6660010682943291,0.7937474497632118],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,4,3,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Interest_Rate","Inflation","Exports"]}},"pearson":{"single":{"tree":{"merges":[[-5,-1],[-4,-3],[1,-6],[3,-2],[2,4],[5,-8],[6,-7]],"heights":[0.4291344744385163,0.452291580564949,0.45976443313061194,0.5153516618947308,0.558031255996206,0.5622023648373777,0.6157984175535484],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,5,1,6,2,8,7]},"ordering":["Interest_Rate","Inflation","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-8,-2],[3,2],[-3,-4],[4,5],[6,-7]],"heights":[0.4291344744385163,0.5069845182955165,0.5622023648373777,0.5945253753728694,0.452291580564949,0.6230148921858623,0.6333909464384576],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,6,1,5,3,4,7]},"ordering":["Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-4,-3],[1,-8],[2,4],[3,-7],[5,6]],"heights":[0.4291344744385163,0.5153516618947308,0.452291580564949,0.6037743992929715,0.6288814303045818,0.6421901844337,0.6653774055834251],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,6,1,5,8,4,3,7]},"ordering":["Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Interest_Rate","Inflation","Exports"]},"ward":{"tree":{"merges":[[-5,-1],[-6,-2],[-4,-3],[2,-8],[4,1],[3,-7],[5,6]],"heights":[0.4291344744385163,0.5153516618947308,0.452291580564949,0.6146785568920026,0.6569173972832316,0.677904657563522,0.7683723088463476],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[6,2,8,5,1,4,3,7]},"ordering":["Consumer_Confidence","Unemployment","Imports","Manufacturing_Index","GDP_Growth","Interest_Rate","Inflation","Exports"]}}},"Europe":{"spearman":{"single":{"tree":{"merges":[[-4,-3],[-5,-1],[2,-6],[1,-8],[4,3],[-7,5],[6,-2]],"heights":[0.38888651878762337,0.41149872849840313,0.43608821203467824,0.5099162522867212,0.5121280679645308,0.5171078358762107,0.519950608540751],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,4,3,8,5,1,6,2]},"ordering":["Exports","Interest_Rate","Inflation","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment"]},"average":{"tree":{"merges":[[-5,-1],[1,-6],[-3,-4],[-8,2],[4,-2],[-7,5],[6,3]],"heights":[0.41149872849840313,0.4970058242741554,0.38888651878762337,0.5414388676471155,0.5518798426200744,0.5752462889955391,0.6053280365255339],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,5,1,6,2,3,4]},"ordering":["Exports","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Inflation","Interest_Rate"]},"complete":{"tree":{"merges":[[-5,-1],[-6,-2],[-3,-4],[-8,2],[1,4],[5,-7],[6,3]],"heights":[0.41149872849840313,0.519950608540751,0.38888651878762337,0.5545586042098345,0.5918955156189478,0.6166176904749661,0.6785764544866345],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[5,1,8,6,2,7,3,4]},"ordering":["Manufacturing_Index","GDP_Growth","Imports","Consumer_Confidence","Unemployment","Exports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-5,-1],[-6,-2],[-3,-4],[-8,2],[1,4],[5,-7],[6,3]],"heights":[0.41149872849840313,0.519950608540751,0.38888651878762337,0.5619451450063874,0.5946482157136438,0.6071929198300965,0.7892698562818304],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[5,1,8,6,2,7,3,4]},"ordering":["Manufacturing_Index","GDP_Growth","Imports","Consumer_Confidence","Unemployment","Exports","Inflation","Interest_Rate"]}},"pearson":{"single":{"tree":{"merges":[[-4,-3],[-5,-1],[2,-6],[1,-8],[4,3],[-7,5],[6,-2]],"heights":[0.36137410027558337,0.41492842515484996,0.41987858789989696,0.5027581354428353,0.5173055892353512,0.5204858435051642,0.5267261727461622],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,4,3,8,5,1,6,2]},"ordering":["Exports","Interest_Rate","Inflation","Imports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-3,-4],[2,-8],[-2,-7],[5,4],[6,3]],"heights":[0.41492842515484996,0.48437398144450383,0.36137410027558337,0.5445358407864055,0.5578747658376122,0.5683273710091393,0.6017199977635513],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[2,7,6,1,5,8,3,4]},"ordering":["Unemployment","Exports","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Inflation","Interest_Rate"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-3,-4],[2,-8],[-7,1],[4,3],[5,6]],"heights":[0.41492842515484996,0.5267261727461622,0.36137410027558337,0.5521702969287972,0.583322740306965,0.6260947855273009,0.6783746765988353],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,1,5,2,6,8,3,4]},"ordering":["Exports","GDP_Growth","Manufacturing_Index","Unemployment","Consumer_Confidence","Imports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-5,-1],[1,-6],[-3,-4],[-8,-2],[4,-7],[5,2],[6,3]],"heights":[0.41492842515484996,0.510863856865347,0.36137410027558337,0.5521702969287972,0.5721709562443266,0.6454303683958624,0.7899607011588891],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[8,2,7,5,1,6,3,4]},"ordering":["Imports","Unemployment","Exports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Inflation","Interest_Rate"]}}},"North America":{"spearman":{"single":{"tree":{"merges":[[-1,-5],[-6,1],[-4,-3],[-2,2],[4,-8],[3,5],[6,-7]],"heights":[0.317684867841114,0.3489838214281353,0.38064682632242264,0.43334437384543956,0.4472097131510389,0.45561371795664485,0.5218072416290208],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"average":{"tree":{"merges":[[-5,-1],[1,-6],[-2,-8],[2,3],[-4,-3],[5,4],[6,-7]],"heights":[0.317684867841114,0.3957531245737584,0.4541595000085512,0.48327001859604635,0.38064682632242264,0.5324087760731642,0.558176994270854],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,5,1,6,2,8,7]},"ordering":["Interest_Rate","Inflation","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Exports"]},"complete":{"tree":{"merges":[[-1,-5],[-2,-6],[-3,-4],[-8,2],[4,1],[-7,5],[6,3]],"heights":[0.317684867841114,0.43334437384543956,0.38064682632242264,0.5061946974644175,0.5352690466376263,0.57572004756201,0.6259349559397497],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,2,6,1,5,3,4]},"ordering":["Exports","Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-1,-5],[-6,1],[-2,-8],[-3,-4],[-7,3],[5,2],[6,4]],"heights":[0.317684867841114,0.42202209185904543,0.4541595000085512,0.38064682632242264,0.5660108767632491,0.6085152101077445,0.6975122720629723],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,2,8,6,1,5,3,4]},"ordering":["Exports","Unemployment","Imports","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]}},"pearson":{"single":{"tree":{"merges":[[-1,-5],[-6,1],[-4,-3],[-2,2],[4,-8],[3,5],[6,-7]],"heights":[0.3217737029967328,0.35445086049843266,0.37023230897752696,0.4396414308410875,0.4661582668552555,0.4715502457125765,0.5105015376331838],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"average":{"tree":{"merges":[[-1,-5],[-6,1],[-2,2],[-4,-3],[3,-8],[4,5],[6,-7]],"heights":[0.3217737029967328,0.3932351509057362,0.47261500357442393,0.37023230897752696,0.5031613600853734,0.5408450316599354,0.5598192153516253],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[4,3,2,6,1,5,8,7]},"ordering":["Interest_Rate","Inflation","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Imports","Exports"]},"complete":{"tree":{"merges":[[-5,-1],[1,-6],[-2,-8],[-3,-4],[2,3],[-7,5],[6,4]],"heights":[0.3217737029967328,0.4320194413130397,0.48449527705856205,0.37023230897752696,0.5337098935475847,0.5744021679165185,0.6343096436809688],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,5,1,6,2,8,3,4]},"ordering":["Exports","Manufacturing_Index","GDP_Growth","Consumer_Confidence","Unemployment","Imports","Inflation","Interest_Rate"]},"ward":{"tree":{"merges":[[-1,-5],[-6,1],[-8,-2],[-3,-4],[-7,3],[5,2],[6,4]],"heights":[0.3217737029967328,0.41673896882852657,0.48449527705856205,0.37023230897752696,0.5665734552707258,0.6058392838772954,0.7149550492409892],"labels":["GDP_Growth","Unemployment","Inflation","Interest_Rate","Manufacturing_Index","Consumer_Confidence","Exports","Imports"],"order":[7,8,2,6,1,5,3,4]},"ordering":["Exports","Imports","Unemployment","Consumer_Confidence","GDP_Growth","Manufacturing_Index","Inflation","Interest_Rate"]}}}};
 
     // Load correlation data
     loadDataset('econ_adv_data').then(function(data) {
@@ -3287,7 +3837,7 @@ $(function(){
     let manualOrder = [];
     let corrDataRaw = null;
     let allVars = [];
-    const dendroOrderings = {"Summer":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.2426601073486498,0.3027275398975262,0.37489681151408333,0.47760049711428054,0.602091264347672,0.6463403177172966,0.6619373760760779],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-7,3],[-8,4],[5,1],[6,-4]],"heights":[0.602091264347672,0.2426601073486498,0.3230465381474311,0.4252878269773501,0.5498202666698517,0.6770606499966527,0.6904980780074842],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,1,2,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Humidity","Wind_Speed"]},"complete":{"tree":{"merges":[[-1,-2],[-3,-5],[2,-6],[3,-7],[-4,1],[4,-8],[5,6]],"heights":[0.602091264347672,0.2426601073486498,0.34336553639733597,0.4622453029218074,0.6930947221436908,0.6053344016950407,0.7042284928168367],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,3,5,6,7,8]},"ordering":["Wind_Speed","Temperature","Humidity","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.602091264347672,0.2426601073486498,0.3465081924463061,0.47760049711428054,0.7010869838605545,0.6375542055067926,0.9555439928556603],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}},"pearson":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-2,-1],[5,4],[6,-4]],"heights":[0.2689440611368548,0.26918983582703526,0.3652765778698239,0.4387974496358434,0.5425423817669328,0.6523078645799211,0.6542041779467973],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,8,7,6,5,3,4]},"ordering":["Humidity","Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed"]},"average":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-7,3],[-8,4],[-4,1],[6,5]],"heights":[0.5425423817669328,0.2689440611368548,0.29857646284095685,0.4239310042997557,0.5402134157195992,0.674332884926496,0.6866760021334454],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"complete":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.5425423817669328,0.2689440611368548,0.32796308985487843,0.4387974496358434,0.6944615919061946,0.6162142833740271,0.7050149798408955],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.5425423817669328,0.2689440611368548,0.3096853263226541,0.4387974496358434,0.7132479190619311,0.657218228660185,0.9848485400796497],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}}},"Spring":{"spearman":{"single":{"tree":{"merges":[[-6,-5],[1,-3],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.22995628439352178,0.2861787431875001,0.380094168011607,0.41393991923890977,0.5840480044047323,0.6342101359995117,0.6584400016633458],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5840480044047323,0.22995628439352178,0.330936558370006,0.41393991923890977,0.4611081236226049,0.6786266851893067,0.6840828174003407],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"complete":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5840480044047323,0.22995628439352178,0.3756943735525119,0.41393991923890977,0.5685505992644289,0.6988133687152676,0.705824460604046],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[1,-4],[3,4],[5,6]],"heights":[0.5840480044047323,0.22995628439352178,0.36203553141034317,0.41393991923890977,0.7077322112970095,0.5851514716205889,0.984005789755756],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}},"pearson":{"single":{"tree":{"merges":[[-6,-5],[1,-3],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.22753832067530494,0.29014736281144327,0.3741138401619421,0.4087906920338456,0.5512551622380187,0.6316536492067375,0.6536178725649582],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5512551622380187,0.22753832067530494,0.33237784183678154,0.4087906920338456,0.464082928079888,0.6778241023884224,0.6809738207422519],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"complete":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[-4,5],[1,6]],"heights":[0.5512551622380187,0.22753832067530494,0.37460832086211976,0.4087906920338456,0.5691651816448815,0.7011429388719598,0.7070690082412497],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[1,-4],[3,4],[5,6]],"heights":[0.5512551622380187,0.22753832067530494,0.36389562836771683,0.4087906920338456,0.7155984831988963,0.593589249041154,0.9830862374882137],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}}},"Fall":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[5,-2],[-1,6]],"heights":[0.2560541744782712,0.26798147409471257,0.3361075565621296,0.49738448113980255,0.6413397442302468,0.6573890393171167,0.6587567857412472],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[5,-2],[-1,6]],"heights":[0.2560541744782712,0.3296836309226214,0.40329864140023425,0.5445088333382581,0.6513349678257315,0.6799671377154016,0.6851987371587767],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-8,3],[-4,-2],[4,5],[-1,6]],"heights":[0.2560541744782712,0.3361075565621296,0.468521285625253,0.5941378427312277,0.6573890393171167,0.6971621641312401,0.7058629841942847],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"ward":{"tree":{"merges":[[-3,-5],[-6,-7],[-4,-2],[1,2],[4,-8],[-1,3],[6,5]],"heights":[0.2560541744782712,0.3361075565621296,0.6573890393171167,0.4637987054276323,0.630810089981453,0.7034995240260214,0.9067997825203344],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,3,5,6,7,8]},"ordering":["Temperature","Wind_Speed","Humidity","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}},"pearson":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.258666513128206,0.29432122451463893,0.34071983560506625,0.49880845763569226,0.6278820731688184,0.6388527931927835,0.6738074309517846],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.258666513128206,0.34022277053800565,0.3969134581290021,0.5475074624323609,0.6411682126881995,0.6666312806544511,0.6859233508299463],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.258666513128206,0.34071983560506625,0.451048011699309,0.5953325811853889,0.6643704069867619,0.6911419207080184,0.7010089260395574],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"ward":{"tree":{"merges":[[-3,-5],[-6,-7],[1,2],[3,-8],[-2,-4],[5,-1],[6,4]],"heights":[0.258666513128206,0.34071983560506625,0.4557093294391372,0.6353478135982396,0.6773247697392618,0.6923200106911951,0.8768709611576964],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,4,1,3,5,6,7,8]},"ordering":["Humidity","Wind_Speed","Temperature","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}}},"Winter":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-1],[-2,5],[6,-4]],"heights":[0.25250813608970174,0.28660507089100007,0.37093180470135834,0.5232031243511639,0.6513349740130707,0.6568595294834296,0.6750388679606012],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,8,7,6,5,3,1,4]},"ordering":["Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-1],[-2,5],[6,-4]],"heights":[0.25250813608970174,0.332486155202139,0.4053944352911491,0.5563570876450454,0.6810920135525025,0.683571117212551,0.6921295729212243],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,8,7,6,5,3,1,4]},"ordering":["Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Wind_Speed"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-1,-4],[-8,3],[4,-2],[6,5]],"heights":[0.25250813608970174,0.37093180470135834,0.435031652166873,0.6899343330162316,0.5801197970149446,0.6947021102147773,0.7053668123906389],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,8,7,6,5,3]},"ordering":["Temperature","Wind_Speed","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-1,-4],[-8,3],[4,-2],[6,5]],"heights":[0.25250813608970174,0.3590952104030217,0.44652458061173134,0.6899343330162316,0.6461597572079605,0.6958347334826049,0.9253611935350833],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,8,7,6,5,3]},"ordering":["Temperature","Wind_Speed","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}},"pearson":{"single":{"tree":{"merges":[[-3,-5],[1,-6],[2,-7],[3,-8],[4,-2],[5,-1],[6,-4]],"heights":[0.27517158437194095,0.30136020505263283,0.3751869800680686,0.5142562310275612,0.6493119601720346,0.6529037862163705,0.6717713908654813],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[3,5,6,7,8,2,1,4]},"ordering":["Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-4,-1],[-2,4],[5,6]],"heights":[0.27517158437194095,0.33208031912430025,0.4186111525047833,0.5416794359487325,0.6819414161828918,0.6778758710051547,0.6888203453167273],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"complete":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-4,-1],[-8,3],[-2,5],[4,6]],"heights":[0.27517158437194095,0.3628004331959676,0.4436679993557654,0.6819414161828918,0.5643677174786809,0.7040847408176537,0.7063663522726702],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-4,-1],[-8,3],[4,-2],[6,5]],"heights":[0.27517158437194095,0.3507918918615086,0.4632329747861642,0.6819414161828918,0.6223538491982077,0.7013171798029189,0.9264655295695605],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}}}};
+    const dendroOrderings = {"Summer":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.2426601073486498,0.3027275398975262,0.37489681151408333,0.47760049711428054,0.602091264347672,0.6463403177172966,0.6619373760760779],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-7,3],[-8,4],[5,1],[6,-4]],"heights":[0.602091264347672,0.2426601073486498,0.3230465381474311,0.4252878269773501,0.5498202666698517,0.6770606499966527,0.6904980780074842],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,1,2,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Humidity","Wind_Speed"]},"complete":{"tree":{"merges":[[-1,-2],[-3,-5],[2,-6],[3,-7],[-4,1],[4,-8],[5,6]],"heights":[0.602091264347672,0.2426601073486498,0.34336553639733597,0.4622453029218074,0.6930947221436908,0.6053344016950407,0.7042284928168367],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,3,5,6,7,8]},"ordering":["Wind_Speed","Temperature","Humidity","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.602091264347672,0.2426601073486498,0.3465081924463061,0.47760049711428054,0.7010869838605545,0.6375542055067926,0.9555439928556603],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}},"pearson":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-2,-1],[5,4],[6,-4]],"heights":[0.2689440611368548,0.26918983582703515,0.36527657786982404,0.43879744963584355,0.5425423817669329,0.6523078645799211,0.6542041779467974],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,8,7,6,5,3,4]},"ordering":["Humidity","Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed"]},"average":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-7,3],[-8,4],[-4,1],[6,5]],"heights":[0.5425423817669329,0.2689440611368548,0.29857646284095674,0.4239310042997557,0.5402134157195992,0.674332884926496,0.6866760021334454],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"complete":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.5425423817669329,0.2689440611368548,0.3279630898548784,0.43879744963584355,0.6944615919061946,0.6162142833740271,0.7050149798408955],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-1,-2],[-5,-3],[-6,2],[-8,-7],[-4,1],[4,3],[5,6]],"heights":[0.5425423817669329,0.2689440611368548,0.309685326322654,0.43879744963584355,0.7132479190619312,0.657218228660185,0.9848485400796497],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}}},"Spring":{"spearman":{"single":{"tree":{"merges":[[-6,-5],[1,-3],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.22995628439352178,0.2861787431875001,0.380094168011607,0.41393991923890977,0.5840480044047323,0.6342101359995117,0.6584400016633458],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5840480044047323,0.22995628439352178,0.330936558370006,0.41393991923890977,0.4611081236226049,0.6786266851893067,0.6840828174003407],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"complete":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5840480044047323,0.22995628439352178,0.3756943735525119,0.41393991923890977,0.5685505992644289,0.6988133687152676,0.705824460604046],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[1,-4],[3,4],[5,6]],"heights":[0.5840480044047323,0.22995628439352178,0.36203553141034317,0.41393991923890977,0.7077322112970095,0.5851514716205889,0.984005789755756],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}},"pearson":{"single":{"tree":{"merges":[[-6,-5],[1,-3],[-7,2],[-8,3],[-2,-1],[4,5],[6,-4]],"heights":[0.22753832067530505,0.29014736281144343,0.3741138401619422,0.4087906920338456,0.5512551622380187,0.6316536492067375,0.6536178725649583],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[8,7,6,5,3,2,1,4]},"ordering":["UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[1,-4],[6,5]],"heights":[0.5512551622380187,0.22753832067530505,0.3323778418367817,0.4087906920338456,0.464082928079888,0.6778241023884224,0.6809738207422519],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"complete":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[3,4],[-4,5],[1,6]],"heights":[0.5512551622380187,0.22753832067530505,0.37460832086212,0.4087906920338456,0.5691651816448815,0.7011429388719598,0.7070690082412497],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]},"ward":{"tree":{"merges":[[-2,-1],[-5,-6],[-3,2],[-7,-8],[1,-4],[3,4],[5,6]],"heights":[0.5512551622380187,0.22753832067530505,0.36389562836771705,0.4087906920338456,0.7155984831988964,0.593589249041154,0.9830862374882136],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,1,4,3,5,6,7,8]},"ordering":["Humidity","Temperature","Wind_Speed","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}}},"Fall":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[5,-2],[-1,6]],"heights":[0.2560541744782712,0.26798147409471257,0.3361075565621296,0.49738448113980255,0.6413397442302468,0.6573890393171167,0.6587567857412472],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[5,-2],[-1,6]],"heights":[0.2560541744782712,0.3296836309226214,0.40329864140023425,0.5445088333382581,0.6513349678257315,0.6799671377154016,0.6851987371587767],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-8,3],[-4,-2],[4,5],[-1,6]],"heights":[0.2560541744782712,0.3361075565621296,0.468521285625253,0.5941378427312277,0.6573890393171167,0.6971621641312401,0.7058629841942847],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"ward":{"tree":{"merges":[[-3,-5],[-6,-7],[-4,-2],[1,2],[4,-8],[-1,3],[6,5]],"heights":[0.2560541744782712,0.3361075565621296,0.6573890393171167,0.4637987054276323,0.630810089981453,0.7034995240260214,0.9067997825203344],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,3,5,6,7,8]},"ordering":["Temperature","Wind_Speed","Humidity","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}},"pearson":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.2586665131282067,0.29432122451463893,0.3407198356050664,0.49880845763569226,0.6278820731688184,0.6388527931927837,0.6738074309517846],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.2586665131282067,0.34022277053800554,0.39691345812900214,0.547507462432361,0.6411682126881995,0.6666312806544511,0.6859233508299463],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-8,3],[4,-4],[-1,5],[6,-2]],"heights":[0.2586665131282067,0.3407198356050664,0.451048011699309,0.595332581185389,0.6643704069867619,0.6911419207080184,0.7010089260395574],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,8,7,6,5,3,4,2]},"ordering":["Temperature","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Wind_Speed","Humidity"]},"ward":{"tree":{"merges":[[-3,-5],[-6,-7],[1,2],[3,-8],[-2,-4],[5,-1],[6,4]],"heights":[0.2586665131282067,0.3407198356050664,0.4557093294391369,0.6353478135982397,0.6773247697392618,0.6923200106911951,0.8768709611576964],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,4,1,3,5,6,7,8]},"ordering":["Humidity","Wind_Speed","Temperature","Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"]}}},"Winter":{"spearman":{"single":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-1],[-2,5],[6,-4]],"heights":[0.25250813608970174,0.28660507089100007,0.37093180470135834,0.5232031243511639,0.6513349740130707,0.6568595294834296,0.6750388679606012],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,8,7,6,5,3,1,4]},"ordering":["Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[4,-1],[-2,5],[6,-4]],"heights":[0.25250813608970174,0.332486155202139,0.4053944352911491,0.5563570876450454,0.6810920135525025,0.683571117212551,0.6921295729212243],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[2,8,7,6,5,3,1,4]},"ordering":["Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure","Temperature","Wind_Speed"]},"complete":{"tree":{"merges":[[-5,-3],[-7,-6],[2,1],[-1,-4],[-8,3],[4,-2],[6,5]],"heights":[0.25250813608970174,0.37093180470135834,0.435031652166873,0.6899343330162316,0.5801197970149446,0.6947021102147773,0.7053668123906389],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,8,7,6,5,3]},"ordering":["Temperature","Wind_Speed","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-1,-4],[-8,3],[4,-2],[6,5]],"heights":[0.25250813608970174,0.3590952104030217,0.44652458061173134,0.6899343330162316,0.6461597572079605,0.6958347334826049,0.9253611935350833],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[1,4,2,8,7,6,5,3]},"ordering":["Temperature","Wind_Speed","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}},"pearson":{"single":{"tree":{"merges":[[-3,-5],[1,-6],[2,-7],[3,-8],[4,-2],[5,-1],[6,-4]],"heights":[0.2751715843719409,0.30136020505263283,0.3751869800680686,0.5142562310275612,0.6493119601720345,0.6529037862163705,0.6717713908654813],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[3,5,6,7,8,2,1,4]},"ordering":["Pressure","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index","Humidity","Temperature","Wind_Speed"]},"average":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-8,3],[-4,-1],[-2,4],[5,6]],"heights":[0.2751715843719409,0.33208031912430014,0.4186111525047835,0.5416794359487326,0.6819414161828918,0.6778758710051547,0.6888203453167273],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"complete":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-4,-1],[-8,3],[-2,5],[4,6]],"heights":[0.2751715843719409,0.3628004331959674,0.4436679993557654,0.6819414161828918,0.5643677174786809,0.7040847408176537,0.7063663522726702],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]},"ward":{"tree":{"merges":[[-5,-3],[-6,1],[-7,2],[-4,-1],[-8,3],[4,-2],[6,5]],"heights":[0.2751715843719409,0.3507918918615085,0.4632329747861643,0.6819414161828918,0.6223538491982077,0.7013171798029189,0.9264655295695606],"labels":["Temperature","Humidity","Pressure","Wind_Speed","Precipitation","Cloud_Cover","Solar_Radiation","UV_Index"],"order":[4,1,2,8,7,6,5,3]},"ordering":["Wind_Speed","Temperature","Humidity","UV_Index","Solar_Radiation","Cloud_Cover","Precipitation","Pressure"]}}}};
 
     // Load correlation data
     loadDataset('climate_adv_data').then(function(data) {
@@ -3859,7 +4409,7 @@ systolic_bp,heart_rate,-0.03520015935281128,default,pearson
 systolic_bp,heart_rate,-0.038792003014271624,default,spearman
 systolic_bp,glucose,-0.02607799345418928,default,pearson
 systolic_bp,glucose,-0.006866436119338504,default,spearman
-systolic_bp,hba1c,-0.04096030819698172,default,pearson
+systolic_bp,hba1c,-0.04096030819698173,default,pearson
 systolic_bp,hba1c,-0.012601942172756607,default,spearman
 systolic_bp,cholesterol_total,0.09116677428998059,default,pearson
 systolic_bp,cholesterol_total,0.08227583875425894,default,spearman
@@ -3871,19 +4421,19 @@ systolic_bp,triglycerides,-0.010040992795285105,default,pearson
 systolic_bp,triglycerides,-0.02296734366586754,default,spearman
 systolic_bp,bmi,0.06551214027934088,default,pearson
 systolic_bp,bmi,0.06449797734709165,default,spearman
-systolic_bp,cardiovascular_risk,0.31342658672588436,default,pearson
+systolic_bp,cardiovascular_risk,0.3134265867258845,default,pearson
 systolic_bp,cardiovascular_risk,0.28356785852669925,default,spearman
 diastolic_bp,heart_rate,-0.043856918941407703,default,pearson
 diastolic_bp,heart_rate,-0.035708332729157556,default,spearman
 diastolic_bp,glucose,-0.07553417418654,default,pearson
 diastolic_bp,glucose,-0.06341323403854092,default,spearman
-diastolic_bp,hba1c,-0.07486211223998737,default,pearson
+diastolic_bp,hba1c,-0.0748621122399873,default,pearson
 diastolic_bp,hba1c,-0.06103220934482335,default,spearman
 diastolic_bp,cholesterol_total,0.05724298083961712,default,pearson
 diastolic_bp,cholesterol_total,0.06406289729263041,default,spearman
 diastolic_bp,ldl,0.07908148686027949,default,pearson
 diastolic_bp,ldl,0.08488750017168128,default,spearman
-diastolic_bp,hdl,0.045868541882521666,default,pearson
+diastolic_bp,hdl,0.04586854188252165,default,pearson
 diastolic_bp,hdl,0.06573524207043702,default,spearman
 diastolic_bp,triglycerides,-0.06527858273144702,default,pearson
 diastolic_bp,triglycerides,-0.051956950840529474,default,spearman
@@ -3893,55 +4443,55 @@ diastolic_bp,cardiovascular_risk,0.2978286527381148,default,pearson
 diastolic_bp,cardiovascular_risk,0.2813360858710943,default,spearman
 heart_rate,glucose,-0.13080550279902745,default,pearson
 heart_rate,glucose,-0.1386464326624421,default,spearman
-heart_rate,hba1c,-0.14422848306888317,default,pearson
+heart_rate,hba1c,-0.1442284830688832,default,pearson
 heart_rate,hba1c,-0.15360122469817253,default,spearman
 heart_rate,cholesterol_total,-0.08174574881586451,default,pearson
 heart_rate,cholesterol_total,-0.10180382336025096,default,spearman
 heart_rate,ldl,-0.11782505623389404,default,pearson
 heart_rate,ldl,-0.13537216207493308,default,spearman
-heart_rate,hdl,0.021816924810687744,default,pearson
+heart_rate,hdl,0.021816924810687758,default,pearson
 heart_rate,hdl,-0.006100755324199376,default,spearman
 heart_rate,triglycerides,-0.07809201453871832,default,pearson
 heart_rate,triglycerides,-0.06381359743372478,default,spearman
 heart_rate,bmi,0.13219691791578436,default,pearson
 heart_rate,bmi,0.11918321430594661,default,spearman
-heart_rate,cardiovascular_risk,-0.03203552194393167,default,pearson
+heart_rate,cardiovascular_risk,-0.03203552194393171,default,pearson
 heart_rate,cardiovascular_risk,-0.03585096005614263,default,spearman
-glucose,hba1c,0.9821323167737176,default,pearson
+glucose,hba1c,0.9821323167737177,default,pearson
 glucose,hba1c,0.9895916397017288,default,spearman
 glucose,cholesterol_total,0.07609173239973821,default,pearson
 glucose,cholesterol_total,0.07547684331497666,default,spearman
 glucose,ldl,0.11946491133194012,default,pearson
 glucose,ldl,0.13082005760403914,default,spearman
-glucose,hdl,0.08696236160543586,default,pearson
+glucose,hdl,0.08696236160543588,default,pearson
 glucose,hdl,0.09985023619992421,default,spearman
 glucose,triglycerides,-0.0747839660052218,default,pearson
 glucose,triglycerides,-0.06425982192083217,default,spearman
 glucose,bmi,-0.09660834795719273,default,pearson
 glucose,bmi,-0.11662025558774107,default,spearman
-glucose,cardiovascular_risk,0.4581997143204896,default,pearson
+glucose,cardiovascular_risk,0.4581997143204897,default,pearson
 glucose,cardiovascular_risk,0.45443872719245526,default,spearman
-hba1c,cholesterol_total,0.08629368250795535,default,pearson
+hba1c,cholesterol_total,0.08629368250795531,default,pearson
 hba1c,cholesterol_total,0.08168652536910531,default,spearman
 hba1c,ldl,0.13044962393279624,default,pearson
 hba1c,ldl,0.13645155581958976,default,spearman
-hba1c,hdl,0.10354684464844392,default,pearson
+hba1c,hdl,0.10354684464844391,default,pearson
 hba1c,hdl,0.10549982046590144,default,spearman
-hba1c,triglycerides,-0.07672189318503726,default,pearson
+hba1c,triglycerides,-0.07672189318503733,default,pearson
 hba1c,triglycerides,-0.06484077881434624,default,spearman
-hba1c,bmi,-0.08887711763306784,default,pearson
+hba1c,bmi,-0.08887711763306776,default,pearson
 hba1c,bmi,-0.11118174815732297,default,spearman
 hba1c,cardiovascular_risk,0.45210926827249526,default,pearson
 hba1c,cardiovascular_risk,0.44907149482638836,default,spearman
 cholesterol_total,ldl,0.8598430969826488,default,pearson
 cholesterol_total,ldl,0.8663136438694536,default,spearman
-cholesterol_total,hdl,0.6640148702858165,default,pearson
+cholesterol_total,hdl,0.6640148702858163,default,pearson
 cholesterol_total,hdl,0.6520129091238603,default,spearman
 cholesterol_total,triglycerides,0.36042486686830855,default,pearson
 cholesterol_total,triglycerides,0.33531247927203744,default,spearman
 cholesterol_total,bmi,0.06902250903720172,default,pearson
 cholesterol_total,bmi,0.06759528394389606,default,spearman
-cholesterol_total,cardiovascular_risk,0.42953159912666733,default,pearson
+cholesterol_total,cardiovascular_risk,0.4295315991266672,default,pearson
 cholesterol_total,cardiovascular_risk,0.426476604579989,default,spearman
 ldl,hdl,0.6238139048750009,default,pearson
 ldl,hdl,0.6021439109839107,default,spearman
@@ -3949,11 +4499,11 @@ ldl,triglycerides,-0.06353542801303395,default,pearson
 ldl,triglycerides,-0.055229156088971935,default,spearman
 ldl,bmi,0.01051338430735566,default,pearson
 ldl,bmi,0.020751975144850197,default,spearman
-ldl,cardiovascular_risk,0.49175794151441715,default,pearson
+ldl,cardiovascular_risk,0.49175794151441743,default,pearson
 ldl,cardiovascular_risk,0.4980181970923712,default,spearman
-hdl,triglycerides,-0.19409767608409398,default,pearson
+hdl,triglycerides,-0.19409767608409392,default,pearson
 hdl,triglycerides,-0.18474973597672692,default,spearman
-hdl,bmi,-0.03797199213610896,default,pearson
+hdl,bmi,-0.03797199213610897,default,pearson
 hdl,bmi,-0.029818540436314312,default,spearman
 hdl,cardiovascular_risk,0.2978345712291631,default,pearson
 hdl,cardiovascular_risk,0.28560846164100556,default,spearman
@@ -3961,156 +4511,156 @@ triglycerides,bmi,0.15510266746883758,default,pearson
 triglycerides,bmi,0.1522244914621984,default,spearman
 triglycerides,cardiovascular_risk,-0.04354153826398101,default,pearson
 triglycerides,cardiovascular_risk,-0.03540026955564472,default,spearman
-bmi,cardiovascular_risk,0.2263987824772256,default,pearson
+bmi,cardiovascular_risk,0.2263987824772259,default,pearson
 bmi,cardiovascular_risk,0.2197983890286374,default,spearman
 
 </script><script type="text/plain" id="econ_adv_data" data-format="csv_embedded" data-src="">
 node1,node2,strength,scenario,correlation_method
 GDP_Growth,Unemployment,-0.5999497258645649,North America,pearson
 GDP_Growth,Unemployment,-0.6081255642752968,North America,spearman
-GDP_Growth,Inflation,0.5552807315368173,North America,pearson
+GDP_Growth,Inflation,0.5552807315368175,North America,pearson
 GDP_Growth,Inflation,0.5848322800194458,North America,spearman
 GDP_Growth,Interest_Rate,0.4049685575939098,North America,pearson
 GDP_Growth,Interest_Rate,0.42693242586290714,North America,spearman
-GDP_Growth,Manufacturing_Index,0.7929233681195406,North America,pearson
+GDP_Growth,Manufacturing_Index,0.7929233681195408,North America,pearson
 GDP_Growth,Manufacturing_Index,0.7981526494895479,North America,spearman
-GDP_Growth,Consumer_Confidence,0.7487291749838417,North America,pearson
+GDP_Growth,Consumer_Confidence,0.7487291749838413,North America,pearson
 GDP_Growth,Consumer_Confidence,0.7564205847628308,North America,spearman
-GDP_Growth,Exports,0.47877636014831015,North America,pearson
+GDP_Growth,Exports,0.4787763601483099,North America,pearson
 GDP_Growth,Exports,0.4554344051670255,North America,spearman
-GDP_Growth,Imports,0.565392940485009,North America,pearson
+GDP_Growth,Imports,0.5653929404850088,North America,pearson
 GDP_Growth,Imports,0.600006944926731,North America,spearman
-Unemployment,Inflation,-0.49806804181889397,North America,pearson
+Unemployment,Inflation,-0.4980680418188941,North America,pearson
 Unemployment,Inflation,-0.5300020834780194,North America,spearman
 Unemployment,Interest_Rate,-0.4278037391534723,North America,pearson
 Unemployment,Interest_Rate,-0.4343009931245225,North America,spearman
-Unemployment,Manufacturing_Index,-0.4361589614906281,North America,pearson
+Unemployment,Manufacturing_Index,-0.43615896149062783,North America,pearson
 Unemployment,Manufacturing_Index,-0.4269740954232933,North America,spearman
-Unemployment,Consumer_Confidence,-0.6134308245760025,North America,pearson
+Unemployment,Consumer_Confidence,-0.6134308245760026,North America,pearson
 Unemployment,Consumer_Confidence,-0.6244253073130078,North America,spearman
-Unemployment,Exports,-0.3912737354804843,North America,pearson
+Unemployment,Exports,-0.3912737354804842,North America,pearson
 Unemployment,Exports,-0.4201541773734287,North America,spearman
-Unemployment,Imports,-0.5305286530158947,North America,pearson
+Unemployment,Imports,-0.5305286530158944,North America,pearson
 Unemployment,Imports,-0.5874782971039656,North America,spearman
-Inflation,Interest_Rate,0.7258560747783378,North America,pearson
+Inflation,Interest_Rate,0.725856074778338,North America,pearson
 Inflation,Interest_Rate,0.7102159872213348,North America,spearman
-Inflation,Manufacturing_Index,0.4002477424139019,North America,pearson
+Inflation,Manufacturing_Index,0.40024774241390165,North America,pearson
 Inflation,Manufacturing_Index,0.396972011945274,North America,spearman
-Inflation,Consumer_Confidence,0.44709235526572816,North America,pearson
+Inflation,Consumer_Confidence,0.4470923552657276,North America,pearson
 Inflation,Consumer_Confidence,0.47810959094381555,North America,spearman
 Inflation,Exports,0.38573279107652797,North America,pearson
 Inflation,Exports,0.3885964303076603,North America,spearman
-Inflation,Imports,0.520121634190496,North America,pearson
+Inflation,Imports,0.5201216341904962,North America,pearson
 Inflation,Imports,0.530217376206681,North America,spearman
-Interest_Rate,Manufacturing_Index,0.215528660309008,North America,pearson
+Interest_Rate,Manufacturing_Index,0.21552866030900794,North America,pearson
 Interest_Rate,Manufacturing_Index,0.21720258351274394,North America,spearman
-Interest_Rate,Consumer_Confidence,0.2656310183272159,North America,pearson
+Interest_Rate,Consumer_Confidence,0.2656310183272161,North America,pearson
 Interest_Rate,Consumer_Confidence,0.2805403152996736,North America,spearman
-Interest_Rate,Exports,0.19530255186664486,North America,pearson
+Interest_Rate,Exports,0.1953025518666449,North America,pearson
 Interest_Rate,Exports,0.2164108618654073,North America,spearman
-Interest_Rate,Imports,0.3725204699430975,North America,pearson
+Interest_Rate,Imports,0.3725204699430973,North America,pearson
 Interest_Rate,Imports,0.40245155913605113,North America,spearman
-Manufacturing_Index,Consumer_Confidence,0.6267184046551383,North America,pearson
+Manufacturing_Index,Consumer_Confidence,0.6267184046551381,North America,pearson
 Manufacturing_Index,Consumer_Confidence,0.6083478019306896,North America,spearman
-Manufacturing_Index,Exports,0.34012429898560753,North America,pearson
+Manufacturing_Index,Exports,0.3401242989856073,North America,pearson
 Manufacturing_Index,Exports,0.33709285367039377,North America,spearman
-Manufacturing_Index,Imports,0.4303074990588518,North America,pearson
+Manufacturing_Index,Imports,0.4303074990588517,North America,pearson
 Manufacturing_Index,Imports,0.42764775331620253,North America,spearman
-Consumer_Confidence,Exports,0.3929231978214378,North America,pearson
+Consumer_Confidence,Exports,0.39292319782143775,North America,pearson
 Consumer_Confidence,Exports,0.3940481977915133,North America,spearman
-Consumer_Confidence,Imports,0.44183625086599976,North America,pearson
+Consumer_Confidence,Imports,0.4418362508659992,North America,pearson
 Consumer_Confidence,Imports,0.4875338565178137,North America,spearman
-Exports,Imports,0.41097415037523566,North America,pearson
+Exports,Imports,0.4109741503752356,North America,pearson
 Exports,Imports,0.4124800333356483,North America,spearman
-GDP_Growth,Unemployment,-0.3841658938563065,Europe,pearson
+GDP_Growth,Unemployment,-0.38416589385630645,Europe,pearson
 GDP_Growth,Unemployment,-0.41438988818667966,Europe,spearman
 GDP_Growth,Inflation,0.4003127285863975,Europe,pearson
 GDP_Growth,Inflation,0.4028126953260643,Europe,spearman
-GDP_Growth,Interest_Rate,0.18451793224036,Europe,pearson
+GDP_Growth,Interest_Rate,0.18451793224036006,Europe,pearson
 GDP_Growth,Interest_Rate,0.1667338009583999,Europe,spearman
-GDP_Growth,Manufacturing_Index,0.6556688039970323,Europe,pearson
+GDP_Growth,Manufacturing_Index,0.6556688039970322,Europe,pearson
 GDP_Growth,Manufacturing_Index,0.661337592888395,Europe,spearman
 GDP_Growth,Consumer_Confidence,0.647403942846377,Europe,pearson
 GDP_Growth,Consumer_Confidence,0.619654142648795,Europe,spearman
-GDP_Growth,Exports,0.45818897342143555,Europe,pearson
+GDP_Growth,Exports,0.4581889734214354,Europe,pearson
 GDP_Growth,Exports,0.4651989721508438,Europe,spearman
 GDP_Growth,Imports,0.4647898546917322,Europe,pearson
 GDP_Growth,Imports,0.47544968400583376,Europe,spearman
-Unemployment,Inflation,-0.3276802730413175,Europe,pearson
+Unemployment,Inflation,-0.3276802730413176,Europe,pearson
 Unemployment,Inflation,-0.33584276685880965,Europe,spearman
-Unemployment,Interest_Rate,-0.21601063907104606,Europe,pearson
+Unemployment,Interest_Rate,-0.2160106390710461,Europe,pearson
 Unemployment,Interest_Rate,-0.2062226543509966,Europe,spearman
-Unemployment,Manufacturing_Index,-0.28399609068221393,Europe,pearson
+Unemployment,Manufacturing_Index,-0.28399609068221404,Europe,pearson
 Unemployment,Manufacturing_Index,-0.29931939718035977,Europe,spearman
-Unemployment,Consumer_Confidence,-0.44511907788835997,Europe,pearson
+Unemployment,Consumer_Confidence,-0.44511907788836014,Europe,pearson
 Unemployment,Consumer_Confidence,-0.4593027293562053,Europe,spearman
-Unemployment,Exports,-0.3775514912832588,Europe,pearson
+Unemployment,Exports,-0.3775514912832587,Europe,pearson
 Unemployment,Exports,-0.36986596291409124,Europe,spearman
-Unemployment,Imports,-0.39021592637912816,Europe,pearson
+Unemployment,Imports,-0.39021592637912805,Europe,pearson
 Unemployment,Imports,-0.3849295089936801,Europe,spearman
-Inflation,Interest_Rate,0.738817519300025,Europe,pearson
+Inflation,Interest_Rate,0.7388175193000253,Europe,pearson
 Inflation,Interest_Rate,0.6975345510104869,Europe,spearman
-Inflation,Manufacturing_Index,0.24111996746976613,Europe,pearson
+Inflation,Manufacturing_Index,0.24111996746976602,Europe,pearson
 Inflation,Manufacturing_Index,0.24417667893603723,Europe,spearman
 Inflation,Consumer_Confidence,0.36640767020952003,Europe,pearson
 Inflation,Consumer_Confidence,0.35941384818390165,Europe,spearman
-Inflation,Exports,0.27265420873168156,Europe,pearson
+Inflation,Exports,0.27265420873168145,Europe,pearson
 Inflation,Exports,0.2591916105285089,Europe,spearman
 Inflation,Imports,0.49446851449208723,Europe,pearson
 Inflation,Imports,0.4799708313077297,Europe,spearman
-Interest_Rate,Manufacturing_Index,0.07961559629885108,Europe,pearson
+Interest_Rate,Manufacturing_Index,0.07961559629885115,Europe,pearson
 Interest_Rate,Manufacturing_Index,0.07906799083269672,Europe,spearman
-Interest_Rate,Consumer_Confidence,0.21662663819445235,Europe,pearson
+Interest_Rate,Consumer_Confidence,0.21662663819445233,Europe,pearson
 Interest_Rate,Consumer_Confidence,0.2018473505104521,Europe,spearman
-Interest_Rate,Exports,0.1713901936123621,Europe,pearson
+Interest_Rate,Exports,0.17139019361236205,Europe,pearson
 Interest_Rate,Exports,0.13406486561566774,Europe,spearman
 Interest_Rate,Imports,0.2893459635878387,Europe,pearson
 Interest_Rate,Imports,0.28417945690672963,Europe,spearman
-Manufacturing_Index,Consumer_Confidence,0.39748481839812577,Europe,pearson
+Manufacturing_Index,Consumer_Confidence,0.3974848183981258,Europe,pearson
 Manufacturing_Index,Consumer_Confidence,0.3774428779776373,Europe,spearman
-Manufacturing_Index,Exports,0.31946916128154684,Europe,pearson
+Manufacturing_Index,Exports,0.3194691612815464,Europe,pearson
 Manufacturing_Index,Exports,0.27388707549135355,Europe,spearman
-Manufacturing_Index,Imports,0.34417417316098725,Europe,pearson
+Manufacturing_Index,Imports,0.3441741731609872,Europe,pearson
 Manufacturing_Index,Imports,0.36545593443989166,Europe,spearman
-Consumer_Confidence,Exports,0.19550079505279744,Europe,pearson
+Consumer_Confidence,Exports,0.1955007950527973,Europe,pearson
 Consumer_Confidence,Exports,0.23956524758663797,Europe,spearman
 Consumer_Confidence,Imports,0.4088564625804937,Europe,pearson
 Consumer_Confidence,Imports,0.3973748176956733,Europe,spearman
-Exports,Imports,0.3354176623976639,Europe,pearson
+Exports,Imports,0.3354176623976638,Europe,pearson
 Exports,Imports,0.3303146051809153,Europe,spearman
-GDP_Growth,Unemployment,-0.2664864982415513,Asia-Pacific,pearson
+GDP_Growth,Unemployment,-0.2664864982415516,Asia-Pacific,pearson
 GDP_Growth,Unemployment,-0.3107299117994305,Asia-Pacific,spearman
 GDP_Growth,Inflation,0.37720223466259356,Asia-Pacific,pearson
 GDP_Growth,Inflation,0.36810195152441144,Asia-Pacific,spearman
-GDP_Growth,Interest_Rate,0.33188257790190384,Asia-Pacific,pearson
+GDP_Growth,Interest_Rate,0.3318825779019036,Asia-Pacific,pearson
 GDP_Growth,Interest_Rate,0.28165150357663726,Asia-Pacific,spearman
-GDP_Growth,Manufacturing_Index,0.6316872056967565,Asia-Pacific,pearson
+GDP_Growth,Manufacturing_Index,0.6316872056967567,Asia-Pacific,pearson
 GDP_Growth,Manufacturing_Index,0.5770539620807,Asia-Pacific,spearman
-GDP_Growth,Consumer_Confidence,0.5772333320561742,Asia-Pacific,pearson
+GDP_Growth,Consumer_Confidence,0.5772333320561741,Asia-Pacific,pearson
 GDP_Growth,Consumer_Confidence,0.5623098826307382,Asia-Pacific,spearman
-GDP_Growth,Exports,0.22900494978794733,Asia-Pacific,pearson
+GDP_Growth,Exports,0.22900494978794728,Asia-Pacific,pearson
 GDP_Growth,Exports,0.21570247933884298,Asia-Pacific,spearman
-GDP_Growth,Imports,0.2709129495168227,Asia-Pacific,pearson
+GDP_Growth,Imports,0.2709129495168229,Asia-Pacific,pearson
 GDP_Growth,Imports,0.26110146537954027,Asia-Pacific,spearman
-Unemployment,Inflation,-0.17181442096347704,Asia-Pacific,pearson
+Unemployment,Inflation,-0.17181442096347707,Asia-Pacific,pearson
 Unemployment,Inflation,-0.17363705812903674,Asia-Pacific,spearman
-Unemployment,Interest_Rate,-0.11454581627814052,Asia-Pacific,pearson
+Unemployment,Interest_Rate,-0.1145458162781406,Asia-Pacific,pearson
 Unemployment,Interest_Rate,-0.1371345232307799,Asia-Pacific,spearman
-Unemployment,Manufacturing_Index,-0.20901629323612664,Asia-Pacific,pearson
+Unemployment,Manufacturing_Index,-0.20901629323612683,Asia-Pacific,pearson
 Unemployment,Manufacturing_Index,-0.22698798527675534,Asia-Pacific,spearman
-Unemployment,Consumer_Confidence,-0.4688253291646777,Asia-Pacific,pearson
+Unemployment,Consumer_Confidence,-0.46882532916467823,Asia-Pacific,pearson
 Unemployment,Consumer_Confidence,-0.46432391138273493,Asia-Pacific,spearman
-Unemployment,Exports,-0.15141257937071476,Asia-Pacific,pearson
+Unemployment,Exports,-0.1514125793707149,Asia-Pacific,pearson
 Unemployment,Exports,-0.14507951941107022,Asia-Pacific,spearman
-Unemployment,Imports,-0.36785700194251986,Asia-Pacific,pearson
+Unemployment,Imports,-0.3678570019425201,Asia-Pacific,pearson
 Unemployment,Imports,-0.368574206542121,Asia-Pacific,spearman
-Inflation,Interest_Rate,0.5908646523001208,Asia-Pacific,pearson
+Inflation,Interest_Rate,0.5908646523001205,Asia-Pacific,pearson
 Inflation,Interest_Rate,0.5974095423293284,Asia-Pacific,spearman
 Inflation,Manufacturing_Index,0.13567517496181972,Asia-Pacific,pearson
 Inflation,Manufacturing_Index,0.09180498645739288,Asia-Pacific,spearman
-Inflation,Consumer_Confidence,0.2112464571062651,Asia-Pacific,pearson
+Inflation,Consumer_Confidence,0.21124645710626502,Asia-Pacific,pearson
 Inflation,Consumer_Confidence,0.18591568858948537,Asia-Pacific,spearman
-Inflation,Exports,0.24158461787709182,Asia-Pacific,pearson
+Inflation,Exports,0.24158461787709157,Asia-Pacific,pearson
 Inflation,Exports,0.28031807764428085,Asia-Pacific,spearman
 Inflation,Imports,0.1786477140011456,Asia-Pacific,pearson
 Inflation,Imports,0.15019098548510312,Asia-Pacific,spearman
@@ -4118,21 +4668,21 @@ Interest_Rate,Manufacturing_Index,0.2777420216281601,Asia-Pacific,pearson
 Interest_Rate,Manufacturing_Index,0.1912146676852559,Asia-Pacific,spearman
 Interest_Rate,Consumer_Confidence,0.2464312057340855,Asia-Pacific,pearson
 Interest_Rate,Consumer_Confidence,0.21236196958122092,Asia-Pacific,spearman
-Interest_Rate,Exports,0.17518353403402057,Asia-Pacific,pearson
+Interest_Rate,Exports,0.17518353403402062,Asia-Pacific,pearson
 Interest_Rate,Exports,0.18771442461282034,Asia-Pacific,spearman
 Interest_Rate,Imports,0.16983509077246978,Asia-Pacific,pearson
 Interest_Rate,Imports,0.17399819431904992,Asia-Pacific,spearman
 Manufacturing_Index,Consumer_Confidence,0.3857145150065549,Asia-Pacific,pearson
 Manufacturing_Index,Consumer_Confidence,0.3557191471629974,Asia-Pacific,spearman
-Manufacturing_Index,Exports,0.18491890781191295,Asia-Pacific,pearson
+Manufacturing_Index,Exports,0.18491890781191297,Asia-Pacific,pearson
 Manufacturing_Index,Exports,0.1548024168345024,Asia-Pacific,spearman
 Manufacturing_Index,Imports,0.293630758780037,Asia-Pacific,pearson
 Manufacturing_Index,Imports,0.2722619626362942,Asia-Pacific,spearman
-Consumer_Confidence,Exports,0.23951539932663524,Asia-Pacific,pearson
+Consumer_Confidence,Exports,0.23951539932663518,Asia-Pacific,pearson
 Consumer_Confidence,Exports,0.2739912493923189,Asia-Pacific,spearman
 Consumer_Confidence,Imports,0.2330664777313144,Asia-Pacific,pearson
 Consumer_Confidence,Imports,0.24442669629835406,Asia-Pacific,spearman
-Exports,Imports,0.1590036335200396,Asia-Pacific,pearson
+Exports,Imports,0.15900363352003957,Asia-Pacific,pearson
 Exports,Imports,0.16596291409125632,Asia-Pacific,spearman
 
 </script><script type="text/plain" id="science_corr_data" data-format="csv_embedded" data-src="">
@@ -4141,19 +4691,19 @@ density,viscosity,0.5694274327608478,default,pearson
 density,viscosity,0.5493008369594526,default,spearman
 density,surface_tension,0.5254951674184954,default,pearson
 density,surface_tension,0.5103865337744751,default,spearman
-density,heat_capacity,-0.1046459221097761,default,pearson
+density,heat_capacity,-0.10464592210977612,default,pearson
 density,heat_capacity,-0.1033319702090203,default,spearman
-density,thermal_conductivity,-0.06701474228243008,default,pearson
+density,thermal_conductivity,-0.06701474228243005,default,pearson
 density,thermal_conductivity,-0.08115678087778719,default,spearman
-density,ph,0.033683080830148635,default,pearson
+density,ph,0.033683080830148655,default,pearson
 density,ph,0.03836573699748497,default,spearman
-density,conductivity,0.04537980677434106,default,pearson
+density,conductivity,0.045379806774341114,default,pearson
 density,conductivity,0.033270857136326125,default,spearman
-density,absorbance_280,0.13412501526604437,default,pearson
+density,absorbance_280,0.13412501526604434,default,pearson
 density,absorbance_280,0.14161379117731582,default,spearman
-density,absorbance_260,0.15068741208259076,default,pearson
+density,absorbance_260,0.15068741208259082,default,pearson
 density,absorbance_260,0.14923498384811373,default,spearman
-density,fluorescence,0.09360050776272809,default,pearson
+density,fluorescence,0.09360050776272814,default,pearson
 density,fluorescence,0.0953846372434768,default,spearman
 viscosity,surface_tension,0.37096647768161933,default,pearson
 viscosity,surface_tension,0.35925457755362367,default,spearman
@@ -4163,9 +4713,9 @@ viscosity,thermal_conductivity,-0.16128981769455325,default,pearson
 viscosity,thermal_conductivity,-0.15286832565614208,default,spearman
 viscosity,ph,0.019149344107833,default,pearson
 viscosity,ph,-0.0025427059264757673,default,spearman
-viscosity,conductivity,0.03394342005868898,default,pearson
+viscosity,conductivity,0.03394342005868901,default,pearson
 viscosity,conductivity,0.047225419909436454,default,spearman
-viscosity,absorbance_280,0.08619211149984647,default,pearson
+viscosity,absorbance_280,0.08619211149984644,default,pearson
 viscosity,absorbance_280,0.07829581079292575,default,spearman
 viscosity,absorbance_260,0.09710094046676535,default,pearson
 viscosity,absorbance_260,0.08316510258745285,default,spearman
@@ -4177,11 +4727,11 @@ surface_tension,thermal_conductivity,-0.08594463860343131,default,pearson
 surface_tension,thermal_conductivity,-0.10224864526654405,default,spearman
 surface_tension,ph,0.0009360297082194271,default,pearson
 surface_tension,ph,-0.005896222281086348,default,spearman
-surface_tension,conductivity,-0.0019098102079159356,default,pearson
+surface_tension,conductivity,-0.001909810207915937,default,pearson
 surface_tension,conductivity,-0.002977918070808068,default,spearman
-surface_tension,absorbance_280,0.13274834493930518,default,pearson
+surface_tension,absorbance_280,0.1327483449393051,default,pearson
 surface_tension,absorbance_280,0.14122344071079582,default,spearman
-surface_tension,absorbance_260,0.14690724746265862,default,pearson
+surface_tension,absorbance_260,0.14690724746265857,default,pearson
 surface_tension,absorbance_260,0.1511665014739429,default,spearman
 surface_tension,fluorescence,0.122432914639578,default,pearson
 surface_tension,fluorescence,0.11409604185801706,default,spearman
@@ -4189,54 +4739,54 @@ heat_capacity,thermal_conductivity,0.5610416923276333,default,pearson
 heat_capacity,thermal_conductivity,0.5150062477828794,default,spearman
 heat_capacity,ph,-0.12351286856145034,default,pearson
 heat_capacity,ph,-0.12229606112357366,default,spearman
-heat_capacity,conductivity,0.046295879228030155,default,pearson
+heat_capacity,conductivity,0.04629587922803021,default,pearson
 heat_capacity,conductivity,0.030388439409580966,default,spearman
 heat_capacity,absorbance_280,-0.12460871993544487,default,pearson
 heat_capacity,absorbance_280,-0.12267427004626208,default,spearman
-heat_capacity,absorbance_260,-0.11406641606164433,default,pearson
+heat_capacity,absorbance_260,-0.11406641606164437,default,pearson
 heat_capacity,absorbance_260,-0.10875273192554878,default,spearman
 heat_capacity,fluorescence,-0.13783273189346124,default,pearson
 heat_capacity,fluorescence,-0.10020801397225551,default,spearman
 thermal_conductivity,ph,-0.10739516877730829,default,pearson
 thermal_conductivity,ph,-0.13555491673640765,default,spearman
-thermal_conductivity,conductivity,-0.11620840808234446,default,pearson
+thermal_conductivity,conductivity,-0.11620840808234444,default,pearson
 thermal_conductivity,conductivity,-0.13689226920879333,default,spearman
-thermal_conductivity,absorbance_280,-0.09597022576381761,default,pearson
+thermal_conductivity,absorbance_280,-0.09597022576381764,default,pearson
 thermal_conductivity,absorbance_280,-0.08679379820938259,default,spearman
-thermal_conductivity,absorbance_260,-0.08977875265836334,default,pearson
+thermal_conductivity,absorbance_260,-0.08977875265836328,default,pearson
 thermal_conductivity,absorbance_260,-0.07875079670848072,default,spearman
 thermal_conductivity,fluorescence,-0.07106520609940112,default,pearson
 thermal_conductivity,fluorescence,-0.04438269316772275,default,spearman
-ph,conductivity,-0.06485162669249513,default,pearson
+ph,conductivity,-0.0648516266924953,default,pearson
 ph,conductivity,-0.053241191975308494,default,spearman
-ph,absorbance_280,0.021238864402401865,default,pearson
+ph,absorbance_280,0.021238864402401858,default,pearson
 ph,absorbance_280,0.02490582083110829,default,spearman
-ph,absorbance_260,0.038317546181879325,default,pearson
+ph,absorbance_260,0.038317546181879394,default,pearson
 ph,absorbance_260,0.03701863058773075,default,spearman
 ph,fluorescence,-0.022796339363081213,default,pearson
 ph,fluorescence,-0.0050356201277139065,default,spearman
-conductivity,absorbance_280,0.031670350629487504,default,pearson
+conductivity,absorbance_280,0.031670350629487524,default,pearson
 conductivity,absorbance_280,0.03959725346282037,default,spearman
-conductivity,absorbance_260,0.01972538399012227,default,pearson
+conductivity,absorbance_260,0.019725383990122268,default,pearson
 conductivity,absorbance_260,0.03484440114357866,default,spearman
-conductivity,fluorescence,0.038069985752841776,default,pearson
+conductivity,fluorescence,0.038069985752841824,default,pearson
 conductivity,fluorescence,0.0727163792750941,default,spearman
-absorbance_280,absorbance_260,0.9914248132288922,default,pearson
+absorbance_280,absorbance_260,0.9914248132288924,default,pearson
 absorbance_280,absorbance_260,0.9924862713867492,default,spearman
-absorbance_280,fluorescence,0.7782056882480659,default,pearson
+absorbance_280,fluorescence,0.778205688248066,default,pearson
 absorbance_280,fluorescence,0.806717364186848,default,spearman
-absorbance_260,fluorescence,0.7720177364287473,default,pearson
+absorbance_260,fluorescence,0.7720177364287472,default,pearson
 absorbance_260,fluorescence,0.8038391244376868,default,spearman
 
 </script><script type="text/plain" id="sales_corr_data" data-format="csv_embedded" data-src="">
 node1,node2,strength,scenario,correlation_method
-leads,conversion_rate,-0.016283947790096613,default,pearson
+leads,conversion_rate,-0.01628394779009665,default,pearson
 leads,conversion_rate,-0.018050729707028756,default,spearman
 leads,units_sold,0.7895733377543582,default,pearson
 leads,units_sold,0.8245884113056222,default,spearman
 leads,avg_deal_size,0.00010587499224769132,default,pearson
 leads,avg_deal_size,-0.0009193438188502013,default,spearman
-leads,revenue,0.5982597389144438,default,pearson
+leads,revenue,0.598259738914444,default,pearson
 leads,revenue,0.6442982468491689,default,spearman
 leads,customer_satisfaction,-0.06634366539442396,default,pearson
 leads,customer_satisfaction,-0.06213764490192476,default,spearman
@@ -4244,29 +4794,29 @@ leads,response_time_hours,0.08877074564771417,default,pearson
 leads,response_time_hours,0.08345155765893242,default,spearman
 leads,marketing_spend,0.5431479388541582,default,pearson
 leads,marketing_spend,0.6022125160680188,default,spearman
-leads,cac,-0.0033336046077816275,default,pearson
+leads,cac,-0.0033336046077816674,default,pearson
 leads,cac,0.014709615966907294,default,spearman
 leads,inventory_level,0.7258781944597442,default,pearson
 leads,inventory_level,0.7701969244486537,default,spearman
-leads,days_to_close,-0.023013493926083376,default,pearson
+leads,days_to_close,-0.023013493926083425,default,pearson
 leads,days_to_close,-0.010812493320738395,default,spearman
-conversion_rate,units_sold,0.4992517769436222,default,pearson
+conversion_rate,units_sold,0.499251776943622,default,pearson
 conversion_rate,units_sold,0.47480018978294236,default,spearman
 conversion_rate,avg_deal_size,0.07865640324365751,default,pearson
 conversion_rate,avg_deal_size,0.08075309859286925,default,spearman
-conversion_rate,revenue,0.4155045497556447,default,pearson
+conversion_rate,revenue,0.4155045497556449,default,pearson
 conversion_rate,revenue,0.41359475707813115,default,spearman
-conversion_rate,customer_satisfaction,0.07785682016077129,default,pearson
+conversion_rate,customer_satisfaction,0.07785682016077128,default,pearson
 conversion_rate,customer_satisfaction,0.07627054977734635,default,spearman
 conversion_rate,response_time_hours,-0.07538857435843588,default,pearson
 conversion_rate,response_time_hours,-0.08095782057144539,default,spearman
-conversion_rate,marketing_spend,0.3579316949702221,default,pearson
+conversion_rate,marketing_spend,0.3579316949702219,default,pearson
 conversion_rate,marketing_spend,0.3425990652762782,default,spearman
-conversion_rate,cac,0.011931918642084826,default,pearson
+conversion_rate,cac,0.011931918642084836,default,pearson
 conversion_rate,cac,0.022060538701017426,default,spearman
-conversion_rate,inventory_level,0.43804313185427385,default,pearson
+conversion_rate,inventory_level,0.4380431318542737,default,pearson
 conversion_rate,inventory_level,0.4319077093583252,default,spearman
-conversion_rate,days_to_close,-0.7354466947486322,default,pearson
+conversion_rate,days_to_close,-0.735446694748632,default,pearson
 conversion_rate,days_to_close,-0.7239337774416816,default,spearman
 units_sold,avg_deal_size,-0.00459490383901312,default,pearson
 units_sold,avg_deal_size,-0.0009872190583650104,default,spearman
@@ -4278,65 +4828,65 @@ units_sold,response_time_hours,0.02632016838333842,default,pearson
 units_sold,response_time_hours,0.024020994651266583,default,spearman
 units_sold,marketing_spend,0.6714247860229485,default,pearson
 units_sold,marketing_spend,0.6980049501237531,default,spearman
-units_sold,cac,-0.021055984302163783,default,pearson
+units_sold,cac,-0.02105598430216381,default,pearson
 units_sold,cac,-0.0053183869484654195,default,spearman
 units_sold,inventory_level,0.9015061748069854,default,pearson
 units_sold,inventory_level,0.9176929423235581,default,spearman
-units_sold,days_to_close,-0.3976440857268536,default,pearson
+units_sold,days_to_close,-0.3976440857268535,default,pearson
 units_sold,days_to_close,-0.38469759858305336,default,spearman
-avg_deal_size,revenue,0.5626783314660482,default,pearson
+avg_deal_size,revenue,0.5626783314660481,default,pearson
 avg_deal_size,revenue,0.602702486297043,default,spearman
 avg_deal_size,customer_satisfaction,-0.13818145541089055,default,pearson
 avg_deal_size,customer_satisfaction,-0.13862732764298694,default,spearman
 avg_deal_size,response_time_hours,0.058115026098929656,default,pearson
 avg_deal_size,response_time_hours,0.08046371213451466,default,spearman
-avg_deal_size,marketing_spend,0.5037747656376766,default,pearson
+avg_deal_size,marketing_spend,0.5037747656376768,default,pearson
 avg_deal_size,marketing_spend,0.5764181539513035,default,spearman
-avg_deal_size,cac,0.7797348675006981,default,pearson
+avg_deal_size,cac,0.7797348675006982,default,pearson
 avg_deal_size,cac,0.8148179145127,default,spearman
 avg_deal_size,inventory_level,0.030951430658718162,default,pearson
 avg_deal_size,inventory_level,0.008440872982312385,default,spearman
-avg_deal_size,days_to_close,-0.07908377628040016,default,pearson
+avg_deal_size,days_to_close,-0.07908377628040017,default,pearson
 avg_deal_size,days_to_close,-0.075075121520144,default,spearman
-revenue,customer_satisfaction,-0.11837214312874185,default,pearson
+revenue,customer_satisfaction,-0.1183721431287419,default,pearson
 revenue,customer_satisfaction,-0.09434450227461934,default,spearman
-revenue,response_time_hours,0.06691147266196382,default,pearson
+revenue,response_time_hours,0.06691147266196376,default,pearson
 revenue,response_time_hours,0.08028848894460253,default,spearman
-revenue,marketing_spend,0.8815206163328045,default,pearson
+revenue,marketing_spend,0.8815206163328048,default,pearson
 revenue,marketing_spend,0.924731118277957,default,spearman
-revenue,cac,0.41161312641681497,default,pearson
+revenue,cac,0.4116131264168149,default,pearson
 revenue,cac,0.4957597658141092,default,spearman
-revenue,inventory_level,0.7239261299528266,default,pearson
+revenue,inventory_level,0.7239261299528268,default,pearson
 revenue,inventory_level,0.7171829295732394,default,spearman
 revenue,days_to_close,-0.33269835426286665,default,pearson
 revenue,days_to_close,-0.33564090140999003,default,spearman
 customer_satisfaction,response_time_hours,-0.7217019492424982,default,pearson
 customer_satisfaction,response_time_hours,-0.7226242204236484,default,spearman
-customer_satisfaction,marketing_spend,-0.08789508001769163,default,pearson
+customer_satisfaction,marketing_spend,-0.08789508001769161,default,pearson
 customer_satisfaction,marketing_spend,-0.06677327983081222,default,spearman
-customer_satisfaction,cac,-0.064924161872163,default,pearson
+customer_satisfaction,cac,-0.06492416187216306,default,pearson
 customer_satisfaction,cac,-0.0765817376909347,default,spearman
 customer_satisfaction,inventory_level,-0.08419640708263437,default,pearson
 customer_satisfaction,inventory_level,-0.0744400474338191,default,spearman
-customer_satisfaction,days_to_close,-0.001282540127281677,default,pearson
+customer_satisfaction,days_to_close,-0.0012825401272816889,default,pearson
 customer_satisfaction,days_to_close,0.01550559653688966,default,spearman
-response_time_hours,marketing_spend,0.04226172461013113,default,pearson
+response_time_hours,marketing_spend,0.04226172461013114,default,pearson
 response_time_hours,marketing_spend,0.07296076178492868,default,spearman
-response_time_hours,cac,0.009430625237033618,default,pearson
+response_time_hours,cac,0.00943062523703367,default,pearson
 response_time_hours,cac,0.06656648848692687,default,spearman
 response_time_hours,inventory_level,0.07104123804055967,default,pearson
 response_time_hours,inventory_level,0.0563672473856836,default,spearman
-response_time_hours,days_to_close,-0.006369528054855617,default,pearson
+response_time_hours,days_to_close,-0.006369528054855589,default,pearson
 response_time_hours,days_to_close,0.029179410869118683,default,spearman
 marketing_spend,cac,0.6175281588148219,default,pearson
 marketing_spend,cac,0.680647026661128,default,spearman
-marketing_spend,inventory_level,0.6584392458593681,default,pearson
+marketing_spend,inventory_level,0.6584392458593679,default,pearson
 marketing_spend,inventory_level,0.6585134628365709,default,spearman
-marketing_spend,days_to_close,-0.30701099910208157,default,pearson
+marketing_spend,days_to_close,-0.3070109991020815,default,pearson
 marketing_spend,days_to_close,-0.2998175946220771,default,spearman
-cac,inventory_level,0.020246116988735924,default,pearson
+cac,inventory_level,0.02024611698873591,default,pearson
 cac,inventory_level,0.012226814840485581,default,spearman
-cac,days_to_close,-0.04433952693033578,default,pearson
+cac,days_to_close,-0.04433952693033581,default,pearson
 cac,days_to_close,-0.04708867443273269,default,spearman
 inventory_level,days_to_close,-0.3664332186404893,default,pearson
 inventory_level,days_to_close,-0.37289975054641683,default,spearman
@@ -4345,225 +4895,225 @@ inventory_level,days_to_close,-0.37289975054641683,default,spearman
 node1,node2,strength,scenario,correlation_method
 Temperature,Humidity,-0.3922354922118713,Spring,pearson
 Temperature,Humidity,-0.3177758571016998,Spring,spearman
-Temperature,Pressure,0.11879914425879162,Spring,pearson
+Temperature,Pressure,0.11879914425879164,Spring,pearson
 Temperature,Pressure,0.10458081244598098,Spring,spearman
-Temperature,Wind_Speed,0.14556735332731602,Spring,pearson
+Temperature,Wind_Speed,0.145567353327316,Spring,pearson
 Temperature,Wind_Speed,0.1329135284191464,Spring,spearman
-Temperature,Precipitation,-0.011142073127685953,Spring,pearson
+Temperature,Precipitation,-0.011142073127685996,Spring,pearson
 Temperature,Precipitation,0.003623661626014918,Spring,spearman
-Temperature,Cloud_Cover,0.07216566352852333,Spring,pearson
+Temperature,Cloud_Cover,0.07216566352852335,Spring,pearson
 Temperature,Cloud_Cover,0.06920114907466555,Spring,spearman
 Temperature,Solar_Radiation,-0.03180050680336217,Spring,pearson
 Temperature,Solar_Radiation,-0.07570481952504425,Spring,spearman
 Temperature,UV_Index,-0.09023872217484441,Spring,pearson
 Temperature,UV_Index,-0.05247561427336708,Spring,spearman
-Humidity,Pressure,-0.2020273348876236,Spring,pearson
+Humidity,Pressure,-0.2020273348876235,Spring,pearson
 Humidity,Pressure,-0.19555500679096186,Spring,spearman
-Humidity,Wind_Speed,0.01430682530893613,Spring,pearson
+Humidity,Wind_Speed,0.014306825308936174,Spring,pearson
 Humidity,Wind_Speed,-0.02331975140963905,Spring,spearman
 Humidity,Precipitation,0.10626238275940363,Spring,pearson
 Humidity,Precipitation,0.10510277141816725,Spring,spearman
-Humidity,Cloud_Cover,0.06703603284785224,Spring,pearson
+Humidity,Cloud_Cover,0.06703603284785221,Spring,pearson
 Humidity,Cloud_Cover,0.07803568900655092,Spring,spearman
 Humidity,Solar_Radiation,0.00010683516947102294,Spring,pearson
 Humidity,Solar_Radiation,0.02058690373297115,Spring,spearman
 Humidity,UV_Index,0.08025045802896597,Spring,pearson
 Humidity,UV_Index,0.022661233897188954,Spring,spearman
-Pressure,Wind_Speed,-0.1266208191260167,Spring,pearson
+Pressure,Wind_Speed,-0.12662081912601664,Spring,pearson
 Pressure,Wind_Speed,-0.11231839321726962,Spring,spearman
-Pressure,Precipitation,-0.8316290157071294,Spring,pearson
+Pressure,Precipitation,-0.8316290157071292,Spring,pearson
 Pressure,Precipitation,-0.8362034538952458,Spring,spearman
-Pressure,Cloud_Cover,-0.7193372118817263,Spring,pearson
+Pressure,Cloud_Cover,-0.719337211881726,Spring,pearson
 Pressure,Cloud_Cover,-0.7177074753619713,Spring,spearman
-Pressure,Solar_Radiation,0.5112520615970424,Spring,pearson
+Pressure,Solar_Radiation,0.5112520615970423,Spring,pearson
 Pressure,Solar_Radiation,0.5293246079762933,Spring,spearman
-Pressure,UV_Index,0.35210199200629827,Spring,pearson
+Pressure,UV_Index,0.35210199200629816,Spring,pearson
 Pressure,UV_Index,0.35350043215211757,Spring,spearman
-Wind_Speed,Precipitation,0.016797158539982406,Spring,pearson
+Wind_Speed,Precipitation,0.016797158539982395,Spring,pearson
 Wind_Speed,Precipitation,0.005646941801638809,Spring,spearman
-Wind_Speed,Cloud_Cover,0.04391497305550897,Spring,pearson
+Wind_Speed,Cloud_Cover,0.04391497305550895,Spring,pearson
 Wind_Speed,Cloud_Cover,0.03494258331268095,Spring,spearman
-Wind_Speed,Solar_Radiation,0.06046483413692101,Spring,pearson
+Wind_Speed,Solar_Radiation,0.060464834136921025,Spring,pearson
 Wind_Speed,Solar_Radiation,0.04536362513890604,Spring,spearman
-Wind_Speed,UV_Index,0.04993221701718511,Spring,pearson
+Wind_Speed,UV_Index,0.049932217017185115,Spring,pearson
 Wind_Speed,UV_Index,0.024982508128575543,Spring,spearman
-Precipitation,Cloud_Cover,0.8964526252485242,Spring,pearson
+Precipitation,Cloud_Cover,0.8964526252485241,Spring,pearson
 Precipitation,Cloud_Cover,0.8942402145358515,Spring,spearman
-Precipitation,Solar_Radiation,-0.6571300129443529,Spring,pearson
+Precipitation,Solar_Radiation,-0.657130012944353,Spring,pearson
 Precipitation,Solar_Radiation,-0.6489090714082916,Spring,spearman
 Precipitation,UV_Index,-0.5238810746105528,Spring,pearson
 Precipitation,UV_Index,-0.5460534677261657,Spring,spearman
-Cloud_Cover,Solar_Radiation,-0.7200776691985696,Spring,pearson
+Cloud_Cover,Solar_Radiation,-0.7200776691985695,Spring,pearson
 Cloud_Cover,Solar_Radiation,-0.7110568468871286,Spring,spearman
 Cloud_Cover,UV_Index,-0.6040992856347008,Spring,pearson
 Cloud_Cover,UV_Index,-0.6172063424614658,Spring,spearman
 Solar_Radiation,UV_Index,0.6657803402129792,Spring,pearson
 Solar_Radiation,UV_Index,0.6573074865209697,Spring,spearman
-Temperature,Humidity,0.41129552797332736,Summer,pearson
+Temperature,Humidity,0.4112955279733273,Summer,pearson
 Temperature,Humidity,0.2749722187924435,Summer,spearman
 Temperature,Pressure,-0.04581938429940846,Summer,pearson
 Temperature,Pressure,0.02883483557640861,Summer,spearman
-Temperature,Wind_Speed,0.1440337871139102,Summer,pearson
+Temperature,Wind_Speed,0.14403378711391016,Summer,pearson
 Temperature,Wind_Speed,0.1236778203070338,Summer,spearman
 Temperature,Precipitation,-0.030525435451724026,Summer,pearson
 Temperature,Precipitation,-0.08555873536142009,Summer,spearman
-Temperature,Cloud_Cover,0.020839129296001974,Summer,pearson
+Temperature,Cloud_Cover,0.020839129296002037,Summer,pearson
 Temperature,Cloud_Cover,-0.02380893846360224,Summer,spearman
-Temperature,Solar_Radiation,-0.12382946962958377,Summer,pearson
+Temperature,Solar_Radiation,-0.12382946962958363,Summer,pearson
 Temperature,Solar_Radiation,-0.09903280240358892,Summer,spearman
-Temperature,UV_Index,-0.1489888996143667,Summer,pearson
+Temperature,UV_Index,-0.14898889961436676,Summer,pearson
 Temperature,UV_Index,-0.09055438943079393,Summer,spearman
-Humidity,Pressure,0.08881585028065907,Summer,pearson
+Humidity,Pressure,0.08881585028065903,Summer,pearson
 Humidity,Pressure,0.13434580400872537,Summer,spearman
-Humidity,Wind_Speed,0.03544619473422805,Summer,pearson
+Humidity,Wind_Speed,0.03544619473422807,Summer,pearson
 Humidity,Wind_Speed,0.03923941227312014,Summer,spearman
-Humidity,Precipitation,-0.09924195864901396,Summer,pearson
+Humidity,Precipitation,-0.099241958649014,Summer,pearson
 Humidity,Precipitation,-0.12626443233723275,Summer,spearman
-Humidity,Cloud_Cover,-0.0823935726665289,Summer,pearson
+Humidity,Cloud_Cover,-0.08239357266652893,Summer,pearson
 Humidity,Cloud_Cover,-0.16448838738620808,Summer,spearman
-Humidity,Solar_Radiation,-0.017281107671632035,Summer,pearson
+Humidity,Solar_Radiation,-0.01728110767163211,Summer,pearson
 Humidity,Solar_Radiation,0.044672181750833435,Summer,spearman
-Humidity,UV_Index,-0.062452560624533915,Summer,pearson
+Humidity,UV_Index,-0.06245256062453391,Summer,pearson
 Humidity,UV_Index,0.028077540437091,Summer,spearman
 Pressure,Wind_Speed,-0.05117351490541702,Summer,pearson
 Pressure,Wind_Speed,0.008124459809853069,Summer,spearman
 Pressure,Precipitation,-0.8553381839584314,Summer,pearson
 Pressure,Precipitation,-0.8822321446030835,Summer,spearman
-Pressure,Cloud_Cover,-0.7848804233856819,Summer,pearson
+Pressure,Cloud_Cover,-0.784880423385682,Summer,pearson
 Pressure,Cloud_Cover,-0.7642002168291395,Summer,spearman
-Pressure,Solar_Radiation,0.6093605546427745,Summer,pearson
+Pressure,Solar_Radiation,0.6093605546427744,Summer,pearson
 Pressure,Solar_Radiation,0.6150471251594847,Summer,spearman
-Pressure,UV_Index,0.3341749587155201,Summer,pearson
+Pressure,UV_Index,0.33417495871552,Summer,pearson
 Pressure,UV_Index,0.32455858747993577,Summer,spearman
-Wind_Speed,Precipitation,-0.042424513592795074,Summer,pearson
+Wind_Speed,Precipitation,-0.04242451359279507,Summer,pearson
 Wind_Speed,Precipitation,-0.0859092149171774,Summer,spearman
-Wind_Speed,Cloud_Cover,-0.005907756399883518,Summer,pearson
+Wind_Speed,Cloud_Cover,-0.005907756399883548,Summer,pearson
 Wind_Speed,Cloud_Cover,-0.008606136525238443,Summer,spearman
-Wind_Speed,Solar_Radiation,0.01835442875802851,Summer,pearson
+Wind_Speed,Solar_Radiation,0.01835442875802853,Summer,pearson
 Wind_Speed,Solar_Radiation,0.02605259908630695,Summer,spearman
-Wind_Speed,UV_Index,0.009020358935212733,Summer,pearson
+Wind_Speed,UV_Index,0.009020358935212728,Summer,pearson
 Wind_Speed,UV_Index,-0.03038235173066634,Summer,spearman
-Precipitation,Cloud_Cover,0.8550736645748276,Summer,pearson
+Precipitation,Cloud_Cover,0.8550736645748277,Summer,pearson
 Precipitation,Cloud_Cover,0.8167120731751834,Summer,spearman
-Precipitation,Solar_Radiation,-0.56835588707567,Summer,pearson
+Precipitation,Solar_Radiation,-0.5683558870756701,Summer,pearson
 Precipitation,Solar_Radiation,-0.572658559853453,Summer,spearman
 Precipitation,UV_Index,-0.2405599139316685,Summer,pearson
 Precipitation,UV_Index,-0.2671405242490141,Summer,spearman
-Cloud_Cover,Solar_Radiation,-0.7331460433194209,Summer,pearson
+Cloud_Cover,Solar_Radiation,-0.7331460433194208,Summer,pearson
 Cloud_Cover,Solar_Radiation,-0.7189047614331477,Summer,spearman
-Cloud_Cover,UV_Index,-0.4406222177573226,Summer,pearson
+Cloud_Cover,UV_Index,-0.4406222177573228,Summer,pearson
 Cloud_Cover,UV_Index,-0.42710320223482384,Summer,spearman
-Solar_Radiation,UV_Index,0.614913596386159,Summer,pearson
+Solar_Radiation,UV_Index,0.6149135963861587,Summer,pearson
 Solar_Radiation,UV_Index,0.5437955303123843,Summer,spearman
-Temperature,Humidity,-0.030947035047308356,Fall,pearson
+Temperature,Humidity,-0.030947035047308346,Fall,pearson
 Temperature,Humidity,-0.016866279787628103,Fall,spearman
-Temperature,Pressure,-0.1818496896495388,Fall,pearson
+Temperature,Pressure,-0.18184968964953874,Fall,pearson
 Temperature,Pressure,-0.08829896695065234,Fall,spearman
 Temperature,Wind_Speed,-0.07236312963997836,Fall,pearson
 Temperature,Wind_Speed,-0.0662386302835741,Fall,spearman
-Temperature,Precipitation,0.18373421725955696,Fall,pearson
+Temperature,Precipitation,0.1837342172595569,Fall,pearson
 Temperature,Precipitation,0.13207899447972118,Fall,spearman
-Temperature,Cloud_Cover,0.11443514026164812,Fall,pearson
+Temperature,Cloud_Cover,0.1144351402616481,Fall,pearson
 Temperature,Cloud_Cover,0.08665682731672317,Fall,spearman
 Temperature,Solar_Radiation,-0.0649938100066459,Fall,pearson
 Temperature,Solar_Radiation,-0.003514895088677975,Fall,spearman
-Temperature,UV_Index,0.04464569088006236,Fall,pearson
+Temperature,UV_Index,0.04464569088006234,Fall,pearson
 Temperature,UV_Index,0.029985591472146578,Fall,spearman
-Humidity,Pressure,-0.053056279807076855,Fall,pearson
+Humidity,Pressure,-0.05305627980707684,Fall,pearson
 Humidity,Pressure,-0.045149606947359755,Fall,spearman
 Humidity,Wind_Speed,-0.08246231259531184,Fall,pearson
 Humidity,Wind_Speed,-0.1356793019714368,Fall,spearman
-Humidity,Precipitation,0.046158487802132636,Fall,pearson
+Humidity,Precipitation,0.04615848780213267,Fall,pearson
 Humidity,Precipitation,0.06022629289590005,Fall,spearman
-Humidity,Cloud_Cover,0.08994960911023492,Fall,pearson
+Humidity,Cloud_Cover,0.08994960911023497,Fall,pearson
 Humidity,Cloud_Cover,0.08980183124201098,Fall,spearman
-Humidity,Solar_Radiation,-0.01717297122573266,Fall,pearson
+Humidity,Solar_Radiation,-0.0171729712257327,Fall,pearson
 Humidity,Solar_Radiation,-0.027929833807691734,Fall,spearman
-Humidity,UV_Index,-0.09196709198831204,Fall,pearson
+Humidity,UV_Index,-0.09196709198831214,Fall,pearson
 Humidity,UV_Index,-0.09091209674842793,Fall,spearman
-Pressure,Wind_Speed,0.1734255207327613,Fall,pearson
+Pressure,Wind_Speed,0.17342552073276132,Fall,pearson
 Pressure,Wind_Speed,0.1512203152652591,Fall,spearman
-Pressure,Precipitation,-0.8661832699721913,Fall,pearson
+Pressure,Precipitation,-0.8661832699721905,Fall,pearson
 Pressure,Precipitation,-0.8688725194645021,Fall,spearman
-Pressure,Cloud_Cover,-0.7018160243200262,Fall,pearson
+Pressure,Cloud_Cover,-0.7018160243200264,Fall,pearson
 Pressure,Cloud_Cover,-0.6936343302937938,Fall,spearman
 Pressure,Solar_Radiation,0.5931113822842,Fall,pearson
 Pressure,Solar_Radiation,0.5609756098321201,Fall,spearman
-Pressure,UV_Index,0.2911582355582847,Fall,pearson
+Pressure,UV_Index,0.2911582355582844,Fall,pearson
 Pressure,UV_Index,0.2940004476693657,Fall,spearman
 Wind_Speed,Precipitation,-0.20013079962044755,Fall,pearson
 Wind_Speed,Precipitation,-0.1624040590274153,Fall,spearman
 Wind_Speed,Cloud_Cover,-0.21152820438645314,Fall,pearson
 Wind_Speed,Cloud_Cover,-0.1773666649413632,Fall,spearman
-Wind_Speed,Solar_Radiation,0.18511927221518892,Fall,pearson
+Wind_Speed,Solar_Radiation,0.18511927221518884,Fall,pearson
 Wind_Speed,Solar_Radiation,0.14513141758426554,Fall,spearman
-Wind_Speed,UV_Index,0.11722392464048889,Fall,pearson
+Wind_Speed,UV_Index,0.11722392464048882,Fall,pearson
 Wind_Speed,UV_Index,0.12098827913136649,Fall,spearman
 Precipitation,Cloud_Cover,0.826750033600407,Fall,pearson
 Precipitation,Cloud_Cover,0.8563718590840498,Fall,spearman
-Precipitation,Solar_Radiation,-0.6816418452665989,Fall,pearson
+Precipitation,Solar_Radiation,-0.6816418452665988,Fall,pearson
 Precipitation,Solar_Radiation,-0.6715171844728176,Fall,spearman
-Precipitation,UV_Index,-0.35530935410895204,Fall,pearson
+Precipitation,UV_Index,-0.35530935410895187,Fall,pearson
 Precipitation,UV_Index,-0.3607215271296646,Fall,spearman
-Cloud_Cover,Solar_Radiation,-0.7678199872505133,Fall,pearson
+Cloud_Cover,Solar_Radiation,-0.767819987250513,Fall,pearson
 Cloud_Cover,Solar_Radiation,-0.7740634208436697,Fall,spearman
-Cloud_Cover,UV_Index,-0.4421485796037272,Fall,pearson
+Cloud_Cover,UV_Index,-0.442148579603727,Fall,pearson
 Cloud_Cover,UV_Index,-0.4568125522440842,Fall,spearman
 Solar_Radiation,UV_Index,0.5023802451822036,Fall,pearson
 Solar_Radiation,UV_Index,0.5052173558425788,Fall,spearman
-Temperature,Humidity,0.054175917008640134,Winter,pearson
+Temperature,Humidity,0.05417591700864016,Winter,pearson
 Temperature,Humidity,0.034777956126270736,Winter,spearman
-Temperature,Pressure,-0.1151978150918052,Winter,pearson
+Temperature,Pressure,-0.11519781509180524,Winter,pearson
 Temperature,Pressure,-0.12292052516771618,Winter,spearman
-Temperature,Wind_Speed,-0.06991180978894376,Winter,pearson
+Temperature,Wind_Speed,-0.06991180978894375,Winter,pearson
 Temperature,Wind_Speed,-0.04798123225089517,Winter,spearman
 Temperature,Precipitation,0.04844981728395278,Winter,pearson
 Temperature,Precipitation,0.03928379833295426,Winter,spearman
-Temperature,Cloud_Cover,-0.0020931527540041252,Winter,pearson
+Temperature,Cloud_Cover,-0.0020931527540041213,Winter,pearson
 Temperature,Cloud_Cover,-0.004915319955738208,Winter,spearman
 Temperature,Solar_Radiation,-0.14743329188865592,Winter,pearson
 Temperature,Solar_Radiation,-0.15152550325478487,Winter,spearman
-Temperature,UV_Index,-0.021952855094040987,Winter,pearson
+Temperature,UV_Index,-0.02195285509404094,Winter,pearson
 Temperature,UV_Index,-0.03823688490988924,Winter,spearman
-Humidity,Pressure,0.008529355495474839,Winter,pearson
+Humidity,Pressure,0.008529355495474815,Winter,pearson
 Humidity,Pressure,0.023434991974317816,Winter,spearman
-Humidity,Wind_Speed,0.005242627825673071,Winter,pearson
+Humidity,Wind_Speed,0.005242627825673065,Winter,pearson
 Humidity,Wind_Speed,0.036654731036753506,Winter,spearman
-Humidity,Precipitation,-0.09864032905669325,Winter,pearson
+Humidity,Precipitation,-0.0986403290566933,Winter,pearson
 Humidity,Precipitation,-0.05701012408801909,Winter,spearman
-Humidity,Cloud_Cover,-0.016203753730490968,Winter,pearson
+Humidity,Cloud_Cover,-0.016203753730490975,Winter,pearson
 Humidity,Cloud_Cover,0.036020979575133436,Winter,spearman
 Humidity,Solar_Radiation,-0.12006292789637073,Winter,pearson
 Humidity,Solar_Radiation,-0.1017084484037441,Winter,spearman
-Humidity,UV_Index,0.1567879567551002,Winter,pearson
+Humidity,UV_Index,0.15678795675510035,Winter,pearson
 Humidity,UV_Index,0.137071117053615,Winter,spearman
-Pressure,Wind_Speed,0.05645285916935778,Winter,pearson
+Pressure,Wind_Speed,0.05645285916935773,Winter,pearson
 Pressure,Wind_Speed,0.03588097295962465,Winter,spearman
-Pressure,Precipitation,-0.8485611983084715,Winter,pearson
+Pressure,Precipitation,-0.8485611983084717,Winter,pearson
 Pressure,Precipitation,-0.8724792824170093,Winter,spearman
-Pressure,Cloud_Cover,-0.7367516913456365,Winter,pearson
+Pressure,Cloud_Cover,-0.7367516913456368,Winter,pearson
 Pressure,Cloud_Cover,-0.7136764641262037,Winter,spearman
-Pressure,Solar_Radiation,0.6180996193713928,Winter,pearson
+Pressure,Solar_Radiation,0.6180996193713925,Winter,pearson
 Pressure,Solar_Radiation,0.6214949232259216,Winter,spearman
-Pressure,UV_Index,0.4184063672634865,Winter,pearson
+Pressure,UV_Index,0.4184063672634864,Winter,pearson
 Pressure,UV_Index,0.37598367654876,Winter,spearman
-Wind_Speed,Precipitation,-0.0065090757232348475,Winter,pearson
+Wind_Speed,Precipitation,-0.006509075723234838,Winter,pearson
 Wind_Speed,Precipitation,-0.013130611670418391,Winter,spearman
-Wind_Speed,Cloud_Cover,-0.04144501234397266,Winter,pearson
+Wind_Speed,Cloud_Cover,-0.041445012343972666,Winter,pearson
 Wind_Speed,Cloud_Cover,-0.05515532392544431,Winter,spearman
-Wind_Speed,Solar_Radiation,0.09744639682931341,Winter,pearson
+Wind_Speed,Solar_Radiation,0.09744639682931343,Winter,pearson
 Wind_Speed,Solar_Radiation,0.08864505348494015,Winter,spearman
-Wind_Speed,UV_Index,-0.009588607733626759,Winter,pearson
+Wind_Speed,UV_Index,-0.009588607733626815,Winter,pearson
 Wind_Speed,UV_Index,-0.014887750707211775,Winter,spearman
 Precipitation,Cloud_Cover,0.8183640536212702,Winter,pearson
 Precipitation,Cloud_Cover,0.8357150666791296,Winter,spearman
 Precipitation,Solar_Radiation,-0.6063174126953051,Winter,pearson
 Precipitation,Solar_Radiation,-0.6634393509642756,Winter,spearman
-Precipitation,UV_Index,-0.3975537068721438,Winter,pearson
+Precipitation,UV_Index,-0.39755370687214386,Winter,pearson
 Precipitation,UV_Index,-0.36487121069857903,Winter,spearman
 Cloud_Cover,Solar_Radiation,-0.7184694599748054,Winter,pearson
 Cloud_Cover,Solar_Radiation,-0.7248191925219867,Winter,spearman
-Cloud_Cover,UV_Index,-0.3629781589358077,Winter,pearson
+Cloud_Cover,UV_Index,-0.36297815893580765,Winter,pearson
 Cloud_Cover,UV_Index,-0.32692204222267895,Winter,spearman
 Solar_Radiation,UV_Index,0.471081057698655,Winter,pearson
 Solar_Radiation,UV_Index,0.45251698133836105,Winter,spearman

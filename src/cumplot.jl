@@ -20,6 +20,7 @@ then subsequent intervals. Use "Reset" to return to the full view.
 - `x_col::Symbol`: Column for x-axis (must be Date, DateTime, or numeric) (default: `:date`)
 - `y_transforms::Vector{Tuple{Symbol, String}}`: Y column and transform pairs. Each tuple is
   (column, transform) where transform is "cumulative" or "cumprod".
+  For "cumprod", values are treated as returns and compounded correctly: cumprod(1+r) - 1.
   (default: `[(:pnl, "cumulative")]`)
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (like strategy name) (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`)

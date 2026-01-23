@@ -135,7 +135,7 @@ include("test_data.jl")
                         html_size = filesize(joinpath(project_dir, "size_test_$(fmt).html"))
 
                         # Check HTML is smaller for external formats
-                        @test html_size < 50000  # HTML should be small
+                        @test html_size < 55000  # HTML should be small (allows for JS library code)
 
                         # Check data file exists
                         data_dir = joinpath(project_dir, "data")

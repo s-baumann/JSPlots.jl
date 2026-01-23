@@ -10,6 +10,8 @@ Scatter plot with optional marginal distributions and interactive filtering.
 - `dimensions::Vector{Symbol}`: Vector of dimension columns for x and y axes
 
 # Keyword Arguments
+- `expression_mode::Bool`: Enable expression input for X axis (default: `false`)
+- `default_x_expr::String`: Default expression for X when expression_mode=true (default: `""`)
 - `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
@@ -20,12 +22,32 @@ Scatter plot with optional marginal distributions and interactive filtering.
 - `title::String`: Chart title (default: `"Scatter Plot"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
 
+When `expression_mode=true`, users can type custom expressions for X axis:
+- Variables: `:varname` or `varname`
+- Operators: `+`, `-`, `*`, `/`
+- `z(expr, [groups])` - z-score within groups
+- `q(expr, [groups])` - quantile within groups
+- `PCA1(:v1, :v2)` - first principal component projection
+- `PCA2(:v1, :v2)` - second principal component projection
+- `r(y, x)` - OLS residual (y - fitted value)
+- `f(y, x)` - OLS fitted value
+- `c(expr, min, max)` - clamp values between min and max (use Inf/-Inf for one-sided)
+
 # Examples
 ```julia
+# Standard scatter plot
 sp = ScatterPlot(:scatter_chart, df, :data, [:x, :y],
     color_cols=[:category],
     marker_size=6,
     title="X vs Y"
+)
+
+# Scatter plot with expression mode
+sp_expr = ScatterPlot(:scatter_expr, df, :data, [:returns, :volatility, :volume],
+    expression_mode=true,
+    default_x_expr="z(:returns, [:sector])",
+    color_cols=[:sector],
+    title="Custom Expression vs Y"
 )
 ```
 """
@@ -36,6 +58,8 @@ struct ScatterPlot <: JSPlotsType
     appearance_html::String
 
     function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
+                         expression_mode::Bool=false,
+                         default_x_expr::String="",
                          color_cols::Vector{Symbol}=[:color],
                          filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                          facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -98,11 +122,195 @@ $options                </select>
         point_symbols = ["circle", "square", "diamond", "cross", "x", "triangle-up",
                         "triangle-down", "triangle-left", "triangle-right", "pentagon", "hexagon", "star"]
 
-        functional_html = """
+        # Escape the default expression for JavaScript
+        escaped_default_expr = replace(default_x_expr, "\"" => "\\\"", "\\" => "\\\\")
+
+        # Build different JavaScript based on expression_mode
+        if expression_mode
+            functional_html = """
             (function() {
             // Filter configuration
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const EXPRESSION_MODE = true;
+
+            window.showDensity_$(chart_title) = $(show_density ? "true" : "false");
+            const POINT_SYMBOLS = $(JSON.json(point_symbols));
+            const DEFAULT_X_EXPR = "$escaped_default_expr";
+            const DEFAULT_Y_COL = '$default_y_col';
+            const DEFAULT_COLOR_COL = '$default_color_col';
+
+            const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+            const buildSymbolMap = (data, col) => {
+                const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+                return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+            };
+
+            function createTracesExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
+                const symbolMap = buildSymbolMap(data, COLOR_COL);
+                const groups = {};
+                data.forEach((row, idx) => {
+                    const key = row[COLOR_COL];
+                    if (!groups[key]) groups[key] = { rows: [], indices: [] };
+                    groups[key].rows.push(row);
+                    groups[key].indices.push(idx);
+                });
+
+                return Object.entries(groups).map(([key, groupInfo]) => {
+                    let groupXValues = groupInfo.indices.map(i => xValues[i]);
+                    let yValues = groupInfo.rows.map(d => d[Y_COL]);
+
+                    // Apply axis transformations
+                    groupXValues = applyAxisTransform(groupXValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    return {
+                        x: groupXValues,
+                        y: yValues,
+                        mode: 'markers',
+                        name: key,
+                        legendgroup: key,
+                        showlegend: showlegend,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        marker: {
+                            size: $marker_size,
+                            opacity: $marker_opacity,
+                            symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]])
+                        },
+                        type: 'scatter'
+                    };
+                });
+            }
+
+            function renderNoFacetsExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xLabel) {
+                const traces = createTracesExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
+
+                if (window.showDensity_$(chart_title)) {
+                    let xDensityValues = applyAxisTransform(xValues.slice(), X_TRANSFORM);
+                    let yDensityValues = data.map(d => d[Y_COL]);
+                    yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
+                    traces.push({
+                        x: xDensityValues, y: yDensityValues,
+                        name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                        showscale: false, type: 'histogram2dcontour', showlegend: false
+                    });
+                }
+
+                let xHistValues = applyAxisTransform(xValues.slice(), X_TRANSFORM);
+                let yHistValues = data.map(d => d[Y_COL]);
+                yHistValues = applyAxisTransform(yHistValues, Y_TRANSFORM);
+
+                traces.push(
+                    { x: xHistValues, name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+                    { y: yHistValues, name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+                );
+
+                var xAxisTitle = X_TRANSFORM === 'identity' ? xLabel : X_TRANSFORM + '(' + xLabel + ')';
+
+                Plotly.newPlot('$chart_title', traces, {
+                    title: '$title', showlegend: true, autosize: true, hovermode: 'closest',
+                    xaxis: { title: xAxisTitle, domain: [0, 0.85], showgrid: true, zeroline: true },
+                    yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+                    xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+                    margin: {t: 100, r: 100, b: 100, l: 100}
+                }, {responsive: true});
+            }
+
+            function updatePlot_$(chart_title)(data) {
+                // Get X expression from input
+                const xExprInput = document.getElementById('x_expr_input_$chart_title');
+                const X_EXPR = xExprInput ? xExprInput.value : DEFAULT_X_EXPR;
+
+                const Y_COL = getCol('y_col_select_$chart_title', DEFAULT_Y_COL);
+                const COLOR_COL = getCol('color_col_select_$chart_title', DEFAULT_COLOR_COL);
+
+                // Get current axis transformations
+                const X_TRANSFORM = getCol('x_transform_select_$chart_title', 'identity');
+                const Y_TRANSFORM = getCol('y_transform_select_$chart_title', 'identity');
+
+                // Evaluate the X expression
+                const xValues = evaluateExpressionString(X_EXPR, data);
+
+                // For now, only support no-facet mode in expression mode
+                renderNoFacetsExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, X_EXPR || 'X');
+            }
+
+            window.updateChart_$(chart_title) = () => updatePlotWithFilters_$(chart_title)();
+
+            // Filter and update function
+            window.updatePlotWithFilters_$(chart_title) = function() {
+                // Get categorical filter values (multiple selections)
+                const filters = {};
+                CATEGORICAL_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_select_$(chart_title)');
+                    if (select) {
+                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+                    }
+                });
+
+                // Get continuous filter values (range sliders)
+                const rangeFilters = {};
+                CONTINUOUS_FILTERS.forEach(col => {
+                    const slider = \$('#' + col + '_range_$(chart_title)' + '_slider');
+                    if (slider.length > 0) {
+                        rangeFilters[col] = {
+                            min: slider.slider("values", 0),
+                            max: slider.slider("values", 1)
+                        };
+                    }
+                });
+
+                // Apply filters with observation counting
+                const filteredData = applyFiltersWithCounting(
+                    window.allData_$(chart_title),
+                    '$chart_title',
+                    CATEGORICAL_FILTERS,
+                    CONTINUOUS_FILTERS,
+                    filters,
+                    rangeFilters
+                );
+
+                // Update plot with filtered data
+                updatePlot_$(chart_title)(filteredData);
+            };
+
+            loadDataset('$data_label').then(data => {
+                window.allData_$(chart_title) = data;
+                \$(function() {
+                    const densityBtn = document.getElementById('$(chart_title)_density_toggle');
+                    if (densityBtn) {
+                        densityBtn.addEventListener('click', function() {
+                            window.showDensity_$(chart_title) = !window.showDensity_$(chart_title);
+                            this.textContent = window.showDensity_$(chart_title) ? 'Hide Density Contours' : 'Show Density Contours';
+                            updatePlotWithFilters_$(chart_title)();
+                        });
+                    }
+
+                    // Set default expression
+                    const xExprInput = document.getElementById('x_expr_input_$chart_title');
+                    if (xExprInput && DEFAULT_X_EXPR) {
+                        xExprInput.value = DEFAULT_X_EXPR;
+                    }
+
+                    updatePlotWithFilters_$(chart_title)();
+
+                    // Setup aspect ratio control after initial render
+                    setupAspectRatioControl('$chart_title');
+                });
+            }).catch(error => console.error('Error loading data for chart $chart_title:', error));
+            })();
+        """
+        else
+            # Standard mode - original JavaScript
+            functional_html = """
+            (function() {
+            // Filter configuration
+            const CATEGORICAL_FILTERS = $categorical_filters_js;
+            const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const EXPRESSION_MODE = false;
 
             window.showDensity_$(chart_title) = $(show_density ? "true" : "false");
             const POINT_SYMBOLS = $(JSON.json(point_symbols));
@@ -371,6 +579,7 @@ $options                </select>
             }).catch(error => console.error('Error loading data for chart $chart_title:', error));
             })();
         """
+        end
 
         # Separate plot attributes from faceting
         plot_attributes_html = ""
@@ -393,24 +602,124 @@ $style_html        </div>
 """
         end
 
-        # Build axis controls HTML (X and Y dimensions + transforms)
-        axes_html = build_axis_controls_html(
-            string(chart_title),
-            "updateChart_$chart_title()";
-            x_cols = valid_x_cols,
-            y_cols = valid_y_cols,
-            default_x = Symbol(default_x_col),
-            default_y = Symbol(default_y_col)
-        )
-        plot_attributes_html *= axes_html
+        # Build axis controls based on expression_mode
+        if expression_mode
+            # Expression mode: X is an expression input, Y is a dropdown
+            x_transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf"]
+            x_transform_opts = join(["<option value=\"$opt\">$opt</option>" for opt in x_transform_options], "\n")
+            y_transform_opts = join(["<option value=\"$opt\">$opt</option>" for opt in x_transform_options], "\n")
+            y_options = join(["<option value=\"$col\"$((string(col) == default_y_col) ? " selected" : "")>$col</option>"
+                             for col in valid_y_cols], "\n")
 
-        # Build faceting section using html_controls abstraction
-        faceting_html = generate_facet_dropdowns_html(
-            string(chart_title),
-            facet_choices,
-            default_facet_array,
-            "updateChart_$chart_title()"
-        )
+            plot_attributes_html *= """
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_expr_input_$chart_title">X Expression:</label>
+                    <input type="text" id="x_expr_input_$chart_title" style="width: 350px; padding: 5px 10px; font-family: monospace;"
+                           placeholder="e.g., z(:var1, [:group]) or :var1 + :var2"
+                           onchange="updateChart_$chart_title()" onkeyup="if(event.key==='Enter') updateChart_$chart_title()">
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_transform_select_$chart_title">X Transform:</label>
+                    <select id="x_transform_select_$chart_title" style="padding: 5px 10px;" onchange="updateChart_$chart_title()">
+                        $x_transform_opts
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_$chart_title">Y:</label>
+                    <select id="y_col_select_$chart_title" style="padding: 5px 10px;" onchange="updateChart_$chart_title()">
+                        $y_options
+                    </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_transform_select_$chart_title">Y Transform:</label>
+                    <select id="y_transform_select_$chart_title" style="padding: 5px 10px;" onchange="updateChart_$chart_title()">
+                        $y_transform_opts
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px; padding: 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; font-size: 0.9em;">
+            <h5 style="margin: 0 0 10px 0; color: #495057;">Expression Syntax Guide</h5>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px;">
+                <div>
+                    <strong>Variables:</strong> <code>:varname</code> or <code>varname</code><br>
+                    <span style="color: #6c757d;">Reference any column from your data</span>
+                </div>
+                <div>
+                    <strong>Operators:</strong> <code>+</code> <code>-</code> <code>*</code> <code>/</code><br>
+                    <span style="color: #6c757d;">Combine variables arithmetically</span>
+                </div>
+            </div>
+            <h5 style="margin: 15px 0 10px 0; color: #495057;">Available Functions</h5>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>z(expr, [groups])</code></td>
+                    <td style="padding: 6px 8px;">Z-score (standardize) within groups. Example: <code>z(:returns, [:sector, :date])</code></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>q(expr, [groups])</code></td>
+                    <td style="padding: 6px 8px;">Quantile rank (0-1) within groups. Example: <code>q(:returns, [:sector])</code></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>PCA1(:v1, :v2)</code></td>
+                    <td style="padding: 6px 8px;">Project onto first principal component of v1 and v2</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>PCA2(:v1, :v2)</code></td>
+                    <td style="padding: 6px 8px;">Project onto second principal component of v1 and v2</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>r(y, x)</code></td>
+                    <td style="padding: 6px 8px;">OLS residual: y minus fitted value from regressing y on x</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>f(y, x)</code></td>
+                    <td style="padding: 6px 8px;">OLS fitted value: predicted y from regressing y on x</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 8px;"><code>c(expr, min, max)</code></td>
+                    <td style="padding: 6px 8px;">Clamp values between min and max. Use <code>Inf</code>/<code>-Inf</code> for one-sided bounds. Example: <code>c(:returns, -0.05, 0.05)</code></td>
+                </tr>
+            </table>
+            <div style="margin-top: 10px; color: #6c757d;">
+                <strong>Examples:</strong>
+                <code style="margin-left: 10px;">:returns + :volatility</code>
+                <code style="margin-left: 10px;">z(:returns, [:sector])</code>
+                <code style="margin-left: 10px;">c(:vol, -Inf, 0.5)</code>
+            </div>
+        </div>
+"""
+        else
+            # Standard mode: X and Y are both dropdowns
+            axes_html = build_axis_controls_html(
+                string(chart_title),
+                "updateChart_$chart_title()";
+                x_cols = valid_x_cols,
+                y_cols = valid_y_cols,
+                default_x = Symbol(default_x_col),
+                default_y = Symbol(default_y_col),
+                include_x_transform = true,
+                include_y_transform = true,
+                include_cumulative = false
+            )
+            plot_attributes_html *= axes_html
+        end
+
+        # Build faceting section using html_controls abstraction (only for non-expression mode)
+        if !expression_mode
+            faceting_html = generate_facet_dropdowns_html(
+                string(chart_title),
+                facet_choices,
+                default_facet_array,
+                "updateChart_$chart_title()"
+            )
+        end
 
         # Use html_controls abstraction to generate appearance HTML
         appearance_html = generate_appearance_html_from_sections(
