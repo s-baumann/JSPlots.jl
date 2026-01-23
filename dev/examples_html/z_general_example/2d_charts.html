@@ -496,8 +496,10 @@ function computeCumulativeSum(values) {
     return result;
 }
 
-// Compute cumulative product of values
-// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+// Compute cumulative product of values for returns data
+// For returns r_i, computes: cumprod(1 + r_i) - 1
+// This converts returns to growth factors, compounds them, then converts back to cumulative return
+// Example: returns [0.1, 0.2, -0.1] -> (1+r): [1.1, 1.2, 0.9] -> cumprod: [1.1, 1.32, 1.188] -> result: [0.1, 0.32, 0.188]
 function computeCumulativeProduct(values) {
     if (!values || values.length === 0) return [];
     var result = [];
@@ -505,9 +507,9 @@ function computeCumulativeProduct(values) {
     for (var i = 0; i < values.length; i++) {
         var v = parseFloat(values[i]);  // Explicitly convert to number
         if (!isNaN(v) && isFinite(v)) {
-            product *= v;
+            product *= (1 + v);  // Convert return to growth factor and multiply
         }
-        result.push(product);
+        result.push(product - 1);  // Convert back to cumulative return
     }
     return result;
 }
@@ -604,6 +606,554 @@ function getAxisLabel(originalLabel, transformType) {
             return originalLabel;
     }
 }
+
+// =============================================================================
+// Expression Parser for ScatterTwo
+// Supports: +, -, *, /, variable references (:var or var), and functions:
+//   z(expr, [groups]) - z-score within groups
+//   q(expr, [groups]) - quantile within groups
+//   PCA1(var1, var2) - projection on first principal component
+//   PCA2(var1, var2) - projection on second principal component
+// =============================================================================
+
+// Tokenizer for expression parsing
+function tokenizeExpression(expr) {
+    var tokens = [];
+    var i = 0;
+    while (i < expr.length) {
+        var ch = expr[i];
+
+        // Skip whitespace
+        if (/\s/.test(ch)) { i++; continue; }
+
+        // Operators and punctuation
+        if ('+-*/(),[]'.indexOf(ch) !== -1) {
+            tokens.push({ type: 'punct', value: ch });
+            i++;
+            continue;
+        }
+
+        // Numbers
+        if (/[0-9.]/.test(ch)) {
+            var num = '';
+            while (i < expr.length && /[0-9.]/.test(expr[i])) {
+                num += expr[i++];
+            }
+            tokens.push({ type: 'number', value: parseFloat(num) });
+            continue;
+        }
+
+        // Variable with colon prefix :varname
+        if (ch === ':') {
+            i++; // skip colon
+            var name = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                name += expr[i++];
+            }
+            tokens.push({ type: 'variable', value: name });
+            continue;
+        }
+
+        // Identifiers (function names or variable names without colon)
+        if (/[a-zA-Z_]/.test(ch)) {
+            var ident = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                ident += expr[i++];
+            }
+            // Check if it's a function (followed by open paren)
+            var j = i;
+            while (j < expr.length && /\s/.test(expr[j])) j++;
+            if (j < expr.length && expr[j] === '(') {
+                tokens.push({ type: 'function', value: ident });
+            } else {
+                tokens.push({ type: 'variable', value: ident });
+            }
+            continue;
+        }
+
+        // Unknown character - skip
+        i++;
+    }
+    return tokens;
+}
+
+// Simple recursive descent parser
+function parseExpression(tokens, pos) {
+    return parseAddSub(tokens, pos);
+}
+
+function parseAddSub(tokens, pos) {
+    var result = parseMulDiv(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '+' || tokens[pos].value === '-')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseMulDiv(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseMulDiv(tokens, pos) {
+    var result = parseUnary(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '*' || tokens[pos].value === '/')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseUnary(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseUnary(tokens, pos) {
+    if (pos < tokens.length && tokens[pos].type === 'punct' && tokens[pos].value === '-') {
+        pos++;
+        var result = parseUnary(tokens, pos);
+        return { node: { type: 'unary', op: '-', arg: result.node }, pos: result.pos };
+    }
+    return parsePrimary(tokens, pos);
+}
+
+function parsePrimary(tokens, pos) {
+    if (pos >= tokens.length) {
+        return { node: { type: 'number', value: 0 }, pos: pos };
+    }
+
+    var token = tokens[pos];
+
+    // Number literal
+    if (token.type === 'number') {
+        return { node: { type: 'number', value: token.value }, pos: pos + 1 };
+    }
+
+    // Variable reference
+    if (token.type === 'variable') {
+        return { node: { type: 'variable', name: token.value }, pos: pos + 1 };
+    }
+
+    // Function call
+    if (token.type === 'function') {
+        var funcName = token.value;
+        pos++; // skip function name
+        if (pos < tokens.length && tokens[pos].value === '(') {
+            pos++; // skip (
+            var args = [];
+            while (pos < tokens.length && tokens[pos].value !== ')') {
+                // Check for array literal [...]
+                if (tokens[pos].value === '[') {
+                    pos++; // skip [
+                    var arrayItems = [];
+                    while (pos < tokens.length && tokens[pos].value !== ']') {
+                        if (tokens[pos].type === 'variable') {
+                            arrayItems.push(tokens[pos].value);
+                        }
+                        pos++;
+                        if (pos < tokens.length && tokens[pos].value === ',') pos++;
+                    }
+                    if (pos < tokens.length && tokens[pos].value === ']') pos++;
+                    args.push({ type: 'array', items: arrayItems });
+                } else {
+                    var argResult = parseExpression(tokens, pos);
+                    args.push(argResult.node);
+                    pos = argResult.pos;
+                }
+                if (pos < tokens.length && tokens[pos].value === ',') pos++;
+            }
+            if (pos < tokens.length && tokens[pos].value === ')') pos++;
+            return { node: { type: 'function', name: funcName, args: args }, pos: pos };
+        }
+    }
+
+    // Parenthesized expression
+    if (token.type === 'punct' && token.value === '(') {
+        pos++; // skip (
+        var result = parseExpression(tokens, pos);
+        pos = result.pos;
+        if (pos < tokens.length && tokens[pos].value === ')') pos++;
+        return { node: result.node, pos: pos };
+    }
+
+    // Default: return 0
+    return { node: { type: 'number', value: 0 }, pos: pos + 1 };
+}
+
+// Evaluate parsed expression against data
+// Returns an array of values, one per data row
+function evaluateExpression(node, data) {
+    if (!node) return data.map(function() { return 0; });
+
+    switch (node.type) {
+        case 'number':
+            return data.map(function() { return node.value; });
+
+        case 'variable':
+            return data.map(function(row) {
+                var val = row[node.name];
+                return (typeof val === 'number') ? val : parseFloat(val) || 0;
+            });
+
+        case 'binary':
+            var left = evaluateExpression(node.left, data);
+            var right = evaluateExpression(node.right, data);
+            return left.map(function(l, i) {
+                var r = right[i];
+                switch (node.op) {
+                    case '+': return l + r;
+                    case '-': return l - r;
+                    case '*': return l * r;
+                    case '/': return r !== 0 ? l / r : NaN;
+                    default: return 0;
+                }
+            });
+
+        case 'unary':
+            var arg = evaluateExpression(node.arg, data);
+            if (node.op === '-') {
+                return arg.map(function(v) { return -v; });
+            }
+            return arg;
+
+        case 'function':
+            return evaluateFunction(node.name, node.args, data);
+
+        default:
+            return data.map(function() { return 0; });
+    }
+}
+
+// Evaluate function calls
+function evaluateFunction(name, args, data) {
+    var lowerName = name.toLowerCase();
+
+    // z(expr, [groups]) - z-score within groups
+    if (lowerName === 'z') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedZScore(values, data, groupCols);
+    }
+
+    // q(expr, [groups]) - quantile within groups
+    if (lowerName === 'q') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedQuantile(values, data, groupCols);
+    }
+
+    // PCA1(var1, var2) - first principal component
+    if (lowerName === 'pca1') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 1);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // PCA2(var1, var2) - second principal component
+    if (lowerName === 'pca2') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 2);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // r(y, x) - OLS residual (y - fitted)
+    if (lowerName === 'r') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSResidual(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // f(y, x) - OLS fitted value
+    if (lowerName === 'f') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSFitted(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // c(expr, min, max) - clamp values between min and max
+    // Use Infinity or -Infinity to only set one bound
+    if (lowerName === 'c') {
+        if (args.length >= 3) {
+            var values = evaluateExpression(args[0], data);
+            var minVal = evaluateExpression(args[1], data);
+            var maxVal = evaluateExpression(args[2], data);
+
+            // Get min/max bounds (they're arrays from evaluateExpression, but should be constant)
+            var lo = minVal[0];
+            var hi = maxVal[0];
+
+            return values.map(function(v) {
+                if (isNaN(v)) return v;
+                if (v < lo) return lo;
+                if (v > hi) return hi;
+                return v;
+            });
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // Unknown function - return zeros
+    return data.map(function() { return 0; });
+}
+
+// Compute z-score within groups
+function computeGroupedZScore(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global z-score
+        var validVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) return values;
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        if (std === 0) return values.map(function() { return 0; });
+        return values.map(function(v) { return (v - mean) / std; });
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute z-score within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var validVals = g.values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) {
+            g.indices.forEach(function(i) { result[i] = NaN; });
+            return;
+        }
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = std === 0 ? 0 : (g.values[j] - mean) / std;
+        });
+    });
+    return result;
+}
+
+// Compute quantile within groups
+function computeGroupedQuantile(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global quantile
+        return computeQuantileTransform(values);
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute quantile within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var quantiles = computeQuantileTransform(g.values);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = quantiles[j];
+        });
+    });
+    return result;
+}
+
+// Compute PCA projection
+// component: 1 for first PC, 2 for second PC
+function computePCA(v1, v2, component) {
+    var n = v1.length;
+    if (n === 0) return [];
+
+    // Filter valid pairs
+    var validIndices = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            validIndices.push(i);
+        }
+    }
+
+    if (validIndices.length < 2) {
+        return v1.map(function() { return 0; });
+    }
+
+    // Compute means
+    var mean1 = 0, mean2 = 0;
+    validIndices.forEach(function(i) {
+        mean1 += v1[i];
+        mean2 += v2[i];
+    });
+    mean1 /= validIndices.length;
+    mean2 /= validIndices.length;
+
+    // Compute covariance matrix elements
+    var cov11 = 0, cov12 = 0, cov22 = 0;
+    validIndices.forEach(function(i) {
+        var d1 = v1[i] - mean1;
+        var d2 = v2[i] - mean2;
+        cov11 += d1 * d1;
+        cov12 += d1 * d2;
+        cov22 += d2 * d2;
+    });
+    cov11 /= validIndices.length;
+    cov12 /= validIndices.length;
+    cov22 /= validIndices.length;
+
+    // Compute eigenvalues and eigenvectors of 2x2 covariance matrix
+    // Using closed-form solution for 2x2 symmetric matrix
+    var trace = cov11 + cov22;
+    var det = cov11 * cov22 - cov12 * cov12;
+    var discriminant = Math.sqrt(Math.max(0, trace * trace / 4 - det));
+    var lambda1 = trace / 2 + discriminant; // larger eigenvalue
+    var lambda2 = trace / 2 - discriminant; // smaller eigenvalue
+
+    // Eigenvector for lambda1 (first PC)
+    var ev1_x, ev1_y;
+    if (Math.abs(cov12) > 1e-10) {
+        ev1_x = lambda1 - cov22;
+        ev1_y = cov12;
+    } else {
+        ev1_x = 1;
+        ev1_y = 0;
+    }
+    var norm1 = Math.sqrt(ev1_x * ev1_x + ev1_y * ev1_y);
+    if (norm1 > 0) { ev1_x /= norm1; ev1_y /= norm1; }
+
+    // Eigenvector for lambda2 (second PC) - perpendicular to first
+    var ev2_x = -ev1_y;
+    var ev2_y = ev1_x;
+
+    // Choose eigenvector based on component
+    var ev_x = component === 1 ? ev1_x : ev2_x;
+    var ev_y = component === 1 ? ev1_y : ev2_y;
+
+    // Project all points onto the principal component
+    var result = new Array(n);
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            result[i] = (v1[i] - mean1) * ev_x + (v2[i] - mean2) * ev_y;
+        } else {
+            result[i] = NaN;
+        }
+    }
+    return result;
+}
+
+// Compute OLS regression coefficients (y = alpha + beta * x)
+// Returns {alpha, beta} or null if regression fails
+function computeOLSCoefficients(y, x) {
+    var n = y.length;
+    if (n === 0 || n !== x.length) return null;
+
+    // Filter to valid pairs only
+    var validPairs = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(y[i]) && isFinite(y[i]) && !isNaN(x[i]) && isFinite(x[i])) {
+            validPairs.push({ y: y[i], x: x[i] });
+        }
+    }
+
+    if (validPairs.length < 2) return null;
+
+    // Compute means
+    var sumX = 0, sumY = 0;
+    validPairs.forEach(function(p) {
+        sumX += p.x;
+        sumY += p.y;
+    });
+    var meanX = sumX / validPairs.length;
+    var meanY = sumY / validPairs.length;
+
+    // Compute beta = Cov(x,y) / Var(x)
+    var covXY = 0, varX = 0;
+    validPairs.forEach(function(p) {
+        var dx = p.x - meanX;
+        var dy = p.y - meanY;
+        covXY += dx * dy;
+        varX += dx * dx;
+    });
+
+    if (varX === 0) return null; // x has no variance
+
+    var beta = covXY / varX;
+    var alpha = meanY - beta * meanX;
+
+    return { alpha: alpha, beta: beta };
+}
+
+// Compute OLS residuals: r(y, x) = y - fitted = y - (alpha + beta * x)
+function computeOLSResidual(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return y.map(function(yi, i) {
+        if (isNaN(yi) || !isFinite(yi) || isNaN(x[i]) || !isFinite(x[i])) {
+            return NaN;
+        }
+        var fitted = coef.alpha + coef.beta * x[i];
+        return yi - fitted;
+    });
+}
+
+// Compute OLS fitted values: f(y, x) = alpha + beta * x
+function computeOLSFitted(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return x.map(function(xi, i) {
+        if (isNaN(y[i]) || !isFinite(y[i]) || isNaN(xi) || !isFinite(xi)) {
+            return NaN;
+        }
+        return coef.alpha + coef.beta * xi;
+    });
+}
+
+// Main function to evaluate an expression string against data
+function evaluateExpressionString(exprString, data) {
+    if (!exprString || exprString.trim() === '') {
+        return data.map(function() { return 0; });
+    }
+    try {
+        var tokens = tokenizeExpression(exprString);
+        var parseResult = parseExpression(tokens, 0);
+        return evaluateExpression(parseResult.node, data);
+    } catch (e) {
+        console.error('Expression parsing error:', e);
+        return data.map(function() { return 0; });
+    }
+}
+
+// =============================================================================
+// End Expression Parser
+// =============================================================================
 
 // Setup aspect ratio control for a chart
 // This should be called after the chart is first rendered
@@ -2031,6 +2581,7 @@ $(function(){
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const EXPRESSION_MODE = false;
 
     window.showDensity_scatter = true;
     const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
@@ -2297,6 +2848,180 @@ $(function(){
             setupAspectRatioControl('scatter');
         });
     }).catch(error => console.error('Error loading data for chart scatter:', error));
+    })();
+    (function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = ['region', 'product'];
+    const CONTINUOUS_FILTERS = [];
+    const EXPRESSION_MODE = true;
+
+    window.showDensity_scatter_expr = true;
+    const POINT_SYMBOLS = ["circle","square","diamond","cross","x","triangle-up","triangle-down","triangle-left","triangle-right","pentagon","hexagon","star"];
+    const DEFAULT_X_EXPR = "z(:profit, [:product])";
+    const DEFAULT_Y_COL = 'sales';
+    const DEFAULT_COLOR_COL = 'product';
+
+    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+    const buildSymbolMap = (data, col) => {
+        const uniqueVals = [...new Set(data.map(row => row[col]))].sort();
+        return Object.fromEntries(uniqueVals.map((val, i) => [val, POINT_SYMBOLS[i % POINT_SYMBOLS.length]]));
+    };
+
+    function createTracesExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
+        const symbolMap = buildSymbolMap(data, COLOR_COL);
+        const groups = {};
+        data.forEach((row, idx) => {
+            const key = row[COLOR_COL];
+            if (!groups[key]) groups[key] = { rows: [], indices: [] };
+            groups[key].rows.push(row);
+            groups[key].indices.push(idx);
+        });
+
+        return Object.entries(groups).map(([key, groupInfo]) => {
+            let groupXValues = groupInfo.indices.map(i => xValues[i]);
+            let yValues = groupInfo.rows.map(d => d[Y_COL]);
+
+            // Apply axis transformations
+            groupXValues = applyAxisTransform(groupXValues, X_TRANSFORM);
+            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+            return {
+                x: groupXValues,
+                y: yValues,
+                mode: 'markers',
+                name: key,
+                legendgroup: key,
+                showlegend: showlegend,
+                xaxis: xaxis,
+                yaxis: yaxis,
+                marker: {
+                    size: 4,
+                    opacity: 0.6,
+                    symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]])
+                },
+                type: 'scatter'
+            };
+        });
+    }
+
+    function renderNoFacetsExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, xLabel) {
+        const traces = createTracesExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM);
+
+        if (window.showDensity_scatter_expr) {
+            let xDensityValues = applyAxisTransform(xValues.slice(), X_TRANSFORM);
+            let yDensityValues = data.map(d => d[Y_COL]);
+            yDensityValues = applyAxisTransform(yDensityValues, Y_TRANSFORM);
+
+            traces.push({
+                x: xDensityValues, y: yDensityValues,
+                name: 'density', ncontours: 20, colorscale: 'Hot', reversescale: true,
+                showscale: false, type: 'histogram2dcontour', showlegend: false
+            });
+        }
+
+        let xHistValues = applyAxisTransform(xValues.slice(), X_TRANSFORM);
+        let yHistValues = data.map(d => d[Y_COL]);
+        yHistValues = applyAxisTransform(yHistValues, Y_TRANSFORM);
+
+        traces.push(
+            { x: xHistValues, name: 'x density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, yaxis: 'y2', type: 'histogram', showlegend: false },
+            { y: yHistValues, name: 'y density', marker: {color: 'rgba(128, 128, 128, 0.5)'}, xaxis: 'x2', type: 'histogram', showlegend: false }
+        );
+
+        var xAxisTitle = X_TRANSFORM === 'identity' ? xLabel : X_TRANSFORM + '(' + xLabel + ')';
+
+        Plotly.newPlot('scatter_expr', traces, {
+            title: 'ScatterPlot with Expression Mode', showlegend: true, autosize: true, hovermode: 'closest',
+            xaxis: { title: xAxisTitle, domain: [0, 0.85], showgrid: true, zeroline: true },
+            yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM), domain: [0, 0.85], showgrid: true, zeroline: true },
+            xaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            yaxis2: { domain: [0.85, 1], showgrid: false, zeroline: false },
+            margin: {t: 100, r: 100, b: 100, l: 100}
+        }, {responsive: true});
+    }
+
+    function updatePlot_scatter_expr(data) {
+        // Get X expression from input
+        const xExprInput = document.getElementById('x_expr_input_scatter_expr');
+        const X_EXPR = xExprInput ? xExprInput.value : DEFAULT_X_EXPR;
+
+        const Y_COL = getCol('y_col_select_scatter_expr', DEFAULT_Y_COL);
+        const COLOR_COL = getCol('color_col_select_scatter_expr', DEFAULT_COLOR_COL);
+
+        // Get current axis transformations
+        const X_TRANSFORM = getCol('x_transform_select_scatter_expr', 'identity');
+        const Y_TRANSFORM = getCol('y_transform_select_scatter_expr', 'identity');
+
+        // Evaluate the X expression
+        const xValues = evaluateExpressionString(X_EXPR, data);
+
+        // For now, only support no-facet mode in expression mode
+        renderNoFacetsExpr(data, xValues, Y_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, X_EXPR || 'X');
+    }
+
+    window.updateChart_scatter_expr = () => updatePlotWithFilters_scatter_expr();
+
+    // Filter and update function
+    window.updatePlotWithFilters_scatter_expr = function() {
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_scatter_expr');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_scatter_expr' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            window.allData_scatter_expr,
+            'scatter_expr',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Update plot with filtered data
+        updatePlot_scatter_expr(filteredData);
+    };
+
+    loadDataset('sales_data').then(data => {
+        window.allData_scatter_expr = data;
+        $(function() {
+            const densityBtn = document.getElementById('scatter_expr_density_toggle');
+            if (densityBtn) {
+                densityBtn.addEventListener('click', function() {
+                    window.showDensity_scatter_expr = !window.showDensity_scatter_expr;
+                    this.textContent = window.showDensity_scatter_expr ? 'Hide Density Contours' : 'Show Density Contours';
+                    updatePlotWithFilters_scatter_expr();
+                });
+            }
+
+            // Set default expression
+            const xExprInput = document.getElementById('x_expr_input_scatter_expr');
+            if (xExprInput && DEFAULT_X_EXPR) {
+                xExprInput.value = DEFAULT_X_EXPR;
+            }
+
+            updatePlotWithFilters_scatter_expr();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('scatter_expr');
+        });
+    }).catch(error => console.error('Error loading data for chart scatter_expr:', error));
     })();
 (function() {
     // Configuration
@@ -3501,7 +4226,7 @@ $(function(){
 <!-- ACTUAL CONTENT -->
 
 <h1>2D Charts</h1>
-<p>This shows examples of LinePlot, AreaChart, ScatterPlot, Path, and CumPlot.</p>
+<p>This shows examples of LinePlot, AreaChart, ScatterPlot (standard and expression mode), Path, and CumPlot.</p>
 
     <div class="textblock-content">
         <h1>Two-Dimensional Plots</h1>
@@ -3803,6 +4528,16 @@ $(function(){
         </select>
     </div>
     <div>
+        <label for="x_transform_select_scatter">X Transform: </label>
+        <select id="x_transform_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
         <label for="y_col_select_scatter">Y: </label>
         <select id="y_col_select_scatter" style="padding: 5px 10px;" onchange="updateChart_scatter()">
             <option value="profit">profit</option>
@@ -3821,8 +4556,6 @@ $(function(){
 <option value="z_score">z_score</option>
 <option value="quantile">quantile</option>
 <option value="inverse_cdf">inverse_cdf</option>
-<option value="cumulative">cumulative</option>
-<option value="cumprod">cumprod</option>
         </select>
     </div>
 </div>
@@ -3859,6 +4592,182 @@ $(function(){
 
 <!-- Chart -->
 <div id="scatter"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
+<hr>
+<br>
+<h2>ScatterPlot with Expression Mode</h2>
+<p>Expression mode allows typing custom formulas for the X axis. Available functions:
+<ul>
+    <li><code>z(expr, [groups])</code> - Z-score within groups (e.g., <code>z(:profit, [:product])</code>)</li>
+    <li><code>q(expr, [groups])</code> - Quantile rank (0-1) within groups</li>
+    <li><code>r(y, x)</code> - OLS residual (y minus fitted value from regressing y on x)</li>
+    <li><code>f(y, x)</code> - OLS fitted value (predicted y from regressing y on x)</li>
+    <li><code>PCA1(:v1, :v2)</code> / <code>PCA2(:v1, :v2)</code> - Principal component projections</li>
+    <li><code>c(expr, min, max)</code> - Clamp values between min and max (use <code>Inf</code>/<code>-Inf</code> for one-sided bounds)</li>
+</ul>
+Try expressions like: <code>:profit + :sales</code>, <code>z(:profit, [:product, :region])</code>, <code>r(:profit, :sales)</code>, <code>c(:profit, -500, 500)</code></p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="scatter_expr_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_scatter_expr">region: </label>
+                <select id="region_select_scatter_expr" multiple onchange="updatePlotWithFilters_scatter_expr()">
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West" selected>West</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_scatter_expr_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="product_select_scatter_expr">product: </label>
+                <select id="product_select_scatter_expr" multiple onchange="updatePlotWithFilters_scatter_expr()">
+                <option value="Laptop" selected>Laptop</option>
+                <option value="Phone" selected>Phone</option>
+                <option value="Tablet" selected>Tablet</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="product_select_scatter_expr_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <div style="margin: 10px 0;">
+    <button id="scatter_expr_density_toggle" style="padding: 5px 15px; cursor: pointer;">
+        Hide Density Contours
+    </button>
+</div>
+<div style="margin: 10px 0; display: flex; gap: 20px; align-items: center;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="color_col_select_scatter_expr">Color/Point type:</label>
+                    <select id="color_col_select_scatter_expr" onchange="updateChart_scatter_expr()">
+                    <option value="product" selected>product</option>
+                    <option value="region">region</option>
+                    <option value="segment">segment</option>                </select>
+                </div>
+                    </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_expr_input_scatter_expr">X Expression:</label>
+                    <input type="text" id="x_expr_input_scatter_expr" style="width: 350px; padding: 5px 10px; font-family: monospace;"
+                           placeholder="e.g., z(:var1, [:group]) or :var1 + :var2"
+                           onchange="updateChart_scatter_expr()" onkeyup="if(event.key==='Enter') updateChart_scatter_expr()">
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="x_transform_select_scatter_expr">X Transform:</label>
+                    <select id="x_transform_select_scatter_expr" style="padding: 5px 10px;" onchange="updateChart_scatter_expr()">
+                        <option value="identity">identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_col_select_scatter_expr">Y:</label>
+                    <select id="y_col_select_scatter_expr" style="padding: 5px 10px;" onchange="updateChart_scatter_expr()">
+                        <option value="profit">profit</option>
+<option value="sales" selected>sales</option>
+<option value="quantity">quantity</option>
+<option value="customers">customers</option>
+<option value="cost">cost</option>
+<option value="satisfaction">satisfaction</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 5px; align-items: center;">
+                    <label for="y_transform_select_scatter_expr">Y Transform:</label>
+                    <select id="y_transform_select_scatter_expr" style="padding: 5px 10px;" onchange="updateChart_scatter_expr()">
+                        <option value="identity">identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px; padding: 12px; background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; font-size: 0.9em;">
+            <h5 style="margin: 0 0 10px 0; color: #495057;">Expression Syntax Guide</h5>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px;">
+                <div>
+                    <strong>Variables:</strong> <code>:varname</code> or <code>varname</code><br>
+                    <span style="color: #6c757d;">Reference any column from your data</span>
+                </div>
+                <div>
+                    <strong>Operators:</strong> <code>+</code> <code>-</code> <code>*</code> <code>/</code><br>
+                    <span style="color: #6c757d;">Combine variables arithmetically</span>
+                </div>
+            </div>
+            <h5 style="margin: 15px 0 10px 0; color: #495057;">Available Functions</h5>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>z(expr, [groups])</code></td>
+                    <td style="padding: 6px 8px;">Z-score (standardize) within groups. Example: <code>z(:returns, [:sector, :date])</code></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>q(expr, [groups])</code></td>
+                    <td style="padding: 6px 8px;">Quantile rank (0-1) within groups. Example: <code>q(:returns, [:sector])</code></td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>PCA1(:v1, :v2)</code></td>
+                    <td style="padding: 6px 8px;">Project onto first principal component of v1 and v2</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>PCA2(:v1, :v2)</code></td>
+                    <td style="padding: 6px 8px;">Project onto second principal component of v1 and v2</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>r(y, x)</code></td>
+                    <td style="padding: 6px 8px;">OLS residual: y minus fitted value from regressing y on x</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #dee2e6;">
+                    <td style="padding: 6px 8px;"><code>f(y, x)</code></td>
+                    <td style="padding: 6px 8px;">OLS fitted value: predicted y from regressing y on x</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 8px;"><code>c(expr, min, max)</code></td>
+                    <td style="padding: 6px 8px;">Clamp values between min and max. Use <code>Inf</code>/<code>-Inf</code> for one-sided bounds. Example: <code>c(:returns, -0.05, 0.05)</code></td>
+                </tr>
+            </table>
+            <div style="margin-top: 10px; color: #6c757d;">
+                <strong>Examples:</strong>
+                <code style="margin-left: 10px;">:returns + :volatility</code>
+                <code style="margin-left: 10px;">z(:returns, [:sector])</code>
+                <code style="margin-left: 10px;">c(:vol, -Inf, 0.5)</code>
+            </div>
+        </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="scatter_expr_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="scatter_expr_aspect_ratio_label">1.0</span>
+    <input type="range" id="scatter_expr_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="scatter_expr"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p><br>
 <hr>
 <br>
@@ -3939,6 +4848,16 @@ $(function(){
         </select>
     </div>
     <div>
+        <label for="x_transform_select_path">X Transform: </label>
+        <select id="x_transform_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
         <label for="y_col_select_path">Y: </label>
         <select id="y_col_select_path" style="padding: 5px 10px;" onchange="updateChart_path()">
             <option value="Profit" selected>Profit</option>
@@ -3954,8 +4873,6 @@ $(function(){
 <option value="z_score">z_score</option>
 <option value="quantile">quantile</option>
 <option value="inverse_cdf">inverse_cdf</option>
-<option value="cumulative">cumulative</option>
-<option value="cumprod">cumprod</option>
         </select>
     </div>
 </div>
@@ -3976,7 +4893,7 @@ $(function(){
 <hr>
 <br>
 <h2>Strategy Performance Comparison</h2>
-<p>CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html" style="color: blue; font-weight: bold;">See here for CumPlot examples</a></p>
+<p>CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. For 'cumprod' transforms, values are treated as returns and compounded correctly: cumprod(1+r) - 1. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html" style="color: blue; font-weight: bold;">See here for CumPlot examples</a></p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">

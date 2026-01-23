@@ -490,8 +490,10 @@ function computeCumulativeSum(values) {
     return result;
 }
 
-// Compute cumulative product of values
-// Returns array of same length: [y[0], y[0]*y[1], y[0]*y[1]*y[2], ...]
+// Compute cumulative product of values for returns data
+// For returns r_i, computes: cumprod(1 + r_i) - 1
+// This converts returns to growth factors, compounds them, then converts back to cumulative return
+// Example: returns [0.1, 0.2, -0.1] -> (1+r): [1.1, 1.2, 0.9] -> cumprod: [1.1, 1.32, 1.188] -> result: [0.1, 0.32, 0.188]
 function computeCumulativeProduct(values) {
     if (!values || values.length === 0) return [];
     var result = [];
@@ -499,9 +501,9 @@ function computeCumulativeProduct(values) {
     for (var i = 0; i < values.length; i++) {
         var v = parseFloat(values[i]);  // Explicitly convert to number
         if (!isNaN(v) && isFinite(v)) {
-            product *= v;
+            product *= (1 + v);  // Convert return to growth factor and multiply
         }
-        result.push(product);
+        result.push(product - 1);  // Convert back to cumulative return
     }
     return result;
 }
@@ -598,6 +600,554 @@ function getAxisLabel(originalLabel, transformType) {
             return originalLabel;
     }
 }
+
+// =============================================================================
+// Expression Parser for ScatterTwo
+// Supports: +, -, *, /, variable references (:var or var), and functions:
+//   z(expr, [groups]) - z-score within groups
+//   q(expr, [groups]) - quantile within groups
+//   PCA1(var1, var2) - projection on first principal component
+//   PCA2(var1, var2) - projection on second principal component
+// =============================================================================
+
+// Tokenizer for expression parsing
+function tokenizeExpression(expr) {
+    var tokens = [];
+    var i = 0;
+    while (i < expr.length) {
+        var ch = expr[i];
+
+        // Skip whitespace
+        if (/\s/.test(ch)) { i++; continue; }
+
+        // Operators and punctuation
+        if ('+-*/(),[]'.indexOf(ch) !== -1) {
+            tokens.push({ type: 'punct', value: ch });
+            i++;
+            continue;
+        }
+
+        // Numbers
+        if (/[0-9.]/.test(ch)) {
+            var num = '';
+            while (i < expr.length && /[0-9.]/.test(expr[i])) {
+                num += expr[i++];
+            }
+            tokens.push({ type: 'number', value: parseFloat(num) });
+            continue;
+        }
+
+        // Variable with colon prefix :varname
+        if (ch === ':') {
+            i++; // skip colon
+            var name = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                name += expr[i++];
+            }
+            tokens.push({ type: 'variable', value: name });
+            continue;
+        }
+
+        // Identifiers (function names or variable names without colon)
+        if (/[a-zA-Z_]/.test(ch)) {
+            var ident = '';
+            while (i < expr.length && /[a-zA-Z0-9_]/.test(expr[i])) {
+                ident += expr[i++];
+            }
+            // Check if it's a function (followed by open paren)
+            var j = i;
+            while (j < expr.length && /\s/.test(expr[j])) j++;
+            if (j < expr.length && expr[j] === '(') {
+                tokens.push({ type: 'function', value: ident });
+            } else {
+                tokens.push({ type: 'variable', value: ident });
+            }
+            continue;
+        }
+
+        // Unknown character - skip
+        i++;
+    }
+    return tokens;
+}
+
+// Simple recursive descent parser
+function parseExpression(tokens, pos) {
+    return parseAddSub(tokens, pos);
+}
+
+function parseAddSub(tokens, pos) {
+    var result = parseMulDiv(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '+' || tokens[pos].value === '-')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseMulDiv(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseMulDiv(tokens, pos) {
+    var result = parseUnary(tokens, pos);
+    var node = result.node;
+    pos = result.pos;
+
+    while (pos < tokens.length && tokens[pos].type === 'punct' &&
+           (tokens[pos].value === '*' || tokens[pos].value === '/')) {
+        var op = tokens[pos].value;
+        pos++;
+        var right = parseUnary(tokens, pos);
+        node = { type: 'binary', op: op, left: node, right: right.node };
+        pos = right.pos;
+    }
+    return { node: node, pos: pos };
+}
+
+function parseUnary(tokens, pos) {
+    if (pos < tokens.length && tokens[pos].type === 'punct' && tokens[pos].value === '-') {
+        pos++;
+        var result = parseUnary(tokens, pos);
+        return { node: { type: 'unary', op: '-', arg: result.node }, pos: result.pos };
+    }
+    return parsePrimary(tokens, pos);
+}
+
+function parsePrimary(tokens, pos) {
+    if (pos >= tokens.length) {
+        return { node: { type: 'number', value: 0 }, pos: pos };
+    }
+
+    var token = tokens[pos];
+
+    // Number literal
+    if (token.type === 'number') {
+        return { node: { type: 'number', value: token.value }, pos: pos + 1 };
+    }
+
+    // Variable reference
+    if (token.type === 'variable') {
+        return { node: { type: 'variable', name: token.value }, pos: pos + 1 };
+    }
+
+    // Function call
+    if (token.type === 'function') {
+        var funcName = token.value;
+        pos++; // skip function name
+        if (pos < tokens.length && tokens[pos].value === '(') {
+            pos++; // skip (
+            var args = [];
+            while (pos < tokens.length && tokens[pos].value !== ')') {
+                // Check for array literal [...]
+                if (tokens[pos].value === '[') {
+                    pos++; // skip [
+                    var arrayItems = [];
+                    while (pos < tokens.length && tokens[pos].value !== ']') {
+                        if (tokens[pos].type === 'variable') {
+                            arrayItems.push(tokens[pos].value);
+                        }
+                        pos++;
+                        if (pos < tokens.length && tokens[pos].value === ',') pos++;
+                    }
+                    if (pos < tokens.length && tokens[pos].value === ']') pos++;
+                    args.push({ type: 'array', items: arrayItems });
+                } else {
+                    var argResult = parseExpression(tokens, pos);
+                    args.push(argResult.node);
+                    pos = argResult.pos;
+                }
+                if (pos < tokens.length && tokens[pos].value === ',') pos++;
+            }
+            if (pos < tokens.length && tokens[pos].value === ')') pos++;
+            return { node: { type: 'function', name: funcName, args: args }, pos: pos };
+        }
+    }
+
+    // Parenthesized expression
+    if (token.type === 'punct' && token.value === '(') {
+        pos++; // skip (
+        var result = parseExpression(tokens, pos);
+        pos = result.pos;
+        if (pos < tokens.length && tokens[pos].value === ')') pos++;
+        return { node: result.node, pos: pos };
+    }
+
+    // Default: return 0
+    return { node: { type: 'number', value: 0 }, pos: pos + 1 };
+}
+
+// Evaluate parsed expression against data
+// Returns an array of values, one per data row
+function evaluateExpression(node, data) {
+    if (!node) return data.map(function() { return 0; });
+
+    switch (node.type) {
+        case 'number':
+            return data.map(function() { return node.value; });
+
+        case 'variable':
+            return data.map(function(row) {
+                var val = row[node.name];
+                return (typeof val === 'number') ? val : parseFloat(val) || 0;
+            });
+
+        case 'binary':
+            var left = evaluateExpression(node.left, data);
+            var right = evaluateExpression(node.right, data);
+            return left.map(function(l, i) {
+                var r = right[i];
+                switch (node.op) {
+                    case '+': return l + r;
+                    case '-': return l - r;
+                    case '*': return l * r;
+                    case '/': return r !== 0 ? l / r : NaN;
+                    default: return 0;
+                }
+            });
+
+        case 'unary':
+            var arg = evaluateExpression(node.arg, data);
+            if (node.op === '-') {
+                return arg.map(function(v) { return -v; });
+            }
+            return arg;
+
+        case 'function':
+            return evaluateFunction(node.name, node.args, data);
+
+        default:
+            return data.map(function() { return 0; });
+    }
+}
+
+// Evaluate function calls
+function evaluateFunction(name, args, data) {
+    var lowerName = name.toLowerCase();
+
+    // z(expr, [groups]) - z-score within groups
+    if (lowerName === 'z') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedZScore(values, data, groupCols);
+    }
+
+    // q(expr, [groups]) - quantile within groups
+    if (lowerName === 'q') {
+        var values = evaluateExpression(args[0], data);
+        var groupCols = (args.length > 1 && args[1].type === 'array') ? args[1].items : [];
+        return computeGroupedQuantile(values, data, groupCols);
+    }
+
+    // PCA1(var1, var2) - first principal component
+    if (lowerName === 'pca1') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 1);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // PCA2(var1, var2) - second principal component
+    if (lowerName === 'pca2') {
+        if (args.length >= 2) {
+            var v1 = evaluateExpression(args[0], data);
+            var v2 = evaluateExpression(args[1], data);
+            return computePCA(v1, v2, 2);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // r(y, x) - OLS residual (y - fitted)
+    if (lowerName === 'r') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSResidual(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // f(y, x) - OLS fitted value
+    if (lowerName === 'f') {
+        if (args.length >= 2) {
+            var y = evaluateExpression(args[0], data);
+            var x = evaluateExpression(args[1], data);
+            return computeOLSFitted(y, x);
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // c(expr, min, max) - clamp values between min and max
+    // Use Infinity or -Infinity to only set one bound
+    if (lowerName === 'c') {
+        if (args.length >= 3) {
+            var values = evaluateExpression(args[0], data);
+            var minVal = evaluateExpression(args[1], data);
+            var maxVal = evaluateExpression(args[2], data);
+
+            // Get min/max bounds (they're arrays from evaluateExpression, but should be constant)
+            var lo = minVal[0];
+            var hi = maxVal[0];
+
+            return values.map(function(v) {
+                if (isNaN(v)) return v;
+                if (v < lo) return lo;
+                if (v > hi) return hi;
+                return v;
+            });
+        }
+        return data.map(function() { return 0; });
+    }
+
+    // Unknown function - return zeros
+    return data.map(function() { return 0; });
+}
+
+// Compute z-score within groups
+function computeGroupedZScore(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global z-score
+        var validVals = values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) return values;
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        if (std === 0) return values.map(function() { return 0; });
+        return values.map(function(v) { return (v - mean) / std; });
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute z-score within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var validVals = g.values.filter(function(v) { return !isNaN(v) && isFinite(v); });
+        if (validVals.length === 0) {
+            g.indices.forEach(function(i) { result[i] = NaN; });
+            return;
+        }
+        var mean = validVals.reduce(function(a, b) { return a + b; }, 0) / validVals.length;
+        var variance = validVals.reduce(function(a, b) { return a + (b - mean) * (b - mean); }, 0) / validVals.length;
+        var std = Math.sqrt(variance);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = std === 0 ? 0 : (g.values[j] - mean) / std;
+        });
+    });
+    return result;
+}
+
+// Compute quantile within groups
+function computeGroupedQuantile(values, data, groupCols) {
+    if (groupCols.length === 0) {
+        // No grouping - compute global quantile
+        return computeQuantileTransform(values);
+    }
+
+    // Group by specified columns
+    var groups = {};
+    data.forEach(function(row, i) {
+        var key = groupCols.map(function(col) { return row[col]; }).join('|');
+        if (!groups[key]) groups[key] = { indices: [], values: [] };
+        groups[key].indices.push(i);
+        groups[key].values.push(values[i]);
+    });
+
+    // Compute quantile within each group
+    var result = new Array(values.length);
+    Object.keys(groups).forEach(function(key) {
+        var g = groups[key];
+        var quantiles = computeQuantileTransform(g.values);
+        g.indices.forEach(function(idx, j) {
+            result[idx] = quantiles[j];
+        });
+    });
+    return result;
+}
+
+// Compute PCA projection
+// component: 1 for first PC, 2 for second PC
+function computePCA(v1, v2, component) {
+    var n = v1.length;
+    if (n === 0) return [];
+
+    // Filter valid pairs
+    var validIndices = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            validIndices.push(i);
+        }
+    }
+
+    if (validIndices.length < 2) {
+        return v1.map(function() { return 0; });
+    }
+
+    // Compute means
+    var mean1 = 0, mean2 = 0;
+    validIndices.forEach(function(i) {
+        mean1 += v1[i];
+        mean2 += v2[i];
+    });
+    mean1 /= validIndices.length;
+    mean2 /= validIndices.length;
+
+    // Compute covariance matrix elements
+    var cov11 = 0, cov12 = 0, cov22 = 0;
+    validIndices.forEach(function(i) {
+        var d1 = v1[i] - mean1;
+        var d2 = v2[i] - mean2;
+        cov11 += d1 * d1;
+        cov12 += d1 * d2;
+        cov22 += d2 * d2;
+    });
+    cov11 /= validIndices.length;
+    cov12 /= validIndices.length;
+    cov22 /= validIndices.length;
+
+    // Compute eigenvalues and eigenvectors of 2x2 covariance matrix
+    // Using closed-form solution for 2x2 symmetric matrix
+    var trace = cov11 + cov22;
+    var det = cov11 * cov22 - cov12 * cov12;
+    var discriminant = Math.sqrt(Math.max(0, trace * trace / 4 - det));
+    var lambda1 = trace / 2 + discriminant; // larger eigenvalue
+    var lambda2 = trace / 2 - discriminant; // smaller eigenvalue
+
+    // Eigenvector for lambda1 (first PC)
+    var ev1_x, ev1_y;
+    if (Math.abs(cov12) > 1e-10) {
+        ev1_x = lambda1 - cov22;
+        ev1_y = cov12;
+    } else {
+        ev1_x = 1;
+        ev1_y = 0;
+    }
+    var norm1 = Math.sqrt(ev1_x * ev1_x + ev1_y * ev1_y);
+    if (norm1 > 0) { ev1_x /= norm1; ev1_y /= norm1; }
+
+    // Eigenvector for lambda2 (second PC) - perpendicular to first
+    var ev2_x = -ev1_y;
+    var ev2_y = ev1_x;
+
+    // Choose eigenvector based on component
+    var ev_x = component === 1 ? ev1_x : ev2_x;
+    var ev_y = component === 1 ? ev1_y : ev2_y;
+
+    // Project all points onto the principal component
+    var result = new Array(n);
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(v1[i]) && isFinite(v1[i]) && !isNaN(v2[i]) && isFinite(v2[i])) {
+            result[i] = (v1[i] - mean1) * ev_x + (v2[i] - mean2) * ev_y;
+        } else {
+            result[i] = NaN;
+        }
+    }
+    return result;
+}
+
+// Compute OLS regression coefficients (y = alpha + beta * x)
+// Returns {alpha, beta} or null if regression fails
+function computeOLSCoefficients(y, x) {
+    var n = y.length;
+    if (n === 0 || n !== x.length) return null;
+
+    // Filter to valid pairs only
+    var validPairs = [];
+    for (var i = 0; i < n; i++) {
+        if (!isNaN(y[i]) && isFinite(y[i]) && !isNaN(x[i]) && isFinite(x[i])) {
+            validPairs.push({ y: y[i], x: x[i] });
+        }
+    }
+
+    if (validPairs.length < 2) return null;
+
+    // Compute means
+    var sumX = 0, sumY = 0;
+    validPairs.forEach(function(p) {
+        sumX += p.x;
+        sumY += p.y;
+    });
+    var meanX = sumX / validPairs.length;
+    var meanY = sumY / validPairs.length;
+
+    // Compute beta = Cov(x,y) / Var(x)
+    var covXY = 0, varX = 0;
+    validPairs.forEach(function(p) {
+        var dx = p.x - meanX;
+        var dy = p.y - meanY;
+        covXY += dx * dy;
+        varX += dx * dx;
+    });
+
+    if (varX === 0) return null; // x has no variance
+
+    var beta = covXY / varX;
+    var alpha = meanY - beta * meanX;
+
+    return { alpha: alpha, beta: beta };
+}
+
+// Compute OLS residuals: r(y, x) = y - fitted = y - (alpha + beta * x)
+function computeOLSResidual(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return y.map(function(yi, i) {
+        if (isNaN(yi) || !isFinite(yi) || isNaN(x[i]) || !isFinite(x[i])) {
+            return NaN;
+        }
+        var fitted = coef.alpha + coef.beta * x[i];
+        return yi - fitted;
+    });
+}
+
+// Compute OLS fitted values: f(y, x) = alpha + beta * x
+function computeOLSFitted(y, x) {
+    var coef = computeOLSCoefficients(y, x);
+    if (!coef) {
+        return y.map(function() { return NaN; });
+    }
+
+    return x.map(function(xi, i) {
+        if (isNaN(y[i]) || !isFinite(y[i]) || isNaN(xi) || !isFinite(xi)) {
+            return NaN;
+        }
+        return coef.alpha + coef.beta * xi;
+    });
+}
+
+// Main function to evaluate an expression string against data
+function evaluateExpressionString(exprString, data) {
+    if (!exprString || exprString.trim() === '') {
+        return data.map(function() { return 0; });
+    }
+    try {
+        var tokens = tokenizeExpression(exprString);
+        var parseResult = parseExpression(tokens, 0);
+        return evaluateExpression(parseResult.node, data);
+    } catch (e) {
+        console.error('Expression parsing error:', e);
+        return data.map(function() { return 0; });
+    }
+}
+
+// =============================================================================
+// End Expression Parser
+// =============================================================================
 
 // Setup aspect ratio control for a chart
 // This should be called after the chart is first rendered
@@ -3500,26 +4050,26 @@ OnePlus 12,90.0,88.0,94.0,95.0,90.0,90.0
 
 </script><script type="text/plain" id="universities_data" data-format="csv_embedded" data-src="">
 label,region,scenario,Academic_Reputation,Research_Output,Faculty_Quality,Industry_Connections,International_Outlook,Student_Satisfaction
-MIT,North America,Overall Rankings,96.0,96.0,95.0,86.0,88.0,88.0
-Stanford,North America,Overall Rankings,96.0,94.0,93.0,86.0,82.0,92.0
-Harvard,North America,Overall Rankings,96.0,95.0,90.0,85.0,84.0,93.0
-Berkeley,North America,Overall Rankings,90.0,92.0,90.0,83.0,79.0,86.0
-Caltech,North America,Overall Rankings,90.0,94.0,94.0,83.0,88.0,94.0
-Oxford,Europe,Overall Rankings,92.0,90.0,93.0,88.0,85.0,92.0
-Cambridge,Europe,Overall Rankings,93.0,91.0,95.0,83.0,82.0,88.0
-ETH Zurich,Europe,Overall Rankings,90.0,88.0,90.0,85.0,77.0,82.0
-Tokyo,Asia,Overall Rankings,86.0,83.0,86.0,84.0,95.0,86.0
-NUS,Asia,Overall Rankings,86.0,85.0,82.0,84.0,95.0,86.0
-MIT,North America,Research Focus,99.0,102.0,96.0,90.0,90.0,89.0
-Stanford,North America,Research Focus,96.0,94.0,92.0,81.0,90.0,84.0
-Harvard,North America,Research Focus,86.0,90.0,87.0,79.0,82.0,77.0
-Berkeley,North America,Research Focus,94.0,94.0,94.0,88.0,81.0,91.0
-Caltech,North America,Research Focus,97.0,101.0,95.0,87.0,91.0,93.0
-Oxford,Europe,Research Focus,94.0,94.0,92.0,83.0,84.0,82.0
-Cambridge,Europe,Research Focus,92.0,93.0,94.0,80.0,84.0,87.0
-ETH Zurich,Europe,Research Focus,94.0,94.0,94.0,87.0,85.0,92.0
-Tokyo,Asia,Research Focus,89.0,90.0,87.0,79.0,95.0,86.0
-NUS,Asia,Research Focus,86.0,87.0,89.0,82.0,95.0,78.0
+MIT,North America,Overall Rankings,98.0,95.0,97.0,91.0,88.0,94.0
+Stanford,North America,Overall Rankings,95.0,94.0,94.0,90.0,90.0,94.0
+Harvard,North America,Overall Rankings,94.0,95.0,96.0,85.0,86.0,93.0
+Berkeley,North America,Overall Rankings,90.0,90.0,94.0,88.0,78.0,84.0
+Caltech,North America,Overall Rankings,96.0,93.0,95.0,93.0,85.0,93.0
+Oxford,Europe,Overall Rankings,90.0,93.0,92.0,88.0,83.0,92.0
+Cambridge,Europe,Overall Rankings,93.0,92.0,89.0,89.0,84.0,90.0
+ETH Zurich,Europe,Overall Rankings,90.0,89.0,89.0,83.0,79.0,88.0
+Tokyo,Asia,Overall Rankings,85.0,83.0,87.0,85.0,95.0,78.0
+NUS,Asia,Overall Rankings,86.0,86.0,84.0,79.0,95.0,81.0
+MIT,North America,Research Focus,97.0,99.0,97.0,89.0,93.0,95.0
+Stanford,North America,Research Focus,94.0,94.0,96.0,89.0,84.0,91.0
+Harvard,North America,Research Focus,86.0,89.0,88.0,76.0,79.0,78.0
+Berkeley,North America,Research Focus,95.0,96.0,94.0,85.0,87.0,89.0
+Caltech,North America,Research Focus,96.0,101.0,98.0,87.0,86.0,89.0
+Oxford,Europe,Research Focus,92.0,95.0,92.0,87.0,84.0,85.0
+Cambridge,Europe,Research Focus,90.0,95.0,94.0,81.0,87.0,85.0
+ETH Zurich,Europe,Research Focus,96.0,96.0,92.0,84.0,84.0,87.0
+Tokyo,Asia,Research Focus,89.0,88.0,88.0,76.0,95.0,77.0
+NUS,Asia,Research Focus,86.0,88.0,89.0,74.0,95.0,87.0
 
 </script><script type="text/plain" id="cars.specifications" data-format="csv_embedded" data-src="">
 label,category,Performance,Efficiency,Interior_Quality,Technology,Safety,Value
