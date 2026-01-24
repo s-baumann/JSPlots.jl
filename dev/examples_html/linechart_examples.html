@@ -1504,7 +1504,68 @@ $(function(){
     const Y_COLS = ['Revenue'];
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'Revenue': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'color';
 
@@ -1738,7 +1799,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -1850,7 +1911,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -1978,7 +2039,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -2055,8 +2116,69 @@ $(function(){
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Year'];
-    const COLOR_MAPS = {'Year': {'2022': '#636efa', '2023': '#EF553B', '2024': '#00cc96'}};
+    const COLOR_MAPS = {'Year': {'2022': '#4169E1', '2023': '#32CD32', '2024': '#FF6347'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Year';
 
@@ -2290,7 +2412,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -2402,7 +2524,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -2530,7 +2652,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -2607,8 +2729,69 @@ $(function(){
     const X_COLS = ['Month'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Department', 'Metric'];
-    const COLOR_MAPS = {'Metric': {'Sick_Days': '#EF553B', 'Productivity': '#636efa'}, 'Department': {'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
+    const COLOR_MAPS = {'Metric': {'Sick_Days': '#EF553B', 'Productivity': '#636efa'}, 'Department': {'Engineering': '#0066cc', 'Sales': '#00cc66', 'Operations': '#cc0066', 'Marketing': '#cc6600'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Department';
 
@@ -2842,7 +3025,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -2954,7 +3137,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -3082,7 +3265,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -3160,7 +3343,68 @@ $(function(){
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['color', 'Product'];
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product D': '#ab63fa', 'Product B': '#EF553B'}, 'color': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'color';
 
@@ -3394,7 +3638,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -3506,7 +3750,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -3634,7 +3878,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -3712,7 +3956,68 @@ $(function(){
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'2023': '#636efa', '2024': '#EF553B'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'color';
 
@@ -3946,7 +4251,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -4058,7 +4363,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -4186,7 +4491,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -4264,7 +4569,68 @@ $(function(){
     const Y_COLS = ['Return'];
     const COLOR_COLS = ['Stock', 'Strategy', 'Region'];
     const COLOR_MAPS = {'Stock': {'GOOGL': '#EF553B', 'MSFT': '#00cc96', 'AAPL': '#636efa'}, 'Strategy': {'Hold': '#00cc96', 'Sell': '#EF553B', 'Buy': '#636efa'}, 'Region': {'EU': '#EF553B', 'ASIA': '#00cc96', 'US': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Return';
     const DEFAULT_COLOR_COL = 'Stock';
 
@@ -4498,7 +4864,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -4610,7 +4976,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -4738,7 +5104,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -4816,7 +5182,68 @@ $(function(){
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Product'];
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product B': '#EF553B'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Product';
 
@@ -5050,7 +5477,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -5162,7 +5589,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -5290,7 +5717,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -5368,7 +5795,68 @@ $(function(){
     const Y_COLS = ['temperature_celsius', 'temperature_fahrenheit', 'humidity_percent', 'pressure_hpa'];
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'default': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'time_hours';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'temperature_celsius';
     const DEFAULT_COLOR_COL = 'color';
 
@@ -5602,7 +6090,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -5714,7 +6202,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -5842,7 +6330,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -5920,7 +6408,68 @@ $(function(){
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Product'];
     const COLOR_MAPS = {'Product': {'Doohickey': '#00cc96', 'Widget': '#636efa', 'Gadget': '#EF553B'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Product';
 
@@ -6154,7 +6703,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -6266,7 +6815,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -6394,7 +6943,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -6472,7 +7021,68 @@ $(function(){
     const Y_COLS = ['Price'];
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'GOOGL': '#EF553B', 'MSFT': '#00cc96', 'AAPL': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Price';
     const DEFAULT_COLOR_COL = 'color';
 
@@ -6706,7 +7316,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -6818,7 +7428,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -6946,7 +7556,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -8721,7 +9331,7 @@ Month,Return,Stock,Strategy,Region
 <hr>
 <br>
 <h2>Monthly Sales Comparison Across Years</h2>
-<p>Multiple series chart demonstrating color dimension to compare years</p>
+<p>Multiple series chart with custom colors: 2022 (blue), 2023 (green), 2024 (red)</p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
@@ -8783,7 +9393,7 @@ Month,Return,Stock,Strategy,Region
 <hr>
 <br>
 <h2>Department Productivity by Month</h2>
-<p>Interactive filters allow you to select different departments and quarters</p>
+<p>Custom colors for departments, default colors for metrics. Interactive filters allow selection.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">

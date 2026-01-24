@@ -1482,6 +1482,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -1547,6 +1610,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -1555,10 +1635,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -1836,6 +1916,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"group":{"Treatment A":"#EF553B","Treatment B":"#00cc96","Control":"#636efa"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -1901,6 +2044,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.5)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.5)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -1909,10 +2069,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.5)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -2190,6 +2350,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"department":{"HR":"#ab63fa","Engineering":"#636efa","Sales":"#EF553B","Marketing":"#00cc96"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -2255,6 +2478,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -2263,10 +2503,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -2544,6 +2784,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"category":{"Category C":"#00cc96","Category B":"#EF553B","Category A":"#636efa"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -2609,6 +2912,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -2617,10 +2937,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -2898,6 +3218,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -2963,6 +3346,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -2971,10 +3371,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -3252,6 +3652,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -3317,6 +3780,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -3325,10 +3805,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -3606,6 +4086,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"group":{"Group A":"#636efa","Group B":"#EF553B","Group C":"#00cc96"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = 2.0;
 
     // Kernel density estimation function
@@ -3671,6 +4214,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.7)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.7)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -3679,10 +4239,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.7)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -3960,6 +4520,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"gender":{"Female":"#636efa","Male":"#EF553B"},"category":{"B":"#EF553B","A":"#636efa","C":"#00cc96"},"country":{"USA":"#EF553B","UK":"#636efa","Canada":"#00cc96"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = null; // Auto-calculate
 
     // Kernel density estimation function
@@ -4025,6 +4648,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -4033,10 +4673,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -4317,6 +4957,69 @@ $(function(){
         'rgb(23, 190, 207)'
     ];
 
+    // Color maps for custom colors
+    const COLOR_MAPS = {"experience_level":{"Mid":"#00cc96","Junior":"#636efa","Senior":"#EF553B"},"department":{"Engineering":"#636efa","Sales":"#00cc96","Marketing":"#EF553B"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
     const BANDWIDTH = 0.0;
 
     // Kernel density estimation function
@@ -4382,6 +5085,23 @@ $(function(){
                 if (values.length > 0) {
                     const kde = kernelDensity(values, BANDWIDTH);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
                     traces.push({
                         x: kde.x,
                         y: kde.y,
@@ -4390,10 +5110,10 @@ $(function(){
                         mode: 'lines',
                         fill: 'tozeroy',
                         line: {
-                            color: plotlyColors[idx % plotlyColors.length],
+                            color: groupColor,
                             width: 2
                         },
-                        fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', 0.6)'),
+                        fillcolor: fillColor,
                         xaxis: xaxis,
                         yaxis: yaxis,
                         showlegend: showlegend,
@@ -4659,6 +5379,440 @@ $(function(){
         });
     }).catch(function(error) {
         console.error('Error loading data for chart comprehensive_kde:', error);
+    });
+    })();
+    (function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+
+    // Plotly default colors
+    const plotlyColors = [
+        'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
+        'rgb(214, 39, 40)', 'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+        'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
+        'rgb(23, 190, 207)'
+    ];
+
+    // Color maps for custom colors
+    const COLOR_MAPS = {"team":{"Beta":"#E67E22","Gamma":"#1ABC9C","Alpha":"#9B59B6"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
+    const BANDWIDTH = null; // Auto-calculate
+
+    // Kernel density estimation function
+    function kernelDensity(values, bandwidth) {
+        // Use Silverman's rule of thumb if bandwidth not specified
+        if (!bandwidth) {
+            const n = values.length;
+            const mean = values.reduce((a, b) => a + b, 0) / n;
+            const std = Math.sqrt(values.reduce((sum, x) => {
+                return sum + Math.pow(x - mean, 2);
+            }, 0) / n);
+            bandwidth = 1.06 * std * Math.pow(n, -0.2);
+        }
+
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min;
+        const points = 200;
+        const step = range / points;
+
+        const x = [];
+        const y = [];
+
+        for (let i = 0; i <= points; i++) {
+            const xi = min - range * 0.1 + (range * 1.2) * i / points;
+            x.push(xi);
+
+            let density = 0;
+            for (let j = 0; j < values.length; j++) {
+                const u = (xi - values[j]) / bandwidth;
+                // Gaussian kernel
+                density += Math.exp(-0.5 * u * u) / Math.sqrt(2 * Math.PI);
+            }
+            y.push(density / (values.length * bandwidth));
+        }
+
+        return {x: x, y: y};
+    }
+
+    const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
+
+    function createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis='x', yaxis='y', showlegend=true) {
+        const traces = [];
+
+        if (GROUP_COL) {
+            // Group data by group column
+            const groups = {};
+            data.forEach(function(row) {
+                const key = row[GROUP_COL];
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(row);
+            });
+
+            const groupKeys = Object.keys(groups);
+
+            groupKeys.forEach(function(key, idx) {
+                const groupData = groups[key];
+                let values = groupData.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+
+                // Apply axis transformation
+                values = applyAxisTransform(values, X_TRANSFORM);
+
+                if (values.length > 0) {
+                    const kde = kernelDensity(values, BANDWIDTH);
+
+                    // Get color for this group (custom map or fallback to palette)
+                    const defaultColor = plotlyColors[idx % plotlyColors.length];
+                    const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                    // Convert color to rgba for fill
+                    let fillColor;
+                    if (groupColor.startsWith('rgb(')) {
+                        fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', 0.6)');
+                    } else if (groupColor.startsWith('#')) {
+                        const r = parseInt(groupColor.slice(1,3), 16);
+                        const g = parseInt(groupColor.slice(3,5), 16);
+                        const b = parseInt(groupColor.slice(5,7), 16);
+                        fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', 0.6)';
+                    } else {
+                        fillColor = groupColor;
+                    }
+
+                    traces.push({
+                        x: kde.x,
+                        y: kde.y,
+                        name: key,
+                        type: 'scatter',
+                        mode: 'lines',
+                        fill: 'tozeroy',
+                        line: {
+                            color: groupColor,
+                            width: 2
+                        },
+                        fillcolor: fillColor,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        showlegend: showlegend,
+                        legendgroup: key
+                    });
+                }
+            });
+        } else {
+            // Single group
+            let values = data.map(d => parseFloat(d[VALUE_COL])).filter(v => !isNaN(v));
+
+            // Apply axis transformation
+            values = applyAxisTransform(values, X_TRANSFORM);
+
+            if (values.length > 0) {
+                const kde = kernelDensity(values, BANDWIDTH);
+
+                traces.push({
+                    x: kde.x,
+                    y: kde.y,
+                    name: 'Density',
+                    type: 'scatter',
+                    mode: 'lines',
+                    fill: 'tozeroy',
+                    line: {
+                        color: 'rgb(31, 119, 180)',
+                        width: 2
+                    },
+                    fillcolor: 'rgba(31, 119, 180, 0.6)',
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    showlegend: false
+                });
+            }
+        }
+
+        return traces;
+    }
+
+    function renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM) {
+        const traces = createDensityTraces(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
+
+        Plotly.newPlot('custom_colors_kde', traces, {
+            title: 'Custom Color Mapping for Teams',
+            showlegend: GROUP_COL !== null,
+            autosize: true,
+            hovermode: 'closest',
+            xaxis: {
+                title: getAxisLabel(VALUE_COL, X_TRANSFORM),
+                showgrid: true,
+                zeroline: true
+            },
+            yaxis: {
+                title: 'Density',
+                showgrid: true,
+                zeroline: true
+            },
+            margin: {t: 100, r: 50, b: 100, l: 80}
+        }, {responsive: true});
+    }
+
+    function renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET_COL, BANDWIDTH, X_TRANSFORM) {
+        const facetValues = [...new Set(data.map(row => row[FACET_COL]))].sort();
+        const nFacets = facetValues.length;
+        const cols = Math.ceil(Math.sqrt(nFacets));
+        const rows = Math.ceil(nFacets / cols);
+        const traces = [];
+
+        facetValues.forEach((facetVal, idx) => {
+            const facetData = data.filter(row => row[FACET_COL] === facetVal);
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+            traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
+        });
+
+        const layout = {
+            title: 'Custom Color Mapping for Teams',
+            showlegend: GROUP_COL !== null,
+            grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: facetValues.map((val, idx) => ({
+                text: FACET_COL + ': ' + val,
+                showarrow: false,
+                xref: (idx === 0 ? 'x' : 'x' + (idx + 1)) + ' domain',
+                yref: (idx === 0 ? 'y' : 'y' + (idx + 1)) + ' domain',
+                x: 0.5,
+                y: 1.1,
+                xanchor: 'center',
+                yanchor: 'bottom'
+            })),
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+
+        facetValues.forEach((val, idx) => {
+            const ax = idx === 0 ? '' : (idx + 1);
+            layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
+            layout['yaxis' + ax] = {title: 'Density'};
+        });
+
+        Plotly.newPlot('custom_colors_kde', traces, layout, {responsive: true});
+    }
+
+    function renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1_COL, FACET2_COL, BANDWIDTH, X_TRANSFORM) {
+        const facet1Values = [...new Set(data.map(row => row[FACET1_COL]))].sort();
+        const facet2Values = [...new Set(data.map(row => row[FACET2_COL]))].sort();
+        const rows = facet1Values.length;
+        const cols = facet2Values.length;
+        const traces = [];
+
+        facet1Values.forEach((facet1Val, rowIdx) => {
+            facet2Values.forEach((facet2Val, colIdx) => {
+                const facetData = data.filter(row =>
+                    row[FACET1_COL] === facet1Val && row[FACET2_COL] === facet2Val
+                );
+
+                if (facetData.length === 0) return;
+
+                const idx = rowIdx * cols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+                traces.push(...createDensityTraces(facetData, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM, xaxis, yaxis, idx === 0));
+            });
+        });
+
+        const layout = {
+            title: 'Custom Color Mapping for Teams',
+            showlegend: GROUP_COL !== null,
+            grid: {rows: rows, columns: cols, pattern: 'independent'},
+            annotations: [
+                ...facet2Values.map((val, colIdx) => ({
+                    text: FACET2_COL + ': ' + val,
+                    showarrow: false,
+                    xref: (colIdx === 0 ? 'x' : 'x' + (colIdx + 1)) + ' domain',
+                    yref: (colIdx === 0 ? 'y' : 'y' + (colIdx + 1)) + ' domain',
+                    x: 0.5,
+                    y: 1.1,
+                    xanchor: 'center',
+                    yanchor: 'bottom'
+                })),
+                ...facet1Values.map((val, rowIdx) => ({
+                    text: FACET1_COL + ': ' + val,
+                    showarrow: false,
+                    xref: (rowIdx * cols === 0 ? 'x' : 'x' + (rowIdx * cols + 1)) + ' domain',
+                    yref: (rowIdx * cols === 0 ? 'y' : 'y' + (rowIdx * cols + 1)) + ' domain',
+                    x: -0.15,
+                    y: 0.5,
+                    xanchor: 'center',
+                    yanchor: 'middle',
+                    textangle: -90
+                }))
+            ],
+            margin: {t: 100, r: 50, b: 50, l: 50}
+        };
+
+        facet1Values.forEach((v1, rowIdx) => {
+            facet2Values.forEach((v2, colIdx) => {
+                const idx = rowIdx * cols + colIdx;
+                const ax = idx === 0 ? '' : (idx + 1);
+                layout['xaxis' + ax] = {title: getAxisLabel(VALUE_COL, X_TRANSFORM)};
+                layout['yaxis' + ax] = {title: 'Density'};
+            });
+        });
+
+        Plotly.newPlot('custom_colors_kde', traces, layout, {responsive: true});
+    }
+
+    function updatePlot_custom_colors_kde(data) {
+        // Get current value column from axes X selector or use default
+        const VALUE_COL = 'metric';
+
+        // Get current group column from dropdown or use default
+        let GROUP_COL = 'team';
+
+        // Handle "None" option for group selector
+        if (GROUP_COL === '_none_') {
+            GROUP_COL = null;
+        }
+
+        // Get current axis transformation
+        const xTransformSelect = document.getElementById('x_transform_select_custom_colors_kde');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        // Get bandwidth from slider (0 means auto)
+        const bandwidthSlider = document.getElementById('custom_colors_kde_bandwidth_slider');
+        const BANDWIDTH = bandwidthSlider ? parseFloat(bandwidthSlider.value) : 0.0;
+
+        let FACET1 = getCol('facet1_select_custom_colors_kde', null);
+        let FACET2 = getCol('facet2_select_custom_colors_kde', null);
+        if (FACET1 === 'None') FACET1 = null;
+        if (FACET2 === 'None') FACET2 = null;
+
+        if (FACET1 && FACET2) {
+            renderFacetGrid(data, VALUE_COL, GROUP_COL, FACET1, FACET2, BANDWIDTH, X_TRANSFORM);
+        } else if (FACET1) {
+            renderFacetWrap(data, VALUE_COL, GROUP_COL, FACET1, BANDWIDTH, X_TRANSFORM);
+        } else {
+            renderNoFacets(data, VALUE_COL, GROUP_COL, BANDWIDTH, X_TRANSFORM);
+        }
+    }
+
+    // Wrapper function
+    window.updateChart_custom_colors_kde = () => updatePlotWithFilters_custom_colors_kde();
+
+    // Filter and update function
+    window.updatePlotWithFilters_custom_colors_kde = function() {
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_custom_colors_kde');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_custom_colors_kde' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_custom_colors_kde,
+            'custom_colors_kde',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters
+        );
+
+        // Render with filtered data
+        updatePlot_custom_colors_kde(filteredData);
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('df10').then(function(data) {
+        window.allData_custom_colors_kde = data;
+
+        // Initialize controls after data is loaded
+        $(function() {
+            
+
+                document.getElementById('custom_colors_kde_bandwidth_slider').addEventListener('input', function() {
+        var bw = parseFloat(this.value);
+        document.getElementById('custom_colors_kde_bandwidth_label').textContent = bw === 0 ? 'auto' : bw.toFixed(2);
+        updateChart_custom_colors_kde();
+    });
+
+
+            // Initial plot
+            updatePlotWithFilters_custom_colors_kde();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('custom_colors_kde');
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart custom_colors_kde:', error);
     });
     })();
 
@@ -7673,6 +8827,609 @@ value,group
 51.9827487331413,Group C
 52.31164060639999,Group C
 54.88265040294197,Group C
+
+</script><script type="text/plain" id="df10" data-format="csv_embedded" data-src="">
+metric,team
+73.68229282980937,Alpha
+79.08044495244998,Alpha
+78.80326976166818,Alpha
+83.82475117418556,Alpha
+82.40696257376285,Alpha
+73.05718009990518,Alpha
+78.98009221002076,Alpha
+80.40493337197998,Alpha
+84.66617130733906,Alpha
+80.22471853136148,Alpha
+80.07204597557887,Alpha
+80.7817561996835,Alpha
+85.92758346972849,Alpha
+82.29644047267901,Alpha
+66.66641375073038,Alpha
+82.93498160684193,Alpha
+75.85378119281067,Alpha
+82.87797036213705,Alpha
+72.57737489339011,Alpha
+70.36166802290458,Alpha
+76.1730558559395,Alpha
+86.78307794722136,Alpha
+76.94481135924903,Alpha
+85.50129617688204,Alpha
+70.5077125490122,Alpha
+81.47723551875868,Alpha
+81.421674026767,Alpha
+83.46292484271821,Alpha
+85.11812817402816,Alpha
+83.81955660015043,Alpha
+82.14117117176615,Alpha
+70.037882999928,Alpha
+79.3565163524714,Alpha
+90.40899290147075,Alpha
+74.47926457259227,Alpha
+80.61418865288057,Alpha
+70.17364613465452,Alpha
+101.55656859676381,Alpha
+85.94908810426908,Alpha
+79.18423637932969,Alpha
+77.78355418395103,Alpha
+94.69258138786125,Alpha
+81.46696955063221,Alpha
+77.39506859198211,Alpha
+90.71734928148213,Alpha
+68.55355671719886,Alpha
+91.22401992763754,Alpha
+66.91515423755921,Alpha
+77.49921274783675,Alpha
+80.15704907715539,Alpha
+86.87689245588558,Alpha
+87.31716426300677,Alpha
+79.17306202894555,Alpha
+74.54189132727556,Alpha
+77.72495603401342,Alpha
+89.15373961688594,Alpha
+83.70525787503989,Alpha
+82.30929180587874,Alpha
+76.10129375251599,Alpha
+90.23756454703522,Alpha
+89.76627015827438,Alpha
+94.96785570651575,Alpha
+81.41878210684418,Alpha
+74.97485227605819,Alpha
+98.67305676651847,Alpha
+84.20012220824502,Alpha
+84.4755070373545,Alpha
+70.9358291813152,Alpha
+72.774019129285,Alpha
+77.36274186499733,Alpha
+79.59708715632775,Alpha
+85.77194763225005,Alpha
+83.61396909159006,Alpha
+78.8487774861997,Alpha
+86.88468751240966,Alpha
+81.03409487506835,Alpha
+74.95265954369117,Alpha
+74.19973552618026,Alpha
+86.62019822305913,Alpha
+88.85702784786992,Alpha
+79.1240853482666,Alpha
+77.318768413269,Alpha
+77.76644496490985,Alpha
+80.0648368379767,Alpha
+76.26139136510257,Alpha
+76.558855177875,Alpha
+89.68502032549435,Alpha
+74.48279382900127,Alpha
+88.90057800079025,Alpha
+70.56427123134095,Alpha
+86.83329035978672,Alpha
+68.44083032432958,Alpha
+87.12938049815337,Alpha
+78.59377399963468,Alpha
+76.80078272936267,Alpha
+79.67887441591061,Alpha
+79.36179075095784,Alpha
+69.73614926477266,Alpha
+90.64530034160133,Alpha
+85.48981429823434,Alpha
+72.04670722469686,Alpha
+78.8306763991932,Alpha
+68.67364931525444,Alpha
+85.6202604397304,Alpha
+76.68363627342194,Alpha
+78.03268785857124,Alpha
+71.98187995938153,Alpha
+81.99509036609153,Alpha
+70.03065385741856,Alpha
+86.89714351721234,Alpha
+90.5327826400753,Alpha
+80.77222757066048,Alpha
+73.94882464337854,Alpha
+75.09490205300192,Alpha
+78.21000843469534,Alpha
+78.31648996371436,Alpha
+87.59790329564636,Alpha
+82.06342141586038,Alpha
+78.62949032066952,Alpha
+83.19109070310262,Alpha
+82.66341696840479,Alpha
+71.44039842109488,Alpha
+82.33289935168942,Alpha
+84.19537741151699,Alpha
+86.94586980444052,Alpha
+84.5806981705891,Alpha
+82.85818728040041,Alpha
+80.95607437948874,Alpha
+93.39049122831877,Alpha
+80.62254163540622,Alpha
+80.623898327473,Alpha
+84.39930996662606,Alpha
+73.78344093523509,Alpha
+79.57226376949063,Alpha
+74.04594746987593,Alpha
+64.0955446447144,Alpha
+88.17531158423202,Alpha
+77.33808140939949,Alpha
+69.57900756011786,Alpha
+95.5971810231848,Alpha
+82.4486613899081,Alpha
+81.66557128330481,Alpha
+72.58781318011845,Alpha
+65.44468156330609,Alpha
+61.37881893231027,Alpha
+77.2745598741707,Alpha
+89.48128854819248,Alpha
+80.77445174729937,Alpha
+82.83884437131908,Alpha
+83.41077630926387,Alpha
+79.16680495712517,Alpha
+86.03086952872654,Alpha
+68.25867441891458,Alpha
+86.25034537850688,Alpha
+76.5217988516333,Alpha
+81.96655022756333,Alpha
+79.3129925949418,Alpha
+70.23177742162343,Alpha
+72.95687122755582,Alpha
+72.05407520954766,Alpha
+72.45414716764498,Alpha
+73.06062334732638,Alpha
+73.27379641411949,Alpha
+66.35305256129038,Alpha
+79.86975401302398,Alpha
+88.08313975928274,Alpha
+80.84572933146424,Alpha
+85.96263456819493,Alpha
+74.69512476808183,Alpha
+75.8202152541867,Alpha
+80.78288442753427,Alpha
+83.42144136938633,Alpha
+79.7122368380306,Alpha
+85.96482831897853,Alpha
+77.78795678321056,Alpha
+81.00157668560072,Alpha
+75.72729673739711,Alpha
+89.59501117223694,Alpha
+87.66750078510792,Alpha
+75.87438503729904,Alpha
+85.6967490294254,Alpha
+72.69652609340608,Alpha
+75.02808955834489,Alpha
+83.06934998025496,Alpha
+78.3580551075836,Alpha
+80.43037076377973,Alpha
+82.61089876998643,Alpha
+70.00744385488717,Alpha
+90.93593061601497,Alpha
+77.93593382194669,Alpha
+72.96060755619523,Alpha
+84.56749976608995,Alpha
+73.11476749504405,Alpha
+76.61730207463228,Alpha
+88.4862870888895,Alpha
+68.1497965440374,Alpha
+71.67938580584207,Alpha
+83.82347493694597,Alpha
+68.77870964855282,Alpha
+75.71986825160073,Alpha
+87.29639589092056,Beta
+95.34561228261606,Beta
+84.77065871386567,Beta
+84.56779029483577,Beta
+85.34547595807611,Beta
+95.67979356984772,Beta
+77.07104110436522,Beta
+87.4872932635258,Beta
+87.02306199794734,Beta
+93.1363321045273,Beta
+93.9062696540947,Beta
+101.76239708876065,Beta
+84.30554097168162,Beta
+86.57414539865172,Beta
+87.4319593240701,Beta
+90.86749195965476,Beta
+95.08742655706646,Beta
+92.11079272419977,Beta
+84.77887531712393,Beta
+99.54600379897336,Beta
+92.3752441897445,Beta
+91.38014867062606,Beta
+97.1115744464787,Beta
+82.2199695666804,Beta
+95.81949970403912,Beta
+96.3822382851474,Beta
+81.16509236493047,Beta
+86.86843301216577,Beta
+89.68450848742958,Beta
+88.89441799606797,Beta
+91.30416019283409,Beta
+93.95530949129372,Beta
+84.61828987776917,Beta
+90.75008269968008,Beta
+93.0466676556293,Beta
+82.43466684068885,Beta
+88.73996657548909,Beta
+93.17682300821754,Beta
+80.08704562181684,Beta
+83.88515803260799,Beta
+96.69241726602172,Beta
+89.20897172265616,Beta
+86.49432200806613,Beta
+93.68251302371498,Beta
+87.73936403609486,Beta
+89.72064168499142,Beta
+90.59226485007201,Beta
+92.71603685981654,Beta
+92.82870141369762,Beta
+86.67017722047107,Beta
+89.67774886761246,Beta
+93.37060389981666,Beta
+85.29057391104382,Beta
+88.94609635399843,Beta
+87.3141470049356,Beta
+85.5914318732415,Beta
+93.44106768731696,Beta
+98.32472649526422,Beta
+99.84505160727495,Beta
+93.82926601259264,Beta
+96.92662525739888,Beta
+93.04017184102698,Beta
+91.33634918905685,Beta
+88.72146780155589,Beta
+91.37583749900352,Beta
+95.20974893294763,Beta
+96.45383304496994,Beta
+80.28815656071541,Beta
+95.7094137360063,Beta
+95.80420053997317,Beta
+98.53534995458322,Beta
+90.85315308187951,Beta
+101.84012203528385,Beta
+89.4143358266925,Beta
+84.84444085688239,Beta
+80.97179812931799,Beta
+83.8166440017189,Beta
+86.391534288641,Beta
+83.57204241088425,Beta
+87.3910514126174,Beta
+84.11839539145647,Beta
+94.31471721217501,Beta
+83.45678061471114,Beta
+86.22619941990264,Beta
+90.61547753806734,Beta
+87.38411240210789,Beta
+92.68503369673763,Beta
+92.41938666365006,Beta
+83.29547341427094,Beta
+92.18837410931359,Beta
+93.05420274389647,Beta
+84.5497326827567,Beta
+76.73076361858193,Beta
+100.7064030244041,Beta
+94.97575929516094,Beta
+97.18114495838543,Beta
+86.64128104890369,Beta
+79.93762154164881,Beta
+88.33541863142628,Beta
+85.77898940724386,Beta
+90.60991301368178,Beta
+98.84692895654607,Beta
+91.01103341045608,Beta
+99.82049665557778,Beta
+100.72652508241727,Beta
+92.32438059476,Beta
+92.88114191784543,Beta
+92.21103383421006,Beta
+113.94228593828211,Beta
+80.00856205327024,Beta
+82.33600503972728,Beta
+86.69535847128319,Beta
+94.3729976857715,Beta
+92.59794911552562,Beta
+88.6884247396583,Beta
+96.19646940289664,Beta
+86.44227985881409,Beta
+100.0079884921138,Beta
+90.95791528875496,Beta
+91.65688758387034,Beta
+83.62799360928622,Beta
+92.10939670557077,Beta
+94.47311450110296,Beta
+84.26577727600072,Beta
+87.78611497728593,Beta
+91.93695408504718,Beta
+81.18023653074054,Beta
+84.41709306268605,Beta
+96.55371797936519,Beta
+84.08737259184736,Beta
+94.96865454593063,Beta
+91.45744224330444,Beta
+91.53400744562256,Beta
+86.34064849462243,Beta
+86.05126504474131,Beta
+89.16728911088093,Beta
+96.5791736536291,Beta
+84.18895177576721,Beta
+82.85261606061869,Beta
+82.85948038256363,Beta
+80.55181341628709,Beta
+87.51234144026839,Beta
+92.53584525559734,Beta
+84.35748167274889,Beta
+92.33190093924837,Beta
+101.06496770571613,Beta
+103.70227325614556,Beta
+82.82814485098184,Beta
+73.01221861905103,Beta
+92.4671980182602,Beta
+102.99764910326357,Beta
+81.18811848284689,Beta
+73.07781566401218,Beta
+88.08798597928775,Beta
+90.0583356286569,Beta
+93.75736203468043,Beta
+94.29448661570741,Beta
+89.3985268053885,Beta
+91.09837166878513,Beta
+91.53151656689401,Beta
+89.26796752943116,Beta
+86.20105479252585,Beta
+85.34522926221932,Beta
+92.3120274014384,Beta
+84.52215281462946,Beta
+86.26279410856618,Beta
+77.66142515222234,Beta
+88.82297996556736,Beta
+79.44844305225854,Beta
+94.18150509802493,Beta
+94.56434092270116,Beta
+90.2283204552516,Beta
+86.1463826827297,Beta
+90.65595388041862,Beta
+98.96044516432386,Beta
+90.43000649529112,Beta
+84.90416543080502,Beta
+94.19307139934722,Beta
+83.2381107766895,Beta
+98.54192130642892,Beta
+86.17285324082181,Beta
+92.85545567398177,Beta
+99.35111074386188,Beta
+85.58747811384043,Beta
+91.98664530117811,Beta
+90.88101404280222,Beta
+92.8649159072803,Beta
+87.02955177027758,Beta
+93.90200463397382,Beta
+94.84584633660971,Beta
+91.8986203727478,Beta
+81.90855005808422,Beta
+99.0235652372546,Beta
+89.69401921395178,Beta
+86.89794330861777,Beta
+94.46589972227494,Beta
+86.79322191489658,Beta
+95.62780445650392,Beta
+87.86635820885878,Beta
+83.26190620457884,Beta
+91.31856922257126,Gamma
+101.05817486479725,Gamma
+99.69937568570829,Gamma
+98.83109397487733,Gamma
+98.19976313474719,Gamma
+103.43484111585363,Gamma
+101.22212764528462,Gamma
+100.42062952397319,Gamma
+92.47371332138157,Gamma
+91.17530802961134,Gamma
+105.47320128650773,Gamma
+104.86729045165325,Gamma
+96.92327217981567,Gamma
+102.1252140352169,Gamma
+99.17836127412556,Gamma
+104.14761322548436,Gamma
+103.35514651799784,Gamma
+105.98098230859647,Gamma
+98.62040236579512,Gamma
+100.11080775590685,Gamma
+101.96994296047973,Gamma
+100.27311861232256,Gamma
+95.92748272458913,Gamma
+98.85506292609593,Gamma
+100.12010540604128,Gamma
+101.64211147430903,Gamma
+98.17048828610302,Gamma
+96.66326406327036,Gamma
+99.50582014392268,Gamma
+103.3880117840527,Gamma
+101.21834828617415,Gamma
+100.65063540745521,Gamma
+103.9793012952332,Gamma
+102.75638207572122,Gamma
+101.456991177956,Gamma
+100.0024338708302,Gamma
+100.50020299091548,Gamma
+97.94377180599767,Gamma
+97.81021021552326,Gamma
+96.64902546604989,Gamma
+98.34647767898772,Gamma
+98.26298917002993,Gamma
+104.7357325925422,Gamma
+94.24005243435052,Gamma
+104.04706969651953,Gamma
+101.01599669188322,Gamma
+90.74510887132789,Gamma
+104.73057937042704,Gamma
+109.80925768351705,Gamma
+98.7246101593031,Gamma
+92.37895147465285,Gamma
+102.22840994154504,Gamma
+95.4735316680844,Gamma
+91.40009241499475,Gamma
+101.68518208288536,Gamma
+106.7757698463541,Gamma
+100.01154166743675,Gamma
+96.25838968893503,Gamma
+98.22603767246386,Gamma
+85.44704815900896,Gamma
+98.04480225093636,Gamma
+104.61715873124886,Gamma
+99.18276841614357,Gamma
+93.68461908268007,Gamma
+108.7528635955361,Gamma
+95.35715861302549,Gamma
+97.9928295421308,Gamma
+96.17225480906099,Gamma
+95.58561180503327,Gamma
+95.92565379431382,Gamma
+98.2609718406011,Gamma
+96.9808459242542,Gamma
+106.32366034180554,Gamma
+101.66521820289027,Gamma
+105.18756999176308,Gamma
+96.89455769680886,Gamma
+101.85796432084778,Gamma
+102.45012062385769,Gamma
+109.51194247469874,Gamma
+98.82380803277793,Gamma
+95.98367357782067,Gamma
+96.58783176076271,Gamma
+99.38458990359553,Gamma
+97.11478620489085,Gamma
+103.17868254070876,Gamma
+104.31494137102557,Gamma
+92.37661986756878,Gamma
+102.92560905475567,Gamma
+96.48159797644414,Gamma
+99.28731929242241,Gamma
+106.76087390908737,Gamma
+102.69035500009788,Gamma
+99.64268505667305,Gamma
+112.06741554519316,Gamma
+93.63429468858747,Gamma
+103.22549618613434,Gamma
+95.40784790230182,Gamma
+99.2821877763362,Gamma
+89.28347978585312,Gamma
+92.61028111616933,Gamma
+101.05518969791079,Gamma
+106.78357573978539,Gamma
+97.89803833649619,Gamma
+95.36775821594053,Gamma
+100.18509621563541,Gamma
+99.85741546650742,Gamma
+111.82820472331731,Gamma
+96.75045333931322,Gamma
+100.27560574989869,Gamma
+98.6630709533278,Gamma
+98.53653578340317,Gamma
+95.1816105922726,Gamma
+107.58836815204215,Gamma
+97.69973597958398,Gamma
+101.63726136744332,Gamma
+93.78543260863114,Gamma
+105.4393373742056,Gamma
+98.06481598209041,Gamma
+100.1785506788886,Gamma
+101.84561402610498,Gamma
+112.32790435577152,Gamma
+97.10520635792638,Gamma
+94.33123292889812,Gamma
+98.57565379355026,Gamma
+104.98315551870957,Gamma
+101.17611198330688,Gamma
+93.0667075741298,Gamma
+103.55496185581218,Gamma
+107.05507941595928,Gamma
+99.73452656439241,Gamma
+103.13545657095031,Gamma
+104.58125814213008,Gamma
+108.79027087620746,Gamma
+93.26085922001553,Gamma
+98.88778235931542,Gamma
+100.43620046970223,Gamma
+103.52659948679047,Gamma
+93.89781675322992,Gamma
+98.69136283880518,Gamma
+97.22800203802625,Gamma
+97.1529414619575,Gamma
+109.57593415502411,Gamma
+101.90249015891175,Gamma
+101.48103671812387,Gamma
+102.94970432165276,Gamma
+100.58978363971904,Gamma
+96.36752566995402,Gamma
+106.12979857444888,Gamma
+100.1060311328196,Gamma
+97.21566591627497,Gamma
+101.00850879845633,Gamma
+93.21872973605436,Gamma
+96.13230386885303,Gamma
+98.68933751447567,Gamma
+97.89837222650073,Gamma
+95.56458959092868,Gamma
+93.8640962507288,Gamma
+106.36126212397699,Gamma
+104.36490838761065,Gamma
+101.91600284079324,Gamma
+99.55747093207522,Gamma
+102.60584777780133,Gamma
+96.06071044301252,Gamma
+95.43330188733727,Gamma
+98.52578020893941,Gamma
+101.51421181856534,Gamma
+99.98613646426892,Gamma
+102.82390093820926,Gamma
+94.92305832682356,Gamma
+95.0395316524241,Gamma
+100.30616923350685,Gamma
+102.99393367462316,Gamma
+95.72603615750154,Gamma
+100.3119408679685,Gamma
+104.78905706465179,Gamma
+100.323224685873,Gamma
+100.56709709742638,Gamma
+102.77221881017502,Gamma
+105.79334007861907,Gamma
+104.12609382920776,Gamma
+106.11119844613295,Gamma
+100.04525398860272,Gamma
+100.06950569053521,Gamma
+99.46735723890208,Gamma
+102.31397026774525,Gamma
+101.96218578921167,Gamma
+93.09568650006933,Gamma
+106.81444074890248,Gamma
+98.48892374746193,Gamma
+93.9685833694003,Gamma
+105.76403852352416,Gamma
+103.25673990275908,Gamma
+97.126060652915,Gamma
+100.9882924352158,Gamma
+98.57173783758488,Gamma
+90.53215009795287,Gamma
+97.61644950680834,Gamma
+93.3585838282356,Gamma
+101.51151071335222,Gamma
+101.3579469600289,Gamma
 
 </script><script type="text/plain" id="df2" data-format="csv_embedded" data-src="">
 value,group
@@ -16041,6 +17798,51 @@ value,treatment,timepoint
 </div>
 
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df9</p><br>
+<hr>
+<br>
+<h2>Custom Color Mapping for Teams</h2>
+<p>This example demonstrates custom color mapping using ColorColSpec. Each team has a specific color assigned via a Dict.</p>
+
+<!-- Filters (for data filtering) -->
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">metric</span>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="custom_colors_kde_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="custom_colors_kde_aspect_ratio_label">0.6</span>
+    <input type="range" id="custom_colors_kde_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="custom_colors_kde"></div>
+
+        <!-- Bandwidth slider below chart -->
+        <div style="margin: 20px 0;">
+    <label for="custom_colors_kde_bandwidth_slider">Bandwidth: </label>
+    <span id="custom_colors_kde_bandwidth_label">auto</span>
+    <input type="range" id="custom_colors_kde_bandwidth_slider"
+           min="0"
+           max="8.91"
+           step="0.1782"
+           value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0 = auto, max ≈ 8.9)</span>
+</div>
+
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df10</p><br>
 <hr>
 <br>
     <div class="textblock-content">

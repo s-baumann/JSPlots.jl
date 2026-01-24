@@ -1478,7 +1478,68 @@ $(function(){
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -1855,7 +1916,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -2005,7 +2066,68 @@ $(function(){
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -2382,7 +2504,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -2532,7 +2654,68 @@ $(function(){
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
     const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'Global': '#ab63fa', 'US': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -2909,7 +3092,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -3059,7 +3242,68 @@ $(function(){
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
     const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -3436,7 +3680,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -3585,8 +3829,69 @@ $(function(){
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#ffaa00', 'Low': '#00aa00', 'High': '#ff0000'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -3963,7 +4268,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -4112,8 +4417,69 @@ $(function(){
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
-    const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'Global': '#ab63fa', 'US': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {'asset_class': {'Fixed Income': '#b027d6', 'Equities': '#1f77b4'}, 'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'Global': '#ab63fa', 'US': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#00aa00', 'High': '#ff0000'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -4490,7 +4856,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -12220,15 +12586,15 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 5: With Filters</h2>
-<p>Filter strategies by asset class or region before computing cumulative performance.</p>
+        <h2>Example 5: With Filters and Custom Colors</h2>
+<p>Filter strategies by asset class or region. Custom color mapping for risk levels.</p>
 
     </div>
 <br>
 <hr>
 <br>
 <h2>Filtered Strategy Performance</h2>
-<p>Use the filter dropdowns to select only certain asset classes or regions. The cumulative calculation is done AFTER filtering.</p>
+<p>Custom colors: risk_level uses red for High, orange for Medium, green for Low. Use the filter dropdowns to select only certain asset classes or regions.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
@@ -12322,14 +12688,14 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <br>
     <div class="textblock-content">
         <h2>Example 6: All Features Combined</h2>
-<p>Multiple metrics with transforms, multiple color options, faceting, and filters all available.</p>
+<p>Multiple metrics with transforms, multiple color options (some with custom colors), faceting, and filters.</p>
 
     </div>
 <br>
 <hr>
 <br>
 <h2>Full Featured Cumulative Chart</h2>
-<p>All options available: metric selection (with transform), color by options, faceting, and filters. Experiment with different combinations to analyze strategy performance.</p>
+<p>All options available: metric selection, color by options (asset_class and risk_level have custom colors), faceting, and filters. Experiment with different combinations.</p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">

@@ -1484,7 +1484,68 @@ $(function(){
     const Y_COLS = ['Revenue'];
     const COLOR_COLS = ['Region'];
     const COLOR_MAPS = {'Region': {'East': '#ab63fa', 'West': '#636efa', 'North': '#EF553B', 'South': '#00cc96'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'Date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'Region';
 
@@ -1718,7 +1779,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -1830,7 +1891,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -1958,7 +2019,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
