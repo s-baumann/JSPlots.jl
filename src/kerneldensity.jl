@@ -10,7 +10,9 @@ Kernel density plot visualization with interactive controls.
 
 # Keyword Arguments
 - `value_cols::Vector{Symbol}`: Column(s) for density estimation (default: `[:value]`)
-- `color_cols::Vector{Symbol}`: Column(s) for grouping/coloring (default: `[:color]`)
+- `color_cols::ColorColSpec`: Column(s) for grouping/coloring. Supports custom color mapping:
+  - `[:col1, :col2]` - columns using default palette
+  - `[(:col1, Dict("A" => "#ff0000", "B" => "#00ff00"))]` - custom categorical colors
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict`: Column => default values. Values can be a single value, vector, or nothing for all values
@@ -40,7 +42,7 @@ struct KernelDensity <: JSPlotsType
 
     function KernelDensity(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                           value_cols::Vector{Symbol}=[:value],
-                          color_cols::Vector{Symbol}=Symbol[],
+                          color_cols::ColorColSpec=Symbol[],
                           filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -54,7 +56,13 @@ struct KernelDensity <: JSPlotsType
 
         # Default selections
         default_value_col = first(value_cols)
-        default_color_col = isempty(color_cols) ? nothing : first(color_cols)
+        color_col_names = extract_color_col_names(color_cols)
+        default_color_col = isempty(color_col_names) ? nothing : first(color_col_names)
+
+        # Build color maps for custom colors
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Validate value column
         for col in value_cols
@@ -62,7 +70,7 @@ struct KernelDensity <: JSPlotsType
         end
 
         # Validate color columns if provided
-        for col in color_cols
+        for col in color_col_names
             String(col) in all_cols || error("Color column $col not found in dataframe. Available: $all_cols")
         end
 
@@ -100,7 +108,7 @@ struct KernelDensity <: JSPlotsType
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
-            color_cols,
+            color_col_names,
             default_color_col,
             "updateChart_$(chart_title)();"
         )
@@ -194,6 +202,11 @@ struct KernelDensity <: JSPlotsType
                 'rgb(23, 190, 207)'
             ];
 
+            // Color maps for custom colors
+            const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+            $JS_COLOR_INTERPOLATION
+
             $bandwidth_js
 
             // Kernel density estimation function
@@ -259,6 +272,23 @@ struct KernelDensity <: JSPlotsType
                         if (values.length > 0) {
                             const kde = kernelDensity(values, BANDWIDTH);
 
+                            // Get color for this group (custom map or fallback to palette)
+                            const defaultColor = plotlyColors[idx % plotlyColors.length];
+                            const groupColor = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, key, defaultColor);
+
+                            // Convert color to rgba for fill
+                            let fillColor;
+                            if (groupColor.startsWith('rgb(')) {
+                                fillColor = groupColor.replace('rgb', 'rgba').replace(')', ', $density_opacity)');
+                            } else if (groupColor.startsWith('#')) {
+                                const r = parseInt(groupColor.slice(1,3), 16);
+                                const g = parseInt(groupColor.slice(3,5), 16);
+                                const b = parseInt(groupColor.slice(5,7), 16);
+                                fillColor = 'rgba(' + r + ', ' + g + ', ' + b + ', $density_opacity)';
+                            } else {
+                                fillColor = groupColor;
+                            }
+
                             traces.push({
                                 x: kde.x,
                                 y: kde.y,
@@ -267,10 +297,10 @@ struct KernelDensity <: JSPlotsType
                                 mode: 'lines',
                                 fill: $(fill_density ? "'tozeroy'" : "'none'"),
                                 line: {
-                                    color: plotlyColors[idx % plotlyColors.length],
+                                    color: groupColor,
                                     width: 2
                                 },
-                                fillcolor: plotlyColors[idx % plotlyColors.length].replace('rgb', 'rgba').replace(')', ', $density_opacity)'),
+                                fillcolor: fillColor,
                                 xaxis: xaxis,
                                 yaxis: yaxis,
                                 showlegend: showlegend,
@@ -443,7 +473,7 @@ struct KernelDensity <: JSPlotsType
                     "'$(default_value_col)'");
 
                 // Get current group column from dropdown or use default
-                let GROUP_COL = $(length(color_cols) >= 2 ?
+                let GROUP_COL = $(length(color_col_names) >= 2 ?
                     "document.getElementById('$(chart_title)_group_selector').value" :
                     (default_color_col !== nothing ? "'$(default_color_col)'" : "null"));
 

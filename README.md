@@ -41,11 +41,11 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[Path](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/path_examples.html)** - Trajectory visualization showing ordered paths through 2D space with direction arrows
 - **[CumPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html)** - Show cumulative line charts that are renormalised to the visible area
 
-
 #### Distributional Plots
 - **[DistPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/distplot_examples.html)** - Distribution visualization combining histogram, box plot, and rug plot
 - **[KernelDensity](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/kerneldensity_examples.html)** - Smooth kernel density estimation for distributions
 - **[PieChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/piechart_examples.html)** - Makes Piecharts.
+- **[BoxAndWhiskers](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/boxandwhiskers_examples.html)** - box and whiskers chart representing the distribution of each entity.
 
 #### Three-Dimensional Plots
 - **[Scatter3D](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scatter3d_examples.html)** - 3D scatter plots with PCA eigenvectors

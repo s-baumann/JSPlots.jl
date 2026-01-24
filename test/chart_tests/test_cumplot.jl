@@ -343,4 +343,53 @@ include("test_data.jl")
         @test occursin("Reset", chart.appearance_html)
         @test occursin("resetRange_", chart.functional_html)
     end
+
+    @testset "Custom color maps" begin
+        df = DataFrame(
+            date = Date(2024, 1, 1):Day(1):Date(2024, 1, 30),
+            pnl = randn(30),
+            strategy = repeat(["Alpha", "Beta", "Gamma"], 10)
+        )
+        chart = CumPlot(:custom_colors, df, :df;
+            x_col = :date,
+            y_transforms = [(:pnl, "cumulative")],
+            color_cols = [(:strategy, Dict("Alpha" => "#ff0000", "Beta" => "#00ff00", "Gamma" => "#0000ff"))]
+        )
+        @test occursin("#ff0000", chart.functional_html)
+        @test occursin("#00ff00", chart.functional_html)
+        @test occursin("#0000ff", chart.functional_html)
+    end
+
+    @testset "Mixed color specs (:default and custom)" begin
+        df = DataFrame(
+            date = Date(2024, 1, 1):Day(1):Date(2024, 1, 30),
+            pnl = randn(30),
+            strategy = repeat(["A", "B", "C"], 10),
+            region = repeat(["US", "EU"], 15)
+        )
+        chart = CumPlot(:mixed_colors, df, :df;
+            x_col = :date,
+            y_transforms = [(:pnl, "cumulative")],
+            color_cols = [(:strategy, :default), (:region, Dict("US" => "#ff0000", "EU" => "#0000ff"))]
+        )
+        @test occursin("strategy", chart.functional_html)
+        @test occursin("region", chart.functional_html)
+        @test occursin("#ff0000", chart.functional_html)
+        @test occursin("#0000ff", chart.functional_html)
+    end
+
+    @testset "Legacy Vector{Symbol} format still works" begin
+        df = DataFrame(
+            date = Date(2024, 1, 1):Day(1):Date(2024, 1, 30),
+            pnl = randn(30),
+            strategy = repeat(["A", "B", "C"], 10)
+        )
+        chart = CumPlot(:legacy_format, df, :df;
+            x_col = :date,
+            y_transforms = [(:pnl, "cumulative")],
+            color_cols = [:strategy]
+        )
+        @test occursin("strategy", chart.functional_html)
+        @test chart.chart_title == :legacy_format
+    end
 end

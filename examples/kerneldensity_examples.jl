@@ -194,6 +194,26 @@ kde9 = KernelDensity(:comprehensive_kde, df9, :df9;
     notes = "This example demonstrates all KernelDensity features together: multiple value columns, grouping by color, filtering with dropdown controls, and faceting. Use the controls to explore different combinations and see how distributions vary across departments, experience levels, and project types."
 )
 
+# Example 10: Custom Color Mapping
+n = 600
+df10 = DataFrame(
+    metric = vcat(
+        randn(rng, n÷3) .* 7 .+ 80,
+        randn(rng, n÷3) .* 6 .+ 90,
+        randn(rng, n÷3) .* 5 .+ 100
+    ),
+    team = repeat(["Alpha", "Beta", "Gamma"], inner=n÷3)
+)
+
+# Using custom color mapping with ColorColSpec
+kde10 = KernelDensity(:custom_colors_kde, df10, :df10;
+    value_cols = [:metric],
+    color_cols = [(:team, Dict("Alpha" => "#9B59B6", "Beta" => "#E67E22", "Gamma" => "#1ABC9C"))],
+    density_opacity = 0.6,
+    title = "Custom Color Mapping for Teams",
+    notes = "This example demonstrates custom color mapping using ColorColSpec. Each team has a specific color assigned via a Dict."
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -219,9 +239,10 @@ page = JSPlotPage(
         :df6 => df6,
         :df7 => df7,
         :df8 => df8,
-        :df9 => df9
+        :df9 => df9,
+        :df10 => df10
     ),
-    [header, kde1, kde2, kde3, kde4, kde5, kde6, kde7, kde8, kde9, conclusion],
+    [header, kde1, kde2, kde3, kde4, kde5, kde6, kde7, kde8, kde9, kde10, conclusion],
     tab_title = "Kernel Density Examples"
 )
 

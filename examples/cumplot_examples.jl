@@ -122,26 +122,29 @@ chart4 = CumPlot(:faceted_view, strategy_df, :strategy_data,
             "Equities vs Fixed Income side by side."
 )
 
-# Example 5: With filters
+# Example 5: With filters and custom colors
 example5_intro = TextBlock("""
-<h2>Example 5: With Filters</h2>
-<p>Filter strategies by asset class or region before computing cumulative performance.</p>
+<h2>Example 5: With Filters and Custom Colors</h2>
+<p>Filter strategies by asset class or region. Custom color mapping for risk levels.</p>
 """)
 
 chart5 = CumPlot(:filtered_strategies, strategy_df, :strategy_data,
     x_col = :date,
     y_transforms = [(:daily_pnl, "cumulative"), (:daily_pnl_gross, "cumulative")],
-    color_cols = [:strategy, :risk_level],
+    color_cols = [
+        (:strategy, :default),
+        (:risk_level, Dict("High" => "#ff0000", "Medium" => "#ffaa00", "Low" => "#00aa00"))
+    ],
     filters = [:asset_class, :region],
     title = "Filtered Strategy Performance",
-    notes = "Use the filter dropdowns to select only certain asset classes or regions. " *
-            "The cumulative calculation is done AFTER filtering."
+    notes = "Custom colors: risk_level uses red for High, orange for Medium, green for Low. " *
+            "Use the filter dropdowns to select only certain asset classes or regions."
 )
 
-# Example 6: Full featured
+# Example 6: Full featured with custom colors
 example6_intro = TextBlock("""
 <h2>Example 6: All Features Combined</h2>
-<p>Multiple metrics with transforms, multiple color options, faceting, and filters all available.</p>
+<p>Multiple metrics with transforms, multiple color options (some with custom colors), faceting, and filters.</p>
 """)
 
 chart6 = CumPlot(:full_featured, strategy_df, :strategy_data,
@@ -151,12 +154,17 @@ chart6 = CumPlot(:full_featured, strategy_df, :strategy_data,
         (:daily_pnl_gross, "cumulative"),
         (:daily_return, "cumprod")
     ],
-    color_cols = [:strategy, :asset_class, :region, :risk_level],
+    color_cols = [
+        (:strategy, :default),
+        (:asset_class, Dict("Equities" => "#1f77b4", "Fixed Income" => "#b027d6")),
+        (:region, :default),
+        (:risk_level, Dict("High" => "#ff0000", "Low" => "#00aa00"))
+    ],
     facet_cols = [:asset_class, :region, :risk_level],
     filters = [:asset_class, :region, :risk_level],
     title = "Full Featured Cumulative Chart",
-    notes = "All options available: metric selection (with transform), color by options, faceting, and filters. " *
-            "Experiment with different combinations to analyze strategy performance."
+    notes = "All options available: metric selection, color by options (asset_class and risk_level have custom colors), " *
+            "faceting, and filters. Experiment with different combinations."
 )
 
 # Conclusion

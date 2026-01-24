@@ -692,9 +692,13 @@ daily_product = @linq df |> groupby( [:date, :product]) |> combine( :total_sales
 line_chart = LineChart(:LineChart, df, :sales_data,
     x_cols=[:date, :quarter],
     y_cols=[:sales, :quantity, :profit, :customers, :satisfaction],
-    color_cols=[:product, :region, :segment],
+    color_cols=[
+        (:product, Dict("Widget" => "#e41a1c", "Gadget" => "#377eb8", "Doohickey" => "#4daf4a")),
+        (:region, :default),
+        (:segment, :default)
+    ],
     facet_cols=[:region, :segment, :product, :month],
-    notes="A linechart. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LineChart examples</a>")
+    notes="A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LineChart examples</a>")
 
 # AreaChart
 area_chart = AreaChart(:AreaChart, df, :sales_data,
@@ -806,11 +810,15 @@ cum_plot = CumPlot(:cum_plot, strategy_df, :strategy_data,
         (:daily_pnl_gross, "cumulative"),
         (:daily_return, "cumprod")
     ],
-    color_cols = [:strategy, :asset_class, :region],
+    color_cols = [
+        (:strategy, :default),
+        (:asset_class, Dict("Equities" => "#1f77b4", "Fixed Income" => "#d62728")),
+        (:region, :default)
+    ],
     facet_cols = [:asset_class, :region],
     filters = [:asset_class, :region],
     title = "Strategy Performance Comparison",
-    notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. For 'cumprod' transforms, values are treated as returns and compounded correctly: cumprod(1+r) - 1. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
+    notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Custom colors for asset_class (Equities=blue, Fixed Income=red). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
 )
 
 # More Exotic Plot Types

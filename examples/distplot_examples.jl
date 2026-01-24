@@ -110,13 +110,34 @@ distplot5 = DistPlot(:custom_appearance, df5, :df5;
     notes = "Demonstrates customization options: rug plot hidden, increased box opacity, custom bin count"
 )
 
-# Example 6: Date/Time Filtering (Testing continuous filters for temporal types)
+# Example 6: Custom Colors
+n = 600
+df6_custom = DataFrame(
+    score = vcat(
+        randn(rng, n÷3) .* 8 .+ 85,
+        randn(rng, n÷3) .* 7 .+ 90,
+        randn(rng, n÷3) .* 6 .+ 95
+    ),
+    team = repeat(["Red Team", "Blue Team", "Green Team"], inner=n÷3)
+)
+
+# Using custom color mapping with ColorColSpec
+distplot6_custom = DistPlot(:custom_colors, df6_custom, :df6_custom;
+    value_cols = [:score],
+    color_cols = [(:team, Dict("Red Team" => "#E74C3C", "Blue Team" => "#3498DB", "Green Team" => "#2ECC71"))],
+    show_controls = true,
+    histogram_bins = 25,
+    title = "Custom Color Mapping for Teams",
+    notes = "This example demonstrates custom color mapping using ColorColSpec. Each team has a specific color assigned via a Dict."
+)
+
+# Example 7: Date/Time Filtering (Testing continuous filters for temporal types)
 n = 100  # Need >20 unique values for each time column to trigger range sliders
 base_date = Date(2024, 1, 1)
 base_datetime = DateTime(2024, 1, 1, 0, 0, 0)
 base_time = Time(0, 0, 0)
 
-df6 = DataFrame(
+df7 = DataFrame(
     value = randn(rng, n) .* 20 .+ 100,
     date_col = [base_date + Day(i) for i in 1:n],  # 100 unique dates
     datetime_col = [base_datetime + Hour(i) for i in 1:n],  # 100 unique datetimes
@@ -125,21 +146,21 @@ df6 = DataFrame(
     category = rand(rng, ["A", "B", "C"], n)
 )
 
-distplot6 = DistPlot(:datetime_filters, df6, :df6;
+distplot7 = DistPlot(:datetime_filters, df7, :df7;
     value_cols = [:value],
     color_cols = [:category],
     filters = Dict(
-        :date_col => df6.date_col[1:50],  # Default to first half of date range
-        :datetime_col => df6.datetime_col,  # All datetimes selected by default
-        :zoneddatetime_col => df6.zoneddatetime_col,  # All zoned datetimes
-        :time_col => df6.time_col[26:75]  # Middle portion of time range
+        :date_col => df7.date_col[1:50],  # Default to first half of date range
+        :datetime_col => df7.datetime_col,  # All datetimes selected by default
+        :zoneddatetime_col => df7.zoneddatetime_col,  # All zoned datetimes
+        :time_col => df7.time_col[26:75]  # Middle portion of time range
     ),
     show_controls = true,
     title = "Date/Time Filtering Test",
     notes = "This example tests continuous range filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders for intuitive filtering. Try adjusting the range sliders to filter the data!"
 )
 
-# Example 7: Date/Time Range Sliders (Testing that all temporal types use sliders)
+# Example 8: Date/Time Range Sliders (Testing that all temporal types use sliders)
 n = 140  # 140 rows but only 10 unique values per time column
 base_date_cat = Date(2024, 1, 1)
 base_datetime_cat = DateTime(2024, 1, 1, 0, 0, 0)
@@ -151,7 +172,7 @@ unique_datetimes = [base_datetime_cat + Hour(i*2) for i in 1:10]
 unique_zoneddatetimes = [ZonedDateTime(base_datetime_cat + Hour(i*2), tz"UTC") for i in 1:10]
 unique_times = [base_time_cat + Hour(i) for i in 1:10]
 
-df7 = DataFrame(
+df8 = DataFrame(
     value = randn(rng, n) .* 15 .+ 90,
     date_cat = repeat(unique_dates, inner=14),  # 10 unique dates
     datetime_cat = repeat(unique_datetimes, inner=14),  # 10 unique datetimes
@@ -160,7 +181,7 @@ df7 = DataFrame(
     region = rand(rng, ["North", "South", "East", "West"], n)
 )
 
-distplot7 = DistPlot(:datetime_sliders, df7, :df7;
+distplot8 = DistPlot(:datetime_sliders, df8, :df8;
     value_cols = [:value],
     color_cols = [:region],
     filters = [:date_cat, :datetime_cat, :zoneddatetime_cat, :time_cat],  # All temporal types use sliders
@@ -169,7 +190,7 @@ distplot7 = DistPlot(:datetime_sliders, df7, :df7;
     notes = "This example tests range slider filters for Date, DateTime, ZonedDateTime, and Time columns. All temporal types use range sliders regardless of the number of unique values, providing a consistent filtering experience."
 )
 
-# Example 8: Using a Struct as Data Source
+# Example 9: Using a Struct as Data Source
 # Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
 
 struct SurveyData
@@ -202,9 +223,9 @@ The <code>SurveyData</code> struct holds both responses and demographics.
 Charts reference the responses DataFrame using <code>Symbol("survey.responses")</code>.</p>
 """)
 
-distplot8 = DistPlot(:struct_dist, survey_data.responses, Symbol("survey.responses");
+distplot9 = DistPlot(:struct_dist, survey_data.responses, Symbol("survey.responses");
     value_cols = [:satisfaction_score, :recommendation_score, :response_time],
-    color_cols = [:survey_type, :age_group],
+    color_cols = [(:survey_type, Dict(:Online => "e00e0a", :Phone => "#99900a", Symbol("In-Person") => "#00a00a" )), (:age_group, :default)],
     show_controls = true,
     title = "Survey Results from Struct Data Source",
     notes = "This example shows how to use a struct as a data source. The SurveyData struct " *
@@ -232,11 +253,12 @@ page = JSPlotPage(
         :df3 => df3,
         :df4 => df4,
         :df5 => df5,
-        :df6 => df6,
+        :df6_custom => df6_custom,
         :df7 => df7,
+        :df8 => df8,
         :survey => survey_data  # Struct with responses and demographics
     ),
-    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6, distplot7, struct_intro, distplot8, conclusion],
+    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6_custom, distplot7, distplot8, struct_intro, distplot9, conclusion],
     tab_title = "DistPlot Examples"
 )
 

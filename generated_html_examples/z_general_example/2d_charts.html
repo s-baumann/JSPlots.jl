@@ -1484,7 +1484,68 @@ $(function(){
     const Y_COLS = ['sales', 'quantity', 'profit', 'customers', 'satisfaction'];
     const COLOR_COLS = ['product', 'region', 'segment'];
     const COLOR_MAPS = {'segment': {'SMB': '#636efa', 'Enterprise': '#00cc96', 'Consumer': '#EF553B'}, 'region': {'West': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}, 'product': {'Phone': '#00cc96', 'Laptop': '#636efa', 'Tablet': '#EF553B'}};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'sales';
     const DEFAULT_COLOR_COL = 'product';
 
@@ -1718,7 +1779,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -1830,7 +1891,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -1958,7 +2019,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -2035,11 +2096,72 @@ $(function(){
     const Y_COLS = ['sales', 'quantity', 'cost', 'customers', 'satisfaction'];
     const COLOR_COLS = ['product', 'segment', 'region'];
     const COLOR_MAPS = {'segment': {'SMB': '#636efa', 'Enterprise': '#00cc96', 'Consumer': '#EF553B'}, 'region': {'West': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}, 'product': {'Phone': '#00cc96', 'Laptop': '#636efa', 'Tablet': '#EF553B'}};
+    const COLOR_SCALES = {};
     const GROUP_ORDER = {'segment': ['SMB', 'Consumer', 'Enterprise'], 'region': ['North', 'South', 'West'], 'product': ['Laptop', 'Tablet', 'Phone']};
     const DEFAULT_X_COL = 'date';
     const DEFAULT_Y_COL = 'sales';
     const DEFAULT_COLOR_COL = 'product';
     const FILL_OPACITY = 0.6;
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
 
     let allData = [];
 
@@ -2159,7 +2281,7 @@ $(function(){
                 xValues = applyAxisTransform(xValues, X_TRANSFORM);
                 yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                const color = COLOR_MAP[groupKey] || '#636efa';
+                const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                 const trace = {
                     x: xValues,
                     y: yValues,
@@ -2300,7 +2422,7 @@ $(function(){
                     xValues = applyAxisTransform(xValues, X_TRANSFORM);
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                    const color = COLOR_MAP[groupKey] || '#636efa';
+                    const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                     const legendGroup = groupKey;
 
                     const trace = {
@@ -2452,7 +2574,7 @@ $(function(){
                         xValues = applyAxisTransform(xValues, X_TRANSFORM);
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                        const color = COLOR_MAP[groupKey] || '#636efa';
+                        const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                         const legendGroup = groupKey;
 
                         const trace = {
@@ -2588,6 +2710,68 @@ $(function(){
     const DEFAULT_X_COL = 'profit';
     const DEFAULT_Y_COL = 'sales';
     const DEFAULT_COLOR_COL = 'product';
+    const COLOR_MAPS = {"month":{"4":"#ab63fa","1":"#636efa","12":"#EF553B","2":"#EF553B","6":"#19d3f3","7":"#FF6692","11":"#636efa","8":"#B6E880","5":"#FFA15A","10":"#FECB52","9":"#FF97FF","3":"#00cc96"},"segment":{"SMB":"#636efa","Enterprise":"#00cc96","Consumer":"#EF553B"},"region":{"West":"#00cc96","North":"#636efa","South":"#EF553B"},"product":{"Phone":"#00cc96","Laptop":"#636efa","Tablet":"#EF553B"}};
+    const COLOR_SCALES = {};
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
 
     const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
     const buildSymbolMap = (data, col) => {
@@ -2624,7 +2808,8 @@ $(function(){
             marker: {
                 size: 4,
                 opacity: 0.6,
-                symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+                symbol: groupData.map(d => symbolMap[d[COLOR_COL]]),
+                color: groupData.map(d => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, d[COLOR_COL]))
             },
             type: 'scatter'
             };
@@ -2860,6 +3045,68 @@ $(function(){
     const DEFAULT_X_EXPR = "z(:profit, [:product])";
     const DEFAULT_Y_COL = 'sales';
     const DEFAULT_COLOR_COL = 'product';
+    const COLOR_MAPS = {"segment":{"SMB":"#636efa","Enterprise":"#00cc96","Consumer":"#EF553B"},"region":{"West":"#00cc96","North":"#636efa","South":"#EF553B"},"product":{"Phone":"#00cc96","Laptop":"#636efa","Tablet":"#EF553B"}};
+    const COLOR_SCALES = {};
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
 
     const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
     const buildSymbolMap = (data, col) => {
@@ -2897,7 +3144,8 @@ $(function(){
                 marker: {
                     size: 4,
                     opacity: 0.6,
-                    symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]])
+                    symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]]),
+                    color: groupInfo.rows.map(d => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, d[COLOR_COL]))
                 },
                 type: 'scatter'
             };
@@ -3030,7 +3278,67 @@ $(function(){
     const X_COLS = ['Cost', 'Profit', 'Sales'];
     const Y_COLS = ['Profit', 'Sales', 'Cost'];
     const COLOR_COLS = ['Product', 'Region', 'Segment'];
-    const COLOR_MAPS = {'Product': {'Doohickey': '#00cc96', 'Widget': '#636efa', 'Gadget': '#EF553B'}, 'Segment': {'Government': '#00cc96', 'Enterprise': '#EF553B', 'Consumer': '#636efa'}, 'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
+    const COLOR_MAPS = {"Product":{"Doohickey":"#00cc96","Widget":"#636efa","Gadget":"#EF553B"},"Segment":{"Government":"#00cc96","Enterprise":"#EF553B","Consumer":"#636efa"},"Region":{"East":"#00cc96","West":"#ab63fa","North":"#636efa","South":"#EF553B"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_X_COL = 'Cost';
     const DEFAULT_Y_COL = 'Profit';
     const DEFAULT_COLOR_COL = 'Product';
@@ -3115,8 +3423,6 @@ $(function(){
         if (facet1) FACET_COLS.push(facet1);
         if (facet2) FACET_COLS.push(facet2);
 
-        // Get color map for current selection
-        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3166,7 +3472,7 @@ $(function(){
                 xValues = applyAxisTransform(xValues, X_TRANSFORM);
                 yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                const baseColor = COLOR_MAP[group.color] || '#000000';
+                const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                 const markerOpacity = getAlphaValues(xValues.length);
 
                 const markerConfig = {
@@ -3330,7 +3636,7 @@ $(function(){
 
                     const legendGroup = group.color;
 
-                    const baseColor = COLOR_MAP[group.color] || '#000000';
+                    const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                     const markerOpacity = getAlphaValues(xValues.length);
 
                     const markerConfig = {
@@ -3519,7 +3825,7 @@ $(function(){
 
                         const legendGroup = group.color;
 
-                        const baseColor = COLOR_MAP[group.color] || '#000000';
+                        const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                         const markerOpacity = getAlphaValues(xValues.length);
 
                         const markerConfig = {
@@ -3695,8 +4001,69 @@ $(function(){
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region'];
-    const COLOR_MAPS = {'asset_class': {'Fixed Income': '#EF553B', 'Equities': '#636efa'}, 'strategy': {'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Delta': '#ab63fa', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'US': '#636efa'}};
+    const COLOR_MAPS = {'asset_class': {'Fixed Income': '#d62728', 'Equities': '#1f77b4'}, 'strategy': {'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Delta': '#ab63fa', 'Alpha': '#636efa'}, 'region': {'Asia': '#00cc96', 'Europe': '#EF553B', 'US': '#636efa'}};
+    const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_DURATION_FRACTION = 0.2;
     const DEFAULT_STEP_FRACTION = 0.2;
 
@@ -4073,7 +4440,7 @@ $(function(){
                     legendgroup: groupInfo.color,
                     showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                     line: {
-                        color: COLOR_MAP[groupInfo.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                         width: 2
                     },
                     marker: { size: 0 },
@@ -4235,7 +4602,7 @@ $(function(){
 <hr>
 <br>
 <h2>Line Chart</h2>
-<p>A linechart. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html" style="color: blue; font-weight: bold;">See here for LineChart examples</a></p>
+<p>A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html" style="color: blue; font-weight: bold;">See here for LineChart examples</a></p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
@@ -4893,7 +5260,7 @@ Try expressions like: <code>:profit + :sales</code>, <code>z(:profit, [:product,
 <hr>
 <br>
 <h2>Strategy Performance Comparison</h2>
-<p>CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Use the Duration and Step inputs to control the time window, and the Step Back/Forward buttons to scroll through time while keeping the window size constant. For 'cumprod' transforms, values are treated as returns and compounded correctly: cumprod(1+r) - 1. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html" style="color: blue; font-weight: bold;">See here for CumPlot examples</a></p>
+<p>CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Custom colors for asset_class (Equities=blue, Fixed Income=red). <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html" style="color: blue; font-weight: bold;">See here for CumPlot examples</a></p>
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
     <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">

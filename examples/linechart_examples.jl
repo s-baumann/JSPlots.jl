@@ -51,9 +51,9 @@ df2 = DataFrame(
 chart2 = LineChart(:multi_series, df2, :sales_data;
     x_cols = [:Month],
     y_cols = [:Sales],
-    color_cols = [:Year],
+    color_cols = [(:Year, Dict("2022" => "#4169E1", "2023" => "#32CD32", "2024" => "#FF6347"))],
     title = "Monthly Sales Comparison Across Years",
-    notes = "Multiple series chart demonstrating color dimension to compare years"
+    notes = "Multiple series chart with custom colors: 2022 (blue), 2023 (green), 2024 (red)"
 )
 
 # Example 3: Line Chart with Interactive Filters
@@ -88,10 +88,13 @@ end
 chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
     x_cols = [:Month],
     y_cols = [:Value],
-    color_cols = [:Department, :Metric],
+    color_cols = [
+        (:Department, Dict("Engineering" => "#0066cc", "Sales" => "#00cc66", "Marketing" => "#cc6600", "Operations" => "#cc0066")),
+        (:Metric, :default)
+    ],
     filters = Dict{Symbol,Any}(:Department => "Engineering", :Quarter => "Q1"),
     title = "Department Productivity by Month",
-    notes = "Interactive filters allow you to select different departments and quarters"
+    notes = "Custom colors for departments, default colors for metrics. Interactive filters allow selection."
 )
 
 # Example 4: Combined with Image

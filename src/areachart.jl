@@ -11,7 +11,11 @@ Area chart visualization with support for stacking modes and interactive control
 # Keyword Arguments
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
-- `color_cols::Vector{Symbol}`: Columns available for grouping/coloring areas (default: `Symbol[]`)
+- `color_cols`: Columns for grouping/coloring. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
+  (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
@@ -47,7 +51,7 @@ struct AreaChart <: JSPlotsType
     function AreaChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
-                            color_cols::Vector{Symbol}=Symbol[],
+                            color_cols::ColorColSpec=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -83,8 +87,8 @@ struct AreaChart <: JSPlotsType
         # Get unique values for each filter column
         filter_options = build_filter_options(normalized_filters, df)
 
-        # Build color maps for all possible group columns that exist
-        color_maps, valid_color_cols = build_color_maps(color_cols, df)
+        # Build color maps for all possible group columns that exist (with optional custom colors)
+        color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
         # Build group order maps (preserving order of first appearance)
         group_order_maps = Dict()
         for col in valid_color_cols
@@ -106,7 +110,7 @@ struct AreaChart <: JSPlotsType
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
 
-        # Create color maps as nested JavaScript object
+        # Create color maps as nested JavaScript object (categorical)
         color_maps_js = if isempty(color_maps)
             "{}"
         else
@@ -115,6 +119,9 @@ struct AreaChart <: JSPlotsType
                 for (col, map) in color_maps
             ], ", ") * "}"
         end
+
+        # Create color scales as nested JavaScript object (continuous)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Create group order maps as nested JavaScript object
         group_order_js = if isempty(group_order_maps)
@@ -140,11 +147,14 @@ struct AreaChart <: JSPlotsType
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
             const GROUP_ORDER = $group_order_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
             const FILL_OPACITY = $fill_opacity;
+
+            $JS_COLOR_INTERPOLATION
 
             let allData = [];
 
@@ -264,7 +274,7 @@ struct AreaChart <: JSPlotsType
                         xValues = applyAxisTransform(xValues, X_TRANSFORM);
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                        const color = COLOR_MAP[groupKey] || '#636efa';
+                        const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                         const trace = {
                             x: xValues,
                             y: yValues,
@@ -405,7 +415,7 @@ struct AreaChart <: JSPlotsType
                             xValues = applyAxisTransform(xValues, X_TRANSFORM);
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                            const color = COLOR_MAP[groupKey] || '#636efa';
+                            const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                             const legendGroup = groupKey;
 
                             const trace = {
@@ -557,7 +567,7 @@ struct AreaChart <: JSPlotsType
                                 xValues = applyAxisTransform(xValues, X_TRANSFORM);
                                 yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                                const color = COLOR_MAP[groupKey] || '#636efa';
+                                const color = getColor(COLOR_MAPS, COLOR_SCALES, GROUP_COL, groupKey);
                                 const legendGroup = groupKey;
 
                                 const trace = {

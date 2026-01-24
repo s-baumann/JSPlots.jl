@@ -10,7 +10,11 @@ Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
 - `dimensions::Vector{Symbol}`: Vector of at least 3 dimension columns for x, y, and z axes
 
 # Keyword Arguments
-- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
+- `color_cols`: Columns for color grouping. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
+  (default: `[:color]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -38,7 +42,7 @@ struct Scatter3D <: JSPlotsType
     appearance_html::String
 
     function Scatter3D(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
-                          color_cols::Vector{Symbol}=[:color],
+                          color_cols::ColorColSpec=[:color],
                           filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -69,9 +73,12 @@ normalized_filters = normalize_filters(filters, df)
         default_z_col = string(dimensions[3])
 
         # Validate color columns and build color maps
-        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
+        color_col_names = extract_color_col_names(color_cols)
+        valid_color_cols = validate_and_filter_columns(color_col_names, df, "color_cols")
         default_color_col = string(valid_color_cols[1])
-        color_maps, _ = build_color_maps(valid_color_cols, df)
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
@@ -143,11 +150,6 @@ $style_html        </div>
         # Generate filter controls JS array
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
 
-        # Create color maps as nested JavaScript object
-        color_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in color_maps
-        ], ", ") * "}"
 
         functional_html = """
             (function() {
@@ -160,6 +162,8 @@ $style_html        </div>
             const DEFAULT_Z_COL = '$default_z_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+            $JS_COLOR_INTERPOLATION
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
 
@@ -350,7 +354,6 @@ $style_html        </div>
                     groups[key].push(row);
                 });
 
-                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
                 const traces = Object.entries(groups).map(([key, groupData]) => {
                     let xValues = groupData.map(d => parseFloat(d[X_COL]));
                     let yValues = groupData.map(d => parseFloat(d[Y_COL]));
@@ -371,7 +374,7 @@ $style_html        </div>
                         marker: {
                             size: $marker_size,
                             opacity: $marker_opacity,
-                            color: COLOR_MAP[key] || '#636efa'
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, key)
                         }
                     };
                 });
@@ -431,7 +434,6 @@ $style_html        </div>
                 const rows = Math.ceil(nFacets / cols);
 
                 const traces = [];
-                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 facetValues.forEach((facetVal, idx) => {
                     const facetData = data.filter(row => row[FACET_COL] === facetVal);
@@ -467,7 +469,7 @@ $style_html        </div>
                             marker: {
                                 size: $marker_size,
                                 opacity: $marker_opacity,
-                                color: COLOR_MAP[key] || '#636efa'
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, key)
                             }
                         });
                     });
@@ -571,7 +573,6 @@ $style_html        </div>
                 const cols = facet2Values.length;
 
                 const traces = [];
-                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 facet1Values.forEach((facet1Val, rowIdx) => {
                     facet2Values.forEach((facet2Val, colIdx) => {
@@ -611,7 +612,7 @@ $style_html        </div>
                                 marker: {
                                     size: $marker_size,
                                     opacity: $marker_opacity,
-                                    color: COLOR_MAP[key] || '#636efa'
+                                    color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, key)
                                 }
                             });
                         });

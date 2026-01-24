@@ -1486,7 +1486,68 @@ $(function(){
     const Y_COLS = ['stock_a', 'stock_b'];
     const COLOR_COLS = [];
     const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'day';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'stock_a';
     const DEFAULT_COLOR_COL = '__no_color__';
 
@@ -1720,7 +1781,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -1832,7 +1893,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -1960,7 +2021,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -2035,7 +2096,67 @@ $(function(){
     const CONTINUOUS_FILTERS = [];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['category'];
-    const COLOR_MAPS = {'category': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product D': '#ab63fa', 'Product B': '#EF553B'}};
+    const COLOR_MAPS = {"category":{"Product A":"#636efa","Product C":"#00cc96","Product D":"#ab63fa","Product B":"#EF553B"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_VALUE_COL = 'sales';
     const DEFAULT_COLOR_COL = 'category';
     const HOLE = 0.0;
@@ -2073,8 +2194,6 @@ $(function(){
         const colorColSelect = document.getElementById('color_col_select_sales_pie');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get color map for current color selection
-        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
         // Get categorical filter values (multiple selections)
         const filters = {};
@@ -2118,7 +2237,7 @@ $(function(){
             const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
             const labels = Object.keys(aggregated);
             const values = Object.values(aggregated);
-            const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+            const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
             const trace = {
                 type: 'pie',
@@ -2154,7 +2273,7 @@ $(function(){
                 const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
                 const labels = Object.keys(aggregated);
                 const values = Object.values(aggregated);
-                const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+                const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
                 const row = Math.floor(i / nCols);
                 const col = i % nCols;
@@ -2222,7 +2341,7 @@ $(function(){
                         const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
                         const labels = Object.keys(aggregated);
                         const values = Object.values(aggregated);
-                        const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+                        const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
                         const domain = {
                             x: [c / nCols + 0.01, (c + 1) / nCols - 0.01],
@@ -2305,7 +2424,68 @@ $(function(){
     const Y_COLS = ['temperature', 'humidity'];
     const COLOR_COLS = [];
     const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
     const DEFAULT_X_COL = 'date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
     const DEFAULT_Y_COL = 'temperature';
     const DEFAULT_COLOR_COL = '__no_color__';
 
@@ -2539,7 +2719,7 @@ $(function(){
                     mode: 'lines+markers',
                     name: group.color,
                     line: {
-                        color: COLOR_MAP[group.color] || '#000000',
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                         width: 1
                     },
                     marker: { size: 1 }
@@ -2651,7 +2831,7 @@ $(function(){
                         xaxis: xaxis,
                         yaxis: yaxis,
                         line: {
-                            color: COLOR_MAP[group.color] || '#000000',
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                             width: 1
                         },
                         marker: { size: 1 }
@@ -2779,7 +2959,7 @@ $(function(){
                             xaxis: xaxis,
                             yaxis: yaxis,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: 1
                             },
                             marker: { size: 1 }
@@ -3041,7 +3221,7 @@ date,temperature,humidity,city
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#230">
+<div class="codeblock-container" id="##codeblock#277">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -3203,7 +3383,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#231">
+<div class="codeblock-container" id="##codeblock#278">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -3309,7 +3489,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#232">
+<div class="codeblock-container" id="##codeblock#279">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -3423,7 +3603,7 @@ create_html(scatter, &quot;output.html&quot;)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#233">
+<div class="codeblock-container" id="##codeblock#280">
     <div class="codeblock-header">
         <span class="codeblock-language">Julia</span>
     </div>
@@ -3515,7 +3695,7 @@ end</code></pre>
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#234">
+<div class="codeblock-container" id="##codeblock#281">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -3682,7 +3862,7 @@ weather_chart = LineChart(:weather, weather_df, :weather_data;
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#235">
+<div class="codeblock-container" id="##codeblock#282">
     <div class="codeblock-header">
         <span class="codeblock-language">python</span>
     </div>
@@ -3797,7 +3977,7 @@ print(f&quot;Sorted array: {sorted_numbers}&quot;)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#236">
+<div class="codeblock-container" id="##codeblock#283">
     <div class="codeblock-header">
         <span class="codeblock-language">r</span>
     </div>
@@ -3903,7 +4083,7 @@ print(predictions)
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#237">
+<div class="codeblock-container" id="##codeblock#284">
     <div class="codeblock-header">
         <span class="codeblock-language">sql</span>
     </div>
@@ -4021,7 +4201,7 @@ ORDER BY segment_revenue DESC;
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#238">
+<div class="codeblock-container" id="##codeblock#285">
     <div class="codeblock-header">
         <span class="codeblock-language">c++</span>
     </div>
@@ -4157,7 +4337,7 @@ int main() {
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#239">
+<div class="codeblock-container" id="##codeblock#286">
     <div class="codeblock-header">
         <span class="codeblock-language">javascript</span>
     </div>
@@ -4304,7 +4484,7 @@ displayTopUsers();
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#240">
+<div class="codeblock-container" id="##codeblock#287">
     <div class="codeblock-header">
         <span class="codeblock-language">rust</span>
     </div>
@@ -4457,7 +4637,7 @@ fn main() {
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#241">
+<div class="codeblock-container" id="##codeblock#288">
     <div class="codeblock-header">
         <span class="codeblock-language">julia</span>
     </div>
@@ -4551,7 +4731,7 @@ end
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#242">
+<div class="codeblock-container" id="##codeblock#289">
     <div class="codeblock-header">
         <span class="codeblock-language">python</span>
     </div>
@@ -4642,7 +4822,7 @@ end
     margin-right: 4px;
 }
 </style>
-<div class="codeblock-container" id="##codeblock#243">
+<div class="codeblock-container" id="##codeblock#290">
     <div class="codeblock-header">
         <span class="codeblock-language">c++</span>
     </div>

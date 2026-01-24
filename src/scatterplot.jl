@@ -12,7 +12,11 @@ Scatter plot with optional marginal distributions and interactive filtering.
 # Keyword Arguments
 - `expression_mode::Bool`: Enable expression input for X axis (default: `false`)
 - `default_x_expr::String`: Default expression for X when expression_mode=true (default: `""`)
-- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `[:color]`)
+- `color_cols`: Columns for color grouping. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
+  (default: `[:color]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -60,7 +64,7 @@ struct ScatterPlot <: JSPlotsType
     function ScatterPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                          expression_mode::Bool=false,
                          default_x_expr::String="",
-                         color_cols::Vector{Symbol}=[:color],
+                         color_cols::ColorColSpec=[:color],
                          filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                          facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                          default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -79,8 +83,14 @@ normalized_filters = normalize_filters(filters, df)
         default_x_col = string(dimensions[1])  # First dimension is default X
         default_y_col = string(dimensions[2])  # Second dimension is default Y
 
-        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
+        # Extract column names and validate they exist
+        color_col_names = extract_color_col_names(color_cols)
+        valid_color_cols = validate_and_filter_columns(color_col_names, df, "color_cols")
         default_color_col = string(valid_color_cols[1])
+        # Build color maps for custom colors (categorical and continuous)
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
         # Point type always uses the same variable as color
         valid_pointtype_cols = valid_color_cols
 
@@ -139,6 +149,10 @@ $options                </select>
             const DEFAULT_X_EXPR = "$escaped_default_expr";
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
+            const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+
+            $JS_COLOR_INTERPOLATION
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
             const buildSymbolMap = (data, col) => {
@@ -176,7 +190,8 @@ $options                </select>
                         marker: {
                             size: $marker_size,
                             opacity: $marker_opacity,
-                            symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]])
+                            symbol: groupInfo.rows.map(d => symbolMap[d[COLOR_COL]]),
+                            color: groupInfo.rows.map(d => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, d[COLOR_COL]))
                         },
                         type: 'scatter'
                     };
@@ -317,6 +332,10 @@ $options                </select>
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
+            const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+
+            $JS_COLOR_INTERPOLATION
 
             const getCol = (id, def) => { const el = document.getElementById(id); return el ? el.value : def; };
             const buildSymbolMap = (data, col) => {
@@ -353,7 +372,8 @@ $options                </select>
                     marker: {
                         size: $marker_size,
                         opacity: $marker_opacity,
-                        symbol: groupData.map(d => symbolMap[d[COLOR_COL]])
+                        symbol: groupData.map(d => symbolMap[d[COLOR_COL]]),
+                        color: groupData.map(d => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, d[COLOR_COL]))
                     },
                     type: 'scatter'
                     };

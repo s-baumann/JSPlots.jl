@@ -22,7 +22,10 @@ then subsequent intervals. Use "Reset" to return to the full view.
   (column, transform) where transform is "cumulative" or "cumprod".
   For "cumprod", values are treated as returns and compounded correctly: cumprod(1+r) - 1.
   (default: `[(:pnl, "cumulative")]`)
-- `color_cols::Vector{Symbol}`: Columns available for color grouping (like strategy name) (default: `Symbol[]`)
+- `color_cols`: Columns for color grouping. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -43,11 +46,11 @@ cc = CumPlot(:strategy_comparison, df, :pnl_data,
     title="Strategy Performance Comparison"
 )
 
-# Multiple metrics with different transforms
-cc = CumPlot(:multi_metric, df, :pnl_data,
+# With custom color mapping for specific values
+cc = CumPlot(:custom_colors, df, :pnl_data,
     x_col=:date,
-    y_transforms=[(:profit_usd, "cumulative"), (:return_pct, "cumprod")],
-    color_cols=[:strategy]
+    y_transforms=[(:daily_pnl, "cumulative")],
+    color_cols=[(:strategy, :default), (:risk_level, Dict(:High => "#ff0000", :Low => "#00ff00"))]
 )
 ```
 """
@@ -59,7 +62,7 @@ struct CumPlot <: JSPlotsType
     function CumPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_col::Symbol=:date,
                             y_transforms::Vector{Tuple{Symbol, String}}=[(:pnl, "cumulative")],
-                            color_cols::Vector{Symbol}=Symbol[],
+                            color_cols::ColorColSpec=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -100,8 +103,8 @@ struct CumPlot <: JSPlotsType
         # Get unique values for each filter column
         filter_options = build_filter_options(normalized_filters, df)
 
-        # Build color maps for all possible color columns that exist
-        color_maps, valid_color_cols = build_color_maps(color_cols, df)
+        # Build color maps for all possible color columns that exist (with optional custom colors)
+        color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
 
         # Build HTML controls using abstraction
         chart_title_str = string(chart_title)
@@ -123,11 +126,14 @@ struct CumPlot <: JSPlotsType
             for (col, transform) in validated_y_transforms
         ], ", ") * "]"
 
-        # Create color maps as nested JavaScript object
+        # Create color maps as nested JavaScript object (categorical)
         color_maps_js = "{" * join([
             "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
             for (col, map) in color_maps
         ], ", ") * "}"
+
+        # Create color scales as nested JavaScript object (continuous)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Default columns
         default_color_col = select_default_column(valid_color_cols, "__no_color__")
@@ -143,7 +149,10 @@ struct CumPlot <: JSPlotsType
             const Y_TRANSFORMS = $y_transforms_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
             const DEFAULT_COLOR_COL = '$default_color_col';
+
+            $JS_COLOR_INTERPOLATION
             const DEFAULT_DURATION_FRACTION = $default_duration_fraction;
             const DEFAULT_STEP_FRACTION = $default_step_fraction;
 
@@ -520,7 +529,7 @@ struct CumPlot <: JSPlotsType
                             legendgroup: groupInfo.color,
                             showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
                             line: {
-                                color: COLOR_MAP[groupInfo.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
                                 width: $line_width
                             },
                             marker: { size: $marker_size },

@@ -11,7 +11,10 @@ Time series or sequential data visualization with interactive filtering.
 # Keyword Arguments
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
-- `color_cols::Vector{Symbol}`: Columns available for color grouping (default: `Symbol[]`)
+- `color_cols`: Columns for color grouping. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
@@ -31,6 +34,13 @@ lc = LineChart(:sales_chart, df, :sales_data,
     color_cols=[:region],
     title="Sales Over Time"
 )
+
+# With custom color mapping
+lc = LineChart(:custom_colors, df, :sales_data,
+    x_cols=[:date],
+    y_cols=[:revenue],
+    color_cols=[(:region, Dict("US" => "#ff0000", "EU" => "#0000ff")), (:product, :default)]
+)
 ```
 """
 struct LineChart <: JSPlotsType
@@ -41,7 +51,7 @@ struct LineChart <: JSPlotsType
     function LineChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             x_cols::Vector{Symbol}=[:x],
                             y_cols::Vector{Symbol}=[:y],
-                            color_cols::Vector{Symbol}=Symbol[],
+                            color_cols::ColorColSpec=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -70,8 +80,8 @@ struct LineChart <: JSPlotsType
         # Get unique values for each filter column
         filter_options = build_filter_options(normalized_filters, df)
 
-        # Build color maps for all possible color columns that exist
-        color_maps, valid_color_cols = build_color_maps(color_cols, df)
+        # Build color maps for all possible color columns that exist (with optional custom colors)
+        color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
         # If no color columns specified or valid, we'll use a default black color for all lines
 
         # Build HTML controls using abstraction
@@ -91,11 +101,14 @@ struct LineChart <: JSPlotsType
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
 
-        # Create color maps as nested JavaScript object
+        # Create color maps as nested JavaScript object (categorical)
         color_maps_js = "{" * join([
             "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
             for (col, map) in color_maps
         ], ", ") * "}"
+
+        # Create color scales as nested JavaScript object (continuous)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Default columns
         default_x_col = string(valid_x_cols[1])
@@ -112,7 +125,10 @@ struct LineChart <: JSPlotsType
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
             const DEFAULT_X_COL = '$default_x_col';
+
+            $JS_COLOR_INTERPOLATION
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
 
@@ -346,7 +362,7 @@ struct LineChart <: JSPlotsType
                             mode: 'lines+markers',
                             name: group.color,
                             line: {
-                                color: COLOR_MAP[group.color] || '#000000',
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                 width: $line_width
                             },
                             marker: { size: $marker_size }
@@ -458,7 +474,7 @@ struct LineChart <: JSPlotsType
                                 xaxis: xaxis,
                                 yaxis: yaxis,
                                 line: {
-                                    color: COLOR_MAP[group.color] || '#000000',
+                                    color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                     width: $line_width
                                 },
                                 marker: { size: $marker_size }
@@ -586,7 +602,7 @@ struct LineChart <: JSPlotsType
                                     xaxis: xaxis,
                                     yaxis: yaxis,
                                     line: {
-                                        color: COLOR_MAP[group.color] || '#000000',
+                                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
                                         width: $line_width
                                     },
                                     marker: { size: $marker_size }

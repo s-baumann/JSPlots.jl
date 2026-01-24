@@ -10,7 +10,9 @@ Distribution visualization combining histogram, box plot, and rug plot.
 
 # Keyword Arguments
 - `value_cols`: Column(s) containing values to plot (default: `:value`)
-- `color_cols`: Column(s) for group comparison and coloring (default: `nothing`)
+- `color_cols::ColorColSpec`: Column(s) for group comparison and coloring. Supports custom color mapping:
+  - `[:col1, :col2]` - columns using default palette
+  - `[(:col1, Dict("A" => "#ff0000", "B" => "#00ff00"))]` - custom categorical colors
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict`: Column => default values. Values can be a single value, vector, or nothing for all values
@@ -42,7 +44,7 @@ struct DistPlot <: JSPlotsType
 
     function DistPlot(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_cols::Vector{Symbol}=[:value],
-                      color_cols::Vector{Symbol}=Symbol[],
+                      color_cols::ColorColSpec=Symbol[],
                       filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       show_histogram::Bool=true,
                       show_box::Bool=true,
@@ -58,12 +60,18 @@ struct DistPlot <: JSPlotsType
 
         # Default selections
         default_value_col = first(value_cols)
-        default_color_col = isempty(color_cols) ? nothing : first(color_cols)
+        color_col_names = extract_color_col_names(color_cols)
+        default_color_col = isempty(color_col_names) ? nothing : first(color_col_names)
+
+        # Build color maps for custom colors
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Generate group column dropdown using html_controls abstraction
         group_dropdown_html, group_dropdown_js = generate_group_column_dropdown_html(
             string(chart_title),
-            color_cols,
+            color_col_names,
             default_color_col,
             "updatePlotWithFilters_$(chart_title)();"
         )
@@ -106,7 +114,7 @@ struct DistPlot <: JSPlotsType
             var currentValueCol = $(length(value_cols) >= 2 ?
                 "document.getElementById('x_col_select_$(chart_title)').value" :
                 "'$(default_value_col)'");
-            var currentGroupCol = $(length(color_cols) >= 2 ?
+            var currentGroupCol = $(length(color_col_names) >= 2 ?
                 "document.getElementById('$(chart_title)_group_selector').value" :
                 (default_color_col !== nothing ? "'$(default_color_col)'" : "null"));
 
@@ -143,6 +151,9 @@ struct DistPlot <: JSPlotsType
                     // Apply axis transformation
                     values = applyAxisTransform(values, X_TRANSFORM);
 
+                    // Get color for this group (custom map or fallback to palette)
+                    var groupColor = getColor(COLOR_MAPS, COLOR_SCALES, currentGroupCol, key, plotlyColors[idx % plotlyColors.length]);
+
                     // Box plot (top portion)
                     if (window.showBox_$(chart_title)) {
                         traces.push({
@@ -153,7 +164,7 @@ struct DistPlot <: JSPlotsType
                             yaxis: 'y2',
                             orientation: 'h',
                             marker: {
-                                color: plotlyColors[idx % plotlyColors.length]
+                                color: groupColor
                             },
                             boxmean: 'sd',
                             opacity: $box_opacity,
@@ -170,7 +181,7 @@ struct DistPlot <: JSPlotsType
                             xaxis: 'x',
                             yaxis: 'y',
                             marker: {
-                                color: plotlyColors[idx % plotlyColors.length]
+                                color: groupColor
                             },
                             opacity: 0.7,
                             nbinsx: currentBins
@@ -188,7 +199,7 @@ struct DistPlot <: JSPlotsType
                             yaxis: 'y3',
                             marker: {
                                 symbol: 'line-ns-open',
-                                color: plotlyColors[idx % plotlyColors.length],
+                                color: groupColor,
                                 size: 8,
                                 line: {
                                     width: 1
@@ -370,6 +381,11 @@ struct DistPlot <: JSPlotsType
                 'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
                 'rgb(23, 190, 207)'
             ];
+
+            // Color maps for custom colors
+            const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+            $JS_COLOR_INTERPOLATION
 
             // Initialize toggle states
             window.showHistogram_$(chart_title) = $(show_histogram ? "true" : "false");

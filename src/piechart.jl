@@ -10,7 +10,11 @@ Pie chart visualization with support for faceting and interactive controls.
 
 # Keyword Arguments
 - `value_cols::Vector{Symbol}`: Columns available for slice sizes (default: `[:value]`)
-- `color_cols::Vector{Symbol}`: Columns available for slice labels/colors (default: `[:label]`)
+- `color_cols`: Columns for slice labels/colors. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
+  (default: `[:label]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -36,7 +40,7 @@ struct PieChart <: JSPlotsType
 
     function PieChart(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                       value_cols::Vector{Symbol}=[:value],
-                      color_cols::Vector{Symbol}=[:label],
+                      color_cols::ColorColSpec=[:label],
                       filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                       default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -50,7 +54,8 @@ normalized_filters = normalize_filters(filters, df)
 
         # Validate columns exist in dataframe
         valid_value_cols = validate_and_filter_columns(value_cols, df, "value_cols")
-        valid_color_cols = validate_and_filter_columns(color_cols, df, "color_cols")
+        color_col_names = extract_color_col_names(color_cols)
+        valid_color_cols = validate_and_filter_columns(color_col_names, df, "color_cols")
 
         # Validate hole parameter
         if hole < 0.0 || hole >= 1.0
@@ -64,7 +69,9 @@ normalized_filters = normalize_filters(filters, df)
         filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible color columns
-        color_maps, _ = build_color_maps(valid_color_cols, df)
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Build filter dropdowns using html_controls abstraction
         chart_title_str = string(chart_title)
@@ -114,11 +121,6 @@ normalized_filters = normalize_filters(filters, df)
         value_cols_js = build_js_array(valid_value_cols)
         color_cols_js = build_js_array(valid_color_cols)
 
-        # Create color maps as nested JavaScript object
-        color_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in color_maps
-        ], ", ") * "}"
 
         # Build appearance HTML using html_controls abstraction
         controls = ChartHtmlControls(
@@ -144,6 +146,8 @@ normalized_filters = normalize_filters(filters, df)
             const VALUE_COLS = $value_cols_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+            $JS_COLOR_INTERPOLATION
             const DEFAULT_VALUE_COL = '$default_value_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
             const HOLE = $(hole);
@@ -181,8 +185,6 @@ normalized_filters = normalize_filters(filters, df)
                 const colorColSelect = document.getElementById('color_col_select_$chart_title');
                 const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-                // Get color map for current color selection
-                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 // Get categorical filter values (multiple selections)
                 const filters = {};
@@ -226,7 +228,7 @@ normalized_filters = normalize_filters(filters, df)
                     const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
                     const labels = Object.keys(aggregated);
                     const values = Object.values(aggregated);
-                    const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+                    const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
                     const trace = {
                         type: 'pie',
@@ -262,7 +264,7 @@ normalized_filters = normalize_filters(filters, df)
                         const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
                         const labels = Object.keys(aggregated);
                         const values = Object.values(aggregated);
-                        const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+                        const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
                         const row = Math.floor(i / nCols);
                         const col = i % nCols;
@@ -330,7 +332,7 @@ normalized_filters = normalize_filters(filters, df)
                                 const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
                                 const labels = Object.keys(aggregated);
                                 const values = Object.values(aggregated);
-                                const colors = labels.map(label => COLOR_MAP[label] || '#808080');
+                                const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
 
                                 const domain = {
                                     x: [c / nCols + 0.01, (c + 1) / nCols - 0.01],

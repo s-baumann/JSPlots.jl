@@ -16,7 +16,11 @@ or other sequences.
 - `x_cols::Vector{Symbol}`: Columns available for x-axis (default: `[:x]`)
 - `y_cols::Vector{Symbol}`: Columns available for y-axis (default: `[:y]`)
 - `order_col::Symbol`: Column determining the order of points along the path (default: `:order`)
-- `color_cols::Vector{Symbol}`: Columns available for color grouping/paths (default: `Symbol[]`)
+- `color_cols`: Columns for color grouping/paths. Can be:
+  - `Vector{Symbol}`: `[:col1, :col2]` - uses default palette
+  - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
+  - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
+  (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
@@ -61,7 +65,7 @@ struct Path <: JSPlotsType
                   x_cols::Vector{Symbol}=[:x],
                   y_cols::Vector{Symbol}=[:y],
                   order_col::Symbol=:order,
-                  color_cols::Vector{Symbol}=Symbol[],
+                  color_cols::ColorColSpec=Symbol[],
                   filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                   facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                   default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
@@ -87,7 +91,11 @@ normalized_filters = normalize_filters(filters, df)
         filter_options = build_filter_options(normalized_filters, df)
 
         # Build color maps for all possible color columns that exist
-        color_maps, valid_color_cols = build_color_maps(color_cols, df)
+        color_col_names = extract_color_col_names(color_cols)
+        valid_color_cols = isempty(color_col_names) ? Symbol[] : validate_and_filter_columns(color_col_names, df, "color_cols")
+        color_maps, color_scales, _ = build_color_maps_extended(color_cols, df)
+        color_maps_js = JSON.json(color_maps)
+        color_scales_js = build_color_scales_js(color_scales)
 
         # Build HTML controls using abstraction
         chart_title_str = string(chart_title)
@@ -106,11 +114,6 @@ normalized_filters = normalize_filters(filters, df)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
 
-        # Create color maps as nested JavaScript object
-        color_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in color_maps
-        ], ", ") * "}"
 
         # Default columns
         default_x_col = string(valid_x_cols[1])
@@ -126,6 +129,8 @@ normalized_filters = normalize_filters(filters, df)
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
+            const COLOR_SCALES = $color_scales_js;
+            $JS_COLOR_INTERPOLATION
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
@@ -210,8 +215,6 @@ normalized_filters = normalize_filters(filters, df)
                 if (facet1) FACET_COLS.push(facet1);
                 if (facet2) FACET_COLS.push(facet2);
 
-                // Get color map for current selection
-                const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
                 // Apply filters with observation counting (centralized function)
                 const filteredData = applyFiltersWithCounting(
@@ -261,7 +264,7 @@ normalized_filters = normalize_filters(filters, df)
                         xValues = applyAxisTransform(xValues, X_TRANSFORM);
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
 
-                        const baseColor = COLOR_MAP[group.color] || '#000000';
+                        const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                         const markerOpacity = getAlphaValues(xValues.length);
 
                         const markerConfig = {
@@ -425,7 +428,7 @@ normalized_filters = normalize_filters(filters, df)
 
                             const legendGroup = group.color;
 
-                            const baseColor = COLOR_MAP[group.color] || '#000000';
+                            const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                             const markerOpacity = getAlphaValues(xValues.length);
 
                             const markerConfig = {
@@ -614,7 +617,7 @@ normalized_filters = normalize_filters(filters, df)
 
                                 const legendGroup = group.color;
 
-                                const baseColor = COLOR_MAP[group.color] || '#000000';
+                                const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
                                 const markerOpacity = getAlphaValues(xValues.length);
 
                                 const markerConfig = {

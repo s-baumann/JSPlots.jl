@@ -226,6 +226,69 @@ console.log('Parquet-wasm library loaded successfully');
         return valid_cols
     end
 
+    # Type alias for color column specification with optional custom color maps
+    # Can be either:
+    # - Vector{Symbol}: [:col1, :col2] - uses default palette for all (categorical)
+    # - Vector of tuples: [(:col1, :default), (:col2, Dict(:val1 => "#hex1"))] - categorical with custom
+    # - Vector of tuples with numeric keys: [(:col1, Dict(0 => "#000", 1 => "#fff"))] - continuous interpolation
+    const ColorColSpec = Union{
+        Vector{Symbol},
+        Vector{<:Tuple{Symbol, Any}}
+    }
+
+    """
+        normalize_color_cols(color_cols::ColorColSpec)
+
+    Normalize color column specification to a standard Vector of (column, colormap_spec) tuples.
+
+    # Input formats
+    - `Vector{Symbol}`: [:col1, :col2] → [(:col1, :default), (:col2, :default)]
+    - `Vector{Tuple}`: [(:col1, :default), (:col2, Dict(...))] → unchanged
+
+    # Examples
+    ```julia
+    normalize_color_cols([:species, :region])
+    # Returns: [(:species, :default), (:region, :default)]
+
+    normalize_color_cols([(:species, :default), (:region, Dict("US" => "#ff0000"))])
+    # Returns: [(:species, :default), (:region, Dict("US" => "#ff0000"))]
+    ```
+    """
+    function normalize_color_cols(color_cols::Vector{Symbol})
+        return [(col, :default) for col in color_cols]
+    end
+
+    function normalize_color_cols(color_cols::Vector{<:Tuple{Symbol, Any}})
+        return color_cols
+    end
+
+    """
+        extract_color_col_names(color_cols::ColorColSpec)
+
+    Extract just the column names from a ColorColSpec, returning a Vector{Symbol}.
+    Useful for validating columns exist in a DataFrame.
+    """
+    function extract_color_col_names(color_cols::Vector{Symbol})
+        return color_cols
+    end
+
+    function extract_color_col_names(color_cols::Vector{<:Tuple{Symbol, Any}})
+        return [col for (col, _) in color_cols]
+    end
+
+    """
+        is_continuous_color_spec(color_spec::Dict)
+
+    Check if a color specification Dict represents a continuous color scale (numeric keys).
+    Returns true if all keys are numeric (Int, Float64, etc.).
+    """
+    function is_continuous_color_spec(color_spec::Dict)
+        isempty(color_spec) && return false
+        all(k -> k isa Number, keys(color_spec))
+    end
+
+    is_continuous_color_spec(::Any) = false
+
     """
         build_color_maps(cols::Vector{Symbol}, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
 
@@ -265,6 +328,176 @@ console.log('Parquet-wasm library loaded successfully');
 
         return color_maps, valid_cols
     end
+
+    """
+        build_color_maps_extended(color_cols::ColorColSpec, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
+
+    Build color maps for columns with support for custom color mappings and continuous color scales.
+
+    # Arguments
+    - `color_cols`: Color column specification - either Vector{Symbol} or Vector of (col, spec) tuples
+      where spec is either:
+      - `:default` - use default palette (categorical)
+      - `Dict{String/Symbol => color}` - categorical with custom colors
+      - `Dict{Number => color}` - continuous with interpolation between color stops
+    - `df::DataFrame`: DataFrame containing the columns
+    - `palette`: Vector of color hex codes for :default columns (default: DEFAULT_COLOR_PALETTE)
+
+    # Returns
+    - `color_maps`: Dict for categorical columns (column name => value => color)
+    - `color_scales`: Dict for continuous columns (column name => sorted list of {value, color} stops)
+    - `valid_cols`: Vector of column names that existed in df
+
+    # Examples
+    ```julia
+    # Using default palette (categorical)
+    color_maps, color_scales, valid_cols = build_color_maps_extended([:species, :region], df)
+
+    # With custom categorical colors
+    color_maps, color_scales, valid_cols = build_color_maps_extended([
+        (:species, :default),
+        (:region, Dict(:US => "#ff0000", :EU => "#00ff00"))
+    ], df)
+
+    # With continuous color scale (interpolates between stops)
+    color_maps, color_scales, valid_cols = build_color_maps_extended([
+        (:temperature, Dict(0 => "#0000ff", 50 => "#ffffff", 100 => "#ff0000"))
+    ], df)
+    ```
+    """
+    function build_color_maps_extended(color_cols::ColorColSpec, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
+        normalized = normalize_color_cols(color_cols)
+        available_cols = Set(names(df))
+        color_maps = Dict{String, Dict{String, String}}()
+        color_scales = Dict{String, Vector{Dict{String, Any}}}()
+        valid_cols = Symbol[]
+
+        for (col, color_spec) in normalized
+            if string(col) in available_cols
+                push!(valid_cols, col)
+                unique_vals = unique(df[!, col])
+
+                if color_spec === :default
+                    # Use default palette (categorical)
+                    color_maps[string(col)] = Dict{String, String}(
+                        string(key) => palette[(i - 1) % length(palette) + 1]
+                        for (i, key) in enumerate(unique_vals)
+                    )
+                elseif is_continuous_color_spec(color_spec)
+                    # Continuous color scale - store sorted stops for interpolation
+                    stops = sort(collect(color_spec), by=x->x[1])
+                    color_scales[string(col)] = [
+                        Dict{String, Any}("value" => Float64(k), "color" => string(v))
+                        for (k, v) in stops
+                    ]
+                else
+                    # Categorical with custom color mapping, with fallback to palette for unmapped values
+                    custom_map = Dict{String, String}()
+                    palette_idx = 1
+                    for val in unique_vals
+                        val_str = string(val)
+                        # Check for matching key in custom mapping (try both symbol and original type)
+                        if haskey(color_spec, val)
+                            custom_map[val_str] = string(color_spec[val])
+                        elseif haskey(color_spec, Symbol(val_str))
+                            custom_map[val_str] = string(color_spec[Symbol(val_str)])
+                        elseif haskey(color_spec, val_str)
+                            custom_map[val_str] = string(color_spec[val_str])
+                        else
+                            # Fallback to palette for unmapped values
+                            custom_map[val_str] = palette[(palette_idx - 1) % length(palette) + 1]
+                            palette_idx += 1
+                        end
+                    end
+                    color_maps[string(col)] = custom_map
+                end
+            end
+        end
+
+        return color_maps, color_scales, valid_cols
+    end
+
+    """
+        build_color_scales_js(color_scales::Dict{String, Vector{Dict{String, Any}}})
+
+    Build JavaScript object string for continuous color scales.
+    """
+    function build_color_scales_js(color_scales::Dict{String, Vector{Dict{String, Any}}})
+        if isempty(color_scales)
+            return "{}"
+        end
+        entries = String[]
+        for (col, stops) in color_scales
+            stops_js = "[" * join([
+                "{value: $(s["value"]), color: '$(s["color"])'}"
+                for s in stops
+            ], ", ") * "]"
+            push!(entries, "'$col': $stops_js")
+        end
+        return "{" * join(entries, ", ") * "}"
+    end
+
+    # JavaScript helper function for color interpolation (to be included in charts that need it)
+    const JS_COLOR_INTERPOLATION = """
+    // Interpolate color for continuous color scales
+    function interpolateColor(stops, value) {
+        if (!stops || stops.length === 0) return '#000000';
+        if (stops.length === 1) return stops[0].color;
+
+        // Clamp to range
+        if (value <= stops[0].value) return stops[0].color;
+        if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+        // Find surrounding stops
+        for (let i = 0; i < stops.length - 1; i++) {
+            if (value >= stops[i].value && value <= stops[i + 1].value) {
+                const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+                return lerpColor(stops[i].color, stops[i + 1].color, t);
+            }
+        }
+        return stops[stops.length - 1].color;
+    }
+
+    // Linear interpolation between two hex colors
+    function lerpColor(color1, color2, t) {
+        const c1 = hexToRgb(color1);
+        const c2 = hexToRgb(color2);
+        if (!c1 || !c2) return color1;
+
+        const r = Math.round(c1.r + (c2.r - c1.r) * t);
+        const g = Math.round(c1.g + (c2.g - c1.g) * t);
+        const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+        return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+
+    // Convert hex color to RGB object
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})\$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : null;
+    }
+
+    // Get color for a value, handling both categorical and continuous
+    function getColor(colorMaps, colorScales, colorCol, value) {
+        // Check categorical first
+        if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+            return colorMaps[colorCol][String(value)];
+        }
+        // Check continuous
+        if (colorScales[colorCol]) {
+            const numVal = parseFloat(value);
+            if (!isNaN(numVal)) {
+                return interpolateColor(colorScales[colorCol], numVal);
+            }
+        }
+        // Fallback
+        return '#000000';
+    }
+    """
 
     """
         normalize_filters(filters::Union{Vector{Symbol}, Dict}, df::DataFrame)
@@ -431,6 +664,7 @@ console.log('Parquet-wasm library loaded successfully');
 
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
     export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column, is_continuous_column
+    export ColorColSpec, normalize_color_cols, extract_color_col_names, build_color_maps_extended, build_color_scales_js, JS_COLOR_INTERPOLATION, is_continuous_color_spec
 
     get_filter_vars(filters::Vector{Symbol}) = filters
     get_filter_vars(filters::Dict) = Symbol.(keys(filters))

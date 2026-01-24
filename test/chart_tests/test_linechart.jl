@@ -406,4 +406,54 @@ include("test_data.jl")
             @test occursin(string(size), chart.functional_html)
         end
     end
+
+    @testset "Custom color maps" begin
+        # test_df has categories A and B
+        chart = LineChart(:custom_colors, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = [(:category, Dict("A" => "#ff0000", "B" => "#00ff00"))]
+        )
+        @test occursin("#ff0000", chart.functional_html)
+        @test occursin("#00ff00", chart.functional_html)
+    end
+
+    @testset "Mixed color specs (:default and custom)" begin
+        df = DataFrame(
+            x = 1:30,
+            y = randn(30),
+            category = repeat(["A", "B", "C"], 10),
+            region = repeat(["US", "EU"], 15)
+        )
+        chart = LineChart(:mixed_colors, df, :df;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = [(:category, :default), (:region, Dict("US" => "#ff0000", "EU" => "#0000ff"))]
+        )
+        @test occursin("category", chart.functional_html)
+        @test occursin("region", chart.functional_html)
+        @test occursin("#ff0000", chart.functional_html)
+        @test occursin("#0000ff", chart.functional_html)
+    end
+
+    @testset "Legacy Vector{Symbol} format still works" begin
+        chart = LineChart(:legacy_format, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = [:category]
+        )
+        @test occursin("category", chart.functional_html)
+        @test chart.chart_title == :legacy_format
+    end
+
+    @testset "Custom color with partial mapping (fallback to default)" begin
+        chart = LineChart(:partial_colors, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            color_cols = [(:category, Dict("A" => "#ff0000"))]  # Only A is mapped
+        )
+        @test occursin("#ff0000", chart.functional_html)
+        # B and C should get default palette colors
+        @test occursin("category", chart.functional_html)
+    end
 end
