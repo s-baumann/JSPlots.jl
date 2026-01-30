@@ -16,6 +16,9 @@ Three-dimensional scatter plot with PCA eigenvectors and interactive filtering.
   - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
   (default: `[:color]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_eigenvectors::Bool`: Display PCA eigenvectors (default: `true`)
@@ -44,6 +47,7 @@ struct Scatter3D <: JSPlotsType
     function Scatter3D(chart_title::Symbol, df::DataFrame, data_label::Symbol, dimensions::Vector{Symbol};
                           color_cols::ColorColSpec=[:color],
                           filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                          choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                           facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                           show_eigenvectors::Bool=true,
@@ -53,8 +57,9 @@ struct Scatter3D <: JSPlotsType
                           title::String="3D Scatter Plot",
                           notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Any} format
+# Normalize filters and choices to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
+normalized_choices = normalize_choices(choices, df)
 
         # Sanitize chart_title for use in JavaScript function names
         chart_title_safe = sanitize_chart_title(chart_title)
@@ -89,7 +94,9 @@ normalized_filters = normalize_filters(filters, df)
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title_safe)()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(string(chart_title_safe), normalized_choices, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") * join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
+        choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
 
         # Helper function to build dropdown HTML
         build_dropdown(id, label, cols, default_value, onchange_fn) = begin
@@ -147,8 +154,10 @@ $style_html        </div>
             "updatePlotWithFilters_$chart_title()"
         )
 
-        # Generate filter controls JS array
+        # Generate filter controls JS arrays
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        choice_cols = collect(keys(normalized_choices))
+        choice_filters_js = build_js_array(choice_cols)
 
 
         functional_html = """
@@ -157,6 +166,7 @@ $style_html        </div>
             window.sharedCamera_$(chart_title_safe) = $(shared_camera ? "true" : "false");
             window.currentCamera_$(chart_title_safe) = null;
             const FILTER_COLS = $filter_cols_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_Z_COL = '$default_z_col';
@@ -752,6 +762,15 @@ $style_html        </div>
                 const Y_TRANSFORM = getCol('y_transform_select_$(chart_title_safe)', 'identity');
                 const Z_TRANSFORM = getCol('z_transform_select_$(chart_title_safe)', 'identity');
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$(chart_title_safe)');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get filter values (multiple selections)
                 const filters = {};
                 FILTER_COLS.forEach(col => {
@@ -767,8 +786,15 @@ $style_html        </div>
                 const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
                 const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
 
-                // Filter data (support multiple selections per filter)
+                // Filter data (support multiple selections per filter and choice filters)
                 const filteredData = window.allData_$(chart_title_safe).filter(row => {
+                    // Apply choice filters first (single-select)
+                    for (let col in choices) {
+                        if (choices[col] && String(row[col]) !== choices[col]) {
+                            return false;
+                        }
+                    }
+                    // Apply multi-select filters
                     for (let col in filters) {
                         const selectedValues = filters[col];
                         if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
@@ -814,6 +840,7 @@ $style_html        </div>
             title,
             notes,
             string(chart_title_safe);
+            choices_html=choices_html,
             aspect_ratio_default=1.0
         )
 

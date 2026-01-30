@@ -285,7 +285,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -296,6 +297,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {

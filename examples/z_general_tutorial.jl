@@ -646,13 +646,15 @@ od["3D Plots"] = [
     ("ScatterSurface3D", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/scattersurface3d_example.html", "3D scatter with fitted surfaces")]
 od["Variable Relationships"] = [("CorrPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html", "Make correlation plots with hierarchical clustering dendrograms showing Pearson and Spearman correlations."),
     ("Graph", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html", "Network graphs showing relationships between entities with adjustable cutoffs and layouts"),
-    ("TSNEPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html", "Interactive t-SNE dimensionality reduction with feature selection and configurable parameters")]
+    ("TSNEPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html", "Interactive t-SNE dimensionality reduction with feature selection and configurable parameters"),
+    ("LocalGaussianCorrelationPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples.html", "Visualize how correlation varies across the joint distribution using Local Gaussian Correlation")]
 od["Situational Charts"] = [
     ("Waterfall", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/waterfall_examples.html", "Make Waterfall plots showing how positive and negative elements add up to an aggregate."),
     ("SanKey", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html", "Make SanKey plots showing how individuals change affiliation over multiple waves."),
     ("BumpChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html", "Rankings over time with dense ranking and cross-facet highlighting")]
 od["Financial Charts"] = [
-    ("CandlestickChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html", "Candlestick candlestick charts with volume, renormalization, and time range controls")]
+    ("CandlestickChart", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html", "Candlestick candlestick charts with volume, renormalization, and time range controls"),
+    ("DrawdownPlot", "https://s-baumann.github.io/JSPlots.jl/dev/examples_html/drawdownplot_examples.html", "Drawdown visualization from peak cumulative performance with day-of-week filtering")]
 
 
 linklist_chart = LinkList(od, chart_title=:links, notes = "A LinkList shows you a list of links with optional descriptions. These are automatically generated if you make a Pages struct where there is a LinkList on the top page with links to the others. You can also make your own. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linklist_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LinkList examples</a>")
@@ -971,6 +973,22 @@ tsne_chart = TSNEPlot(:stock_tsne, tsne_stock_data, :tsne_stock_data;
     notes = "TSNEPlot performs t-SNE dimensionality reduction entirely in the browser. This example shows 10 stocks positioned by similarity across 6 statistical features. <strong>Key Features:</strong> Interactive feature selection (Available/Selected lists let you choose which variables define similarity), Rescaling options (None, Z-score, Z-score capped, Quantile), Configurable early exaggeration (iterations and factor), Three step modes: 'Step (small)' for single non-exaggerated steps, 'Exaggerated Step' for large movements, 'Run to Convergence' for automatic optimization. You can drag nodes to manually reposition them and resume iteration. Color by sector to see if similar stocks cluster together. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for TSNEPlot examples</a>"
 )
 
+# LocalGaussianCorrelationPlot - Show how correlation varies across the return distribution
+# Create data showing pairs of stock returns
+lgc_stock_data = DataFrame(
+    AAPL_return = df_stocks[!, :AAPL],
+    MSFT_return = df_stocks[!, :MSFT],
+    JPM_return = df_stocks[!, :JPM],
+    JNJ_return = df_stocks[!, :JNJ]
+)
+
+lgc_chart = LocalGaussianCorrelationPlot(:stock_lgc, lgc_stock_data, :lgc_stock_data;
+    dimensions = [:AAPL_return, :MSFT_return, :JPM_return, :JNJ_return],
+    grid_size = 25,
+    title = "Local Gaussian Correlation Between Stock Returns",
+    notes = "LocalGaussianCorrelationPlot visualizes how correlation between two variables changes across their joint distribution. Unlike global correlation (a single number), this shows that stocks might be more correlated during extreme moves than during normal trading. The <strong>heatmap</strong> shows local correlation at each point (blue = positive, red = negative). The <strong>green line</strong> (right) shows average correlation at each Y value. The <strong>red line</strong> (bottom) shows average correlation at each X value. <strong>Try this:</strong> Change X and Y to compare different stock pairs. Use transforms like z_score or quantile to see correlation structure at different scales. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LocalGaussianCorrelationPlot examples</a>"
+)
+
 # ===== Financial Charts =====
 financial_section = TextBlock("<h1>Financial Charts</h1>")
 
@@ -1137,6 +1155,49 @@ execution_plot = ExecutionPlot(:execution_analysis, exec_data_tutorial, :exec_da
 
 # Get the prepared data for the page
 exec_data_dict = get_execution_data_dict(execution_plot)
+
+# DrawdownPlot - Strategy Drawdown Analysis
+# Generate strategy PnL data
+rng_dd = StableRNG(321)
+drawdown_dates = Date(2023, 1, 1):Day(1):Date(2024, 6, 30)
+n_dd_days = length(drawdown_dates)
+drawdown_strategies = ["Momentum", "Value", "Carry", "Trend"]
+
+drawdown_parts = DataFrame[]
+for (idx, strat) in enumerate(drawdown_strategies)
+    base_return = randn(rng_dd) * 0.0002
+    volatility = 0.008 + rand(rng_dd) * 0.012
+
+    daily_pnl = base_return .+ volatility .* randn(rng_dd, n_dd_days)
+    daily_return = 1 .+ daily_pnl  # For cumprod
+
+    # Add some drawdown events
+    if idx == 1  # Momentum - significant drawdown in Q2 2023
+        daily_pnl[120:180] .-= 0.015
+    elseif idx == 2  # Value - prolonged drawdown late 2023
+        daily_pnl[280:350] .-= 0.008
+    end
+
+    push!(drawdown_parts, DataFrame(
+        date = drawdown_dates,
+        daily_pnl = daily_pnl,
+        daily_return = daily_return,
+        strategy = fill(strat, n_dd_days),
+        style = fill(idx <= 2 ? "Factor" : "Alternative", n_dd_days),
+        day_of_week = dayname.(drawdown_dates)
+    ))
+end
+drawdown_df = reduce(vcat, drawdown_parts)
+
+drawdown_chart = DrawdownPlot(:strategy_drawdown, drawdown_df, :drawdown_data;
+    x_col = :date,
+    y_transforms = [(:daily_pnl, "cumulative"), (:daily_return, "cumprod")],
+    color_cols = [(:strategy, :default), (:style, Dict("Factor" => "#3498db", "Alternative" => "#e74c3c"))],
+    filters = [:day_of_week, :style],
+    facet_cols = [:style],
+    title = "Strategy Drawdown Analysis",
+    notes = "DrawdownPlot visualizes strategy drawdowns from peak cumulative performance. Lines are at zero when at new highs, negative when in drawdown. <strong>Key Features:</strong> Use 'Metric' dropdown to switch between cumulative PnL and wealth (cumprod) drawdowns, hover to see maximum drawdown for the visible window, filter by day of week to analyze day-specific effects (recalculates max drawdown), facet by style to compare Factor vs Alternative, Step Forward/Back to analyze drawdowns in specific periods. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/drawdownplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for DrawdownPlot examples</a>"
+)
 
 # Waterfall
 # Create waterfall data showing profit breakdown
@@ -1808,9 +1869,11 @@ all_data = Dict{Symbol, Any}(
     :boxwhiskers_data => boxwhiskers_data,
     :stock_corr_data => stock_corr_data,
     :tsne_stock_data => tsne_stock_data,
+    :lgc_stock_data => lgc_stock_data,
     :cities_geo_data => cities_geo_df,
     :countries_geo_data => countries_geo_df,
-    :strategy_data => strategy_df
+    :strategy_data => strategy_df,
+    :drawdown_data => drawdown_df
 )
 
 # Merge execution data into all_data
@@ -1878,10 +1941,10 @@ images_page =  JSPlotPage(
 
 variable_relationships_page =  JSPlotPage(
     all_data,
-    [corrplot5, graph_stock, tsne_chart],
+    [corrplot5, graph_stock, tsne_chart, lgc_chart],
     tab_title="Variable Relationship Charts",
     page_header = "Variable Relationship Charts",
-    notes = "This shows examples of CorrPlot, Graph, and TSNEPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network. TSNEPlot performs t-SNE dimensionality reduction in the browser, letting you interactively explore which features drive similarity between entities.",
+    notes = "This shows examples of CorrPlot, Graph, TSNEPlot, and LocalGaussianCorrelationPlot. CorrPlot displays correlation matrices with hierarchical clustering dendrograms. Graph visualizes correlations as a network. TSNEPlot performs t-SNE dimensionality reduction in the browser. LocalGaussianCorrelationPlot shows how correlation varies across the joint distribution of two variables.",
     dataformat = :parquet
 )
 
@@ -1897,10 +1960,10 @@ situational_plot_page =  JSPlotPage(
 
 financial_plot_page =  JSPlotPage(
     all_data,
-    [financial_section, candlestick_chart, execution_plot],
+    [financial_section, candlestick_chart, execution_plot, drawdown_chart],
     tab_title="Financial Charts",
     page_header = "Financial Charts",
-    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology.",
+    notes = "This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology. DrawdownPlot visualizes strategy drawdowns from peak performance with day-of-week filtering.",
     dataformat = :parquet
 )
 

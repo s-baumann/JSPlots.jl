@@ -147,6 +147,25 @@ chart5 = AreaChart(:filtered_area, df5, :channel_revenue;
     notes = "Continuous date axis with interactive filters. Select different years and regions to update the view."
 )
 
+# Example 5b: Using choices (single-select) instead of filters (multi-select)
+# Choices enforce that exactly ONE value is selected at a time
+chart5b = AreaChart(:choice_area, df5, :channel_revenue;
+    x_cols = [:Date],
+    y_cols = [:Revenue],
+    color_cols = [:Channel],
+    choices = Dict{Symbol,Any}(:Year => 2024),  # Single-select: user picks ONE year
+    filters = Dict{Symbol,Any}(:Region => ["North", "South"]),  # Multi-select: user can pick multiple regions
+    stack_mode = "stack",
+    title = "Example 5b: Revenue by Channel with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **Year (choice)**: Single-select dropdown - pick exactly ONE year at a time
+    - **Region (filter)**: Multi-select dropdown - can select multiple regions
+
+    Use choices when the user must select exactly one option (like choosing a specific year to analyze).
+    """
+)
+
 # Example 6: Facet Wrap (1 facet variable) - Continuous
 df6 = DataFrame()
 metrics = ["Metric A", "Metric B", "Metric C", "Metric D"]
@@ -481,7 +500,7 @@ page = JSPlotPage(
         :comparison_data => df12,
         :regional => regional_data  # Struct with monthly_sales and quarterly_summary
     ),
-    [header, chart1, chart2, chart3, chart4, chart5, chart6, chart7, chart8,
+    [header, chart1, chart2, chart3, chart4, chart5, chart5b, chart6, chart7, chart8,
      comparison_header, chart9a, chart9b, chart9c,
      dynamic_x_header, chart10,
      dodge_header, chart11,
@@ -508,6 +527,7 @@ println("  • Unstacked overlapping areas (continuous numeric)")
 println("  • Normalized stacking (percentage)")
 println("  • Discrete/categorical areas (stacked bars)")
 println("  • Interactive filters with date axis")
+println("  • Choices (single-select) vs filters (multi-select)")
 println("  • Facet wrap (1 variable)")
 println("  • Facet grid (2 variables)")
 println("  • Dynamic controls (grouping, stacking, faceting)")

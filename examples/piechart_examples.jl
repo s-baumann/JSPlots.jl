@@ -75,6 +75,23 @@ pie3 = PieChart(:sales_filtered, sales_df, :sales_data;
     notes = "Interactive filters allow you to select different regions and years. Try selecting multiple options!"
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+# Choices enforce that exactly ONE value is selected at a time
+pie3b = PieChart(:sales_choice, sales_df, :sales_data;
+    value_cols = [:sales],
+    color_cols = [:product],
+    choices = Dict{Symbol,Any}(:year => 2024),  # Single-select: user picks ONE year
+    filters = Dict{Symbol,Any}(:region => ["North", "South"]),  # Multi-select: user can pick multiple regions
+    title = "Example 3b: Product Sales with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **year (choice)**: Single-select dropdown - pick exactly ONE year at a time
+    - **region (filter)**: Multi-select dropdown - can select multiple regions
+
+    Use choices when the user must select exactly one option (like choosing a specific year to analyze).
+    """
+)
+
 # Example 4: Facet Wrap (1 variable) - Sales by Region
 pie4 = PieChart(:sales_by_region, sales_df, :sales_data;
     value_cols = [:sales],
@@ -316,7 +333,7 @@ page = JSPlotPage(
         :comprehensive_data => comprehensive_df,
         :company => company_data  # Struct with revenue and employees
     ),
-    [header, pie1, pie2, pie3, pie4, pie5, pie6, pie7, pie8, pie9, pie10, struct_intro, pie11, conclusion],
+    [header, pie1, pie2, pie3, pie3b, pie4, pie5, pie6, pie7, pie8, pie9, pie10, struct_intro, pie11, conclusion],
     tab_title = "PieChart Examples"
 )
 
@@ -335,6 +352,7 @@ println("\nThis page includes:")
 println("  • Basic pie chart with variable selection")
 println("  • Donut chart (with hole parameter)")
 println("  • Interactive filters (now working!)")
+println("  • Choices (single-select) vs filters (multi-select)")
 println("  • Facet wrap (1 variable) - single dropdown")
 println("  • Facet grid (2 variables)")
 println("  • Multiple value and label column selection")

@@ -125,6 +125,32 @@ ribbon1 = SanKey(:voters, df_voters, :voter_data;
 
 
 # =============================================================================
+# Example 1b: Choices vs Filters
+# =============================================================================
+
+example1b_text = TextBlock("""
+<h2>Example 1b: Choices vs Filters</h2>
+<p>Demonstrates the difference between choices (single-select) and filters (multi-select).</p>
+""")
+
+ribbon1b = SanKey(:voters_choices, df_voters, :voter_data;
+    id_col = :voter_id,
+    time_col = :year,
+    color_cols = [:party, :employment],
+    value_cols = [:count, :turnout_weighted],
+    choices = Dict{Symbol,Any}(:region => "Northeast"),  # Single-select: user picks ONE region
+    filters = Dict{Symbol,Any}(:age_group => ["18-29", "30-44", "45-64", "65+"]),  # Multi-select: can select multiple age groups
+    title = "Voter Transitions (Single-Select Region)",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **Region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+    - **Age Group (filter)**: Multi-select dropdown - can select multiple age groups
+
+    Use choices when the user must select exactly one option (like comparing transitions region by region).
+    """
+)
+
+# =============================================================================
 # Example 2: Budget Flow Tracking
 # =============================================================================
 
@@ -346,7 +372,7 @@ page = JSPlotPage(
         :voter_data => df_voters,
         :shopkeeper_budget => shopkeeper_budget
     ),
-    [header, example1_text, ribbon1, example2_text, ribbon2, summary];
+    [header, example1_text, ribbon1, example1b_text, ribbon1b, example2_text, ribbon2, summary];
     dataformat=:csv_embedded
 )
 

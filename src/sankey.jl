@@ -14,6 +14,9 @@ Create an interactive Sankey diagram (alluvial diagram) showing flows between gr
 - `color_cols::Vector{Symbol}`: Column(s) for group affiliation (required). If multiple columns provided, a dropdown allows switching between them.
 - `value_cols::Vector{Symbol}`: Column(s) for weighting flows (default: equal weighting = empty vector). If multiple columns provided, a dropdown allows switching between them.
 - `filters::Union{Vector{Symbol}, Dict}`: Filter columns (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `title::String`: Chart title (default: `"Sankey Diagram"`)
 - `notes::String`: Descriptive text (default: `""`)
 
@@ -62,6 +65,7 @@ struct SanKey <: JSPlotsType
                         color_cols::Vector{Symbol},
                         value_cols::Vector{Symbol} = Symbol[],
                         filters::Union{Vector{Symbol}, Dict} = Dict{Symbol,Any}(),
+                        choices::Union{Vector{Symbol}, Dict} = Dict{Symbol, Any}(),
                         title::String = "Sankey Diagram",
                         notes::String = "")
 
@@ -95,19 +99,23 @@ struct SanKey <: JSPlotsType
         default_color_col = color_cols[1]
         default_value_col = isempty(value_cols) ? :count : value_cols[1]
 
-        # Normalize filters
+        # Normalize filters and choices
         normalized_filters = normalize_filters(filters, df_work)
+        normalized_choices = normalize_choices(choices, df_work)
 
         # Build filter controls
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df_work, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df_work, update_function)
 
-        # Separate categorical and continuous filters for JavaScript
+        # Separate categorical, continuous, and choice filters for JavaScript
         categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
         continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        choice_cols = collect(keys(normalized_choices))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
 
         # Build color column dropdown if multiple provided
         color_col_dropdown = if length(color_cols) > 1
@@ -145,6 +153,7 @@ struct SanKey <: JSPlotsType
             chart_title_str,
             chart_title_str,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             vcat(color_col_dropdown, value_col_dropdown),
@@ -177,6 +186,7 @@ struct SanKey <: JSPlotsType
         (function() {
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const COLOR_COLS = $color_cols_js;
             const VALUE_COLS = $value_cols_js;
             const ID_COL = '$(string(id_col))';
@@ -339,6 +349,15 @@ struct SanKey <: JSPlotsType
                     }
                 });
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Apply filters with observation counting (centralized function)
                 const filteredData = applyFiltersWithCounting(
                     allData,
@@ -346,7 +365,9 @@ struct SanKey <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 if (filteredData.length === 0) {

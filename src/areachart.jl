@@ -19,6 +19,10 @@ Area chart visualization with support for stacking modes and interactive control
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
+  Unlike filters, choices only allow selecting ONE value at a time.
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `stack_mode::String`: Stacking mode - "unstack", "stack", "normalised_stack", or "dodge" (default: `"stack"`)
@@ -53,6 +57,7 @@ struct AreaChart <: JSPlotsType
                             y_cols::Vector{Symbol}=[:y],
                             color_cols::ColorColSpec=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                            choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             stack_mode::String="stack",
@@ -60,8 +65,9 @@ struct AreaChart <: JSPlotsType
                             fill_opacity::Float64=0.6,
                             notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Sanitize chart title for use in JavaScript/HTML IDs
         chart_title_safe = string(sanitize_chart_title(chart_title))
@@ -99,13 +105,16 @@ struct AreaChart <: JSPlotsType
         # Build HTML controls using abstraction
         update_function = "updatePlot_$chart_title_safe()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_safe, normalized_choices, df, update_function)
 
         # Create JavaScript arrays for columns (split categorical and continuous)
         categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
         continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
@@ -143,6 +152,7 @@ struct AreaChart <: JSPlotsType
             // Configuration
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
@@ -184,6 +194,15 @@ struct AreaChart <: JSPlotsType
 
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title_safe');
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title_safe');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
 
                 // Get categorical filter values (multiple selections)
                 const filters = {};
@@ -236,7 +255,9 @@ struct AreaChart <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 if (FACET_COLS.length === 0) {
@@ -738,6 +759,7 @@ struct AreaChart <: JSPlotsType
             chart_title_safe,
             chart_title_safe,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,

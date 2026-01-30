@@ -18,6 +18,14 @@ using Random
         include("chart_tests/test_cumplot.jl")
     end
 
+    @testset "DrawdownPlot Tests" begin
+        include("chart_tests/test_drawdownplot.jl")
+    end
+
+    @testset "LocalGaussianCorrelationPlot Tests" begin
+        include("chart_tests/test_localgaussiancorrelationplot.jl")
+    end
+
     @testset "AreaChart Tests" begin
         include("chart_tests/test_areachart.jl")
     end

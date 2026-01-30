@@ -141,6 +141,28 @@ chart5 = CumPlot(:filtered_strategies, strategy_df, :strategy_data,
             "Use the filter dropdowns to select only certain asset classes or regions."
 )
 
+# Example 5b: Using choices (single-select) instead of filters (multi-select)
+example5b_intro = TextBlock("""
+<h2>Example 5b: Choices vs Filters</h2>
+<p>Choices enforce single-selection while filters allow multi-selection.</p>
+""")
+
+chart5b = CumPlot(:choice_example, strategy_df, :strategy_data,
+    x_col = :date,
+    y_transforms = [(:daily_pnl, "cumulative"), (:daily_pnl_gross, "cumulative")],
+    color_cols = [:strategy, :risk_level],
+    choices = Dict{Symbol,Any}(:asset_class => "Equities"),  # Single-select: user picks ONE asset class
+    filters = Dict{Symbol,Any}(:region => ["US", "Europe"]),  # Multi-select: can select multiple regions
+    title = "Example 5b: CumPlot with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **asset_class (choice)**: Single-select dropdown - pick exactly ONE asset class at a time
+    - **region (filter)**: Multi-select dropdown - can select multiple regions
+
+    Use choices when the user must select exactly one option.
+    """
+)
+
 # Example 6: Full featured with custom colors
 example6_intro = TextBlock("""
 <h2>Example 6: All Features Combined</h2>
@@ -203,6 +225,7 @@ page = JSPlotPage(
      example3_intro, chart3,
      example4_intro, chart4,
      example5_intro, chart5,
+     example5b_intro, chart5b,
      example6_intro, chart6,
      conclusion],
     tab_title = "CumPlot Examples"

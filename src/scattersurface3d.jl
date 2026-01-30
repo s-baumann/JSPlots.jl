@@ -18,6 +18,9 @@ Three-dimensional scatter plot with fitted surfaces, combining point clouds with
   `Dict("Industry" => [:industry], "Country" => [:country])` creates a dropdown to switch between grouping by industry or country.
 - `facet_cols::Vector{Symbol}`: Columns available for faceting (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `surface_fitter::Function`: Function to fit surfaces: `(x, y, z, smoothing) -> (x_grid, y_grid, z_grid)`
 - `smoothing_params::Vector{Float64}`: Smoothing parameters to pre-compute (default: `[0.1, 0.15, ..., 10.0]`)
 - `default_smoothing::Dict{String, Float64}`: Default smoothing for each group (default: auto-computed)
@@ -58,6 +61,7 @@ struct ScatterSurface3D <: JSPlotsType
                                grouping_schemes::Dict{String, Vector{Symbol}}=Dict{String, Vector{Symbol}}(),
                                facet_cols::Vector{Symbol}=Symbol[],
                                filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                               choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                                surface_fitter::Union{Function, Nothing}=nothing,
                                smoothing_params::Vector{Float64}=[0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 7.0, 10.0],
                                default_smoothing::Dict{String, Float64}=Dict{String, Float64}(),
@@ -162,7 +166,7 @@ normalized_filters = normalize_filters(filters, df)
         # Generate HTML
         functional_html, appearance_html = generate_html(
             chart_title_safe, data_label, df,
-            x_col, y_col, z_col, group_cols, facet_cols, filters,
+            x_col, y_col, z_col, group_cols, facet_cols, filters, choices,
             all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
             all_surfaces_data, marker_size, marker_opacity, height, title, notes
         )
@@ -295,25 +299,30 @@ js_dependencies(::ScatterSurface3D) = vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)
 Generate HTML and JavaScript for ScatterSurface3D
 """
 function generate_html(chart_title_safe, data_label, df,
-                      x_col, y_col, z_col, group_cols, facet_cols, filters,
+                      x_col, y_col, z_col, group_cols, facet_cols, filters, choices,
                       all_scheme_info, use_multiple_schemes, smoothing_params, default_smoothing,
                       all_surfaces_data, marker_size, marker_opacity, height, title, notes)
 
-    # Normalize filters to standard Dict{Symbol, Any} format
+    # Normalize filters and choices to standard Dict{Symbol, Any} format
     normalized_filters = normalize_filters(filters, df)
+    normalized_choices = normalize_choices(choices, df)
 
     # Build filter dropdowns using html_controls abstraction
     update_function = "updatePlotWithFilters_$(chart_title_safe)()"
     filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+    choice_dropdowns = build_choice_dropdowns(string(chart_title_safe), normalized_choices, df, update_function)
     filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") * join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
+    choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
 
     # Separate categorical and continuous filters for JavaScript
     categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
     continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+    choice_cols = collect(keys(normalized_choices))
 
     filter_cols_js = build_js_array(collect(keys(normalized_filters)))
     categorical_filters_js = build_js_array(categorical_filter_cols)
     continuous_filters_js = build_js_array(continuous_filter_cols)
+    choice_filters_js = build_js_array(choice_cols)
 
     # Get the first/default grouping scheme for initial display
     scheme_names = collect(keys(all_scheme_info))
@@ -347,7 +356,7 @@ function generate_html(chart_title_safe, data_label, df,
     # Generate JavaScript
     functional_html = generate_functional_js(
         chart_title_safe, data_label, x_col, y_col, z_col,
-        group_cols, facet_cols, categorical_filters_js, continuous_filters_js,
+        group_cols, facet_cols, categorical_filters_js, continuous_filters_js, choice_filters_js,
         all_scheme_info, use_multiple_schemes, default_scheme_name,
         smoothing_params, default_smoothing,
         group_colors, all_schemes_surfaces_dict, has_l1,
@@ -368,6 +377,7 @@ function generate_html(chart_title_safe, data_label, df,
         title,
         notes,
         string(chart_title_safe);
+        choices_html=choices_html,
         aspect_ratio_default=1.0
     )
 
@@ -426,7 +436,7 @@ function prepare_surfaces_data(surfaces_data, group_colors)
     return surfaces_array  # Return raw array, not JSON string
 end
 function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_col,
-                                group_cols, facet_cols, categorical_filters_js, continuous_filters_js,
+                                group_cols, facet_cols, categorical_filters_js, continuous_filters_js, choice_filters_js,
                                 all_scheme_info, use_multiple_schemes, default_scheme_name,
                                 smoothing_params, default_smoothing,
                                 group_colors, all_schemes_surfaces_dict, has_l1,
@@ -458,6 +468,7 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
         // Filter configuration
         const CATEGORICAL_FILTERS = $categorical_filters_js;
         const CONTINUOUS_FILTERS = $continuous_filters_js;
+        const CHOICE_FILTERS = $choice_filters_js;
 
         // All grouping schemes and their surfaces
         const allSchemes_$(chart_title_safe) = $(schemes_json);
@@ -670,6 +681,15 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
 
         // Filter and update function
         window.updatePlotWithFilters_$(chart_title_safe) = function() {
+            // Get choice values (single selections)
+            const choices = {};
+            CHOICE_FILTERS.forEach(col => {
+                const select = document.getElementById(col + '_choice_$(chart_title_safe)');
+                if (select) {
+                    choices[col] = select.value;
+                }
+            });
+
             // Get categorical filter values (multiple selections)
             const filters = {};
             CATEGORICAL_FILTERS.forEach(col => {
@@ -698,7 +718,9 @@ function generate_functional_js(chart_title_safe, data_label, x_col, y_col, z_co
                 CATEGORICAL_FILTERS,
                 CONTINUOUS_FILTERS,
                 filters,
-                rangeFilters
+                rangeFilters,
+                CHOICE_FILTERS,
+                choices
             );
 
             // Update plot with filtered data

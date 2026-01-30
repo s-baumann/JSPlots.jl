@@ -12,6 +12,9 @@ Create an interactive waterfall chart visualization with side-by-side calculatio
 - `color_cols::Vector{Symbol}`: Column(s) containing category names (default: `[:category]`). If multiple columns provided, a dropdown will allow switching between them.
 - `value_col::Symbol`: Column containing values (default: `:value`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `show_table::Bool`: Display side-by-side calculation table (default: `true`)
@@ -62,13 +65,15 @@ struct Waterfall <: JSPlotsType
                        color_cols::Vector{Symbol} = [:category],
                        value_col::Symbol = :value,
                        filters::Union{Vector{Symbol}, Dict} = Dict{Symbol,Any}(),
+                       choices::Union{Vector{Symbol}, Dict} = Dict{Symbol, Any}(),
                        show_table::Bool = true,
                        show_totals::Bool = true,
                        title::String = "Waterfall Chart",
                        notes::String = "")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Validate item_col
         if !(item_col in Symbol.(names(df)))
@@ -112,12 +117,15 @@ struct Waterfall <: JSPlotsType
                 update_function
             ))
         end
+        choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Build color maps for category-based coloring
         color_maps, _ = build_color_maps(color_cols, df, DEFAULT_COLOR_PALETTE)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        choice_cols = collect(keys(normalized_choices))
+        choice_filters_js = build_js_array(choice_cols)
         color_cols_js = build_js_array(String.(color_cols))
         color_maps_js = JSON.json(color_maps)
 
@@ -148,6 +156,7 @@ struct Waterfall <: JSPlotsType
             chart_title_str,
             chart_title_str,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             DropdownControl[],  # No sliders
             vcat(color_mode_dropdown, color_col_dropdown),  # Color mode + category column dropdowns
@@ -266,6 +275,7 @@ struct Waterfall <: JSPlotsType
         (function() {
             // Configuration
             const FILTER_COLS = $filter_cols_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const COLOR_COLS = $color_cols_js;
             const ITEM_COL = '$(string(item_col))';
             let CATEGORY_COL = '$(string(default_color_col))';
@@ -480,10 +490,24 @@ struct Waterfall <: JSPlotsType
                     }
                 });
 
-                // Filter data (single selection per filter)
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
+                // Filter data (single selection per filter + choices)
                 const filteredData = allData.filter(row => {
                     for (let col in filters) {
                         if (String(row[col]) !== filters[col]) {
+                            return false;
+                        }
+                    }
+                    for (let col in choices) {
+                        if (String(row[col]) !== choices[col]) {
                             return false;
                         }
                     }

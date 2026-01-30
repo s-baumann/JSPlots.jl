@@ -141,6 +141,36 @@ wf3 = Waterfall(:variance, variance_data, :variance_data;
 )
 
 # =============================================================================
+# Example 3b: Using Choices (Single-Select) Instead of Filters
+# =============================================================================
+
+example3b_text = TextBlock("""
+<h2>Example 3b: Sales Variance with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:</p>
+<ul>
+    <li><strong>Region (choice)</strong>: Single-select dropdown - pick exactly ONE region</li>
+    <li>Filters allow multi-select, but choices restrict to exactly one selection</li>
+</ul>
+<p>Use choices when the user must select exactly one option, such as when comparing data that only makes sense for a single dimension at a time.</p>
+""")
+
+wf3b = Waterfall(:variance_choice, variance_data, :variance_data;
+    item_col = :item,
+    color_cols = [:category],
+    value_col = :value,
+    choices = Dict{Symbol,Any}(:region => "North"),  # Single-select choice
+    title = "Example 3b: Variance Analysis with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **Region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+
+    Use choices when the user must select exactly one option.
+    """,
+    show_table = true,
+    show_totals = false
+)
+
+# =============================================================================
 # Example 4: Budget vs Actuals Comparison
 # =============================================================================
 
@@ -327,7 +357,7 @@ page = JSPlotPage(
         :multi_color_data => df_multi_color
     ),
     [header, example1_text, wf1, example2_text, wf2, example3_text, wf3,
-     example4_text, wf4, example5_text, wf5, example6_text, wf6, summary];
+     example3b_text, wf3b, example4_text, wf4, example5_text, wf5, example6_text, wf6, summary];
     dataformat=:csv_embedded
 )
 

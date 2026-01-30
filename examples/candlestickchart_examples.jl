@@ -94,8 +94,34 @@ chart2 = CandlestickChart(
     notes="Compare stocks with vastly different prices. Enable renormalization to see relative performance (first bar open = 1). Switch between Overlay and Faceted display modes."
 )
 
-# Example 3: Integer time periods (quarters) without volume
-println("Creating Example 3: Integer time periods without volume...")
+# Example 3: Using choices (single-select) for symbol selection
+println("Creating Example 3: Single-select choice for symbol...")
+
+chart3 = CandlestickChart(
+    :example3_candlestick,
+    df2,
+    :stock_data_2,
+    time_from_col=:time_from,
+    time_to_col=:time_to,
+    symbol_col=:symbol,
+    open_col=:open,
+    high_col=:high,
+    low_col=:low,
+    close_col=:close,
+    volume_col=:volume,
+    choices=Dict{Symbol,Any}(:symbol => "AAPL"),  # Single-select dropdown
+    title="Example 3: Single-Select Choice for Symbol",
+    notes="""
+    This example demonstrates the `choices` parameter for single-select dropdowns:
+    - **symbol (choice)**: Pick exactly ONE stock to view at a time
+
+    Use choices when the user must select exactly one option (e.g., one stock, one time period).
+    Compare to Example 2 which shows all stocks at once with multi-select filters.
+    """
+)
+
+# Example 4: Integer time periods (quarters) without volume
+println("Creating Example 4: Integer time periods without volume...")
 
 # Generate data using integer time periods (quarters)
 quarters = 1:12
@@ -127,8 +153,8 @@ end
 
 df3 = vcat(df3_parts...)
 
-chart3 = CandlestickChart(
-    :example3_candlestick,
+chart4 = CandlestickChart(
+    :example4_candlestick,
     df3,
     :company_data,
     time_from_col=:quarter,
@@ -141,7 +167,7 @@ chart3 = CandlestickChart(
     volume_col=nothing,  # No volume for this example
     display_mode="Faceted",
     chart_type="candlestick",  # Use Candlestick bars instead of candlesticks
-    title="Example 3: Quarterly Data Without Volume",
+    title="Example 4: Quarterly Data Without Volume",
     notes="Quarterly company performance using integer time periods. No volume data. Using Candlestick bar style instead of candlesticks. Faceted display shows each company separately."
 )
 
@@ -153,7 +179,7 @@ page = JSPlotPage(
         :stock_data_2 => df2,
         :company_data => df3
     ),
-    [chart1, chart2, chart3];
+    [chart1, chart2, chart3, chart4];
     page_header="Candlestick Chart Examples"
 )
 

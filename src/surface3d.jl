@@ -14,6 +14,9 @@ Three-dimensional surface plot visualization using Plotly.
 - `z_col::Symbol`: Column for z-axis (height) values (default: `:z`)
 - `group_col`: Column for grouping multiple surfaces (default: `nothing`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `height::Int`: Plot height in pixels (default: `600`)
 - `title::String`: Chart title (default: `"3D Chart"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
@@ -36,6 +39,7 @@ struct Surface3D <: JSPlotsType
     appearance_html::String
     function Surface3D(chart_title::Symbol, df::DataFrame, data_label::Symbol;
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                            choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             height::Int=600,
                             x_col::Symbol=:x,
                             y_col::Symbol=:y,
@@ -44,8 +48,9 @@ struct Surface3D <: JSPlotsType
                             title::String="3D Chart",
                             notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Any} format
+# Normalize filters and choices to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
+normalized_choices = normalize_choices(choices, df)
 
         all_cols = names(df)
 
@@ -63,8 +68,12 @@ normalized_filters = normalize_filters(filters, df)
         # Build filter dropdowns using html_controls abstraction
         update_function = "updatePlotWithFilters_$(chart_title_safe)()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(string(chart_title_safe), normalized_choices, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") * join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
+        choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
+        choice_cols = collect(keys(normalized_choices))
+        choice_filters_js = build_js_array(choice_cols)
 
         # Determine if we're using grouping
         use_grouping = group_col !== nothing
@@ -72,6 +81,7 @@ normalized_filters = normalize_filters(filters, df)
         functional_html = """
             (function() {
             const FILTER_COLS = $filter_cols_js;
+            const CHOICE_FILTERS = $choice_filters_js;
 
             // Load and parse CSV data using centralized parser
             loadDataset('$data_label').then(function(data3d) {
@@ -185,6 +195,15 @@ normalized_filters = normalize_filters(filters, df)
 
             // Filter and update function
             window.updatePlotWithFilters_$(chart_title_safe) = function() {
+                // Get choice values (single selections)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$(chart_title_safe)');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get filter values (multiple selections)
                 const filters = {};
                 FILTER_COLS.forEach(col => {
@@ -194,16 +213,17 @@ normalized_filters = normalize_filters(filters, df)
                     }
                 });
 
-                // Filter data (support multiple selections per filter)
-                const filteredData = window.allData_$(chart_title_safe).filter(row => {
-                    for (let col in filters) {
-                        const selectedValues = filters[col];
-                        if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                            return false;
-                        }
-                    }
-                    return true;
-                });
+                // Apply filters with observation counting (centralized function)
+                const filteredData = applyFiltersWithCounting(
+                    window.allData_$(chart_title_safe),
+                    '$(chart_title_safe)',
+                    FILTER_COLS,
+                    [],  // No continuous filters
+                    filters,
+                    {},  // No range filters
+                    CHOICE_FILTERS,
+                    choices
+                );
 
                 // Update plot with filtered data
                 updatePlot_$(chart_title_safe)(filteredData);
@@ -222,6 +242,7 @@ normalized_filters = normalize_filters(filters, df)
             title,
             notes,
             string(chart_title_safe);
+            choices_html=choices_html,
             aspect_ratio_default=1.0
         )
 

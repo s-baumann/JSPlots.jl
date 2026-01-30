@@ -124,9 +124,34 @@ chart3 = Surface3D(:filtered_surface, filtered_df, :filtered_data;
     notes = "Use the filters to filter by distance from origin or region (quadrant)"
 )
 
-# Example 4: Trigonometric vs Polynomial Shapes
+# Example 4: Using choices (single-select) instead of filters (multi-select)
 example4_text = TextBlock("""
-<h2>Example 4: Shape Family Filtering</h2>
+<h2>Example 4: 3D Surface with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices (single-select) and filters (multi-select).
+Use the region dropdown to select exactly ONE quadrant at a time.</p>
+""")
+
+# Reuse filtered_df from Example 3
+chart4 = Surface3D(:choice_surface, filtered_df, :filtered_data;
+    x_col = :x,
+    y_col = :y,
+    z_col = :z,
+    group_col = :group,
+    choices = Dict{Symbol,Any}(:region => "NE"),  # Single-select - pick exactly ONE region
+    filters = Dict{Symbol,Any}(:distance => [5.0]),  # Multi-select for comparison
+    title = "3D Surface with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **region (choice)**: Single-select dropdown - pick exactly ONE quadrant
+    - **distance (filter)**: Multi-select dropdown - can select multiple distance thresholds
+
+    Compare with Example 3 which uses filters for both. Use choices when the user must select exactly one option.
+    """
+)
+
+# Example 5: Trigonometric vs Polynomial Shapes
+example5_text = TextBlock("""
+<h2>Example 5: Shape Family Filtering</h2>
 <p>This example shows the power of filtering for exploring different mathematical families.
 Use the shape family filter to switch between trigonometric functions and polynomials.
 Within each family, you can see different shapes by color.</p>
@@ -170,7 +195,7 @@ for x in -5:0.3:5
     end
 end
 
-chart4 = Surface3D(:shape_family, shape_df, :shape_data;
+chart5 = Surface3D(:shape_family, shape_df, :shape_data;
     x_col = :x,
     y_col = :y,
     z_col = :z,
@@ -180,9 +205,9 @@ chart4 = Surface3D(:shape_family, shape_df, :shape_data;
     notes = "Filter by shape family to switch between trigonometric and polynomial functions"
 )
 
-# Example 5: Wave Interference Pattern
-example5_text = TextBlock("""
-<h2>Example 5: Wave Interference Pattern</h2>
+# Example 6: Wave Interference Pattern
+example6_text = TextBlock("""
+<h2>Example 6: Wave Interference Pattern</h2>
 <p>A classic physics demonstration showing interference from two wave sources.</p>
 """)
 
@@ -203,7 +228,7 @@ for x in -10:0.5:10
     end
 end
 
-chart5 = Surface3D(:wave_interference, wave_df, :wave_data;
+chart6 = Surface3D(:wave_interference, wave_df, :wave_data;
     x_col = :x,
     y_col = :y,
     z_col = :z,
@@ -212,9 +237,9 @@ chart5 = Surface3D(:wave_interference, wave_df, :wave_data;
     notes = "Interference pattern from two wave sources - great for physics simulations"
 )
 
-# Example 6: Using a Struct as Data Source
-example6_text = TextBlock("""
-<h2>Example 6: Terrain Data from Struct Data Source</h2>
+# Example 7: Using a Struct as Data Source
+example7_text = TextBlock("""
+<h2>Example 7: Terrain Data from Struct Data Source</h2>
 <p>This 3D surface uses data from a struct containing multiple DataFrames.
 The <code>TerrainData</code> struct holds elevation and metadata information.</p>
 """)
@@ -242,7 +267,7 @@ metadata_df = DataFrame(
 # Create the struct
 terrain_data = TerrainData(terrain_df, metadata_df)
 
-chart6 = Surface3D(:struct_terrain, terrain_data.elevation, Symbol("terrain.elevation");
+chart7 = Surface3D(:struct_terrain, terrain_data.elevation, Symbol("terrain.elevation");
     x_col = :x,
     y_col = :y,
     z_col = :elevation,
@@ -282,6 +307,7 @@ page = JSPlotPage(
      example4_text, chart4,
      example5_text, chart5,
      example6_text, chart6,
+     example7_text, chart7,
      conclusion],
     tab_title = "3D Surface Chart Examples"
 )
@@ -301,6 +327,7 @@ println("\nThis page includes:")
 println("  • Basic 3D surface plot")
 println("  • Multiple surfaces with grouping")
 println("  • Filtering (continuous and categorical)")
+println("  • Single-select choice example")
 println("  • Shape family filtering example")
 println("  • Wave interference pattern")
 println("  • Struct data source (referencing struct fields via dot notation)")

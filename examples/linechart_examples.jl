@@ -97,6 +97,42 @@ chart3 = LineChart(:filtered_metrics, metrics_df, :metrics;
     notes = "Custom colors for departments, default colors for metrics. Interactive filters allow selection."
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+# Choices enforce that exactly ONE value is selected at a time
+chart3b = LineChart(:single_select_metrics, metrics_df, :metrics;
+    x_cols = [:Month],
+    y_cols = [:Value],
+    color_cols = [:Department],
+    choices = Dict{Symbol,Any}(:Metric => :Productivity),  # Single-select: user picks ONE metric
+    filters = Dict{Symbol,Any}(:Quarter => ["Q1", "Q2"]),  # Multi-select: user can pick multiple quarters
+    title = "Department Performance (Single Metric Selection)",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **Metric (choice)**: Single-select dropdown - pick exactly ONE metric at a time
+    - **Quarter (filter)**: Multi-select dropdown - can select multiple quarters
+
+    Use choices when the user must select exactly one option (like choosing a strategy or metric type).
+    """
+)
+
+# Example 3c: Shorthand syntax for choices
+# Instead of specifying default values, just list the column names
+# JSPlots will automatically use the first unique value from each column as the default
+chart3c = LineChart(:shorthand_choices, metrics_df, :metrics;
+    x_cols = [:Month],
+    y_cols = [:Value],
+    color_cols = [:Department],
+    choices = [:Metric, :Quarter],  # Shorthand: uses first unique value from each column
+    title = "Shorthand Choices Syntax",
+    notes = """
+    **Shorthand syntax for choices:** Instead of `Dict{Symbol,Any}(:Metric => :Productivity)`,
+    you can simply use `[:Metric, :Quarter]`. JSPlots automatically selects the first unique
+    value from each column as the default.
+
+    This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Quarter => first(unique(df.Quarter)))`
+    """
+)
+
 # Example 4: Combined with Image
 example_image = joinpath(dirname(@__FILE__),"pictures", "images.jpeg")
 pic = Picture(:example_visual, example_image;
@@ -372,7 +408,7 @@ page = JSPlotPage(
         :continuous_filter_data => continuous_filter_df,
         :financial => financial_data  # Struct with prices and volumes DataFrames
     ),
-    [header, chart1, chart2, chart3, pic, chart5, chart6, chart7, chart8, chart9, chart10, struct_intro, struct_chart, conclusion],
+    [header, chart1, chart2, chart3, chart3b, chart3c, pic, chart5, chart6, chart7, chart8, chart9, chart10, struct_intro, struct_chart, conclusion],
     tab_title = "LineChart Examples"
 )
 

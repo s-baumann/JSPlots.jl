@@ -228,6 +228,38 @@ bw5 = BoxAndWhiskers(:filtered_bw, df_filtered, :filtered_data;
 )
 
 # =============================================================================
+# Example 5b: Using choices (single-select) instead of filters (multi-select)
+# =============================================================================
+
+example5b_text = TextBlock("""
+<h2>Example 5b: Single-Select Choices vs Multi-Select Filters</h2>
+<p>Demonstrates the difference between choices (single-select) and filters (multi-select).</p>
+<p>Features demonstrated:</p>
+<ul>
+    <li><strong>Choices:</strong> Single-select dropdown - user picks exactly ONE value at a time</li>
+    <li><strong>Filters:</strong> Multi-select dropdown - user can select multiple values</li>
+    <li>Use choices when comparison should be one value at a time</li>
+</ul>
+""")
+
+bw5b = BoxAndWhiskers(:choice_bw, df_filtered, :filtered_data;
+    x_cols = [:score],
+    color_cols = [:region, :division],
+    grouping_cols = [:region, :division],
+    group_col = :group,
+    choices = Dict{Symbol,Any}(:quarter => "Q1"),  # Single-select
+    filters = Dict{Symbol,Any}(:division => ["A", "B"]),  # Multi-select for comparison
+    title = "Example 5b: BoxAndWhiskers with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **quarter (choice)**: Single-select dropdown - pick exactly ONE quarter at a time
+    - **division (filter)**: Multi-select dropdown - can select multiple divisions
+
+    Use choices when the user must select exactly one option (e.g., viewing one quarter at a time).
+    """
+)
+
+# =============================================================================
 # Example 6: Wide Range of Values
 # =============================================================================
 
@@ -325,6 +357,8 @@ page = JSPlotPage(
         bw4,
         example5_text,
         bw5,
+        example5b_text,
+        bw5b,
         example6_text,
         bw6,
         example7_text,

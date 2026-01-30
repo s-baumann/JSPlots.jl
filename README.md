@@ -56,10 +56,12 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
 - **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
 - **[TSNEPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html)** - Use t-sne to cluster similar points together in a 2 dimensional space.
+- **[LocalGaussianCorrelationPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples.html)** - Visualize how correlation between two variables changes across their joint distribution using Local Gaussian Correlation.
 
 #### Financial Time Series
 - **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
 - **[ExecutionChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/execution_analysis/execution_analysis.html)** - A chart showing fills relative to bid and ask over the course of trading a security.
+- **[DrawdownPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/drawdownplot_examples.html)** - Drawdown visualization from peak cumulative performance.
 
 #### Geographical Plots
 - **[GeoPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/geoplot_examples.html)** - Plot points or areas on a map.
@@ -69,10 +71,6 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[SanKey](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/sankey_examples.html)** - Make SanKey plots showing how observations change affiliation over multiple waves.
 - **[RadarChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/radarchart_examples.html)** - Make RadarCharts showing how a single entity performs on various metrics.
 - **[BumpChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/bumpchart_examples.html)** - BumpChart showing rankings over time.
-
-
-
-
 
 The examples above for each plottype (together with a few others) can be found in the examples/ folder. 
 

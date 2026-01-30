@@ -585,6 +585,97 @@ console.log('Parquet-wasm library loaded successfully');
     end
 
     """
+        normalize_choices(choices, df::DataFrame)
+
+    Normalize choice specification to a standard Dict{Symbol, Any} format where values are single defaults.
+
+    Choices are like filters but only allow selecting ONE value at a time. This is useful for
+    parameters where the user must choose exactly one option (e.g., selecting a single strategy).
+
+    # Arguments
+    - `choices`: Can be:
+      - `Vector{Symbol}`: Column names - uses first unique value from each column as default
+      - `Dict`: Column => default value mapping
+    - `df::DataFrame`: DataFrame to validate columns and get first value if needed
+
+    # Behavior
+    - Vector input: `[:strategy, :region]` becomes `Dict(:strategy => first_val, :region => first_val)`
+    - Dict values can be: Symbol, String, Number, or any single value
+    - If Dict value is `nothing`, uses the first unique value from the column
+
+    # Examples
+    ```julia
+    # Shorthand - uses first unique value from each column
+    normalize_choices([:strategy, :region], df)
+    # Returns: Dict(:strategy => first(unique(df.strategy)), :region => first(unique(df.region)))
+
+    # With explicit default
+    normalize_choices(Dict(:strategy => :momentum), df)
+    # Returns: Dict(:strategy => :momentum)
+
+    # With nothing - uses first unique value
+    normalize_choices(Dict(:strategy => nothing), df)
+    # Returns: Dict(:strategy => <first unique value in df.strategy>)
+    ```
+    """
+    function normalize_choices(choices::Vector{Symbol}, df::DataFrame)::Dict{Symbol, Any}
+        # Convert Vector{Symbol} to Dict with nothing values, then normalize
+        return normalize_choices(Dict{Symbol, Any}(col => nothing for col in choices), df)
+    end
+
+    function normalize_choices(choices::Dict, df::DataFrame)::Dict{Symbol, Any}
+        result = Dict{Symbol, Any}()
+        for (col, default_val) in choices
+            col_sym = col isa Symbol ? col : Symbol(col)
+            if !(string(col_sym) in names(df))
+                @warn "Choice column $col_sym not found in dataframe, skipping"
+                continue
+            end
+
+            # Get unique values for this column
+            unique_vals = collect(unique(skipmissing(df[!, col_sym])))
+
+            if isnothing(default_val)
+                # Nothing means use first value
+                if !isempty(unique_vals)
+                    result[col_sym] = first(unique_vals)
+                end
+            else
+                # Use the provided default value
+                result[col_sym] = default_val
+            end
+        end
+        return result
+    end
+
+    # Handle empty choices Dict
+    function normalize_choices(choices::Dict{Symbol, Any}, df::DataFrame)::Dict{Symbol, Any}
+        if isempty(choices)
+            return Dict{Symbol, Any}()
+        end
+        # Fall through to generic Dict handling
+        result = Dict{Symbol, Any}()
+        for (col, default_val) in choices
+            col_sym = col isa Symbol ? col : Symbol(col)
+            if !(string(col_sym) in names(df))
+                @warn "Choice column $col_sym not found in dataframe, skipping"
+                continue
+            end
+
+            unique_vals = collect(unique(skipmissing(df[!, col_sym])))
+
+            if isnothing(default_val)
+                if !isempty(unique_vals)
+                    result[col_sym] = first(unique_vals)
+                end
+            else
+                result[col_sym] = default_val
+            end
+        end
+        return result
+    end
+
+    """
         is_continuous_column(df::DataFrame, col::Symbol)
 
     Determine if a column should be treated as continuous (numeric or date/time type).
@@ -663,11 +754,12 @@ console.log('Parquet-wasm library loaded successfully');
     end
 
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
-    export validate_and_filter_columns, build_color_maps, normalize_filters, build_filter_options, build_js_array, select_default_column, is_continuous_column
+    export validate_and_filter_columns, build_color_maps, normalize_filters, normalize_choices, build_filter_options, build_js_array, select_default_column, is_continuous_column
     export ColorColSpec, normalize_color_cols, extract_color_col_names, build_color_maps_extended, build_color_scales_js, JS_COLOR_INTERPOLATION, is_continuous_color_spec
 
     get_filter_vars(filters::Vector{Symbol}) = filters
     get_filter_vars(filters::Dict) = Symbol.(keys(filters))
+    get_choice_vars(choices::Dict) = Symbol.(keys(choices))
 
     include("html_controls.jl")
 
@@ -748,6 +840,12 @@ console.log('Parquet-wasm library loaded successfully');
 
     include("cumplot.jl")
     export CumPlot
+
+    include("drawdownplot.jl")
+    export DrawdownPlot
+
+    include("localgaussiancorrelationplot.jl")
+    export LocalGaussianCorrelationPlot
 
     include("bumpchart.jl")
     export BumpChart

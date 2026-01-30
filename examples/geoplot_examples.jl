@@ -176,7 +176,30 @@ earthquake_map = GeoPlot(:earthquakes, earthquake_df, :quake_data;
 )
 
 # ========================================
-# Example 5: Simple Points - Global Offices
+# Example 5: Using choices (single-select) instead of filters (multi-select)
+# ========================================
+println("Creating Choices example...")
+
+# Reuse earthquake_df from Example 4
+earthquake_choice_map = GeoPlot(:earthquakes_choice, earthquake_df, :quake_data;
+    lat = :latitude,
+    lon = :longitude,
+    color = :magnitude,
+    size = :depth_km,
+    popup_cols = [:region],
+    choices = Dict{Symbol,Any}(:region => "Japan"),  # Single-select - pick exactly ONE region
+    title = "Example 5: Earthquake Data with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+
+    Compare with Example 4 which uses filters (multi-select) on the same data.
+    Use choices when the user must select exactly one option.
+    """
+)
+
+# ========================================
+# Example 6: Simple Points - Global Offices
 # ========================================
 println("Creating Global Offices example...")
 
@@ -200,7 +223,7 @@ offices_map = GeoPlot(:offices, offices_df, :office_data;
 )
 
 # ========================================
-# Example 6: Multiple Overlays - Country Statistics
+# Example 7: Multiple Overlays - Country Statistics
 # ========================================
 println("Creating Multiple Overlays example...")
 
@@ -250,7 +273,7 @@ all_data = Dict{Symbol, Any}(
 # Create page with all examples
 page = JSPlotPage(
     all_data,
-    [header, cities_map, states_map, world_map, earthquake_map, offices_map, multi_overlay_map],
+    [header, cities_map, states_map, world_map, earthquake_map, earthquake_choice_map, offices_map, multi_overlay_map],
     dataformat=:csv_embedded
 )
 
@@ -269,6 +292,8 @@ println("Open the HTML file in a browser to see:")
 println("  1. US Cities - Points with color by population")
 println("  2. US States Population - Choropleth map")
 println("  3. World GDP - Choropleth of countries")
-println("  4. Earthquake Data - Points with color and size")
-println("  5. Global Offices - Simple points example")
+println("  4. Earthquake Data - Points with color and size (filters)")
+println("  5. Earthquake Data - Single-select choice example")
+println("  6. Global Offices - Simple points example")
+println("  7. Country Statistics - Multiple overlays")
 println()

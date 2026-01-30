@@ -81,6 +81,29 @@ chart2 = BumpChart(
     line_width=2
 )
 
+# Example 2b: Using choices (single-select) instead of filters (multi-select)
+println("Creating Example 2b: Product rankings with single-select choice...")
+
+chart2b = BumpChart(
+    :example2b_bump,
+    df2,
+    :product_data,
+    x_col=:quarter,
+    performance_cols=[:sales, :market_share],
+    entity_col=:product,
+    choices = Dict{Symbol,Any}(:region => "North"),  # Single-select choice
+    filters = Dict{Symbol,Any}(:product => products),  # Multi-select filter for comparison
+    y_mode="Ranking",
+    title="Example 2b: Product Rankings with Single-Select Choice",
+    notes="""
+    This example demonstrates the difference between choices and filters:
+    - **Region (choice)**: Single-select dropdown - pick exactly ONE region
+    - **Product (filter)**: Multi-select dropdown - can select multiple products
+
+    Use choices when the user must select exactly one option.
+    """
+)
+
 # Example 3: Absolute values mode (not ranked)
 println("Creating Example 3: Absolute values mode...")
 
@@ -177,7 +200,7 @@ page = JSPlotPage(
         :company_performance => df3,
         :league => league_data  # Struct with rankings and team_info
     ),
-    [chart1, chart2, chart3, chart4];
+    [chart1, chart2, chart2b, chart3, chart4];
     page_header="Bump Chart Examples"
 )
 

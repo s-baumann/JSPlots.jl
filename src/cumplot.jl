@@ -27,6 +27,9 @@ then subsequent intervals. Use "Reset" to return to the full view.
   - `Vector{Tuple}`: `[(:col1, :default), (:col2, Dict(:val => "#hex"))]` - with custom colors
   (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `default_duration_fraction::Float64`: Default duration as fraction of total span (default: `0.2` = 1/5)
@@ -64,6 +67,7 @@ struct CumPlot <: JSPlotsType
                             y_transforms::Vector{Tuple{Symbol, String}}=[(:pnl, "cumulative")],
                             color_cols::ColorColSpec=Symbol[],
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                            choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_duration_fraction::Float64=0.2,
@@ -73,8 +77,9 @@ struct CumPlot <: JSPlotsType
                             marker_size::Int=0,
                             notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Validate x_col exists
         validate_column(df, x_col, "x_col")
@@ -110,14 +115,17 @@ struct CumPlot <: JSPlotsType
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title(true)"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Separate categorical and continuous filters
         categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
         continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        choice_cols = [string(d.id)[1:findfirst("_choice_", string(d.id))[1]-1] for d in choice_dropdowns]
 
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
         color_cols_js = build_js_array(valid_color_cols)
 
         # Build y_transforms as JavaScript array of objects
@@ -145,6 +153,7 @@ struct CumPlot <: JSPlotsType
             const FILTER_COLS = $filter_cols_js;
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const X_COL = '$x_col_str';
             const Y_TRANSFORMS = $y_transforms_js;
             const COLOR_COLS = $color_cols_js;
@@ -306,6 +315,15 @@ struct CumPlot <: JSPlotsType
                 // Get current filter values
                 const filters = {};
                 const rangeFilters = {};
+                const choices = {};
+
+                // Read choice filters (single-select dropdowns)
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
 
                 // Read categorical filters (dropdowns)
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -346,7 +364,9 @@ struct CumPlot <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 // Sort data by X
@@ -503,10 +523,21 @@ struct CumPlot <: JSPlotsType
                         const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                         let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                        // Normalize: divide all values by the FIRST value in the range
+                        // Normalize so all lines start at the same point
                         const firstVal = rangeYValues[0];
-                        if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                            rangeYValues = rangeYValues.map(v => v / firstVal);
+                        if (!isNaN(firstVal) && isFinite(firstVal)) {
+                            if (Y_TRANSFORM === 'cumprod') {
+                                // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                                // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                                const firstWealth = firstVal + 1;
+                                if (firstWealth !== 0) {
+                                    rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                                }
+                            } else {
+                                // For cumulative: subtract first value so lines start at 0
+                                // This shows relative PnL gain/loss from the start of the window
+                                rangeYValues = rangeYValues.map(v => v - firstVal);
+                            }
                         }
 
                         // Determine which subplot this trace belongs to
@@ -560,7 +591,7 @@ struct CumPlot <: JSPlotsType
                         anchor: 'y'
                     };
                     layout.yaxis = {
-                        title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                        title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                         domain: [0, 1],
                         anchor: 'x'
                     };
@@ -592,7 +623,7 @@ struct CumPlot <: JSPlotsType
                                 anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                                 showticklabels: col === 0,
                                 title: col === 0 && row === Math.floor(nRows / 2) ?
-                                    'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                                    (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                             };
 
                             // Add facet label annotation
@@ -737,6 +768,7 @@ struct CumPlot <: JSPlotsType
             chart_title_str,
             chart_title_str,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,

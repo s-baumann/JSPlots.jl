@@ -272,10 +272,45 @@ chart3 = ScatterSurface3D(:finance_multi_group, df_finance, :finance_data,
     notes="Use the grouping scheme dropdown to switch between Industry and Country groupings. Colors and surfaces update automatically."
 )
 
+# =============================================================================
+# Example 4: Using choices (single-select) instead of filters (multi-select)
+# =============================================================================
+
+example4_text = TextBlock("""
+<h2>Example 4: Using Choices (Single-Select)</h2>
+<p>This example demonstrates the difference between choices and filters using the financial dataset:</p>
+<ul>
+    <li><strong>Industry (choice)</strong>: Single-select dropdown - pick exactly ONE industry at a time</li>
+    <li><strong>Country (filter)</strong>: Multi-select dropdown - can select multiple countries simultaneously</li>
+</ul>
+<p>Use choices when the user must select exactly one option, such as comparing one industry's 3D surface against filtered country subsets.</p>
+""")
+
+chart4 = ScatterSurface3D(:scatter_surface_choices, df_finance, :finance_data,
+    x_col=:carry,
+    y_col=:trading_activity,
+    z_col=:return_24h,
+    group_cols=[:country],
+    choices = Dict{Symbol,Any}(:industry => "Technology"),  # Single-select: user picks ONE industry
+    filters = Dict{Symbol,Any}(:country => ["USA", "UK", "Germany"]),  # Multi-select: user can pick multiple countries
+    smoothing_params=[0.5, 1.0, 2.0, 3.0, 5.0],
+    marker_size=5,
+    marker_opacity=0.7,
+    height=600,
+    title="Example 4: Single-Select Industry Choice",
+    notes="""
+    This example demonstrates the difference between choices and filters:
+    - **Industry (choice)**: Single-select dropdown - pick exactly ONE industry at a time
+    - **Country (filter)**: Multi-select dropdown - can select multiple countries
+
+    Use choices when the user must select exactly one option.
+    """
+)
+
 # Create combined page
 page = JSPlotPage(
     Dict(:data => df, :data_subset => df_subset, :finance_data => df_finance),
-    [header, example1_text, chart1, example2_text, chart2, example3_text, chart3, summary],
+    [header, example1_text, chart1, example2_text, chart2, example3_text, chart3, example4_text, chart4, summary],
     tab_title="ScatterSurface3D Examples"
 )
 
@@ -294,5 +329,6 @@ println("\nThis page includes:")
 println("  • Example 1: Basic scatter with default smoother (3 groups)")
 println("  • Example 2: Custom surface fitting function (2 groups)")
 println("  • Example 3: Finance with switchable grouping schemes (Industry/Country)")
+println("  • Example 4: Using choices (single-select) vs filters (multi-select)")
 println("  • Interactive controls for smoothing, ranges, and visibility")
 println("\nOpen the HTML file in a browser to interact with the 3D plots!")

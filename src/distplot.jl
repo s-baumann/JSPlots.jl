@@ -16,6 +16,9 @@ Distribution visualization combining histogram, box plot, and rug plot.
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict`: Column => default values. Values can be a single value, vector, or nothing for all values
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `show_histogram::Bool`: Display histogram (default: `true`)
 - `show_box::Bool`: Display box plot (default: `true`)
 - `show_rug::Bool`: Display rug plot (default: `true`)
@@ -46,6 +49,7 @@ struct DistPlot <: JSPlotsType
                       value_cols::Vector{Symbol}=[:value],
                       color_cols::ColorColSpec=Symbol[],
                       filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                      choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                       show_histogram::Bool=true,
                       show_box::Bool=true,
                       show_rug::Bool=true,
@@ -55,8 +59,9 @@ struct DistPlot <: JSPlotsType
                       title::String="Distribution Plot",
                       notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Default selections
         default_value_col = first(value_cols)
@@ -97,16 +102,20 @@ struct DistPlot <: JSPlotsType
         # Build filter dropdowns
         update_function = "updatePlotWithFilters_$(chart_title)()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(string(chart_title), normalized_choices, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") *
                        join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
+        choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
 
         # Separate categorical and continuous filters for JavaScript
         categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
         continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        choice_cols = collect(keys(normalized_choices))
 
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
         
         # Generate trace creation JavaScript
         trace_js = """
@@ -373,6 +382,7 @@ struct DistPlot <: JSPlotsType
             // Filter configuration
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
 
             // Plotly default colors
             var plotlyColors = [
@@ -447,6 +457,15 @@ struct DistPlot <: JSPlotsType
 
             // Filter and update function
             window.updatePlotWithFilters_$(chart_title) = function() {
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$(chart_title)');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get categorical filter values (multiple selections)
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -475,7 +494,9 @@ struct DistPlot <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 // Render with filtered data
@@ -491,7 +512,8 @@ struct DistPlot <: JSPlotsType
             "",  # No faceting in DistPlot
             title,
             notes,
-            string(chart_title)
+            string(chart_title);
+            choices_html=choices_html
         )
 
         # Add bins slider after chart div

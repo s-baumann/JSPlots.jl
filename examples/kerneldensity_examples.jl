@@ -67,6 +67,22 @@ kde3 = KernelDensity(:filtered_kde, df3, :df3;
     notes = "Use age and region filters to filter data dynamically and see how distributions change"
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+kde3b = KernelDensity(:choice_kde, df3, :df3;
+    value_cols = [:score],
+    color_cols = [:department],
+    choices = Dict{Symbol,Any}(:region => "North"),  # Single-select
+    filters = Dict{Symbol,Any}(:age => collect(18:80)),  # Multi-select for comparison
+    title = "Example 3b: KernelDensity with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+    - **age (filter)**: Multi-select dropdown - can select multiple age values
+
+    Use choices when the user must select exactly one option (e.g., comparing one region at a time).
+    """
+)
+
 # Example 4: Faceting by One Variable
 n = 400
 df4 = DataFrame(
@@ -242,7 +258,7 @@ page = JSPlotPage(
         :df9 => df9,
         :df10 => df10
     ),
-    [header, kde1, kde2, kde3, kde4, kde5, kde6, kde7, kde8, kde9, kde10, conclusion],
+    [header, kde1, kde2, kde3, kde3b, kde4, kde5, kde6, kde7, kde8, kde9, kde10, conclusion],
     tab_title = "Kernel Density Examples"
 )
 

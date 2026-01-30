@@ -101,6 +101,30 @@ chart3 = Path(:regional_paths, df_regional, :regional_data;
     marker_size = 7
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+println("  Creating Example 3b: Choices vs Filters")
+
+chart3b = Path(:choice_example, df_regional, :regional_data;
+    x_cols = [:volatility, :Sharpe, :winrate],
+    y_cols = [:Sharpe, :drawdown, :winrate],
+    order_col = :year,
+    color_cols = [:strategy],
+    choices = Dict{Symbol,Any}(:region => :US),  # Single-select: user picks ONE region
+    filters = Dict{Symbol,Any}(:strategy => ["momentum", "carry"]),  # Multi-select: can select multiple strategies
+    title = "Example 3b: Path with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+    - **strategy (filter)**: Multi-select dropdown - can select multiple strategies
+
+    Use choices when the user must select exactly one option.
+    """,
+    show_arrows = true,
+    use_alpharange = true,
+    line_width = 2,
+    marker_size = 7
+)
+
 # Example 4: Asset Class Comparison (3 asset classes)
 println("  Creating Example 4: Asset Class Performance")
 
@@ -257,6 +281,7 @@ plots = [
     chart1,
     chart2,
     chart3,
+    chart3b,
     chart4,
     chart5,
     chart6,

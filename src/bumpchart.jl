@@ -15,6 +15,9 @@ Bump chart visualization showing entity rankings over time with interactive cont
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `y_mode::String`: Y-axis mode - "Ranking" or "Absolute" (default: `"Ranking"`)
@@ -44,6 +47,7 @@ struct BumpChart <: JSPlotsType
                             performance_cols::Vector{Symbol}=[:performance],
                             entity_col::Symbol=:entity,
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                            choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                             y_mode::String="Ranking",
@@ -52,8 +56,9 @@ struct BumpChart <: JSPlotsType
                             line_width::Int=2,
                             notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Sanitize chart title for use in JavaScript/HTML IDs
         chart_title_safe = string(sanitize_chart_title(chart_title))
@@ -85,13 +90,16 @@ struct BumpChart <: JSPlotsType
         # Build HTML controls using abstraction
         update_function = "updateChart_$chart_title_safe()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_safe, normalized_choices, df, update_function)
 
-        # Separate categorical and continuous filters
+        # Separate categorical, continuous, and choice filters
         categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
         continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
         x_col_js = string(x_col)
         performance_cols_js = build_js_array(valid_performance_cols)
         entity_col_js = string(entity_col)
@@ -112,6 +120,7 @@ struct BumpChart <: JSPlotsType
             // Configuration
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const X_COL = '$x_col_js';
             const PERFORMANCE_COLS = $performance_cols_js;
             const ENTITY_COL = '$entity_col_js';
@@ -205,6 +214,15 @@ struct BumpChart <: JSPlotsType
                     }
                 });
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title_safe');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get current facet selections
                 const facet1Select = document.getElementById('facet1_select_$chart_title_safe');
                 const facet2Select = document.getElementById('facet2_select_$chart_title_safe');
@@ -223,7 +241,9 @@ struct BumpChart <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 // Assign colors to entities in filtered data
@@ -640,6 +660,7 @@ struct BumpChart <: JSPlotsType
             chart_title_safe,
             chart_title_safe,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,

@@ -20,6 +20,9 @@ Candlestick (Open-High-Low-Close) candlestick chart with volume bars for financi
 - `filters::Union{Vector{Symbol}, Dict}`: Filter specification (default: `Dict{Symbol,Any}()`). Can be:
   - `Vector{Symbol}`: Column names - creates filters with all unique values selected by default
   - `Dict{Symbol, Any}`: Column => default values. Values can be a single value, vector, or nothing for all values
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `display_mode::String`: Display mode - "Overlay" or "Faceted" (default: `"Overlay"`)
 - `show_volume::Bool`: Show volume subplot (default: `true`)
 - `chart_type::String`: Chart type - "candlestick" or "ohlc" (default: `"candlestick"`)
@@ -56,14 +59,16 @@ struct CandlestickChart <: JSPlotsType
                             close_col::Symbol=:close,
                             volume_col::Union{Symbol, Nothing}=:volume,
                             filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                            choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                             display_mode::String="Overlay",
                             show_volume::Bool=true,
                             chart_type::String="candlestick",
                             title::String="Candlestick Chart",
                             notes::String="")
 
-        # Normalize filters to standard Dict{Symbol, Any} format
+        # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Sanitize chart title for use in JavaScript/HTML IDs
         chart_title_safe = string(sanitize_chart_title(chart_title))
@@ -110,13 +115,16 @@ struct CandlestickChart <: JSPlotsType
         # Build HTML controls using abstraction
         update_function = "updateChart_$chart_title_safe()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_safe, normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_safe, normalized_choices, df, update_function)
 
-        # Separate categorical and continuous filters
+        # Separate categorical, continuous, and choice filters
         categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
         continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
 
         # Create JavaScript constants
         time_from_col_js = string(time_from_col)
@@ -142,6 +150,7 @@ struct CandlestickChart <: JSPlotsType
             const HAS_VOLUME = $has_volume;
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
 
             let allData = [];
             let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
@@ -187,6 +196,15 @@ struct CandlestickChart <: JSPlotsType
                     }
                 });
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title_safe');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Apply filters with observation counting
                 const filteredData = applyFiltersWithCounting(
                     allData,
@@ -194,7 +212,9 @@ struct CandlestickChart <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 // Group data by symbol
@@ -514,6 +534,7 @@ struct CandlestickChart <: JSPlotsType
             chart_title_safe,
             chart_title_safe,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,

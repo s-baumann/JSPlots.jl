@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1472,6 +1485,7 @@ $(function(){
 (function() {
     const CATEGORICAL_FILTERS = ['region', 'age_group'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['party', 'employment', 'education'];
     const VALUE_COLS = ['count', 'turnout_weighted'];
     const ID_COL = 'voter_id';
@@ -1634,6 +1648,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_voters');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
             allData,
@@ -1641,7 +1664,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (filteredData.length === 0) {
@@ -1730,8 +1755,281 @@ $(function(){
     });
 })();
 (function() {
+    const CATEGORICAL_FILTERS = ['age_group'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['region'];
+    const COLOR_COLS = ['party', 'employment'];
+    const VALUE_COLS = ['count', 'turnout_weighted'];
+    const ID_COL = 'voter_id';
+    const TIME_COL = 'year';
+    let COLOR_COL = 'party';
+    let VALUE_COL = 'count';
+    const USE_COUNT = false;
+
+    let allData = [];
+
+    function processSankeyData_voters_choices(data) {
+        // Update columns from dropdowns if they exist
+        const colorColSelect = document.getElementById('color_col_voters_choices');
+        if (colorColSelect) {
+            COLOR_COL = colorColSelect.value;
+        }
+
+        const valueColSelect = document.getElementById('value_col_voters_choices');
+        if (valueColSelect) {
+            VALUE_COL = valueColSelect.value;
+        }
+
+        // Get unique time values preserving order of first appearance
+        // This respects categorical ordering from the data
+        const uniqueTimes = [];
+        const seen = new Set();
+        for (const row of data) {
+            const time = row[TIME_COL];
+            if (!seen.has(time)) {
+                seen.add(time);
+                uniqueTimes.push(time);
+            }
+        }
+
+        // Only sort if values are dates or numbers (not categorical strings)
+        const firstTime = uniqueTimes[0];
+        if (firstTime instanceof Date || typeof firstTime === 'number') {
+            uniqueTimes.sort((a, b) => {
+                if (a instanceof Date && b instanceof Date) {
+                    return a - b;
+                } else {
+                    return a - b;
+                }
+            });
+        }
+        // For strings (categorical), keep first-occurrence order
+
+        if (uniqueTimes.length < 2) {
+            console.error('Need at least 2 time periods for Sankey diagram');
+            return { nodes: [], links: [] };
+        }
+
+        // Build nodes and links for Sankey diagram
+        const nodeMap = new Map();  // name -> index
+        const nodes = [];
+        const links = [];
+
+        // Create nodes for each (time, affiliation) pair
+        uniqueTimes.forEach((time, timeIdx) => {
+            const timeData = data.filter(row => row[TIME_COL] === time);
+            const uniqueAffiliations = [...new Set(timeData.map(row => String(row[COLOR_COL])))];
+
+            uniqueAffiliations.forEach(affiliation => {
+                const nodeName = `${time}__${affiliation}`;
+                if (!nodeMap.has(nodeName)) {
+                    nodeMap.set(nodeName, nodes.length);
+                    nodes.push({
+                        name: affiliation,
+                        fullName: nodeName,
+                        time: time,
+                        timeIdx: timeIdx
+                    });
+                }
+            });
+        });
+
+        // Build links between consecutive time periods
+        for (let i = 0; i < uniqueTimes.length - 1; i++) {
+            const time1 = uniqueTimes[i];
+            const time2 = uniqueTimes[i + 1];
+
+            // Get data for both time periods
+            const time1Data = data.filter(row => row[TIME_COL] === time1);
+            const time2Data = data.filter(row => row[TIME_COL] === time2);
+
+            // Build lookup by ID for time2
+            const time2Lookup = new Map();
+            time2Data.forEach(row => {
+                time2Lookup.set(row[ID_COL], row);
+            });
+
+            // Track flows: (affiliation1, affiliation2) -> total value
+            const flowMap = new Map();
+
+            time1Data.forEach(row1 => {
+                const id = row1[ID_COL];
+                const affiliation1 = String(row1[COLOR_COL]);
+
+                // Find matching record at time2
+                const row2 = time2Lookup.get(id);
+                if (row2) {
+                    const affiliation2 = String(row2[COLOR_COL]);
+                    const flowKey = `${affiliation1}→${affiliation2}`;
+
+                    const value = USE_COUNT ? 1 : (Number(row1[VALUE_COL]) || 0);
+
+                    if (flowMap.has(flowKey)) {
+                        flowMap.set(flowKey, flowMap.get(flowKey) + value);
+                    } else {
+                        flowMap.set(flowKey, value);
+                    }
+                }
+            });
+
+            // Create links from flow map
+            flowMap.forEach((value, flowKey) => {
+                const [affiliation1, affiliation2] = flowKey.split('→');
+                const sourceName = `${time1}__${affiliation1}`;
+                const targetName = `${time2}__${affiliation2}`;
+
+                const sourceIdx = nodeMap.get(sourceName);
+                const targetIdx = nodeMap.get(targetName);
+
+                if (sourceIdx !== undefined && targetIdx !== undefined && value > 0) {
+                    links.push({
+                        source: sourceIdx,
+                        target: targetIdx,
+                        value: value
+                    });
+                }
+            });
+        }
+
+        return { nodes, links, uniqueTimes };
+    }
+
+    window.updateChart_voters_choices = function() {
+        if (!allData || allData.length === 0) {
+            return;
+        }
+
+        // Get categorical filter values
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_voters_choices');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_voters_choices' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_voters_choices');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'voters_choices',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        if (filteredData.length === 0) {
+            console.warn('No data after filtering');
+            return;
+        }
+
+        // Process data into Sankey format
+        const { nodes, links, uniqueTimes } = processSankeyData_voters_choices(filteredData);
+
+        // Create Sankey diagram
+        const data = [{
+            type: "sankey",
+            orientation: "h",
+            node: {
+                pad: 15,
+                thickness: 20,
+                line: {
+                    color: "black",
+                    width: 0.5
+                },
+                label: nodes.map(n => n.name),
+                color: nodes.map((n, i) => {
+                    // Color by time stage
+                    const colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+                    return colors[n.timeIdx % colors.length];
+                }),
+                // Add x positions based on time
+                x: nodes.map(n => n.timeIdx / (Math.max(...nodes.map(node => node.timeIdx)) || 1)),
+                y: Array(nodes.length).fill(null)  // Let Plotly auto-position vertically
+            },
+            link: {
+                source: links.map(l => l.source),
+                target: links.map(l => l.target),
+                value: links.map(l => l.value),
+                color: links.map(l => {
+                    // Semi-transparent based on source color
+                    const sourceNode = nodes[l.source];
+                    const colors = ['rgba(31,119,180,0.3)', 'rgba(255,127,14,0.3)', 'rgba(44,160,44,0.3)',
+                                  'rgba(214,39,40,0.3)', 'rgba(148,103,189,0.3)', 'rgba(140,86,75,0.3)',
+                                  'rgba(227,119,194,0.3)', 'rgba(127,127,127,0.3)', 'rgba(188,189,34,0.3)', 'rgba(23,190,207,0.3)'];
+                    return colors[sourceNode.timeIdx % colors.length];
+                })
+            }
+        }];
+
+        // Create time labels annotations
+        const timeAnnotations = uniqueTimes.map((time, idx) => {
+            const xPos = idx / (uniqueTimes.length - 1 || 1);
+            return {
+                x: xPos,
+                y: 1.05,
+                xref: 'paper',
+                yref: 'paper',
+                text: String(time),
+                showarrow: false,
+                font: {
+                    size: 14,
+                    color: '#333'
+                },
+                xanchor: 'center'
+            };
+        });
+
+        const layout = {
+            font: {
+                size: 12
+            },
+            height: 600,
+            margin: { l: 50, r: 50, t: 70, b: 50 },
+            annotations: timeAnnotations
+        };
+
+        Plotly.newPlot('voters_choices', data, layout, {responsive: true});
+    };
+
+    // Load data
+    loadDataset('voter_data').then(function(data) {
+        allData = data;
+        window.updateChart_voters_choices();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('voters_choices');
+    }).catch(function(error) {
+        console.error('Error loading data for chart voters_choices:', error);
+    });
+})();
+(function() {
     const CATEGORICAL_FILTERS = ['income_type'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['Product'];
     const VALUE_COLS = ['Value'];
     const ID_COL = 'flow_id';
@@ -1894,6 +2192,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_budget');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
             allData,
@@ -1901,7 +2208,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (filteredData.length === 0) {
@@ -10176,6 +10485,107 @@ voter_id,year,party,employment,education,region,age_group,count,turnout_weighted
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Example 1b: Choices vs Filters</h2>
+<p>Demonstrates the difference between choices (single-select) and filters (multi-select).</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Voter Transitions (Single-Select Region)</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **Region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+- **Age Group (filter)**: Multi-select dropdown - can select multiple age groups
+
+Use choices when the user must select exactly one option (like comparing transitions region by region).
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="voters_choices_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="region_choice_voters_choices"><strong>region</strong>: </label>
+                <select id="region_choice_voters_choices" onchange="updateChart_voters_choices()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Midwest">Midwest</option>
+                <option value="Northeast" selected>Northeast</option>
+                <option value="South">South</option>
+                <option value="West">West</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="age_group_select_voters_choices">age_group: </label>
+                <select id="age_group_select_voters_choices" multiple onchange="updateChart_voters_choices()">
+                <option value="18-29" selected>18-29</option>
+                <option value="30-44" selected>30-44</option>
+                <option value="45-64" selected>45-64</option>
+                <option value="65+" selected>65+</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="age_group_select_voters_choices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_voters_choices">Affiliation: </label>
+                <select id="color_col_voters_choices" onchange="updateChart_voters_choices()">
+                <option value="party" selected>party</option>
+                <option value="employment">employment</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_voters_choices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="value_col_voters_choices">Weight By: </label>
+                <select id="value_col_voters_choices" onchange="updateChart_voters_choices()">
+                <option value="count" selected>count</option>
+                <option value="turnout_weighted">turnout_weighted</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="value_col_voters_choices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="voters_choices_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="voters_choices_aspect_ratio_label">0.4</span>
+    <input type="range" id="voters_choices_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="voters_choices"></div>
+<style>
+    .sankey-container-voters_choices {
+        width: 100%;
+        max-width: 1200px;
+        margin: 20px auto;
+    }
+</style>
+<div class="sankey-container-voters_choices">
+    <div id="voters_choices"></div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: voter_data</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Example 2: Shopkeeper Budget Flow Analysis</h2>
 <p>Track individual money flows from revenue sources through total budget to spending destinations.</p>
 <p>This example demonstrates:</p>
@@ -10277,6 +10687,6 @@ voter_id,year,party,employment,education,region,age_group,count,turnout_weighted
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

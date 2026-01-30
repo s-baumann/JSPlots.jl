@@ -18,6 +18,9 @@ vertically with clear visual separation by grouping columns.
 - `grouping_cols::Vector{Symbol}`: Columns available for organizing/grouping (default: `Symbol[]`)
 - `group_col::Symbol`: Column defining the groups (default: `:group`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `title::String`: Chart title (default: `"Box and Whiskers Plot"`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
 
@@ -49,11 +52,13 @@ struct BoxAndWhiskers <: JSPlotsType
                            grouping_cols::Vector{Symbol}=Symbol[],
                            group_col::Symbol=:group,
                            filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                           choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                            title::String="Box and Whiskers Plot",
                            notes::String="")
 
         # Normalize filters to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Sanitize chart title
         chart_title_safe = sanitize_chart_title(chart_title)
@@ -94,7 +99,7 @@ struct BoxAndWhiskers <: JSPlotsType
         functional_html, appearance_html = generate_boxandwhiskers_html(
             chart_title_safe, data_label, df,
             x_cols, color_cols, grouping_cols, group_col,
-            normalized_filters, color_maps, title, notes
+            normalized_filters, normalized_choices, color_maps, title, notes
         )
 
         new(chart_title, data_label, functional_html, appearance_html)
@@ -106,17 +111,20 @@ Generate HTML and JavaScript for BoxAndWhiskers chart
 """
 function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
                                      x_cols, color_cols, grouping_cols, group_col,
-                                     normalized_filters, color_maps, title, notes)
+                                     normalized_filters, normalized_choices, color_maps, title, notes)
 
     # Build filter dropdowns
     update_function = "updateChart_$(chart_title_safe)()"
     filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title_safe), normalized_filters, df, update_function)
+    choice_dropdowns = build_choice_dropdowns(string(chart_title_safe), normalized_choices, df, update_function)
 
     # Separate categorical and continuous filters for JavaScript
     categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
     continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+    choice_cols = collect(keys(normalized_choices))
     categorical_filters_js = build_js_array(categorical_filter_cols)
     continuous_filters_js = build_js_array(continuous_filter_cols)
+    choice_filters_js = build_js_array(choice_cols)
 
     # Build attribute dropdowns
     attribute_dropdowns = DropdownControl[]
@@ -180,6 +188,9 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
 
     attributes_html = join([generate_dropdown_html(dd) for dd in attribute_dropdowns], "\n") * toggles_html
 
+    # Generate choices HTML
+    choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
+
     # Generate appearance HTML
     base_appearance_html = generate_appearance_html_from_sections(
         filters_html,
@@ -188,6 +199,7 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
         title,
         notes,
         string(chart_title_safe);
+        choices_html=choices_html,
         aspect_ratio_default=0.6
     )
 
@@ -216,6 +228,7 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
     // Filter configuration
     const categoricalFilters_$(chart_title_safe) = $(categorical_filters_js);
     const continuousFilters_$(chart_title_safe) = $(continuous_filters_js);
+    const CHOICE_FILTERS = $(choice_filters_js);
 
     // State variables
     let currentData_$(chart_title_safe) = null;
@@ -312,6 +325,15 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
         var displayQuantiles = showQuantiles ? showQuantiles.checked : true;
         var displayMeanStd = showMeanStd ? showMeanStd.checked : true;
 
+        // Get choice filter values (single-select)
+        var choices = {};
+        CHOICE_FILTERS.forEach(function(col) {
+            var select = document.getElementById(col + '_choice_$(chart_title_safe)');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Re-read filter values from dropdowns/sliders (they may have changed)
         var currentFilters = {};
         categoricalFilters_$(chart_title_safe).forEach(function(col) {
@@ -341,7 +363,9 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
             categoricalFilters_$(chart_title_safe),
             continuousFilters_$(chart_title_safe),
             currentFilters,
-            currentRangeFilters
+            currentRangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Group data

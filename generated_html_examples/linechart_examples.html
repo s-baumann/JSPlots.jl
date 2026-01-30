@@ -359,7 +359,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -370,6 +371,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1500,6 +1513,7 @@ $(function(){
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Date'];
     const Y_COLS = ['Revenue'];
     const COLOR_COLS = ['color'];
@@ -1683,6 +1697,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_revenue_trend');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1733,7 +1756,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -2113,6 +2138,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Year'];
@@ -2296,6 +2322,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_series');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2346,7 +2381,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -2726,6 +2763,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = ['Department', 'Quarter'];
     const CATEGORICAL_FILTERS = ['Department', 'Quarter'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Department', 'Metric'];
@@ -2909,6 +2947,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_filtered_metrics');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2959,7 +3006,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -3336,9 +3385,1260 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 })();
 (function() {
     // Configuration
+    const FILTER_COLS = ['Quarter'];
+    const CATEGORICAL_FILTERS = ['Quarter'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['Metric'];
+    const X_COLS = ['Month'];
+    const Y_COLS = ['Value'];
+    const COLOR_COLS = ['Department'];
+    const COLOR_MAPS = {'Department': {'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
+    const COLOR_SCALES = {};
+    const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_Y_COL = 'Value';
+    const DEFAULT_COLOR_COL = 'Department';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;  // Return all values when no aggregation
+        if (method === 'count') return [values.length];
+
+        // Convert all values to numbers for numeric operations
+        const numericValues = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && isFinite(v));
+        if (numericValues.length === 0) return [NaN];
+
+        if (method === 'sum') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
+        if (method === 'mean') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum / numericValues.length];
+        }
+        if (method === 'median') {
+            const sorted = [...numericValues].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...numericValues)];
+        if (method === 'max') return [Math.max(...numericValues)];
+        return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare the actual Date objects
+                    const dateA = xOriginalValues[a];
+                    const dateB = xOriginalValues[b];
+                    return dateA - dateB;  // Date subtraction gives milliseconds difference
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_single_select_metrics = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_single_select_metrics');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_single_select_metrics');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current Y axis transformation
+        const yTransformSelect = document.getElementById('y_transform_select_single_select_metrics');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_single_select_metrics');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_single_select_metrics');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_single_select_metrics' + '_slider');
+            // Check slider is initialized before reading values
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_single_select_metrics');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_single_select_metrics');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_single_select_metrics');
+        const facet2Select = document.getElementById('facet2_select_single_select_metrics');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'single_select_metrics',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+
+                    // Check if values are Date objects
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
+
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply Y axis transformation
+                // Special handling for cumulative transforms (computed per group after aggregation)
+                if (Y_TRANSFORM === 'cumulative') {
+                    yValues = computeCumulativeSum(yValues);
+                } else if (Y_TRANSFORM === 'cumprod') {
+                    yValues = computeCumulativeProduct(yValues);
+                } else {
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: getAxisLabel(Y_COL, Y_TRANSFORM),
+                    // Force linear type for cumulative transforms to prevent auto-date detection
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('single_select_metrics', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+
+                        // Check if values are Date objects
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
+
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply Y axis transformation
+                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    if (Y_TRANSFORM === 'cumulative') {
+                        yValues = computeCumulativeSum(yValues);
+                    } else if (Y_TRANSFORM === 'cumprod') {
+                        yValues = computeCumulativeProduct(yValues);
+                    } else {
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis,
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('single_select_metrics', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
+
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply Y axis transformation
+                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        if (Y_TRANSFORM === 'cumulative') {
+                            yValues = computeCumulativeSum(yValues);
+                        } else if (Y_TRANSFORM === 'cumprod') {
+                            yValues = computeCumulativeProduct(yValues);
+                        } else {
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis,
+                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('single_select_metrics', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('metrics').then(function(data) {
+        allData = data;
+        window.updateChart_single_select_metrics();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('single_select_metrics');
+    }).catch(function(error) {
+        console.error('Error loading data for chart single_select_metrics:', error);
+    });
+})();
+(function() {
+    // Configuration
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['Metric', 'Quarter'];
+    const X_COLS = ['Month'];
+    const Y_COLS = ['Value'];
+    const COLOR_COLS = ['Department'];
+    const COLOR_MAPS = {'Department': {'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
+    const COLOR_SCALES = {};
+    const DEFAULT_X_COL = 'Month';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_Y_COL = 'Value';
+    const DEFAULT_COLOR_COL = 'Department';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;  // Return all values when no aggregation
+        if (method === 'count') return [values.length];
+
+        // Convert all values to numbers for numeric operations
+        const numericValues = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && isFinite(v));
+        if (numericValues.length === 0) return [NaN];
+
+        if (method === 'sum') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
+        if (method === 'mean') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum / numericValues.length];
+        }
+        if (method === 'median') {
+            const sorted = [...numericValues].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...numericValues)];
+        if (method === 'max') return [Math.max(...numericValues)];
+        return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare the actual Date objects
+                    const dateA = xOriginalValues[a];
+                    const dateB = xOriginalValues[b];
+                    return dateA - dateB;  // Date subtraction gives milliseconds difference
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_shorthand_choices = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_shorthand_choices');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_shorthand_choices');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current Y axis transformation
+        const yTransformSelect = document.getElementById('y_transform_select_shorthand_choices');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_shorthand_choices');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_shorthand_choices');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_shorthand_choices' + '_slider');
+            // Check slider is initialized before reading values
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_shorthand_choices');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_shorthand_choices');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_shorthand_choices');
+        const facet2Select = document.getElementById('facet2_select_shorthand_choices');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'shorthand_choices',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+
+                    // Check if values are Date objects
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
+
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply Y axis transformation
+                // Special handling for cumulative transforms (computed per group after aggregation)
+                if (Y_TRANSFORM === 'cumulative') {
+                    yValues = computeCumulativeSum(yValues);
+                } else if (Y_TRANSFORM === 'cumprod') {
+                    yValues = computeCumulativeProduct(yValues);
+                } else {
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: getAxisLabel(Y_COL, Y_TRANSFORM),
+                    // Force linear type for cumulative transforms to prevent auto-date detection
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('shorthand_choices', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+
+                        // Check if values are Date objects
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
+
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply Y axis transformation
+                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    if (Y_TRANSFORM === 'cumulative') {
+                        yValues = computeCumulativeSum(yValues);
+                    } else if (Y_TRANSFORM === 'cumprod') {
+                        yValues = computeCumulativeProduct(yValues);
+                    } else {
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis,
+                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('shorthand_choices', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
+
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply Y axis transformation
+                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        if (Y_TRANSFORM === 'cumulative') {
+                            yValues = computeCumulativeSum(yValues);
+                        } else if (Y_TRANSFORM === 'cumprod') {
+                            yValues = computeCumulativeProduct(yValues);
+                        } else {
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis,
+                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('shorthand_choices', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('metrics').then(function(data) {
+        allData = data;
+        window.updateChart_shorthand_choices();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('shorthand_choices');
+    }).catch(function(error) {
+        console.error('Error loading data for chart shorthand_choices:', error);
+    });
+})();
+(function() {
+    // Configuration
+    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['color', 'Product'];
@@ -3522,6 +4822,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_facet_wrap_example');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3572,7 +4881,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -3952,6 +5263,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['color'];
@@ -4135,6 +5447,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_facet_grid_example');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4185,7 +5506,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -4565,6 +5888,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Return'];
     const COLOR_COLS = ['Stock', 'Strategy', 'Region'];
@@ -4748,6 +6072,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_dynamic_controls');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4798,7 +6131,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -5178,6 +6513,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Product'];
@@ -5361,6 +6697,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_aggregation_demo');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -5411,7 +6756,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -5791,6 +7138,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['time_hours', 'time_halfhours'];
     const Y_COLS = ['temperature_celsius', 'temperature_fahrenheit', 'humidity_percent', 'pressure_hpa'];
     const COLOR_COLS = ['color'];
@@ -5974,6 +7322,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_dimensions');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -6024,7 +7381,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -6404,6 +7763,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = ['Product', 'Units', 'Profit_Margin'];
     const CATEGORICAL_FILTERS = ['Product'];
     const CONTINUOUS_FILTERS = ['Units', 'Profit_Margin'];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Product'];
@@ -6587,6 +7947,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_continuous_filters');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -6637,7 +8006,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -7017,6 +8388,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['Date'];
     const Y_COLS = ['Price'];
     const COLOR_COLS = ['color'];
@@ -7200,6 +8572,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_struct_prices');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -7250,7 +8631,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -9501,6 +10884,197 @@ Month,Return,Stock,Strategy,Region
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: metrics</p><br>
 <hr>
 <br>
+<h2>Department Performance (Single Metric Selection)</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **Metric (choice)**: Single-select dropdown - pick exactly ONE metric at a time
+- **Quarter (filter)**: Multi-select dropdown - can select multiple quarters
+
+Use choices when the user must select exactly one option (like choosing a strategy or metric type).
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="single_select_metrics_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="Metric_choice_single_select_metrics"><strong>Metric</strong>: </label>
+                <select id="Metric_choice_single_select_metrics" onchange="updateChart_single_select_metrics()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Productivity" selected>Productivity</option>
+                <option value="Sick_Days">Sick_Days</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="Quarter_select_single_select_metrics">Quarter: </label>
+                <select id="Quarter_select_single_select_metrics" multiple onchange="updateChart_single_select_metrics()">
+                <option value="Q1" selected>Q1</option>
+                <option value="Q2" selected>Q2</option>
+                <option value="Q3">Q3</option>
+                <option value="Q4">Q4</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="Quarter_select_single_select_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_single_select_metrics">Aggregator: </label>
+                <select id="aggregator_select_single_select_metrics" onchange="updateChart_single_select_metrics()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+                <option value="sum">sum</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_single_select_metrics_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Month</span>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_single_select_metrics">Y Transform: </label>
+        <select id="y_transform_select_single_select_metrics" style="padding: 5px 10px;" onchange="updateChart_single_select_metrics()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+<option value="cumulative">cumulative</option>
+<option value="cumprod">cumprod</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="single_select_metrics_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="single_select_metrics_aspect_ratio_label">0.4</span>
+    <input type="range" id="single_select_metrics_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="single_select_metrics"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: metrics</p><br>
+<hr>
+<br>
+<h2>Shorthand Choices Syntax</h2>
+<p>**Shorthand syntax for choices:** Instead of `Dict{Symbol,Any}(:Metric => :Productivity)`,
+you can simply use `[:Metric, :Quarter]`. JSPlots automatically selects the first unique
+value from each column as the default.
+
+This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Quarter => first(unique(df.Quarter)))`
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="shorthand_choices_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="Metric_choice_shorthand_choices"><strong>Metric</strong>: </label>
+                <select id="Metric_choice_shorthand_choices" onchange="updateChart_shorthand_choices()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Productivity" selected>Productivity</option>
+                <option value="Sick_Days">Sick_Days</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="Quarter_choice_shorthand_choices"><strong>Quarter</strong>: </label>
+                <select id="Quarter_choice_shorthand_choices" onchange="updateChart_shorthand_choices()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Q1" selected>Q1</option>
+                <option value="Q2">Q2</option>
+                <option value="Q3">Q3</option>
+                <option value="Q4">Q4</option>
+            </select>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_shorthand_choices">Aggregator: </label>
+                <select id="aggregator_select_shorthand_choices" onchange="updateChart_shorthand_choices()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+                <option value="sum">sum</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_shorthand_choices_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Month</span>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Value</span>
+    </div>
+    <div>
+        <label for="y_transform_select_shorthand_choices">Y Transform: </label>
+        <select id="y_transform_select_shorthand_choices" style="padding: 5px 10px;" onchange="updateChart_shorthand_choices()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+<option value="cumulative">cumulative</option>
+<option value="cumprod">cumprod</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="shorthand_choices_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="shorthand_choices_aspect_ratio_label">0.4</span>
+    <input type="range" id="shorthand_choices_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="shorthand_choices"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: metrics</p><br>
+<hr>
+<br>
     <div class="picture-container">
         <h2>example_visual</h2>
         <p>Example visualization image</p>
@@ -10200,6 +11774,6 @@ Month,Return,Stock,Strategy,Region
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

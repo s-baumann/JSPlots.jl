@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1472,6 +1485,7 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = ['currency', 'accounting'];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['category'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
@@ -1686,10 +1700,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_pnl');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -1810,6 +1838,7 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['category'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
@@ -2024,10 +2053,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_cashflow');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -2148,6 +2191,7 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = ['region'];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['category'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
@@ -2362,10 +2406,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_variance');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -2485,7 +2543,361 @@ $(function(){
 })();
 (function() {
     // Configuration
+    const FILTER_COLS = [];
+    const CHOICE_FILTERS = ['region'];
+    const COLOR_COLS = ['category'];
+    const ITEM_COL = 'item';
+    let CATEGORY_COL = 'category';
+    const VALUE_COL = 'value';
+    const SHOW_TABLE = true;
+    const SHOW_TOTALS = false;
+    const COLOR_MAPS = {"category":{"Variance":"#636efa"}};
+
+    // Store data globally
+    let allData = [];
+    let removedItems = new Set();  // Set of removed item names
+    let removedCategories = new Set();  // Set of removed category names
+
+    function calculateWaterfall_variance_choice(data) {
+        const activeData = data.filter(row => {
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            return !removedItems.has(item) && !removedCategories.has(category);
+        });
+
+        let runningTotal = 0;
+        const processed = [];
+
+        for (let i = 0; i < activeData.length; i++) {
+            const row = activeData[i];
+            const item = String(row[ITEM_COL]);
+            const category = String(row[CATEGORY_COL]);
+            const value = Number(row[VALUE_COL]) || 0;
+            const start = runningTotal;
+            const end = runningTotal + value;
+
+            // All items are 'relative' (floating bars showing individual changes)
+            // First item starts from 0 but still uses relative measure
+            processed.push({
+                item: item,
+                category: category,
+                value: value,
+                start: start,
+                end: end,
+                type: value >= 0 ? 'increasing' : 'decreasing',
+                isFirst: i === 0
+            });
+
+            runningTotal = end;
+        }
+
+        // Add total if enabled
+        if (SHOW_TOTALS && processed.length > 0) {
+            processed.push({
+                item: 'Total',
+                category: 'Total',
+                value: runningTotal,
+                start: 0,
+                end: runningTotal,
+                type: 'total',
+                isFirst: false
+            });
+        }
+
+        return processed;
+    }
+
+    function updateTable_variance_choice(processedData, allItemsData) {
+        if (!SHOW_TABLE) return;
+
+        const container = document.getElementById('waterfall_table_container_variance_choice');
+        if (!container) return;
+
+        // Build a map for quick lookup by item name
+        const dataMap = {};
+        for (const item of processedData) {
+            dataMap[item.item] = item;
+        }
+
+        // Group items by category
+        const categoryGroups = {};
+        for (const row of allItemsData) {
+            const cat = String(row[CATEGORY_COL]);
+            const item = String(row[ITEM_COL]);
+            if (!categoryGroups[cat]) {
+                categoryGroups[cat] = [];
+            }
+            categoryGroups[cat].push(item);
+        }
+
+        // Build table HTML
+        let html = '<table class="waterfall-table-variance_choice">';
+        html += '<thead><tr><th>Item</th><th>Change</th><th>Running Total</th></tr></thead>';
+        html += '<tbody>';
+
+        // Iterate through categories
+        for (const [category, items] of Object.entries(categoryGroups)) {
+            const catRemoved = removedCategories.has(category);
+
+            // Category header row
+            html += `<tr class="category-header" style="background-color: #e0e0e0; font-weight: bold; cursor: pointer;"
+                     onclick="toggleCategoryGroup_variance_choice('${category}')">`;
+            html += `<td colspan="3">`;
+            html += `<input type="checkbox" ${!catRemoved ? 'checked' : ''}
+                     onclick="event.stopPropagation(); toggleCategoryGroup_variance_choice('${category}')"
+                     style="margin-right: 8px;">`;
+            html += `${category}</td></tr>`;
+
+            // Item rows within category
+            for (const item of items) {
+                const itemRemoved = removedItems.has(item) || catRemoved;
+                const data = dataMap[item];
+
+                let rowClass = '';
+                if (itemRemoved) {
+                    rowClass = 'removed';
+                } else if (data) {
+                    if (data.type === 'absolute' || data.type === 'increasing') {
+                        rowClass = 'positive';
+                    } else if (data.type === 'decreasing') {
+                        rowClass = 'negative';
+                    } else if (data.type === 'total') {
+                        rowClass = 'total';
+                    }
+                }
+
+                html += `<tr class="${rowClass}" style="cursor: pointer; padding-left: 20px;"
+                         onclick="toggleItem_variance_choice('${item}')">`;
+                html += `<td style="padding-left: 20px;">${item}</td>`;
+
+                if (data && !itemRemoved) {
+                    html += `<td style="text-align: right;">${data.value.toFixed(2)}</td>`;
+                    html += `<td style="text-align: right;">${data.end.toFixed(2)}</td>`;
+                } else {
+                    html += `<td style="text-align: right;">-</td>`;
+                    html += `<td style="text-align: right;">-</td>`;
+                }
+                html += '</tr>';
+            }
+        }
+
+        // Add Total row if it exists in processed data
+        const totalData = processedData.find(d => d.type === 'total');
+        if (totalData) {
+            const totalRemoved = removedItems.has('Total');
+            const rowClass = totalRemoved ? 'removed' : 'total';
+
+            html += `<tr class="${rowClass}" style="background-color: #f5f5f5; font-weight: bold; cursor: pointer;"
+                     onclick="toggleItem_variance_choice('Total')">`;
+            html += `<td style="padding-left: 20px;">Total</td>`;
+
+            if (!totalRemoved) {
+                html += `<td style="text-align: right;">${totalData.value.toFixed(2)}</td>`;
+                html += `<td style="text-align: right;">${totalData.end.toFixed(2)}</td>`;
+            } else {
+                html += `<td style="text-align: right;">-</td>`;
+                html += `<td style="text-align: right;">-</td>`;
+            }
+            html += '</tr>';
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    window.toggleItem_variance_choice = function(item) {
+        // Allow toggling of all items including Total
+        if (removedItems.has(item)) {
+            removedItems.delete(item);
+        } else {
+            removedItems.add(item);
+        }
+        window.updateChart_variance_choice();
+    };
+
+    window.toggleCategoryGroup_variance_choice = function(category) {
+        if (removedCategories.has(category)) {
+            removedCategories.delete(category);
+        } else {
+            removedCategories.add(category);
+        }
+        window.updateChart_variance_choice();
+    };
+
+    window.resetWaterfall_variance_choice = function() {
+        removedItems = new Set();
+        removedCategories = new Set();
+        window.updateChart_variance_choice();
+    };
+
+    // Make it global so inline onchange can see it
+    window.updateChart_variance_choice = function() {
+        // Check if data is loaded
+        if (!allData || allData.length === 0) {
+            return;
+        }
+
+        // Update category column if dropdown exists
+        const colorColSelect = document.getElementById('color_col_variance_choice');
+        if (colorColSelect) {
+            CATEGORY_COL = colorColSelect.value;
+        }
+
+        // Get color mode
+        const colorModeSelect = document.getElementById('color_mode_variance_choice');
+        const colorMode = colorModeSelect ? colorModeSelect.value : 'Value (Positive/Negative)';
+        console.log('Color mode:', colorMode);
+        console.log('CATEGORY_COL:', CATEGORY_COL);
+        console.log('COLOR_MAPS:', COLOR_MAPS);
+
+        // Get current filter values (single selection)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select_variance_choice');
+            if (select) {
+                filters[col] = select.value;
+            }
+        });
+
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_variance_choice');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
+        const filteredData = allData.filter(row => {
+            for (let col in filters) {
+                if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Calculate waterfall (includes all items)
+        const processed = calculateWaterfall_variance_choice(filteredData);
+
+        // Filter processed data for chart display (remove toggled items like Total)
+        const processedForChart = processed.filter(d => !removedItems.has(d.item));
+
+        const items = processedForChart.map(d => d.item);
+        const values = processedForChart.map(d => d.value);
+        const bases = processedForChart.map(d => d.type === 'total' ? 0 : d.start);
+
+        // Determine colors based on mode
+        let markerColors;
+        if (colorMode === 'Category' && COLOR_MAPS[CATEGORY_COL]) {
+            // Category-based coloring
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                const categoryColor = COLOR_MAPS[CATEGORY_COL][d.category];
+                return categoryColor || '#4285F4';
+            });
+            console.log('Using category-based colors:', markerColors);
+        } else {
+            // Value-based coloring (positive/negative)
+            markerColors = processedForChart.map(d => {
+                if (d.type === 'total') return '#000000';  // Total is always black
+                return d.value >= 0 ? '#4CAF50' : '#F44336';  // Green for positive, Red for negative
+            });
+            console.log('Using value-based colors (positive/negative):', markerColors);
+        }
+
+        // Build waterfall using bar chart with base values
+        // This gives us full control over colors
+        const trace = {
+            type: 'bar',
+            orientation: 'v',
+            x: items,
+            y: values,
+            base: bases,
+            text: values.map(v => v.toFixed(2)),
+            textposition: 'outside',
+            hovertemplate: '%{x}<br>Change: %{y:.2f}<br>Running Total: %{base:+y:.2f}<extra></extra>',
+            marker: {
+                color: markerColors,
+                line: { width: 1, color: '#333' }
+            }
+        };
+
+        // Add connector lines as shapes
+        const shapes = [];
+        for (let i = 0; i < processedForChart.length - 1; i++) {
+            if (processedForChart[i].type !== 'total' && processedForChart[i + 1].type !== 'total') {
+                const endY = processedForChart[i].end;
+                shapes.push({
+                    type: 'line',
+                    x0: i + 0.4,
+                    x1: i + 1 - 0.4,
+                    y0: endY,
+                    y1: endY,
+                    line: {
+                        color: 'rgb(63, 63, 63)',
+                        width: 2,
+                        dash: 'dot'
+                    }
+                });
+            }
+        }
+
+        const layout = {
+            showlegend: false,
+            xaxis: { title: ITEM_COL },
+            yaxis: { title: VALUE_COL },
+            height: 500,
+            margin: {l: 80, r: 50, t: 50, b: 100},
+            shapes: shapes
+        };
+
+        // Use newPlot to ensure colors update properly
+        // (react sometimes doesn't update all trace properties)
+        Plotly.newPlot('variance_choice', [trace], layout, {responsive: true}).then(function() {
+            // Initialize click handler after first plot is created
+            initClickHandler_variance_choice();
+        });
+
+        // Update table
+        updateTable_variance_choice(processed, filteredData);
+    };
+
+    // Track if click handler has been initialized
+    let clickHandlerInitialized = false;
+
+    // Initialize click handler after first plot is created
+    function initClickHandler_variance_choice() {
+        if (clickHandlerInitialized) return;
+        const chartDiv = document.getElementById('variance_choice');
+        chartDiv.on('plotly_click', function(data) {
+            const clickedItem = data.points[0].x;
+            window.toggleItem_variance_choice(clickedItem);
+        });
+        clickHandlerInitialized = true;
+    }
+
+    // Load and parse data
+    loadDataset('variance_data').then(function(data) {
+        allData = data;
+        window.updateChart_variance_choice();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('variance_choice');
+    }).catch(function(error) {
+        console.error('Error loading data for chart variance_choice:', error);
+    });
+})();
+(function() {
+    // Configuration
     const FILTER_COLS = ['year', 'department'];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['category'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
@@ -2700,10 +3112,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_budget');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -2824,6 +3250,7 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['category'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'category';
@@ -3038,10 +3465,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_simple');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -3162,6 +3603,7 @@ $(function(){
 (function() {
     // Configuration
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
     const COLOR_COLS = ['financial_category', 'department'];
     const ITEM_COL = 'item';
     let CATEGORY_COL = 'financial_category';
@@ -3376,10 +3818,24 @@ $(function(){
             }
         });
 
-        // Filter data (single selection per filter)
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_color');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Filter data (single selection per filter + choices)
         const filteredData = allData.filter(row => {
             for (let col in filters) {
                 if (String(row[col]) !== filters[col]) {
+                    return false;
+                }
+            }
+            for (let col in choices) {
+                if (String(row[col]) !== choices[col]) {
                     return false;
                 }
             }
@@ -4134,6 +4590,170 @@ Net Income,Net,All Depts,1600
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Example 3b: Sales Variance with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:</p>
+<ul>
+    <li><strong>Region (choice)</strong>: Single-select dropdown - pick exactly ONE region</li>
+    <li>Filters allow multi-select, but choices restrict to exactly one selection</li>
+</ul>
+<p>Use choices when the user must select exactly one option, such as when comparing data that only makes sense for a single dimension at a time.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Example 3b: Variance Analysis with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **Region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+
+Use choices when the user must select exactly one option.
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="variance_choice_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="region_choice_variance_choice"><strong>region</strong>: </label>
+                <select id="region_choice_variance_choice" onchange="updateChart_variance_choice()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="East">East</option>
+                <option value="North" selected>North</option>
+                <option value="South">South</option>
+                <option value="West">West</option>
+            </select>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_mode_variance_choice">Color By: </label>
+                <select id="color_mode_variance_choice" onchange="updateChart_variance_choice()">
+                <option value="Value (Positive/Negative)" selected>Value (Positive/Negative)</option>
+                <option value="Category">Category</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_mode_variance_choice_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="variance_choice_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="variance_choice_aspect_ratio_label">0.4</span>
+    <input type="range" id="variance_choice_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="variance_choice"></div>
+<style>
+    .waterfall-layout-variance_choice {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        margin: 20px 0;
+    }
+
+    .waterfall-chart-section-variance_choice {
+        width: 100%;
+        max-width: 1200px;
+    }
+
+    .waterfall-table-section-variance_choice {
+        background-color: #f9f9f9;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        overflow-x: auto;
+        max-width: 800px;
+    }
+
+    .waterfall-table-variance_choice {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9em;
+    }
+
+    .waterfall-table-variance_choice th,
+    .waterfall-table-variance_choice td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+
+    .waterfall-table-variance_choice th {
+        background-color: #4CAF50;
+        color: white;
+        font-weight: bold;
+    }
+
+    .waterfall-table-variance_choice tr.removed {
+        opacity: 0.3;
+        text-decoration: line-through;
+        background-color: #e0e0e0 !important;
+    }
+
+    .waterfall-table-variance_choice tr.positive {
+        background-color: #d5f4e6;
+    }
+
+    .waterfall-table-variance_choice tr.negative {
+        background-color: #fadbd8;
+    }
+
+    .waterfall-table-variance_choice tr.total {
+        background-color: #d6eaf8;
+        font-weight: bold;
+        border-top: 2px solid #333;
+    }
+
+    .waterfall-table-variance_choice tr:hover:not(.removed) {
+        background-color: #fffacd !important;
+        cursor: pointer;
+    }
+
+    .waterfall-reset-btn-variance_choice {
+        margin-top: 10px;
+        padding: 8px 16px;
+        background-color: #ff5722;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+
+    .waterfall-reset-btn-variance_choice:hover {
+        background-color: #e64a19;
+    }
+</style>
+<div class="waterfall-layout-variance_choice">
+    <div class="waterfall-chart-section-variance_choice">
+        <!-- Chart will be rendered here -->
+    </div>
+    <div class="waterfall-table-section-variance_choice">
+                <h4>Calculation Table</h4>
+                <p style="font-size: 0.85em; color: #666; margin-top: 0;">Click on category headers to toggle groups, or individual rows to exclude items</p>
+                <div id="waterfall_table_container_variance_choice">
+                    <!-- Table will be generated by JavaScript -->
+                </div>
+                <button class="waterfall-reset-btn-variance_choice" onclick="resetWaterfall_variance_choice()">🔄 Reset All</button>
+            </div>
+</div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: variance_data</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Example 4: Budget vs Actuals Comparison</h2>
 <p>Compare budgeted vs actual expenses across departments with multiple filters.</p>
 <p>Features:</p>
@@ -4649,6 +5269,6 @@ Net Income,Net,All Depts,1600
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

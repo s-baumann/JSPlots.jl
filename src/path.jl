@@ -22,6 +22,9 @@ or other sequences.
   - For continuous: `[(:col, Dict(0 => "#000", 1 => "#fff"))]` - interpolates between stops
   (default: `Symbol[]`)
 - `filters::Union{Vector{Symbol}, Dict}`: Default filter values (default: `Dict{Symbol,Any}()`)
+- `choices`: Single-select choice filters (default: `Dict{Symbol,Any}()`). Can be:
+  - `Vector{Symbol}`: Column names - uses first unique value as default
+  - `Dict{Symbol, Any}`: Column => default value mapping
 - `facet_cols`: Columns available for faceting (default: `nothing`)
 - `default_facet_cols`: Default faceting columns (default: `nothing`)
 - `title::String`: Chart title (default: `"Path Chart"`)
@@ -67,6 +70,7 @@ struct Path <: JSPlotsType
                   order_col::Symbol=:order,
                   color_cols::ColorColSpec=Symbol[],
                   filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                  choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                   facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                   default_facet_cols::Union{Nothing, Symbol, Vector{Symbol}}=nothing,
                   title::String="Path Chart",
@@ -76,8 +80,9 @@ struct Path <: JSPlotsType
                   use_alpharange::Bool=false,
                   notes::String="")
 
-# Normalize filters to standard Dict{Symbol, Any} format
+# Normalize filters and choices to standard Dict{Symbol, Any} format
 normalized_filters = normalize_filters(filters, df)
+normalized_choices = normalize_choices(choices, df)
 
         # Validate columns exist in dataframe
         valid_x_cols = validate_and_filter_columns(x_cols, df, "x_cols")
@@ -101,15 +106,18 @@ normalized_filters = normalize_filters(filters, df)
         chart_title_str = string(chart_title)
         update_function = "updateChart_$chart_title()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(chart_title_str, normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Separate categorical and continuous filters for JavaScript
         categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
         continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        choice_cols = [string(d.id)[1:findfirst("_choice_", string(d.id))[1]-1] for d in choice_dropdowns]
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
         x_cols_js = build_js_array(valid_x_cols)
         y_cols_js = build_js_array(valid_y_cols)
         color_cols_js = build_js_array(valid_color_cols)
@@ -125,6 +133,7 @@ normalized_filters = normalize_filters(filters, df)
             // Configuration
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
             const X_COLS = $x_cols_js;
             const Y_COLS = $y_cols_js;
             const COLOR_COLS = $color_cols_js;
@@ -179,6 +188,15 @@ normalized_filters = normalize_filters(filters, df)
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get categorical filter values (multiple selections)
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -223,7 +241,9 @@ normalized_filters = normalize_filters(filters, df)
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 if (FACET_COLS.length === 0) {
@@ -823,6 +843,7 @@ normalized_filters = normalize_filters(filters, df)
             chart_title_str,
             chart_title_str,
             update_function,
+            choice_dropdowns,
             filter_dropdowns,
             filter_sliders,
             attribute_dropdowns,

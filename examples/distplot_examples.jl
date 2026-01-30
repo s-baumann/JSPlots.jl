@@ -66,6 +66,22 @@ distplot3 = DistPlot(:filtered_dist, df3, :df3;
     notes = "Use age and department filters to filter data dynamically"
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+distplot3b = DistPlot(:choice_dist, df3, :df3;
+    value_cols = [:score],
+    choices = Dict{Symbol,Any}(:department => "Engineering"),  # Single-select dropdown - pick exactly ONE value
+    filters = Dict{Symbol,Any}(:age => [30]),  # Multi-select for comparison
+    histogram_bins = 40,
+    title = "Example 3b: Distribution with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **department (choice)**: Single-select dropdown - pick exactly ONE department
+    - **age (filter)**: Multi-select dropdown - can select multiple age values
+
+    Use choices when the user must select exactly one option.
+    """
+)
+
 # Example 4: Multiple Value and Group Columns with Dropdowns
 n = 800
 df4 = DataFrame(
@@ -258,7 +274,7 @@ page = JSPlotPage(
         :df8 => df8,
         :survey => survey_data  # Struct with responses and demographics
     ),
-    [header, distplot1, distplot2, distplot3, distplot4, distplot5, distplot6_custom, distplot7, distplot8, struct_intro, distplot9, conclusion],
+    [header, distplot1, distplot2, distplot3, distplot3b, distplot4, distplot5, distplot6_custom, distplot7, distplot8, struct_intro, distplot9, conclusion],
     tab_title = "DistPlot Examples"
 )
 

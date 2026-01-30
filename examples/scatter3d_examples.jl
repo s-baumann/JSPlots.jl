@@ -97,6 +97,30 @@ chart3 = Scatter3D(:filtered_scatter, df3, :df3, [:x, :y, :z];
     notes = "Use the filters to filter by temperature and region - eigenvectors update with the data"
 )
 
+# Example 3b: Using choices (single-select) instead of filters (multi-select)
+example3b_text = TextBlock("""
+<h2>Example 3b: Single-Select Choices vs Multi-Select Filters</h2>
+<p>This example demonstrates the difference between <strong>choices</strong> (single-select) and <strong>filters</strong> (multi-select).
+Use choices when the user must select exactly one option at a time.</p>
+""")
+
+chart3b = Scatter3D(:choice_scatter, df3, :df3, [:x, :y, :z];
+    color_cols = [:category],
+    choices = Dict{Symbol,Any}(:region => "North"),  # Single-select dropdown - pick exactly ONE value
+    filters = Dict{Symbol,Any}(:temperature => [20.0]),  # Multi-select for comparison
+    show_eigenvectors = true,
+    marker_size = 5,
+    marker_opacity = 0.7,
+    title = "Example 3b: 3D Scatter with Single-Select Choice",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **region (choice)**: Single-select dropdown - pick exactly ONE region
+    - **temperature (filter)**: Multi-select dropdown - can select multiple temperature values
+
+    Use choices when the user must select exactly one option.
+    """
+)
+
 # Example 4: Clustering Visualization
 example4_text = TextBlock("""
 <h2>Example 4: Clustering Visualization</h2>
@@ -264,6 +288,7 @@ page = JSPlotPage(
      example1_text, chart1,
      example2_text, chart2,
      example3_text, chart3,
+     example3b_text, chart3b,
      example4_text, chart4,
      example5_text, chart5,
      example6_text, chart6,

@@ -78,6 +78,7 @@ struct GeoPlot <: JSPlotsType
                      # Common parameters
                      color_scale::Symbol=:viridis,
                      filters::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
+                     choices::Union{Vector{Symbol}, Dict}=Dict{Symbol, Any}(),
                      title::String="Geographic Map",
                      notes::String="")
 
@@ -122,18 +123,22 @@ struct GeoPlot <: JSPlotsType
 
         # Normalize filters
         normalized_filters = normalize_filters(filters, df)
+        normalized_choices = normalize_choices(choices, df)
 
         # Build filter controls
         update_function = "updateMap_$(chart_title)()"
         filter_dropdowns, filter_sliders = build_filter_dropdowns(string(chart_title), normalized_filters, df, update_function)
+        choice_dropdowns = build_choice_dropdowns(string(chart_title), normalized_choices, df, update_function)
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") *
                        join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
 
         categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
         continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        choice_cols = collect(keys(normalized_choices))
 
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
+        choice_filters_js = build_js_array(choice_cols)
 
         # Get GeoJSON URL for region type
         geojson_source = get_geojson_url(region_type, geojson_url)
@@ -217,6 +222,7 @@ struct GeoPlot <: JSPlotsType
             const COLOR_PALETTE = $color_palette_js;
             const CATEGORICAL_FILTERS = $categorical_filters_js;
             const CONTINUOUS_FILTERS = $continuous_filters_js;
+            const CHOICE_FILTERS = $choice_filters_js;
 
             let map_$chart_title_str = null;
             let markersLayer_$chart_title_str = null;
@@ -659,6 +665,15 @@ struct GeoPlot <: JSPlotsType
                     VALUE_COL = overlaySelect.value;
                 }
 
+                // Get choice filter values (single-select)
+                const choices = {};
+                CHOICE_FILTERS.forEach(col => {
+                    const select = document.getElementById(col + '_choice_$chart_title_str');
+                    if (select) {
+                        choices[col] = select.value;
+                    }
+                });
+
                 // Get filter values
                 const filters = {};
                 CATEGORICAL_FILTERS.forEach(col => {
@@ -686,7 +701,9 @@ struct GeoPlot <: JSPlotsType
                     CATEGORICAL_FILTERS,
                     CONTINUOUS_FILTERS,
                     filters,
-                    rangeFilters
+                    rangeFilters,
+                    CHOICE_FILTERS,
+                    choices
                 );
 
                 // Always fit bounds to show the current filtered data
@@ -855,6 +872,9 @@ struct GeoPlot <: JSPlotsType
         <div id="map_$chart_title_str" style="width: 100%; height: 500px; border: 1px solid #ccc; border-radius: 4px;"></div>
         """
 
+        # Generate choices HTML
+        choices_html = join([generate_choice_dropdown_html(dd) for dd in choice_dropdowns], "\n")
+
         appearance_html = """
         <div class="chart-container" style="margin-bottom: 20px;">
             <h3>$title</h3>
@@ -862,6 +882,7 @@ struct GeoPlot <: JSPlotsType
             $sliders_html
             <div style="margin-bottom: 10px;">
                 $overlay_dropdown_html
+                $choices_html
                 $filters_html
             </div>
             $map_container

@@ -60,7 +60,8 @@ Complete specification for a chart's HTML controls (filters, attributes, axes, f
 - `chart_title_safe::String`: Sanitized chart title for use in HTML IDs
 - `chart_div_id::String`: ID of the main chart div element
 - `update_function_name::String`: Name of the JavaScript update function
-- `filter_dropdowns::Vector{DropdownControl}`: Categorical filter controls
+- `choice_dropdowns::Vector{DropdownControl}`: Single-select choice controls (displayed at top of filters)
+- `filter_dropdowns::Vector{DropdownControl}`: Categorical filter controls (multi-select)
 - `filter_sliders::Vector{RangeSliderControl}`: Continuous filter controls
 - `attribute_dropdowns::Vector{DropdownControl}`: Chart-specific attribute controls
 - `axes_html::String`: Pre-built HTML for axes controls (integrated into Plot Attributes)
@@ -72,6 +73,7 @@ struct ChartHtmlControls
     chart_title_safe::String
     chart_div_id::String
     update_function_name::String
+    choice_dropdowns::Vector{DropdownControl}
     filter_dropdowns::Vector{DropdownControl}
     filter_sliders::Vector{RangeSliderControl}
     attribute_dropdowns::Vector{DropdownControl}
@@ -288,12 +290,20 @@ function generate_appearance_html(controls::ChartHtmlControls;
                                   multiselect_filters::Bool=true,
                                   aspect_ratio_default::Float64=0.6)::String
 
-    # Build filters section
+    # Build filters section (includes choices at top, then filters)
     filters_html = ""
-    if !isempty(controls.filter_dropdowns) || !isempty(controls.filter_sliders)
+    has_choices = !isempty(controls.choice_dropdowns)
+    has_filters = !isempty(controls.filter_dropdowns) || !isempty(controls.filter_sliders)
+
+    if has_choices || has_filters
         filter_controls_html = ""
 
-        # Add dropdown filters
+        # Add choice dropdowns first (single-select, at top)
+        for dropdown in controls.choice_dropdowns
+            filter_controls_html *= generate_choice_dropdown_html(dropdown)
+        end
+
+        # Add dropdown filters (multi-select)
         for dropdown in controls.filter_dropdowns
             filter_controls_html *= generate_dropdown_html(dropdown; multiselect=multiselect_filters)
         end
@@ -477,6 +487,93 @@ function build_facet_dropdowns(chart_title_safe::String,
     end
 
     return facet_dropdowns
+end
+
+"""
+    build_choice_dropdowns(chart_title_safe::String,
+                          choices::Dict{Symbol, Any},
+                          df::DataFrame,
+                          update_function::String)
+
+Helper function to build choice (single-select) dropdown controls from choice dictionary.
+Choices are like filters but only allow selecting ONE value at a time.
+
+# Arguments
+- `chart_title_safe::String`: Sanitized chart title for IDs
+- `choices::Dict{Symbol, Any}`: Choice specifications (col => default_value)
+- `df::DataFrame`: DataFrame to extract choice options from
+- `update_function::String`: JavaScript function name for updates
+
+# Returns
+- `Vector{DropdownControl}`: Vector of single-select dropdown controls
+"""
+function build_choice_dropdowns(chart_title_safe::String,
+                                choices::Dict{Symbol, Any},
+                                df::DataFrame,
+                                update_function::String)::Vector{DropdownControl}
+
+    choice_dropdowns = DropdownControl[]
+
+    for (col, default_val) in choices
+        col_str = string(col)
+        if col_str in names(df)
+            # Get all unique values for the dropdown
+            unique_vals = sort(unique(skipmissing(df[!, col])))
+            options = [string(v) for v in unique_vals]
+
+            # Convert default value to string
+            default_str = string(default_val)
+
+            # Verify default is in options, otherwise use first option
+            if !(default_str in options) && !isempty(options)
+                default_str = options[1]
+            end
+
+            push!(choice_dropdowns, DropdownControl(
+                "$(col)_choice_$chart_title_safe",
+                col_str,
+                options,
+                default_str,  # Single value (not vector) for single-select
+                update_function
+            ))
+        end
+    end
+
+    return choice_dropdowns
+end
+
+"""
+    generate_choice_dropdown_html(dropdown::DropdownControl)
+
+Generate HTML for a single-select choice dropdown control.
+Similar to filter dropdowns but without multiselect and with different styling.
+
+# Arguments
+- `dropdown::DropdownControl`: The dropdown specification
+
+# Returns
+- `String`: HTML string for the single-select dropdown
+"""
+function generate_choice_dropdown_html(dropdown::DropdownControl)::String
+    options_html = ""
+
+    # Default value is a single string for choices
+    default_value_str = dropdown.default_value isa String ? dropdown.default_value : string(dropdown.default_value)
+
+    for option in dropdown.options
+        selected = (string(option) == default_value_str) ? " selected" : ""
+        options_html *= "                <option value=\"$option\"$selected>$option</option>\n"
+    end
+
+    return """
+            <div style="margin: 10px; display: flex; align-items: center;">
+                <div style="flex: 0 0 100%;">
+                    <label for="$(dropdown.id)"><strong>$(dropdown.label)</strong>: </label>
+                    <select id="$(dropdown.id)" onchange="$(dropdown.onchange)" style="padding: 5px 10px; font-weight: bold;">
+    $options_html            </select>
+                </div>
+            </div>
+            """
 end
 
 """
@@ -776,7 +873,9 @@ end
                                            faceting_html::String,
                                            title::String,
                                            notes::String,
-                                           chart_div_id::String)
+                                           chart_div_id::String;
+                                           choices_html::String="",
+                                           aspect_ratio_default::Float64=0.6)
 
 Generate appearance HTML from pre-built sections (for charts using custom controls).
 
@@ -784,12 +883,14 @@ This function provides the standard two-section layout without requiring Dropdow
 Useful for charts that build their HTML sections directly.
 
 # Arguments
-- `filters_html::String`: Pre-built HTML for filter controls
+- `filters_html::String`: Pre-built HTML for filter controls (multiselect)
 - `plot_attributes_html::String`: Pre-built HTML for attribute controls
 - `faceting_html::String`: Pre-built HTML for faceting controls (merged into Plot Attributes)
 - `title::String`: Chart title
 - `notes::String`: Chart notes/description
 - `chart_div_id::String`: ID for the chart container div
+- `choices_html::String`: Pre-built HTML for choice controls (single-select, displayed at top of filters)
+- `aspect_ratio_default::Float64`: Default aspect ratio (default: 0.6)
 
 # Returns
 - `String`: Complete appearance HTML with two-section layout (Filters + Plot Attributes with facets)
@@ -800,15 +901,19 @@ function generate_appearance_html_from_sections(filters_html::String,
                                                 title::String,
                                                 notes::String,
                                                 chart_div_id::String;
+                                                choices_html::String="",
                                                 aspect_ratio_default::Float64=0.6)::String
-    # Build filters section
-    filters_section = filters_html != "" ? """
+    # Combine choices and filters - choices go at the top
+    combined_filters_html = choices_html * filters_html
+
+    # Build filters section (includes both choices and filters)
+    filters_section = combined_filters_html != "" ? """
         <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
             <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
                 <span>Filters</span>
                 <span id="$(chart_div_id)_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
             </h4>
-            $filters_html
+            $combined_filters_html
         </div>
         """ : ""
 

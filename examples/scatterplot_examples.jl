@@ -141,7 +141,23 @@ scatter6 = ScatterPlot(:timeseries, df6, :df6, [:value1, :value2];
            "Points are colored by portfolio to show different investment trajectories."
 )
 
-# Example 7: Using a Struct as Data Source
+# Example 7: Using choices (single-select) instead of filters (multi-select)
+scatter7 = ScatterPlot(:choices_example, df6, :df6, [:value1, :value2];
+    color_cols = [:portfolio],
+    choices = Dict{Symbol,Any}(:portfolio => "Portfolio A"),  # Single-select
+    filters = Dict{Symbol,Any}(:quarter => [1, 2]),  # Multi-select for comparison
+    title = "Example 7: Single-Select Choice vs Multi-Select Filter",
+    notes = """
+    This example demonstrates the difference between choices and filters:
+    - **portfolio (choice)**: Single-select dropdown - pick exactly ONE portfolio
+    - **quarter (filter)**: Multi-select dropdown - can select multiple quarters
+
+    Use choices when the user must select exactly one option (e.g., pick one portfolio to analyze).
+    Use filters when multiple selections make sense (e.g., view data from several quarters).
+    """
+)
+
+# Example 8: Using a Struct as Data Source
 # Demonstrates passing a struct containing DataFrames and referencing fields via dot notation
 
 struct ExperimentData
@@ -174,10 +190,10 @@ The <code>ExperimentData</code> struct holds both measurements and metadata.
 Charts reference the measurements DataFrame using <code>Symbol("experiment.measurements")</code>.</p>
 """)
 
-scatter7 = ScatterPlot(:struct_scatter, experiment_data.measurements, Symbol("experiment.measurements"),
+scatter8 = ScatterPlot(:struct_scatter, experiment_data.measurements, Symbol("experiment.measurements"),
     [:x_position, :y_position, :z_position, :intensity];
     color_cols = [:experiment, :batch],
-    title = "Experiment Measurements from Struct Data Source",
+    title = "Example 8: Experiment Measurements from Struct Data Source",
     notes = "This example shows how to use a struct as a data source. The ExperimentData struct " *
            "contains measurements and metadata DataFrames. Access struct fields via dot notation."
 )
@@ -193,9 +209,9 @@ custom expressions for the X axis. This is useful for creating computed variable
 <p><strong>Available functions:</strong> z(), q(), PCA1(), PCA2(), r(), f(), c()</p>
 """)
 
-# Example 8: Basic expression mode with z-score
+# Example 9: Basic expression mode with z-score
 n = 300
-df8 = DataFrame(
+df9 = DataFrame(
     returns = randn(rng, n) .* 0.02,
     volatility = abs.(randn(rng, n)) .* 0.1 .+ 0.05,
     volume = rand(rng, n) .* 1000 .+ 100,
@@ -203,54 +219,54 @@ df8 = DataFrame(
     region = rand(rng, ["US", "EU", "Asia"], n)
 )
 
-scatter8 = ScatterPlot(:expr_zscore, df8, :df8, [:returns, :volatility, :volume];
+scatter9 = ScatterPlot(:expr_zscore, df9, :df9, [:returns, :volatility, :volume];
     expression_mode = true,
     default_x_expr = "z(:returns, [:sector])",
     color_cols = [:sector, :region],
     filters = [:sector, :region],
-    title = "Expression Mode: Z-Score Within Groups",
+    title = "Example 9: Expression Mode - Z-Score Within Groups",
     notes = "X axis shows z-score of returns within each sector. " *
            "Try: z(:returns, [:sector, :region]) for nested groups, or just :returns for raw values."
 )
 
-# Example 9: OLS residuals and fitted values
-df9 = copy(df8)
-df9.market_returns = df9.returns .* 0.8 .+ randn(rng, n) .* 0.005
+# Example 10: OLS residuals and fitted values
+df10 = copy(df9)
+df10.market_returns = df10.returns .* 0.8 .+ randn(rng, n) .* 0.005
 
-scatter9 = ScatterPlot(:expr_ols, df9, :df9, [:returns, :market_returns, :volatility];
+scatter10 = ScatterPlot(:expr_ols, df10, :df10, [:returns, :market_returns, :volatility];
     expression_mode = true,
     default_x_expr = "r(:returns, :market_returns)",
     color_cols = [:sector],
     filters = [:sector],
-    title = "Expression Mode: OLS Residuals",
+    title = "Example 10: Expression Mode - OLS Residuals",
     notes = "X = residuals from regressing returns on market_returns (idiosyncratic returns). " *
            "Try: f(:returns, :market_returns) for fitted values, or :returns - f(:returns, :market_returns)."
 )
 
-# Example 10: Clamp function for handling outliers
+# Example 11: Clamp function for handling outliers
 n = 400
-df10 = DataFrame(
+df11 = DataFrame(
     raw_value = vcat(randn(rng, 380) .* 10, randn(rng, 20) .* 50),  # Some outliers
     signal = randn(rng, n) .* 5,
     group = rand(rng, ["A", "B", "C"], n)
 )
 
-scatter10 = ScatterPlot(:expr_clamp, df10, :df10, [:raw_value, :signal];
+scatter11 = ScatterPlot(:expr_clamp, df11, :df11, [:raw_value, :signal];
     expression_mode = true,
     default_x_expr = "c(:raw_value, -30, 30)",
     color_cols = [:group],
-    title = "Expression Mode: Clamp for Outliers",
+    title = "Example 11: Expression Mode - Clamp for Outliers",
     notes = "X = raw_value clamped between -30 and 30 to limit outlier impact. " *
            "Try: c(:raw_value, -Inf, 20) for max-only, or c(:raw_value, -20, Inf) for min-only."
 )
 
-# Example 11: Combined expressions
-scatter11 = ScatterPlot(:expr_combined, df8, :df8, [:returns, :volatility, :volume];
+# Example 12: Combined expressions
+scatter12 = ScatterPlot(:expr_combined, df9, :df9, [:returns, :volatility, :volume];
     expression_mode = true,
     default_x_expr = "z(c(:returns, -0.05, 0.05), [:sector])",
     color_cols = [:sector],
     filters = [:sector],
-    title = "Expression Mode: Combined Functions",
+    title = "Example 12: Expression Mode - Combined Functions",
     notes = "X = z-score of clamped returns within sector. Clamp first to reduce outlier impact, then standardize. " *
            "Try: c(z(:returns, [:sector]), -2, 2) to clamp z-scores instead."
 )
@@ -264,15 +280,15 @@ data_dict = Dict{Symbol,Any}(
     :df5 => df5,
     :df6 => df6,
     :experiment => experiment_data,  # Struct data source
-    :df8 => df8,
     :df9 => df9,
-    :df10 => df10
+    :df10 => df10,
+    :df11 => df11
 )
 
 page = JSPlotPage(
     data_dict,
-    [header, scatter1, scatter2, scatter3, scatter4, scatter5, scatter6, struct_intro, scatter7,
-     expr_intro, scatter8, scatter9, scatter10, scatter11];
+    [header, scatter1, scatter2, scatter3, scatter4, scatter5, scatter6, scatter7,
+     struct_intro, scatter8, expr_intro, scatter9, scatter10, scatter11, scatter12];
     dataformat = :csv_embedded
 )
 
@@ -294,6 +310,7 @@ println("  • Single faceting (marginals disappear)")
 println("  • Two-dimensional faceting (grid layout)")
 println("  • Complex multi-feature example")
 println("  • Time series with date filters")
+println("  • Choices (single-select) vs filters (multi-select)")
 println("  • Struct data source (referencing struct fields via dot notation)")
 println("  • Expression mode examples:")
 println("      - Z-score within groups: z(:var, [:groups])")
