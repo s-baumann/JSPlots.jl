@@ -974,19 +974,24 @@ tsne_chart = TSNEPlot(:stock_tsne, tsne_stock_data, :tsne_stock_data;
 )
 
 # LocalGaussianCorrelationPlot - Show how correlation varies across the return distribution
-# Create data showing pairs of stock returns
+# Create data showing pairs of stock returns with sector info for filtering
 lgc_stock_data = DataFrame(
     AAPL_return = df_stocks[!, :AAPL],
     MSFT_return = df_stocks[!, :MSFT],
     JPM_return = df_stocks[!, :JPM],
-    JNJ_return = df_stocks[!, :JNJ]
+    JNJ_return = df_stocks[!, :JNJ],
+    market_regime = [abs(df_stocks[i, :AAPL]) > 0.02 ? "High Volatility" : "Normal" for i in 1:nrow(df_stocks)]
 )
 
 lgc_chart = LocalGaussianCorrelationPlot(:stock_lgc, lgc_stock_data, :lgc_stock_data;
     dimensions = [:AAPL_return, :MSFT_return, :JPM_return, :JNJ_return],
+    filters = [:market_regime],
+    bandwidth = 0.015,
     grid_size = 25,
+    min_weight = 0.05,
+    colorscale = "RdBu",
     title = "Local Gaussian Correlation Between Stock Returns",
-    notes = "LocalGaussianCorrelationPlot visualizes how correlation between two variables changes across their joint distribution. Unlike global correlation (a single number), this shows that stocks might be more correlated during extreme moves than during normal trading. The <strong>heatmap</strong> shows local correlation at each point (blue = positive, red = negative). The <strong>green line</strong> (right) shows average correlation at each Y value. The <strong>red line</strong> (bottom) shows average correlation at each X value. <strong>Try this:</strong> Change X and Y to compare different stock pairs. Use transforms like z_score or quantile to see correlation structure at different scales. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LocalGaussianCorrelationPlot examples</a>"
+    notes = "LocalGaussianCorrelationPlot visualizes how correlation between two variables changes across their joint distribution. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples/localgaussiancorrelationplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LocalGaussianCorrelationPlot examples</a>"
 )
 
 # ===== Financial Charts =====

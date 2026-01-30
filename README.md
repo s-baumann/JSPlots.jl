@@ -56,7 +56,7 @@ The plot types are below. For each you can click on the name of the chart and se
 - **[CorrPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/corrplot_examples.html)** - Make Correlation matrices and hierarchical clustering dendrograms representing connections between variables.
 - **[Graph](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/graph_examples.html)** - Make graphs that show the connections between variables in a correlation matrix.
 - **[TSNEPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/tsneplot_examples/tsneplot_examples.html)** - Use t-sne to cluster similar points together in a 2 dimensional space.
-- **[LocalGaussianCorrelationPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples.html)** - Visualize how correlation between two variables changes across their joint distribution using Local Gaussian Correlation.
+- **[LocalGaussianCorrelationPlot](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/localgaussiancorrelationplot_examples/localgaussiancorrelationplot_examples.html)** - Visualize how correlation between two variables changes across their joint distribution using Local Gaussian Correlation.
 
 #### Financial Time Series
 - **[CandlestickChart](https://s-baumann.github.io/JSPlots.jl/dev/examples_html/candlestickchart_examples.html)** - CandleStick charts (Open/High/Low/Close/Volume). for financial time series.
