@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1473,6 +1486,7 @@ $(function(){
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'returns'];
     const Y_COLS = ['Sharpe', 'returns', 'max_drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -1585,6 +1599,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_strategy_evolution_arrows');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_strategy_evolution_arrows');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1629,7 +1652,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -2195,6 +2220,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'returns'];
     const Y_COLS = ['Sharpe', 'returns', 'max_drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -2307,6 +2333,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_strategy_evolution_alpha');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_strategy_evolution_alpha');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2351,7 +2386,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -2917,6 +2954,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = ['region'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe', 'winrate'];
     const Y_COLS = ['Sharpe', 'drawdown', 'winrate'];
     const COLOR_COLS = ['strategy', 'region'];
@@ -3029,6 +3067,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_regional_paths');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_regional_paths');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3073,7 +3120,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -3637,8 +3686,743 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 })();
 (function() {
     // Configuration
+    const CATEGORICAL_FILTERS = ['strategy'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['region'];
+    const X_COLS = ['volatility', 'Sharpe', 'winrate'];
+    const Y_COLS = ['Sharpe', 'drawdown', 'winrate'];
+    const COLOR_COLS = ['strategy'];
+    const COLOR_MAPS = {"strategy":{"momentum":"#636efa","carry":"#EF553B","value":"#00cc96"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_X_COL = 'volatility';
+    const DEFAULT_Y_COL = 'Sharpe';
+    const DEFAULT_COLOR_COL = 'strategy';
+    const ORDER_COL = 'year';
+    const USE_ALPHARANGE = true;
+
+    // Global state for arrow/line toggle
+    window.showArrows_choice_example = true;
+
+    let allData = [];
+
+    // Helper function to generate alpha values for path progression
+    function getAlphaValues(length) {
+        if (!USE_ALPHARANGE || length === 0) return undefined;
+        if (length === 1) return [1.0];
+        const alphaValues = [];
+        for (let i = 0; i < length; i++) {
+            // Linear interpolation from 0.3 to 1.0
+            const alpha = 0.3 + (0.7 * i / (length - 1));
+            alphaValues.push(alpha);
+        }
+        return alphaValues;
+    }
+
+    // Helper function to convert hex color to rgba
+    function hexToRgba(hex, alpha) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_choice_example = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_choice_example');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_choice_example');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current axis transformations
+        const xTransformSelect = document.getElementById('x_transform_select_choice_example');
+        const X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+        const yTransformSelect = document.getElementById('y_transform_select_choice_example');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_choice_example');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_choice_example');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_choice_example' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_choice_example');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_choice_example');
+        const facet2Select = document.getElementById('facet2_select_choice_example');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'choice_example',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            const annotations = [];
+
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+
+                // Sort by order column
+                group.data.sort((a, b) => {
+                    const aVal = a[ORDER_COL];
+                    const bVal = b[ORDER_COL];
+                    if (typeof aVal === 'number' && typeof bVal === 'number') {
+                        return aVal - bVal;
+                    }
+                    return String(aVal).localeCompare(String(bVal));
+                });
+
+                let xValues = group.data.map(row => row[X_COL]);
+                let yValues = group.data.map(row => row[Y_COL]);
+                const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                // Apply axis transformations
+                xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
+                const markerOpacity = getAlphaValues(xValues.length);
+
+                const markerConfig = {
+                    size: 7,
+                    color: baseColor
+                };
+                if (markerOpacity !== undefined) {
+                    markerConfig.opacity = markerOpacity;
+                }
+
+                // Add markers trace
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'markers',
+                    name: group.color,
+                    marker: markerConfig,
+                    text: orderValues.map(v => ORDER_COL + ': ' + v),
+                    hovertemplate: '%{text}<br>' + X_COL + ': %{x}<br>' + Y_COL + ': %{y}<extra></extra>',
+                    showlegend: true
+                });
+
+                // Add connections between points (arrows or lines)
+                if (xValues.length > 1) {
+                    if (window.showArrows_choice_example) {
+                        // Add arrow segments connecting points (each segment is an arrow)
+                        for (let i = 0; i < xValues.length - 1; i++) {
+                            const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                            const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
+
+                            annotations.push({
+                                x: xValues[i + 1],
+                                y: yValues[i + 1],
+                                ax: xValues[i],
+                                ay: yValues[i],
+                                xref: 'x',
+                                yref: 'y',
+                                axref: 'x',
+                                ayref: 'y',
+                                showarrow: true,
+                                arrowhead: 2,
+                                arrowsize: 1.5,
+                                arrowwidth: 2,
+                                arrowcolor: arrowColor,
+                                opacity: alpha
+                            });
+                        }
+                    } else {
+                        // Add line trace connecting points
+                        if (USE_ALPHARANGE) {
+                            // Create individual line segments with varying opacity
+                            for (let i = 0; i < xValues.length - 1; i++) {
+                                const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                const lineColor = hexToRgba(baseColor, alpha);
+
+                                traces.push({
+                                    x: [xValues[i], xValues[i + 1]],
+                                    y: [yValues[i], yValues[i + 1]],
+                                    type: 'scatter',
+                                    mode: 'lines',
+                                    line: {
+                                        color: lineColor,
+                                        width: 2
+                                    },
+                                    showlegend: false,
+                                    hoverinfo: 'skip'
+                                });
+                            }
+                        } else {
+                            // Simple continuous line
+                            traces.push({
+                                x: xValues,
+                                y: yValues,
+                                type: 'scatter',
+                                mode: 'lines',
+                                name: group.color + ' (path)',
+                                line: {
+                                    color: baseColor,
+                                    width: 2
+                                },
+                                showlegend: false,
+                                hoverinfo: 'skip'
+                            });
+                        }
+                    }
+                }
+            }
+
+            const layout = {
+                title: 'Example 3b: Path with Single-Select Choice',
+                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                yaxis: { title: getAxisLabel(Y_COL, Y_TRANSFORM) },
+                hovermode: 'closest',
+                showlegend: true,
+                annotations: annotations
+            };
+
+            Plotly.newPlot('choice_example', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                title: 'Example 3b: Path with Single-Select Choice',
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                annotations: []
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+
+                    // Sort by order column
+                    group.data.sort((a, b) => {
+                        const aVal = a[ORDER_COL];
+                        const bVal = b[ORDER_COL];
+                        if (typeof aVal === 'number' && typeof bVal === 'number') {
+                            return aVal - bVal;
+                        }
+                        return String(aVal).localeCompare(String(bVal));
+                    });
+
+                    let xValues = group.data.map(row => row[X_COL]);
+                    let yValues = group.data.map(row => row[Y_COL]);
+                    const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                    // Apply axis transformations
+                    xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                    const legendGroup = group.color;
+
+                    const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
+                    const markerOpacity = getAlphaValues(xValues.length);
+
+                    const markerConfig = {
+                        size: 7,
+                        color: baseColor
+                    };
+                    if (markerOpacity !== undefined) {
+                        markerConfig.opacity = markerOpacity;
+                    }
+
+                    // Add markers trace
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        marker: markerConfig,
+                        text: orderValues.map(v => ORDER_COL + ': ' + v),
+                        hovertemplate: '%{text}<br>' + X_COL + ': %{x}<br>' + Y_COL + ': %{y}<extra></extra>'
+                    });
+
+                    // Add connections between points (arrows or lines)
+                    if (xValues.length > 1) {
+                        if (window.showArrows_choice_example) {
+                            // Add arrow segments connecting points (each segment is an arrow)
+                            for (let i = 0; i < xValues.length - 1; i++) {
+                                const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                                const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
+
+                                layout.annotations.push({
+                                    x: xValues[i + 1],
+                                    y: yValues[i + 1],
+                                    ax: xValues[i],
+                                    ay: yValues[i],
+                                    xref: xaxis === 'x' ? 'x' : xaxis,
+                                    yref: yaxis === 'y' ? 'y' : yaxis,
+                                    axref: xaxis === 'x' ? 'x' : xaxis,
+                                    ayref: yaxis === 'y' ? 'y' : yaxis,
+                                    showarrow: true,
+                                    arrowhead: 2,
+                                    arrowsize: 1.5,
+                                    arrowwidth: 2,
+                                    arrowcolor: arrowColor,
+                                    opacity: alpha
+                                });
+                            }
+                        } else {
+                            // Add line trace connecting points
+                            if (USE_ALPHARANGE) {
+                                // Create individual line segments with varying opacity
+                                for (let i = 0; i < xValues.length - 1; i++) {
+                                    const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                    const lineColor = hexToRgba(baseColor, alpha);
+
+                                    traces.push({
+                                        x: [xValues[i], xValues[i + 1]],
+                                        y: [yValues[i], yValues[i + 1]],
+                                        type: 'scatter',
+                                        mode: 'lines',
+                                        line: {
+                                            color: lineColor,
+                                            width: 2
+                                        },
+                                        legendgroup: legendGroup,
+                                        showlegend: false,
+                                        xaxis: xaxis,
+                                        yaxis: yaxis,
+                                        hoverinfo: 'skip'
+                                    });
+                                }
+                            } else {
+                                // Simple continuous line
+                                traces.push({
+                                    x: xValues,
+                                    y: yValues,
+                                    type: 'scatter',
+                                    mode: 'lines',
+                                    name: group.color + ' (path)',
+                                    legendgroup: legendGroup,
+                                    showlegend: false,
+                                    xaxis: xaxis,
+                                    yaxis: yaxis,
+                                    line: {
+                                        color: baseColor,
+                                        width: 2
+                                    },
+                                    hoverinfo: 'skip'
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis
+                };
+
+                // Add annotation for facet label
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('choice_example', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                title: 'Example 3b: Path with Single-Select Choice',
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'},
+                annotations: []
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+
+                        // Sort by order column
+                        group.data.sort((a, b) => {
+                            const aVal = a[ORDER_COL];
+                            const bVal = b[ORDER_COL];
+                            if (typeof aVal === 'number' && typeof bVal === 'number') {
+                                return aVal - bVal;
+                            }
+                            return String(aVal).localeCompare(String(bVal));
+                        });
+
+                        let xValues = group.data.map(row => row[X_COL]);
+                        let yValues = group.data.map(row => row[Y_COL]);
+                        const orderValues = group.data.map(row => row[ORDER_COL]);
+
+                        // Apply axis transformations
+                        xValues = applyAxisTransform(xValues, X_TRANSFORM);
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+
+                        const legendGroup = group.color;
+
+                        const baseColor = getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color);
+                        const markerOpacity = getAlphaValues(xValues.length);
+
+                        const markerConfig = {
+                            size: 7,
+                            color: baseColor
+                        };
+                        if (markerOpacity !== undefined) {
+                            markerConfig.opacity = markerOpacity;
+                        }
+
+                        // Add markers trace
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            marker: markerConfig,
+                            text: orderValues.map(v => ORDER_COL + ': ' + v),
+                            hovertemplate: '%{text}<br>' + X_COL + ': %{x}<br>' + Y_COL + ': %{y}<extra></extra>'
+                        });
+
+                        // Add connections between points (arrows or lines)
+                        if (xValues.length > 1) {
+                            if (window.showArrows_choice_example) {
+                                // Add arrow segments connecting points (each segment is an arrow)
+                                for (let i = 0; i < xValues.length - 1; i++) {
+                                    const alpha = USE_ALPHARANGE ? 0.3 + (0.7 * i / (xValues.length - 1)) : 1.0;
+                                    const arrowColor = USE_ALPHARANGE ? hexToRgba(baseColor, alpha) : baseColor;
+
+                                    layout.annotations.push({
+                                        x: xValues[i + 1],
+                                        y: yValues[i + 1],
+                                        ax: xValues[i],
+                                        ay: yValues[i],
+                                        xref: xaxis === 'x' ? 'x' : xaxis,
+                                        yref: yaxis === 'y' ? 'y' : yaxis,
+                                        axref: xaxis === 'x' ? 'x' : xaxis,
+                                        ayref: yaxis === 'y' ? 'y' : yaxis,
+                                        showarrow: true,
+                                        arrowhead: 2,
+                                        arrowsize: 1.5,
+                                        arrowwidth: 2,
+                                        arrowcolor: arrowColor,
+                                        opacity: alpha
+                                    });
+                                }
+                            } else {
+                                // Add line trace connecting points
+                                if (USE_ALPHARANGE) {
+                                    // Create individual line segments with varying opacity
+                                    for (let i = 0; i < xValues.length - 1; i++) {
+                                        const alpha = 0.3 + (0.7 * i / (xValues.length - 1));
+                                        const lineColor = hexToRgba(baseColor, alpha);
+
+                                        traces.push({
+                                            x: [xValues[i], xValues[i + 1]],
+                                            y: [yValues[i], yValues[i + 1]],
+                                            type: 'scatter',
+                                            mode: 'lines',
+                                            line: {
+                                                color: lineColor,
+                                                width: 2
+                                            },
+                                            legendgroup: legendGroup,
+                                            showlegend: false,
+                                            xaxis: xaxis,
+                                            yaxis: yaxis,
+                                            hoverinfo: 'skip'
+                                        });
+                                    }
+                                } else {
+                                    // Simple continuous line
+                                    traces.push({
+                                        x: xValues,
+                                        y: yValues,
+                                        type: 'scatter',
+                                        mode: 'lines',
+                                        name: group.color + ' (path)',
+                                        legendgroup: legendGroup,
+                                        showlegend: false,
+                                        xaxis: xaxis,
+                                        yaxis: yaxis,
+                                        line: {
+                                            color: baseColor,
+                                            width: 2
+                                        },
+                                        hoverinfo: 'skip'
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis
+                    };
+
+                    // Add annotations for facet labels
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('choice_example', traces, layout, {responsive: true});
+        }
+    };
+
+    // Arrow/line toggle button handler
+    const arrowToggleBtn = document.getElementById('choice_example_arrow_toggle');
+    if (arrowToggleBtn) {
+        arrowToggleBtn.addEventListener('click', function() {
+            window.showArrows_choice_example = !window.showArrows_choice_example;
+            arrowToggleBtn.textContent = window.showArrows_choice_example ? 'Show Lines' : 'Show Arrows';
+            window.updateChart_choice_example();
+        });
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('regional_data').then(function(data) {
+        allData = data;
+        window.updateChart_choice_example();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('choice_example');
+    }).catch(function(error) {
+        console.error('Error loading data for chart choice_example:', error);
+    });
+})();
+(function() {
+    // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe'];
     const Y_COLS = ['returns', 'Sharpe'];
     const COLOR_COLS = ['asset_class'];
@@ -3751,6 +4535,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_asset_performance');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_asset_performance');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3795,7 +4588,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -4361,6 +5156,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['volatility', 'Sharpe'];
     const Y_COLS = ['Sharpe', 'drawdown'];
     const COLOR_COLS = ['strategy'];
@@ -4473,6 +5269,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_facet_by_region');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_facet_by_region');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4517,7 +5322,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -5083,6 +5890,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['development_cost', 'features_completed', 'bug_count'];
     const Y_COLS = ['user_satisfaction', 'features_completed', 'development_cost'];
     const COLOR_COLS = ['product'];
@@ -5195,6 +6003,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_product_development');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_product_development');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -5239,7 +6056,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -5805,6 +6624,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['portfolio_risk', 'diversification', 'transaction_cost'];
     const Y_COLS = ['portfolio_return', 'portfolio_risk', 'diversification'];
     const COLOR_COLS = ['stage'];
@@ -5917,6 +6737,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_optimization_path');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_optimization_path');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -5961,7 +6790,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -6527,6 +7358,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COLS = ['customer_acquisition_cost', 'churn_rate', 'monthly_revenue'];
     const Y_COLS = ['customer_lifetime_value', 'monthly_revenue', 'customer_acquisition_cost'];
     const COLOR_COLS = ['company'];
@@ -6639,6 +7471,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_business_metrics');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_business_metrics');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -6683,7 +7524,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         if (FACET_COLS.length === 0) {
@@ -7746,6 +8589,102 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: regional_data</p><br>
 <hr>
 <br>
+<h2>Example 3b: Path with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **region (choice)**: Single-select dropdown - pick exactly ONE region at a time
+- **strategy (filter)**: Multi-select dropdown - can select multiple strategies
+
+Use choices when the user must select exactly one option.
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="choice_example_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="region_choice_choice_example"><strong>region</strong>: </label>
+                <select id="region_choice_choice_example" onchange="updateChart_choice_example()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Asia">Asia</option>
+                <option value="Europe">Europe</option>
+                <option value="US" selected>US</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="strategy_select_choice_example">strategy: </label>
+                <select id="strategy_select_choice_example" multiple onchange="updateChart_choice_example()">
+                <option value="carry" selected>carry</option>
+                <option value="momentum" selected>momentum</option>
+                <option value="value">value</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="strategy_select_choice_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label for="x_col_select_choice_example">X: </label>
+        <select id="x_col_select_choice_example" style="padding: 5px 10px;" onchange="updateChart_choice_example()">
+            <option value="volatility" selected>volatility</option>
+<option value="Sharpe">Sharpe</option>
+<option value="winrate">winrate</option>
+        </select>
+    </div>
+    <div>
+        <label for="x_transform_select_choice_example">X Transform: </label>
+        <select id="x_transform_select_choice_example" style="padding: 5px 10px;" onchange="updateChart_choice_example()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_col_select_choice_example">Y: </label>
+        <select id="y_col_select_choice_example" style="padding: 5px 10px;" onchange="updateChart_choice_example()">
+            <option value="Sharpe" selected>Sharpe</option>
+<option value="drawdown">drawdown</option>
+<option value="winrate">winrate</option>
+        </select>
+    </div>
+    <div>
+        <label for="y_transform_select_choice_example">Y Transform: </label>
+        <select id="y_transform_select_choice_example" style="padding: 5px 10px;" onchange="updateChart_choice_example()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+        </select>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="choice_example_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="choice_example_aspect_ratio_label">0.4</span>
+    <input type="range" id="choice_example_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="choice_example"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: regional_data</p><br>
+<hr>
+<br>
 <h2>Asset Class Risk-Return Evolution (2016-2024)</h2>
 <p>Three major asset classes. Notice how bonds have lower volatility but also lower returns. Alpha gradient shows recent years are bolder.</p>
 
@@ -8066,6 +9005,6 @@ iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 <div id="business_metrics"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_data</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

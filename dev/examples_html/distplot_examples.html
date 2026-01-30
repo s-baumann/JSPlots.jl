@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1473,6 +1486,7 @@ $(function(){
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -1813,6 +1827,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_simple_dist = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_simple_dist');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1841,7 +1864,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -1852,6 +1877,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -2172,6 +2198,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_group_dist = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_group_dist');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2200,7 +2235,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -2211,6 +2248,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = ['department'];
     const CONTINUOUS_FILTERS = ['age'];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -2531,6 +2569,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_filtered_dist = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_filtered_dist');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2559,7 +2606,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -2569,7 +2618,379 @@ if (currentGroupCol) {
 (function() {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = ['age'];
+    const CHOICE_FILTERS = ['department'];
+
+    // Plotly default colors
+    var plotlyColors = [
+        'rgb(31, 119, 180)', 'rgb(255, 127, 14)', 'rgb(44, 160, 44)',
+        'rgb(214, 39, 40)', 'rgb(148, 103, 189)', 'rgb(140, 86, 75)',
+        'rgb(227, 119, 194)', 'rgb(127, 127, 127)', 'rgb(188, 189, 34)',
+        'rgb(23, 190, 207)'
+    ];
+
+    // Color maps for custom colors
+    const COLOR_MAPS = {};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+
+    // Initialize toggle states
+    window.showHistogram_choice_dist = true;
+    window.showBox_choice_dist = true;
+    window.showRug_choice_dist = true;
+    
+    // Load and parse CSV data using centralized parser
+    loadDataset('df3').then(function(data) {
+        window.allData_choice_dist = data;
+
+        // Initialize buttons and sliders after data is loaded
+        $(function() {
+                
+
+                
+
+                    document.getElementById('choice_dist_bins_slider').addEventListener('input', function() {
+        var bins = parseInt(this.value);
+        document.getElementById('choice_dist_bins_label').textContent = bins;
+        updatePlotWithFilters_choice_dist();
+    });
+
+
+            // Initial plot
+            updatePlotWithFilters_choice_dist();
+
+            // Setup aspect ratio control after initial render
+            setupAspectRatioControl('choice_dist');
+        });
+    }).catch(function(error) {
+        console.error('Error loading data for chart choice_dist:', error);
+    });
+
+    function updatePlot_choice_dist(data) {
+        var traces = [];
+
+        // Get current selections from dropdowns and axes
+var currentValueCol = 'score';
+var currentGroupCol = null;
+
+// Handle "None" option for group selector
+if (currentGroupCol === '_none_') {
+    currentGroupCol = null;
+}
+
+// Get current axis transformation
+var xTransformSelect = document.getElementById('x_transform_select_choice_dist');
+var X_TRANSFORM = xTransformSelect ? xTransformSelect.value : 'identity';
+
+// Get current bins from slider
+var binsSlider = document.getElementById('choice_dist_bins_slider');
+var currentBins = binsSlider ? parseInt(binsSlider.value) : 40;
+
+if (currentGroupCol) {
+    // Group data by group column
+    var groups = {};
+    data.forEach(function(row) {
+        var key = row[currentGroupCol];
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(row);
+    });
+
+    var groupKeys = Object.keys(groups);
+    var numGroups = groupKeys.length;
+
+    // Create traces for each group
+    groupKeys.forEach(function(key, idx) {
+        var groupData = groups[key];
+        var values = groupData.map(d => d[currentValueCol]);
+
+        // Apply axis transformation
+        values = applyAxisTransform(values, X_TRANSFORM);
+
+        // Get color for this group (custom map or fallback to palette)
+        var groupColor = getColor(COLOR_MAPS, COLOR_SCALES, currentGroupCol, key, plotlyColors[idx % plotlyColors.length]);
+
+        // Box plot (top portion)
+        if (window.showBox_choice_dist) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'box',
+                xaxis: 'x2',
+                yaxis: 'y2',
+                orientation: 'h',
+                marker: {
+                    color: groupColor
+                },
+                boxmean: 'sd',
+                opacity: 0.7,
+                showlegend: false
+            });
+        }
+
+        // Histogram (bottom portion)
+        if (window.showHistogram_choice_dist) {
+            traces.push({
+                x: values,
+                name: key,
+                type: 'histogram',
+                xaxis: 'x',
+                yaxis: 'y',
+                marker: {
+                    color: groupColor
+                },
+                opacity: 0.7,
+                nbinsx: currentBins
+            });
+        }
+
+        // Rug plot (tick marks at bottom)
+        if (window.showRug_choice_dist) {
+            traces.push({
+                x: values,
+                name: key + ' rug',
+                type: 'scatter',
+                mode: 'markers',
+                xaxis: 'x',
+                yaxis: 'y3',
+                marker: {
+                    symbol: 'line-ns-open',
+                    color: groupColor,
+                    size: 8,
+                    line: {
+                        width: 1
+                    }
+                },
+                showlegend: false,
+                hoverinfo: 'x'
+            });
+        }
+    });
+} else {
+    // No grouping
+    var values = data.map(d => d[currentValueCol]);
+
+    // Apply axis transformation
+    values = applyAxisTransform(values, X_TRANSFORM);
+
+    // Box plot (top portion)
+    if (window.showBox_choice_dist) {
+        traces.push({
+            x: values,
+            name: 'distribution',
+            type: 'box',
+            xaxis: 'x2',
+            yaxis: 'y2',
+            orientation: 'h',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            boxmean: 'sd',
+            opacity: 0.7,
+            showlegend: false
+        });
+    }
+
+    // Histogram (bottom portion)
+    if (window.showHistogram_choice_dist) {
+        traces.push({
+            x: values,
+            name: 'frequency',
+            type: 'histogram',
+            xaxis: 'x',
+            yaxis: 'y',
+            marker: {
+                color: 'rgb(31, 119, 180)'
+            },
+            opacity: 0.7,
+            nbinsx: currentBins,
+            showlegend: false
+        });
+    }
+
+    // Rug plot (tick marks at bottom)
+    if (window.showRug_choice_dist) {
+        traces.push({
+            x: values,
+            name: 'rug',
+            type: 'scatter',
+            mode: 'markers',
+            xaxis: 'x',
+            yaxis: 'y3',
+            marker: {
+                symbol: 'line-ns-open',
+                color: 'rgb(31, 119, 180)',
+                size: 8,
+                line: {
+                    width: 1
+                }
+            },
+            showlegend: false,
+            hoverinfo: 'x'
+        });
+    }
+}
+
+
+            var layout = {
+        title: 'Example 3b: Distribution with Single-Select Choice',
+        showlegend: currentGroupCol !== null,
+        autosize: true,
+        grid: {
+            rows: 3,
+            columns: 1,
+            pattern: 'independent',
+            roworder: 'top to bottom'
+        },
+        xaxis: {
+            title: getAxisLabel(currentValueCol, X_TRANSFORM),
+            domain: [0, 1],
+            showgrid: true,
+            zeroline: true
+        },
+        yaxis: {
+            title: 'Frequency',
+            domain: [0.07, 0.69],
+            showgrid: true,
+            zeroline: true
+        },
+        xaxis2: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis2: {
+            domain: [0.7, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        xaxis3: {
+            domain: [0, 1],
+            showgrid: false,
+            showticklabels: false
+        },
+        yaxis3: {
+            domain: [0, 0.05],
+            showgrid: false,
+            showticklabels: false
+        },
+        margin: {t: 100, r: 50, b: 100, l: 80}
+    };
+
+
+        Plotly.newPlot('choice_dist', traces, layout, {responsive: true});
+    }
+
+    // Filter and update function
+    window.updatePlotWithFilters_choice_dist = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_choice_dist');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_choice_dist');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_choice_dist' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_choice_dist,
+            'choice_dist',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Render with filtered data
+        updatePlot_choice_dist(filteredData);
+    };
+})();
+(function() {
+    // Filter configuration
+    const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -2913,6 +3334,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_dropdown = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_dropdown');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2941,7 +3371,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -2952,6 +3384,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -3272,6 +3705,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_custom_appearance = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_custom_appearance');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3300,7 +3742,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -3311,6 +3755,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -3651,6 +4096,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_custom_colors = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_custom_colors');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3679,7 +4133,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -3690,6 +4146,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = ['time_col', 'datetime_col', 'date_col', 'zoneddatetime_col'];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -4030,6 +4487,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_datetime_filters = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_datetime_filters');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4058,7 +4524,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -4069,6 +4537,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = ['datetime_cat', 'zoneddatetime_cat', 'date_cat', 'time_cat'];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -4409,6 +4878,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_datetime_sliders = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_datetime_sliders');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4437,7 +4915,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -4448,6 +4928,7 @@ if (currentGroupCol) {
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     var plotlyColors = [
@@ -4791,6 +5272,15 @@ if (currentGroupCol) {
 
     // Filter and update function
     window.updatePlotWithFilters_struct_dist = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_struct_dist');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4819,7 +5309,9 @@ if (currentGroupCol) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -11453,6 +11945,132 @@ value,date_cat,datetime_cat,zoneddatetime_cat,time_cat,region
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df3</p><br>
 <hr>
 <br>
+<h2>Example 3b: Distribution with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **department (choice)**: Single-select dropdown - pick exactly ONE department
+- **age (filter)**: Multi-select dropdown - can select multiple age values
+
+Use choices when the user must select exactly one option.
+</p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="choice_dist_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="department_choice_choice_dist"><strong>department</strong>: </label>
+                <select id="department_choice_choice_dist" onchange="updatePlotWithFilters_choice_dist()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Engineering" selected>Engineering</option>
+                <option value="HR">HR</option>
+                <option value="Marketing">Marketing</option>
+                <option value="Sales">Sales</option>
+            </select>
+            </div>
+        </div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">age: </label>
+        <span id="age_range_choice_dist_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">18 - 80</span>
+        <div id="age_range_choice_dist_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="age_range_choice_dist_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_age_range_choice_dist(x) {
+    return Math.round(x).toString();
+}
+
+            // Initialize jQuery UI range slider
+            $("#age_range_choice_dist_slider").slider({
+                range: true,
+                min: 18.0,
+                max: 80.0,
+                step: 1.0,  // Integer steps for integers, smooth for others
+                values: [18.0, 80.0],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#age_range_choice_dist_display").text(formatValue_age_range_choice_dist(minVal) + " - " + formatValue_age_range_choice_dist(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#age_range_choice_dist_display").text(formatValue_age_range_choice_dist(minVal) + " - " + formatValue_age_range_choice_dist(maxVal));
+
+                    // Store values for easy access
+                    $("#age_range_choice_dist_slider").data('minValue', minVal);
+                    $("#age_range_choice_dist_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_choice_dist()
+                }
+            });
+
+            // Store initial values
+            $("#age_range_choice_dist_slider").data('minValue', 18.0);
+            $("#age_range_choice_dist_slider").data('maxValue', 80.0);
+        });
+
+        // Helper functions to get slider values
+        function getage_range_choice_distMin() {
+            return $("#age_range_choice_dist_slider").slider("values", 0);
+        }
+
+        function getage_range_choice_distMax() {
+            return $("#age_range_choice_dist_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">score</span>
+    </div>
+</div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="choice_dist_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="choice_dist_aspect_ratio_label">0.6</span>
+    <input type="range" id="choice_dist_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.5108256237659907"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="choice_dist"></div>
+
+        <!-- Bins slider below chart -->
+        <div style="margin: 20px 0;">
+    <label for="choice_dist_bins_slider">Number of bins: </label>
+    <span id="choice_dist_bins_label">40</span>
+    <input type="range" id="choice_dist_bins_slider"
+           min="5"
+           max="100"
+           step="1"
+           value="40"
+           style="width: 75%; margin-left: 10px;">
+</div>
+
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: df3</p><br>
+<hr>
+<br>
 <h2>Multi-Variable Distribution with Dropdowns</h2>
 <p>Select different variables and grouping columns using the dropdowns above. This example demonstrates the full flexibility of the DistPlot.</p>
 
@@ -12359,6 +12977,6 @@ Charts reference the responses DataFrame using <code>Symbol("survey.responses")<
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

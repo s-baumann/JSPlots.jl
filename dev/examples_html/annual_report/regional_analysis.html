@@ -339,7 +339,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -350,6 +351,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1479,6 +1492,7 @@ $(function(){
     // Filter configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     // Plotly default colors
     const plotlyColors = [
@@ -1849,6 +1863,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_regional_distribution = function() {
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_regional_distribution');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1877,7 +1900,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Render with filtered data
@@ -1982,6 +2007,6 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

@@ -339,7 +339,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -350,6 +351,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1488,6 +1501,7 @@ $(function(){
     const HAS_VOLUME = true;
     const CATEGORICAL_FILTERS = ['sector'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
 
     let allData = [];
     let firstBarOpenPrices = {};  // Store first bar open prices for renormalization
@@ -1533,6 +1547,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_financial_candlestick');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
             allData,
@@ -1540,7 +1563,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Group data by symbol
@@ -2440,6 +2465,595 @@ $(function(){
         console.error('Error loading execution data:', error);
     });
 })();
+(function() {
+    // Configuration
+    const FILTER_COLS = ['day_of_week', 'style'];
+    const CATEGORICAL_FILTERS = ['day_of_week', 'style'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
+    const X_COL = 'date';
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
+    const COLOR_COLS = ['strategy', 'style'];
+    const COLOR_MAPS = {'style': {'Alternative': '#e74c3c', 'Factor': '#3498db'}, 'strategy': {'Value': '#EF553B', 'Carry': '#00cc96', 'Momentum': '#636efa', 'Trend': '#ab63fa'}};
+    const COLOR_SCALES = {};
+    const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
+
+    let allData = [];
+
+    // Chart state
+    window.ddChartState_strategy_drawdown = {
+        uniqueXValues: [],
+        startIdx: 0,
+        duration: 0,
+        step: 0,
+        timeUnit: 'days',
+        unitMultiplier: 1,
+        showingFullRange: true,
+        totalDuration: 0
+    };
+
+    // Determine time unit based on data span
+    function determineTimeUnit(xValues) {
+        if (xValues.length < 2) return { unit: 'units', multiplier: 1 };
+
+        const first = xValues[0];
+        const last = xValues[xValues.length - 1];
+        const isDate = first > 946684800000;
+
+        if (!isDate) {
+            return { unit: 'units', multiplier: 1 };
+        }
+
+        const spanMs = last - first;
+        const spanDays = spanMs / (24 * 60 * 60 * 1000);
+
+        if (spanDays > 3) {
+            return { unit: 'days', multiplier: 24 * 60 * 60 * 1000 };
+        } else if (spanDays * 24 > 3) {
+            return { unit: 'hours', multiplier: 60 * 60 * 1000 };
+        } else {
+            return { unit: 'minutes', multiplier: 60 * 1000 };
+        }
+    }
+
+    // Compute drawdown from cumulative values
+    // Returns {drawdown: array, maxDrawdown: number}
+    function computeDrawdown(cumulativeValues) {
+        const drawdown = [];
+        let runningMax = -Infinity;
+        let maxDrawdown = 0;
+
+        for (let i = 0; i < cumulativeValues.length; i++) {
+            const val = cumulativeValues[i];
+            if (val > runningMax) {
+                runningMax = val;
+            }
+            const dd = val - runningMax;  // This will be <= 0
+            drawdown.push(dd);
+            if (dd < maxDrawdown) {
+                maxDrawdown = dd;
+            }
+        }
+
+        return { drawdown: drawdown, maxDrawdown: maxDrawdown };
+    }
+
+    // Reset to show full range
+    window.resetRange_strategy_drawdown = function() {
+        const state = window.ddChartState_strategy_drawdown;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        const durationInput = document.getElementById('duration_input_strategy_drawdown');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_strategy_drawdown(true);
+    };
+
+    // Step forward/backward
+    window.stepRange_strategy_drawdown = function(direction) {
+        const state = window.ddChartState_strategy_drawdown;
+        const durationInput = document.getElementById('duration_input_strategy_drawdown');
+        const stepInput = document.getElementById('step_input_strategy_drawdown');
+
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                state.startIdx = 0;
+            } else {
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_strategy_drawdown(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
+        const stepInUnits = step * state.unitMultiplier;
+        const numPoints = state.uniqueXValues.length;
+
+        if (direction === 'forward') {
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX + stepInUnits;
+            let newStartIdx = state.startIdx;
+            for (let i = state.startIdx; i < numPoints; i++) {
+                if (state.uniqueXValues[i] >= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+                newStartIdx = i;
+            }
+            state.startIdx = Math.min(newStartIdx, numPoints - 1);
+        } else {
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX - stepInUnits;
+            let newStartIdx = 0;
+            for (let i = state.startIdx; i >= 0; i--) {
+                if (state.uniqueXValues[i] <= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+            }
+            state.startIdx = Math.max(newStartIdx, 0);
+        }
+
+        window.updateChart_strategy_drawdown(true);
+    };
+
+    window.updateDuration_strategy_drawdown = function() {
+        window.updateChart_strategy_drawdown(true);
+    };
+
+    window.updateChart_strategy_drawdown = function(preserveRange) {
+        const state = window.ddChartState_strategy_drawdown;
+
+        // Get current Y transform selection (combined column + transform)
+        const yTransformSelect = document.getElementById('y_transform_select_strategy_drawdown');
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_strategy_drawdown');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_strategy_drawdown');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_strategy_drawdown' + '_slider');
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        const colorColSelect = document.getElementById('color_col_select_strategy_drawdown');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        const facet1Select = document.getElementById('facet1_select_strategy_drawdown');
+        const facet2Select = document.getElementById('facet2_select_strategy_drawdown');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'strategy_drawdown',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Sort data by X
+        filteredData.sort((a, b) => {
+            const aVal = a[X_COL];
+            const bVal = b[X_COL];
+            if (aVal instanceof Date && bVal instanceof Date) {
+                return aVal - bVal;
+            }
+            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+        });
+
+        // Get unique X values
+        const uniqueXValues = [...new Set(filteredData.map(row => {
+            const v = row[X_COL];
+            return v instanceof Date ? v.getTime() : v;
+        }))].sort((a, b) => a - b);
+
+        state.uniqueXValues = uniqueXValues;
+
+        if (!preserveRange || state.timeUnit === undefined) {
+            const unitInfo = determineTimeUnit(uniqueXValues);
+            state.timeUnit = unitInfo.unit;
+            state.unitMultiplier = unitInfo.multiplier;
+
+            const unitLabel = document.getElementById('unit_label_strategy_drawdown');
+            const unitLabel2 = document.getElementById('unit_label2_strategy_drawdown');
+            if (unitLabel) unitLabel.textContent = state.timeUnit;
+            if (unitLabel2) unitLabel2.textContent = state.timeUnit;
+
+            if (uniqueXValues.length >= 2) {
+                const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
+            } else {
+                state.totalDuration = 1;
+                state.duration = 1;
+                state.step = 1;
+            }
+
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            const durationInput = document.getElementById('duration_input_strategy_drawdown');
+            const stepInput = document.getElementById('step_input_strategy_drawdown');
+            if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
+            if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
+        }
+
+        let startX, endX;
+        if (state.showingFullRange) {
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            const durationInput = document.getElementById('duration_input_strategy_drawdown');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
+
+        let endIdx = state.startIdx;
+        for (let i = state.startIdx; i < uniqueXValues.length; i++) {
+            if (uniqueXValues[i] <= endX) {
+                endIdx = i;
+            } else {
+                break;
+            }
+        }
+
+        updateIntervalDisplay_strategy_drawdown(startX, uniqueXValues[endIdx], state.timeUnit, state.unitMultiplier);
+
+        let facet1Values = facet1 ? [...new Set(filteredData.map(r => String(r[facet1])))] : [null];
+        let facet2Values = facet2 ? [...new Set(filteredData.map(r => String(r[facet2])))] : [null];
+        facet1Values.sort();
+        facet2Values.sort();
+
+        const nRows = facet2Values.length;
+        const nCols = facet1Values.length;
+        const hasFacets = facet1 !== null || facet2 !== null;
+
+        // Group FULL data by color
+        const fullGroupedData = {};
+        filteredData.forEach(row => {
+            const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+            const f1Val = facet1 ? String(row[facet1]) : '';
+            const f2Val = facet2 ? String(row[facet2]) : '';
+            const fullKey = colorVal + '|' + f1Val + '|' + f2Val;
+            if (!fullGroupedData[fullKey]) {
+                fullGroupedData[fullKey] = {
+                    color: colorVal,
+                    facet1: f1Val,
+                    facet2: f2Val,
+                    rows: []
+                };
+            }
+            fullGroupedData[fullKey].rows.push(row);
+        });
+
+        const mainTraces = [];
+
+        for (let fullKey in fullGroupedData) {
+            const groupInfo = fullGroupedData[fullKey];
+            const group = groupInfo.rows;
+            if (group.length === 0) continue;
+
+            // Sort by X within group
+            group.sort((a, b) => {
+                const aVal = a[X_COL];
+                const bVal = b[X_COL];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const fullXValues = group.map(row => row[X_COL]);
+            const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
+            let fullYValues = group.map(row => parseFloat(row[Y_COL]));
+
+            // Apply cumulative transform first
+            let cumulative;
+            if (Y_TRANSFORM === 'cumulative') {
+                cumulative = computeCumulativeSum(fullYValues);
+            } else if (Y_TRANSFORM === 'cumprod') {
+                // For cumprod, compute cumulative product of (1+r), result is wealth factor
+                cumulative = computeCumulativeProduct(fullYValues);
+                // Convert from cumulative return to wealth (add 1)
+                cumulative = cumulative.map(v => v + 1);
+            } else {
+                cumulative = computeCumulativeSum(fullYValues);
+            }
+
+            // Compute drawdown from cumulative
+            const ddResult = computeDrawdown(cumulative);
+            const fullDrawdown = ddResult.drawdown;
+
+            // Extract range for display
+            const rangeIndices = [];
+            for (let i = 0; i < fullXNumeric.length; i++) {
+                if (fullXNumeric[i] >= startX && fullXNumeric[i] <= endX) {
+                    rangeIndices.push(i);
+                }
+            }
+
+            if (rangeIndices.length > 0) {
+                const rangeXValues = rangeIndices.map(i => fullXValues[i]);
+
+                // Recalculate drawdown for the window (starting fresh from window start)
+                const windowCumulative = rangeIndices.map(i => cumulative[i]);
+                const windowDdResult = computeDrawdown(windowCumulative);
+                const windowDrawdown = windowDdResult.drawdown;
+                const windowMaxDrawdown = windowDdResult.maxDrawdown;
+
+                let xAxisNum = 1;
+                let yAxisNum = 1;
+                if (hasFacets) {
+                    const f1Idx = facet1 ? facet1Values.indexOf(groupInfo.facet1) : 0;
+                    const f2Idx = facet2 ? facet2Values.indexOf(groupInfo.facet2) : 0;
+                    const plotIdx = f2Idx * nCols + f1Idx + 1;
+                    xAxisNum = plotIdx;
+                    yAxisNum = plotIdx;
+                }
+
+                mainTraces.push({
+                    x: rangeXValues,
+                    y: windowDrawdown,
+                    type: 'scatter',
+                    mode: 'lines',
+                    name: groupInfo.color,
+                    legendgroup: groupInfo.color,
+                    showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
+                    fill: 'tozeroy',
+                    line: {
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
+                        width: 2
+                    },
+                    xaxis: xAxisNum === 1 ? 'x' : 'x' + xAxisNum,
+                    yaxis: yAxisNum === 1 ? 'y' : 'y' + yAxisNum,
+                    hovertemplate: '<b>' + groupInfo.color + '</b><br>' +
+                                   'Date: %{x}<br>' +
+                                   'Drawdown: %{y:.4f}<br>' +
+                                   'Max Drawdown: ' + windowMaxDrawdown.toFixed(4) +
+                                   '<extra></extra>'
+                });
+            }
+        }
+
+        // Build layout
+        const yAxisTitle = Y_TRANSFORM === 'cumprod' ? 'Drawdown (wealth)' : 'Drawdown (' + Y_COL + ')';
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                y: 1.02,
+                x: 0.5,
+                xanchor: 'center'
+            },
+            annotations: []
+        };
+
+        if (!hasFacets) {
+            layout.xaxis = {
+                title: X_COL,
+                domain: [0, 1],
+                anchor: 'y'
+            };
+            layout.yaxis = {
+                title: yAxisTitle,
+                domain: [0, 1],
+                anchor: 'x'
+            };
+        } else {
+            const gapX = 0.05;
+            const gapY = 0.08;
+            const plotWidth = (1 - gapX * (nCols - 1)) / nCols;
+            const plotHeight = (1 - gapY * (nRows - 1)) / nRows;
+
+            for (let row = 0; row < nRows; row++) {
+                for (let col = 0; col < nCols; col++) {
+                    const plotIdx = row * nCols + col + 1;
+                    const x0 = col * (plotWidth + gapX);
+                    const x1 = x0 + plotWidth;
+                    const y1 = 1 - row * (plotHeight + gapY);
+                    const y0 = y1 - plotHeight;
+
+                    const xAxisName = plotIdx === 1 ? 'xaxis' : 'xaxis' + plotIdx;
+                    const yAxisName = plotIdx === 1 ? 'yaxis' : 'yaxis' + plotIdx;
+
+                    layout[xAxisName] = {
+                        domain: [x0, x1],
+                        anchor: plotIdx === 1 ? 'y' : 'y' + plotIdx,
+                        showticklabels: row === nRows - 1
+                    };
+                    layout[yAxisName] = {
+                        domain: [y0, y1],
+                        anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
+                        showticklabels: col === 0,
+                        title: col === 0 && row === Math.floor(nRows / 2) ? yAxisTitle : ''
+                    };
+
+                    let facetLabel = '';
+                    if (facet1 && facet2) {
+                        facetLabel = facet1Values[col] + ' / ' + facet2Values[row];
+                    } else if (facet1) {
+                        facetLabel = facet1Values[col];
+                    } else if (facet2) {
+                        facetLabel = facet2Values[row];
+                    }
+
+                    layout.annotations.push({
+                        text: '<b>' + facetLabel + '</b>',
+                        x: (x0 + x1) / 2,
+                        y: y1 + 0.02,
+                        xref: 'paper',
+                        yref: 'paper',
+                        showarrow: false,
+                        font: { size: 11 }
+                    });
+                }
+            }
+        }
+
+        Plotly.newPlot('strategy_drawdown', mainTraces, layout, {responsive: true});
+    };
+
+    function updateIntervalDisplay_strategy_drawdown(startX, endX, timeUnit, unitMultiplier) {
+        const displayDiv = document.getElementById('interval_display_strategy_drawdown');
+        if (!displayDiv) return;
+
+        const isDate = startX > 946684800000;
+
+        if (isDate) {
+            const startDate = new Date(startX);
+            const endDate = new Date(endX);
+
+            const formatDate = (d) => {
+                if (timeUnit === 'days') {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0');
+                } else {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0') + ' ' +
+                           String(d.getHours()).padStart(2, '0') + ':' +
+                           String(d.getMinutes()).padStart(2, '0');
+                }
+            };
+
+            const durationUnits = Math.round((endX - startX) / unitMultiplier * 100) / 100;
+
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + formatDate(startDate) +
+                                   ' &nbsp; <strong>End:</strong> ' + formatDate(endDate) +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        } else {
+            const durationUnits = Math.round((endX - startX) * 100) / 100;
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + startX +
+                                   ' &nbsp; <strong>End:</strong> ' + endX +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        }
+    }
+
+    // Load and parse data
+    loadDataset('drawdown_data').then(function(data) {
+        allData = data;
+        window.updateChart_strategy_drawdown(false);
+        setupAspectRatioControl('strategy_drawdown');
+    }).catch(function(error) {
+        console.error('Error loading data for chart strategy_drawdown:', error);
+    });
+})();
 
 
 });
@@ -2447,12 +3061,12 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="strategy_data" data-format="parquet" data-src="data/strategy_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="strategy_data" data-format="parquet" data-src="data/strategy_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="lgc_stock_data" data-format="parquet" data-src="data/lgc_stock_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="drawdown_data" data-format="parquet" data-src="data/drawdown_data.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
 <h1>Financial Charts</h1>
-<p>This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology.</p>
+<p>This shows examples of financial market visualization charts. CandlestickChart displays candlestick patterns for technical analysis. ExecutionPlot provides comprehensive trading execution analysis with refined slippage methodology. DrawdownPlot visualizes strategy drawdowns from peak performance with day-of-week filtering.</p>
 
     <div class="textblock-content">
         <h1>Financial Charts</h1>
@@ -2636,7 +3250,112 @@ $(function(){
         To regenerate: <code>exec_data = ExecutionData(fills, metadata, tob, covar_matrix; volume=volume)</code> then <code>calculate_slippage!(exec_data)</code>
     </div>
 </div>
-<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: exec_data.parquet</p>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: exec_data.parquet</p><br>
+<hr>
+<br>
+<h2>Strategy Drawdown Analysis</h2>
+<p>DrawdownPlot visualizes strategy drawdowns from peak cumulative performance. Lines are at zero when at new highs, negative when in drawdown. <strong>Key Features:</strong> Use 'Metric' dropdown to switch between cumulative PnL and wealth (cumprod) drawdowns, hover to see maximum drawdown for the visible window, filter by day of week to analyze day-specific effects (recalculates max drawdown), facet by style to compare Factor vs Alternative, Step Forward/Back to analyze drawdowns in specific periods. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/drawdownplot_examples.html" style="color: blue; font-weight: bold;">See here for DrawdownPlot examples</a></p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="strategy_drawdown_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="day_of_week_select_strategy_drawdown">day_of_week: </label>
+                <select id="day_of_week_select_strategy_drawdown" multiple onchange="updateChart_strategy_drawdown(true)">
+                <option value="Friday" selected>Friday</option>
+                <option value="Monday" selected>Monday</option>
+                <option value="Saturday" selected>Saturday</option>
+                <option value="Sunday" selected>Sunday</option>
+                <option value="Thursday" selected>Thursday</option>
+                <option value="Tuesday" selected>Tuesday</option>
+                <option value="Wednesday" selected>Wednesday</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="day_of_week_select_strategy_drawdown_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="style_select_strategy_drawdown">style: </label>
+                <select id="style_select_strategy_drawdown" multiple onchange="updateChart_strategy_drawdown(true)">
+                <option value="Alternative" selected>Alternative</option>
+                <option value="Factor" selected>Factor</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="style_select_strategy_drawdown_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_strategy_drawdown">Color by: </label>
+                <select id="color_col_select_strategy_drawdown" onchange="updateChart_strategy_drawdown(true)">
+                <option value="strategy" selected>strategy</option>
+                <option value="style">style</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_strategy_drawdown_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+    <div>
+        <label for="y_transform_select_strategy_drawdown">Metric: </label>
+        <select id="y_transform_select_strategy_drawdown" style="padding: 5px 10px;" onchange="updateChart_strategy_drawdown(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_return (cumprod)</option>
+        </select>
+    </div>
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_strategy_drawdown()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
+        <button onclick="stepRange_strategy_drawdown('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Duration:</label>
+            <input type="number" id="duration_input_strategy_drawdown" style="width: 80px; padding: 5px;" onchange="updateDuration_strategy_drawdown()">
+            <span id="unit_label_strategy_drawdown">days</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Step:</label>
+            <input type="number" id="step_input_strategy_drawdown" style="width: 80px; padding: 5px;">
+            <span>(<span id="unit_label2_strategy_drawdown">days</span>)</span>
+        </div>
+        <button onclick="stepRange_strategy_drawdown('forward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Step Forward &rarr;</button>
+    </div>
+    <div id="interval_display_strategy_drawdown" style="font-family: monospace; background: #f5f5f5; padding: 8px 15px; border-radius: 4px; margin-bottom: 10px;">
+        <strong>Start:</strong> -- &nbsp; <strong>End:</strong> -- &nbsp; <strong>Duration:</strong> --
+    </div>
+<h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
+<div style="margin: 10px 0;">
+    <label for="facet1_select_strategy_drawdown">Facet by: </label>
+    <select id="facet1_select_strategy_drawdown" onchange="updateChart_strategy_drawdown(true)">
+        <option value="None" selected>None</option>
+<option value="style">style</option>
+    </select>
+</div>
+
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="strategy_drawdown_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="strategy_drawdown_aspect_ratio_label">0.5</span>
+    <input type="range" id="strategy_drawdown_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.6931471805599453"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="strategy_drawdown"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: drawdown_data.parquet</p>
 
 <hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>

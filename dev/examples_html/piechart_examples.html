@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1473,6 +1486,7 @@ $(function(){
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['revenue', 'units'];
     const COLOR_COLS = ['company'];
     const COLOR_MAPS = {"company":{"Company E":"#FFA15A","Company D":"#ab63fa","Company C":"#00cc96","Company B":"#EF553B","Company A":"#636efa"}};
@@ -1574,6 +1588,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_market_share');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1602,7 +1625,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -1798,6 +1823,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['amount'];
     const COLOR_COLS = ['category'];
     const COLOR_MAPS = {"category":{"Salaries":"#636efa","R&D":"#00cc96","Operations":"#ab63fa","Other":"#19d3f3","Marketing":"#EF553B","Infrastructure":"#FFA15A"}};
@@ -1899,6 +1925,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_budget_donut');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1927,7 +1962,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -2123,6 +2160,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = ['region'];
     const CONTINUOUS_FILTERS = ['year'];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['product'];
     const COLOR_MAPS = {"product":{"Product A":"#636efa","Product C":"#00cc96","Product B":"#EF553B"}};
@@ -2224,6 +2262,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_sales_filtered');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2252,7 +2299,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -2446,8 +2495,346 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 })();
 (function() {
     // Configuration
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['year'];
+    const VALUE_COLS = ['sales'];
+    const COLOR_COLS = ['product'];
+    const COLOR_MAPS = {"product":{"Product A":"#636efa","Product C":"#00cc96","Product B":"#EF553B"}};
+    const COLOR_SCALES = {};
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_VALUE_COL = 'sales';
+    const DEFAULT_COLOR_COL = 'product';
+    const HOLE = 0.0;
+    const SHOW_LEGEND = true;
+
+    // Store data globally
+    let allData = [];
+
+    // Function to aggregate data for pie chart
+    function aggregateData(data, labelCol, valueCol) {
+        const aggregated = {};
+        for (const row of data) {
+            const label = String(row[labelCol]);
+            const value = Number(row[valueCol]) || 0;
+            if (aggregated[label]) {
+                aggregated[label] += value;
+            } else {
+                aggregated[label] = value;
+            }
+        }
+        return aggregated;
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_sales_choice = function() {
+        // Check if data is loaded
+        if (!allData || allData.length === 0) {
+            return;
+        }
+
+        // Get current value and color columns
+        const valueColSelect = document.getElementById('value_col_select_sales_choice');
+        const VALUE_COL = valueColSelect ? valueColSelect.value : DEFAULT_VALUE_COL;
+
+        const colorColSelect = document.getElementById('color_col_select_sales_choice');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_sales_choice');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Get categorical filter values (multiple selections)
+        const filters = {};
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_sales_choice');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Get continuous filter values (range sliders)
+        const rangeFilters = {};
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_sales_choice' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'sales_choice',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_sales_choice');
+        const facet2Select = document.getElementById('facet2_select_sales_choice');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        if (!facet1) {
+            // No faceting - single pie chart
+            const aggregated = aggregateData(filteredData, COLOR_COL, VALUE_COL);
+            const labels = Object.keys(aggregated);
+            const values = Object.values(aggregated);
+            const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
+
+            const trace = {
+                type: 'pie',
+                labels: labels,
+                values: values,
+                marker: { colors: colors },
+                hole: HOLE,
+                textposition: 'auto',
+                hoverinfo: 'label+value+percent'
+            };
+
+            const layout = {
+                showlegend: SHOW_LEGEND,
+                margin: {l: 50, r: 50, t: 50, b: 50},
+                height: 500
+            };
+
+            Plotly.newPlot('sales_choice', [trace], layout, {responsive: true});
+
+        } else if (facet1 && !facet2) {
+            // Facet wrap (1 variable)
+            const facetValues = [...new Set(filteredData.map(row => String(row[facet1])))].sort();
+            const nFacets = facetValues.length;
+            const nCols = Math.min(3, nFacets);
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const annotations = [];
+
+            for (let i = 0; i < nFacets; i++) {
+                const facetValue = facetValues[i];
+                const facetData = filteredData.filter(row => String(row[facet1]) === facetValue);
+                const aggregated = aggregateData(facetData, COLOR_COL, VALUE_COL);
+                const labels = Object.keys(aggregated);
+                const values = Object.values(aggregated);
+                const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
+
+                const row = Math.floor(i / nCols);
+                const col = i % nCols;
+
+                const domain = {
+                    x: [col / nCols + 0.01, (col + 1) / nCols - 0.01],
+                    y: [1 - (row + 1) / nRows + 0.01, 1 - row / nRows - 0.01]
+                };
+
+                traces.push({
+                    type: 'pie',
+                    labels: labels,
+                    values: values,
+                    marker: {colors: colors},
+                    hole: HOLE,
+                    domain: domain,
+                    name: facetValue,
+                    hoverinfo: 'label+value+percent',
+                    textposition: 'auto'
+                });
+
+                // Add facet label
+                annotations.push({
+                    text: facet1 + ': ' + facetValue,
+                    showarrow: false,
+                    x: (col + 0.5) / nCols,
+                    y: 1 - row / nRows - 0.02,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'center',
+                    yanchor: 'top',
+                    font: {size: 12, weight: 'bold'}
+                });
+            }
+
+            const layout = {
+                showlegend: SHOW_LEGEND,
+                annotations: annotations,
+                height: 300 * nRows,
+                margin: {l: 20, r: 20, t: 40, b: 20}
+            };
+
+            Plotly.newPlot('sales_choice', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 variables)
+            const rowValues = [...new Set(filteredData.map(row => String(row[facet1])))].sort();
+            const colValues = [...new Set(filteredData.map(row => String(row[facet2])))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const annotations = [];
+
+            for (let r = 0; r < nRows; r++) {
+                for (let c = 0; c < nCols; c++) {
+                    const rowVal = rowValues[r];
+                    const colVal = colValues[c];
+                    const cellData = filteredData.filter(row =>
+                        String(row[facet1]) === rowVal &&
+                        String(row[facet2]) === colVal
+                    );
+
+                    if (cellData.length > 0) {
+                        const aggregated = aggregateData(cellData, COLOR_COL, VALUE_COL);
+                        const labels = Object.keys(aggregated);
+                        const values = Object.values(aggregated);
+                        const colors = labels.map(label => getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, label));
+
+                        const domain = {
+                            x: [c / nCols + 0.01, (c + 1) / nCols - 0.01],
+                            y: [1 - (r + 1) / nRows + 0.01, 1 - r / nRows - 0.01]
+                        };
+
+                        traces.push({
+                            type: 'pie',
+                            labels: labels,
+                            values: values,
+                            marker: {colors: colors},
+                            hole: HOLE,
+                            domain: domain,
+                            hoverinfo: 'label+value+percent',
+                            textposition: 'auto',
+                            showlegend: false
+                        });
+                    }
+                }
+            }
+
+            // Add column headers
+            for (let c = 0; c < nCols; c++) {
+                annotations.push({
+                    text: facet2 + ': ' + colValues[c],
+                    showarrow: false,
+                    x: (c + 0.5) / nCols,
+                    y: 1.02,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 11, weight: 'bold'}
+                });
+            }
+
+            // Add row headers
+            for (let r = 0; r < nRows; r++) {
+                annotations.push({
+                    text: facet1 + ': ' + rowValues[r],
+                    showarrow: false,
+                    x: -0.02,
+                    y: 1 - (r + 0.5) / nRows,
+                    xref: 'paper',
+                    yref: 'paper',
+                    xanchor: 'right',
+                    yanchor: 'middle',
+                    font: {size: 11, weight: 'bold'}
+                });
+            }
+
+            const layout = {
+                showlegend: SHOW_LEGEND && nRows * nCols <= 4,
+                annotations: annotations,
+                height: 300 * nRows,
+                margin: {l: 80, r: 20, t: 60, b: 20}
+            };
+
+            Plotly.newPlot('sales_choice', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse data
+    loadDataset('sales_data').then(function(data) {
+        allData = data;
+        window.updateChart_sales_choice();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('sales_choice');
+    }).catch(function(error) {
+        console.error('Error loading data for chart sales_choice:', error);
+    });
+})();
+(function() {
+    // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = ['year'];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['product'];
     const COLOR_MAPS = {"product":{"Product A":"#636efa","Product C":"#00cc96","Product B":"#EF553B"}};
@@ -2549,6 +2936,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_sales_by_region');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2577,7 +2973,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -2773,6 +3171,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['count'];
     const COLOR_COLS = ['preference'];
     const COLOR_MAPS = {"preference":{"Mobile":"#636efa","Desktop":"#EF553B","Tablet":"#00cc96"}};
@@ -2874,6 +3273,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_demographics_grid');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2902,7 +3310,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -3098,6 +3508,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = ['quarter'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['amount'];
     const COLOR_COLS = ['expense_type', 'department'];
     const COLOR_MAPS = {"expense_type":{"Salaries":"#636efa","Training":"#ab63fa","Equipment":"#EF553B","Travel":"#00cc96","Supplies":"#FFA15A"},"department":{"HR":"#FFA15A","Engineering":"#636efa","Sales":"#EF553B","Operations":"#ab63fa","Marketing":"#00cc96"}};
@@ -3199,6 +3610,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_dept_expenses');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3227,7 +3647,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -3423,6 +3845,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['revenue_contribution'];
     const COLOR_COLS = ['segment'];
     const COLOR_MAPS = {"segment":{"Enterprise":"#636efa","Individual":"#FFA15A","Mid-Market":"#EF553B","Small Business":"#00cc96","Startup":"#ab63fa"}};
@@ -3524,6 +3947,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_customer_segments');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3552,7 +3984,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -3748,6 +4182,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['sales'];
     const COLOR_COLS = ['category'];
     const COLOR_MAPS = {"category":{"Food":"#ab63fa","Home & Garden":"#00cc96","Clothing":"#EF553B","Electronics":"#636efa","Books":"#FFA15A"}};
@@ -3849,6 +4284,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_store_comparison');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3877,7 +4321,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -4073,6 +4519,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['visitors'];
     const COLOR_COLS = ['browser', 'device'];
     const COLOR_MAPS = {"browser":{"Safari":"#00cc96","Chrome":"#636efa","Edge":"#ab63fa","Firefox":"#EF553B"},"device":{"Mobile":"#EF553B","Desktop":"#636efa","Tablet":"#00cc96"}};
@@ -4174,6 +4621,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_traffic_analysis');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4202,7 +4658,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -4398,6 +4856,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = ['quarter'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['revenue', 'units_sold', 'profit', 'customer_count'];
     const COLOR_COLS = ['product', 'channel', 'region'];
     const COLOR_MAPS = {"channel":{"Retail":"#EF553B","Online":"#636efa","Wholesale":"#00cc96"},"region":{"Asia":"#00cc96","Europe":"#EF553B","North America":"#636efa","South America":"#ab63fa"},"product":{"Monitor":"#FFA15A","Phone":"#EF553B","Headphones":"#ab63fa","Laptop":"#636efa","Tablet":"#00cc96"}};
@@ -4499,6 +4958,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_comprehensive_sales');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4527,7 +4995,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -4723,6 +5193,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const VALUE_COLS = ['amount'];
     const COLOR_COLS = ['source'];
     const COLOR_MAPS = {"source":{"Hardware":"#ab63fa","Licensing":"#EF553B","Services":"#00cc96","Other":"#FFA15A","Subscriptions":"#636efa"}};
@@ -4824,6 +5295,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_struct_pie');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get categorical filter values (multiple selections)
         const filters = {};
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4852,7 +5332,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Get current facet selections
@@ -5731,6 +6213,52 @@ Company E,8000,250
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data</p><br>
 <hr>
 <br>
+<h2>Example 3b: Product Sales with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **year (choice)**: Single-select dropdown - pick exactly ONE year at a time
+- **region (filter)**: Multi-select dropdown - can select multiple regions
+
+Use choices when the user must select exactly one option (like choosing a specific year to analyze).
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="sales_choice_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="year_choice_sales_choice"><strong>year</strong>: </label>
+                <select id="year_choice_sales_choice" onchange="updateChart_sales_choice()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="2022">2022</option>
+                <option value="2023">2023</option>
+                <option value="2024" selected>2024</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_sales_choice">region: </label>
+                <select id="region_select_sales_choice" multiple onchange="updateChart_sales_choice()">
+                <option value="East">East</option>
+                <option value="North" selected>North</option>
+                <option value="South" selected>South</option>
+                <option value="West">West</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_sales_choice_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+
+<!-- Chart -->
+<div id="sales_choice"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: sales_data</p><br>
+<hr>
+<br>
 <h2>Example 4: Product Sales Faceted by Region</h2>
 <p>Facet wrap creates a grid of pie charts, one for each region. Note single facet dropdown!</p>
 
@@ -6159,6 +6687,6 @@ Charts reference the revenue DataFrame using <code>Symbol("company.revenue")</co
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

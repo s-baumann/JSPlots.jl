@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1471,6 +1484,7 @@ $(function(){
 
     (function() {
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('surface_data').then(function(data3d) {
@@ -1571,6 +1585,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_basic_surface = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_basic_surface');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1580,16 +1603,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_basic_surface.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_basic_surface,
+            'basic_surface',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_basic_surface(filteredData);
@@ -1598,6 +1622,7 @@ const plotData = uniqueGroups.map((grp, index) => {
     })();
     (function() {
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('multi_data').then(function(data3d) {
@@ -1698,6 +1723,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_surfaces = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_surfaces');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1707,16 +1741,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_multi_surfaces.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_multi_surfaces,
+            'multi_surfaces',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_multi_surfaces(filteredData);
@@ -1725,6 +1760,7 @@ const plotData = uniqueGroups.map((grp, index) => {
     })();
     (function() {
     const FILTER_COLS = ['region', 'distance'];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('filtered_data').then(function(data3d) {
@@ -1825,6 +1861,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_filtered_surface = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_filtered_surface');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1834,16 +1879,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_filtered_surface.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_filtered_surface,
+            'filtered_surface',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_filtered_surface(filteredData);
@@ -1851,7 +1897,146 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     })();
     (function() {
+    const FILTER_COLS = ['distance'];
+    const CHOICE_FILTERS = ['region'];
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('filtered_data').then(function(data3d) {
+        window.allData_choice_surface = data3d;
+
+        // Initial plot
+        updatePlotWithFilters_choice_surface();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('choice_surface');
+    }).catch(function(error) {
+        console.error('Error loading data for chart choice_surface:', error);
+    });
+
+    function updatePlot_choice_surface(data3d) {
+        // ========== 3D SURFACE PLOT CONFIGURATION ==========
+        // Define your column names here
+        const x = 'x';
+        const y = 'y';
+        const z = 'z';
+        const group = 'group';
+        // ===================================================
+
+        // Get unique groups
+const uniqueGroups = [...new Set(data3d.map(row => row[group]))].sort();
+
+
+        // Define a set of distinct color gradients
+        const colorGradients = [
+            // Blue gradient
+            [[0, 'rgb(8,48,107)'], [0.25, 'rgb(33,102,172)'], [0.5, 'rgb(67,147,195)'], [0.75, 'rgb(146,197,222)'], [1, 'rgb(209,229,240)']],
+            // Red-Orange gradient
+            [[0, 'rgb(127,0,0)'], [0.25, 'rgb(189,0,38)'], [0.5, 'rgb(227,74,51)'], [0.75, 'rgb(252,141,89)'], [1, 'rgb(253,204,138)']],
+            // Green gradient
+            [[0, 'rgb(0,68,27)'], [0.25, 'rgb(0,109,44)'], [0.5, 'rgb(35,139,69)'], [0.75, 'rgb(116,196,118)'], [1, 'rgb(199,233,192)']],
+            // Purple gradient
+            [[0, 'rgb(63,0,125)'], [0.25, 'rgb(106,81,163)'], [0.5, 'rgb(158,154,200)'], [0.75, 'rgb(188,189,220)'], [1, 'rgb(218,218,235)']],
+            // Yellow-Orange gradient
+            [[0, 'rgb(102,37,6)'], [0.25, 'rgb(153,52,4)'], [0.5, 'rgb(217,95,14)'], [0.75, 'rgb(254,153,41)'], [1, 'rgb(254,217,142)']],
+            // Teal gradient
+            [[0, 'rgb(1,70,54)'], [0.25, 'rgb(1,102,94)'], [0.5, 'rgb(2,129,138)'], [0.75, 'rgb(54,175,172)'], [1, 'rgb(178,226,226)']],
+            // Pink-Magenta gradient
+            [[0, 'rgb(73,0,106)'], [0.25, 'rgb(123,50,148)'], [0.5, 'rgb(194,165,207)'], [0.75, 'rgb(231,212,232)'], [1, 'rgb(247,242,247)']],
+            // Brown gradient
+            [[0, 'rgb(84,48,5)'], [0.25, 'rgb(140,81,10)'], [0.5, 'rgb(191,129,45)'], [0.75, 'rgb(223,194,125)'], [1, 'rgb(246,232,195)']],
+        ];
+
+        // Function to create z matrix for a group
+        function createSurface(groupData, colorscale, name) {
+            const xVals = [...new Set(groupData.map(row => parseFloat(row[x])))].sort((a,b) => a-b);
+            const yVals = [...new Set(groupData.map(row => parseFloat(row[y])))].sort((a,b) => a-b);
+
+            const zMatrix = [];
+            for (let i = 0; i < yVals.length; i++) {
+                zMatrix[i] = [];
+                for (let j = 0; j < xVals.length; j++) {
+                    const point = groupData.find(row =>
+                        parseFloat(row[x]) === xVals[j] &&
+                        parseFloat(row[y]) === yVals[i]
+                    );
+                    zMatrix[i][j] = point ? parseFloat(point[z]) : null;
+                }
+            }
+
+            return {
+                z: zMatrix,
+                x: xVals,
+                y: yVals,
+                type: 'surface',
+                name: name,
+                colorscale: colorscale,
+                showscale: false
+            };
+        }
+
+        // Create a surface for each group
+const plotData = uniqueGroups.map((grp, index) => {
+    const groupData = data3d.filter(row => row[group] === grp);
+    const colorscale = colorGradients[index % colorGradients.length];
+    return createSurface(groupData, colorscale, `Group ${grp}`);
+});
+
+
+        const layout = {
+            title: '3D Surface with Single-Select Choice',
+            autosize: true,
+            height: 600,
+            scene: {
+                xaxis: { title: x },
+                yaxis: { title: y },
+                zaxis: { title: z }
+            },
+            showlegend: true,
+        };
+
+        Plotly.newPlot('choice_surface', plotData, layout);
+    }
+
+    // Filter and update function
+    window.updatePlotWithFilters_choice_surface = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_choice_surface');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Get filter values (multiple selections)
+        const filters = {};
+        FILTER_COLS.forEach(col => {
+            const select = document.getElementById(col + '_select_choice_surface');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_choice_surface,
+            'choice_surface',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Update plot with filtered data
+        updatePlot_choice_surface(filteredData);
+    };
+
+    })();
+    (function() {
     const FILTER_COLS = ['shapefamily'];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('shape_data').then(function(data3d) {
@@ -1952,6 +2137,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_shape_family = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_shape_family');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -1961,16 +2155,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_shape_family.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_shape_family,
+            'shape_family',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_shape_family(filteredData);
@@ -1979,6 +2174,7 @@ const plotData = uniqueGroups.map((grp, index) => {
     })();
     (function() {
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('wave_data').then(function(data3d) {
@@ -2079,6 +2275,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_wave_interference = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_wave_interference');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -2088,16 +2293,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_wave_interference.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_wave_interference,
+            'wave_interference',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_wave_interference(filteredData);
@@ -2106,6 +2312,7 @@ const plotData = uniqueGroups.map((grp, index) => {
     })();
     (function() {
     const FILTER_COLS = [];
+    const CHOICE_FILTERS = [];
 
     // Load and parse CSV data using centralized parser
     loadDataset('terrain.elevation').then(function(data3d) {
@@ -2206,6 +2413,15 @@ const plotData = uniqueGroups.map((grp, index) => {
 
     // Filter and update function
     window.updatePlotWithFilters_struct_terrain = function() {
+        // Get choice values (single selections)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_struct_terrain');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get filter values (multiple selections)
         const filters = {};
         FILTER_COLS.forEach(col => {
@@ -2215,16 +2431,17 @@ const plotData = uniqueGroups.map((grp, index) => {
             }
         });
 
-        // Filter data (support multiple selections per filter)
-        const filteredData = window.allData_struct_terrain.filter(row => {
-            for (let col in filters) {
-                const selectedValues = filters[col];
-                if (selectedValues.length > 0 && !selectedValues.includes(String(row[col]))) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            window.allData_struct_terrain,
+            'struct_terrain',
+            FILTER_COLS,
+            [],  // No continuous filters
+            filters,
+            {},  // No range filters
+            CHOICE_FILTERS,
+            choices
+        );
 
         // Update plot with filtered data
         updatePlot_struct_terrain(filteredData);
@@ -17194,7 +17411,122 @@ The surface updates dynamically as you adjust the filters - perfect for explorin
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 4: Shape Family Filtering</h2>
+        <h2>Example 4: 3D Surface with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices (single-select) and filters (multi-select).
+Use the region dropdown to select exactly ONE quadrant at a time.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>3D Surface with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **region (choice)**: Single-select dropdown - pick exactly ONE quadrant
+- **distance (filter)**: Multi-select dropdown - can select multiple distance thresholds
+
+Compare with Example 3 which uses filters for both. Use choices when the user must select exactly one option.
+</p>
+
+<!-- Filters (for data filtering) -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="choice_surface_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="region_choice_choice_surface"><strong>region</strong>: </label>
+                <select id="region_choice_choice_surface" onchange="updatePlotWithFilters_choice_surface()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="NE" selected>NE</option>
+                <option value="NW">NW</option>
+                <option value="SE">SE</option>
+                <option value="SW">SW</option>
+            </select>
+            </div>
+        </div>
+        <div style="margin: 15px 10px; display: flex; align-items: flex-start;">
+    <div style="flex: 0 0 70%;">
+        <label style="display: block; margin-bottom: 5px; font-weight: bold;">distance: </label>
+        <span id="distance_range_choice_surface_display" style="display: inline-block; min-width: 200px; font-size: 0.9em; color: #666;">0 - 14.14</span>
+        <div id="distance_range_choice_surface_slider" style="margin: 10px 5px; width: 90%;"></div>
+    </div>
+    <div style="flex: 0 0 30%; text-align: right; padding-right: 10px; padding-top: 25px;">
+        <span id="distance_range_choice_surface_obs_count" style="font-size: 0.9em; color: #666;"></span>
+    </div>
+    <script>
+        $(function() {
+            // Value formatter function
+            function formatValue_distance_range_choice_surface(x) {
+    return x === Math.floor(x) ? Math.floor(x).toString() : x.toFixed(2);
+}
+
+            // Initialize jQuery UI range slider
+            $("#distance_range_choice_surface_slider").slider({
+                range: true,
+                min: 0.0,
+                max: 14.142135623730951,
+                step: 0.01414213562373095,  // Integer steps for integers, smooth for others
+                values: [0.0, 14.142135623730951],
+                slide: function(event, ui) {
+                    // Update display during sliding
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#distance_range_choice_surface_display").text(formatValue_distance_range_choice_surface(minVal) + " - " + formatValue_distance_range_choice_surface(maxVal));
+                },
+                change: function(event, ui) {
+                    // Update display and trigger chart update
+                    const minVal = ui.values[0];
+                    const maxVal = ui.values[1];
+                    $("#distance_range_choice_surface_display").text(formatValue_distance_range_choice_surface(minVal) + " - " + formatValue_distance_range_choice_surface(maxVal));
+
+                    // Store values for easy access
+                    $("#distance_range_choice_surface_slider").data('minValue', minVal);
+                    $("#distance_range_choice_surface_slider").data('maxValue', maxVal);
+
+                    // Call the update function
+                    updatePlotWithFilters_choice_surface()
+                }
+            });
+
+            // Store initial values
+            $("#distance_range_choice_surface_slider").data('minValue', 0.0);
+            $("#distance_range_choice_surface_slider").data('maxValue', 14.142135623730951);
+        });
+
+        // Helper functions to get slider values
+        function getdistance_range_choice_surfaceMin() {
+            return $("#distance_range_choice_surface_slider").slider("values", 0);
+        }
+
+        function getdistance_range_choice_surfaceMax() {
+            return $("#distance_range_choice_surface_slider").slider("values", 1);
+        }
+    </script>
+</div>
+
+</div>
+
+<!-- Plot Attributes -->
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+    <!-- Aspect ratio control below --><div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="choice_surface_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="choice_surface_aspect_ratio_label">1.0</span>
+    <input type="range" id="choice_surface_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="0.0"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="choice_surface"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: filtered_data</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
+        <h2>Example 5: Shape Family Filtering</h2>
 <p>This example shows the power of filtering for exploring different mathematical families.
 Use the shape family filter to switch between trigonometric functions and polynomials.
 Within each family, you can see different shapes by color.</p>
@@ -17247,7 +17579,7 @@ Within each family, you can see different shapes by color.</p>
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 5: Wave Interference Pattern</h2>
+        <h2>Example 6: Wave Interference Pattern</h2>
 <p>A classic physics demonstration showing interference from two wave sources.</p>
 
     </div>
@@ -17279,7 +17611,7 @@ Within each family, you can see different shapes by color.</p>
 <hr>
 <br>
     <div class="textblock-content">
-        <h2>Example 6: Terrain Data from Struct Data Source</h2>
+        <h2>Example 7: Terrain Data from Struct Data Source</h2>
 <p>This 3D surface uses data from a struct containing multiple DataFrames.
 The <code>TerrainData</code> struct holds elevation and metadata information.</p>
 
@@ -17326,6 +17658,6 @@ The <code>TerrainData</code> struct holds elevation and metadata information.</p
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

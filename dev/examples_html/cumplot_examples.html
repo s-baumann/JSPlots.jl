@@ -333,7 +333,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -344,6 +345,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1474,6 +1487,7 @@ $(function(){
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
@@ -1693,6 +1707,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_strategy_comparison');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -1733,7 +1756,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -1890,10 +1915,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -1947,7 +1983,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -1979,7 +2015,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -2062,6 +2098,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy'];
@@ -2281,6 +2318,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_y_vars');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2321,7 +2367,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -2478,10 +2526,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -2535,7 +2594,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -2567,7 +2626,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -2650,6 +2709,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
@@ -2869,6 +2929,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_multi_color_cols');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -2909,7 +2978,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -3066,10 +3137,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -3123,7 +3205,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -3155,7 +3237,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -3238,6 +3320,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = [];
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
@@ -3457,6 +3540,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_faceted_view');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -3497,7 +3589,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -3654,10 +3748,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -3711,7 +3816,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -3743,7 +3848,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -3826,6 +3931,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const FILTER_COLS = ['region', 'asset_class'];
     const CATEGORICAL_FILTERS = ['region', 'asset_class'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
@@ -4045,6 +4151,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_filtered_strategies');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4085,7 +4200,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -4242,10 +4359,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -4299,7 +4427,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -4331,7 +4459,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -4411,9 +4539,621 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 })();
 (function() {
     // Configuration
+    const FILTER_COLS = ['region'];
+    const CATEGORICAL_FILTERS = ['region'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['asset_class'];
+    const X_COL = 'date';
+    const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
+    const COLOR_COLS = ['strategy', 'risk_level'];
+    const COLOR_MAPS = {'strategy': {'Zeta': '#19d3f3', 'Beta': '#EF553B', 'Gamma': '#00cc96', 'Epsilon': '#FFA15A', 'Eta': '#FF6692', 'Theta': '#B6E880', 'Delta': '#ab63fa', 'Kappa': '#FECB52', 'Iota': '#FF97FF', 'Alpha': '#636efa'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_SCALES = {};
+    const DEFAULT_COLOR_COL = 'strategy';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_DURATION_FRACTION = 0.2;
+    const DEFAULT_STEP_FRACTION = 0.2;
+
+    let allData = [];
+
+    // Chart state
+    window.cumChartState_choice_example = {
+        uniqueXValues: [],
+        startIdx: 0,
+        duration: 0,  // in units
+        step: 0,      // in units
+        timeUnit: 'days',  // 'days', 'hours', 'minutes', 'seconds', or 'units'
+        unitMultiplier: 1,  // milliseconds per unit (or 1 for numeric)
+        showingFullRange: true,  // true when showing entire plot
+        totalDuration: 0  // full span in units
+    };
+
+    // Determine time unit based on data span
+    function determineTimeUnit(xValues) {
+        if (xValues.length < 2) return { unit: 'units', multiplier: 1 };
+
+        const first = xValues[0];
+        const last = xValues[xValues.length - 1];
+
+        // Check if values are dates (timestamps in ms)
+        const isDate = first > 946684800000; // After year 2000
+
+        if (!isDate) {
+            return { unit: 'units', multiplier: 1 };
+        }
+
+        const spanMs = last - first;
+        const spanSeconds = spanMs / 1000;
+        const spanMinutes = spanSeconds / 60;
+        const spanHours = spanMinutes / 60;
+        const spanDays = spanHours / 24;
+
+        if (spanDays > 3) {
+            return { unit: 'days', multiplier: 24 * 60 * 60 * 1000 };
+        } else if (spanHours > 3) {
+            return { unit: 'hours', multiplier: 60 * 60 * 1000 };
+        } else if (spanMinutes > 3) {
+            return { unit: 'minutes', multiplier: 60 * 1000 };
+        } else if (spanSeconds > 3) {
+            return { unit: 'seconds', multiplier: 1000 };
+        } else {
+            return { unit: 'units', multiplier: 1 };
+        }
+    }
+
+    // Reset to show full range
+    window.resetRange_choice_example = function() {
+        const state = window.cumChartState_choice_example;
+        state.showingFullRange = true;
+        state.startIdx = 0;
+
+        // Update duration input to show full span
+        const durationInput = document.getElementById('duration_input_choice_example');
+        if (durationInput) {
+            durationInput.value = Math.round(state.totalDuration * 100) / 100;
+        }
+
+        window.updateChart_choice_example(true);
+    };
+
+    // Step forward/backward
+    window.stepRange_choice_example = function(direction) {
+        const state = window.cumChartState_choice_example;
+        const durationInput = document.getElementById('duration_input_choice_example');
+        const stepInput = document.getElementById('step_input_choice_example');
+
+        // If currently showing full range, switch to interval mode
+        if (state.showingFullRange) {
+            state.showingFullRange = false;
+            // Set duration to the configured fraction
+            const intervalDuration = state.totalDuration * DEFAULT_DURATION_FRACTION;
+            if (durationInput) {
+                durationInput.value = Math.round(intervalDuration * 100) / 100;
+            }
+
+            if (direction === 'forward') {
+                // Start from beginning with the interval duration
+                state.startIdx = 0;
+            } else {
+                // Start from end minus duration
+                const endX = state.uniqueXValues[state.uniqueXValues.length - 1];
+                const startX = endX - intervalDuration * state.unitMultiplier;
+                let newStartIdx = 0;
+                for (let i = state.uniqueXValues.length - 1; i >= 0; i--) {
+                    if (state.uniqueXValues[i] <= startX) {
+                        newStartIdx = i;
+                        break;
+                    }
+                }
+                state.startIdx = newStartIdx;
+            }
+            window.updateChart_choice_example(true);
+            return;
+        }
+
+        const step = parseFloat(stepInput.value) || state.step;
+        const stepInUnits = step * state.unitMultiplier;
+        const numPoints = state.uniqueXValues.length;
+
+        if (direction === 'forward') {
+            // Find new start index
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX + stepInUnits;
+            let newStartIdx = state.startIdx;
+            for (let i = state.startIdx; i < numPoints; i++) {
+                if (state.uniqueXValues[i] >= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+                newStartIdx = i;
+            }
+            state.startIdx = Math.min(newStartIdx, numPoints - 1);
+        } else {
+            // Find new start index going backward
+            const currentStartX = state.uniqueXValues[state.startIdx];
+            const newStartX = currentStartX - stepInUnits;
+            let newStartIdx = 0;
+            for (let i = state.startIdx; i >= 0; i--) {
+                if (state.uniqueXValues[i] <= newStartX) {
+                    newStartIdx = i;
+                    break;
+                }
+            }
+            state.startIdx = Math.max(newStartIdx, 0);
+        }
+
+        window.updateChart_choice_example(true);
+    };
+
+    // Update duration from input
+    window.updateDuration_choice_example = function() {
+        window.updateChart_choice_example(true);
+    };
+
+    // Make it global so inline onchange can see it
+    window.updateChart_choice_example = function(preserveRange) {
+        const state = window.cumChartState_choice_example;
+
+        // Get current Y transform selection (combined column + transform)
+        const yTransformSelect = document.getElementById('y_transform_select_choice_example');
+        const selectedIdx = yTransformSelect ? parseInt(yTransformSelect.value) : 0;
+        const selectedYTransform = Y_TRANSFORMS[selectedIdx] || Y_TRANSFORMS[0];
+        const Y_COL = selectedYTransform.col;
+        const Y_TRANSFORM = selectedYTransform.transform;
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_choice_example');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_choice_example');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_choice_example' + '_slider');
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_choice_example');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_choice_example');
+        const facet2Select = document.getElementById('facet2_select_choice_example');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'choice_example',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Sort data by X
+        filteredData.sort((a, b) => {
+            const aVal = a[X_COL];
+            const bVal = b[X_COL];
+            if (aVal instanceof Date && bVal instanceof Date) {
+                return aVal - bVal;
+            }
+            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+        });
+
+        // Get unique X values
+        const uniqueXValues = [...new Set(filteredData.map(row => {
+            const v = row[X_COL];
+            return v instanceof Date ? v.getTime() : v;
+        }))].sort((a, b) => a - b);
+
+        state.uniqueXValues = uniqueXValues;
+
+        // Determine time unit on first load or when data changes significantly
+        if (!preserveRange || state.timeUnit === undefined) {
+            const unitInfo = determineTimeUnit(uniqueXValues);
+            state.timeUnit = unitInfo.unit;
+            state.unitMultiplier = unitInfo.multiplier;
+
+            // Update unit labels
+            const unitLabel = document.getElementById('unit_label_choice_example');
+            const unitLabel2 = document.getElementById('unit_label2_choice_example');
+            if (unitLabel) {
+                unitLabel.textContent = state.timeUnit;
+            }
+            if (unitLabel2) {
+                unitLabel2.textContent = state.timeUnit;
+            }
+
+            // Set total duration and default step/duration fractions
+            if (uniqueXValues.length >= 2) {
+                const totalSpan = uniqueXValues[uniqueXValues.length - 1] - uniqueXValues[0];
+                state.totalDuration = totalSpan / state.unitMultiplier;
+                state.duration = state.totalDuration * DEFAULT_DURATION_FRACTION;  // Default interval duration
+                state.step = state.totalDuration * DEFAULT_STEP_FRACTION;
+            } else {
+                state.totalDuration = 1;
+                state.duration = 1;
+                state.step = 1;
+            }
+
+            // Start showing full range
+            state.showingFullRange = true;
+            state.startIdx = 0;
+
+            // Update input fields with default fraction values
+            const durationInput = document.getElementById('duration_input_choice_example');
+            const stepInput = document.getElementById('step_input_choice_example');
+            if (durationInput) durationInput.value = Math.round(state.duration * 100) / 100;
+            if (stepInput) stepInput.value = Math.round(state.step * 100) / 100;
+        }
+
+        // Calculate start and end based on whether showing full range or interval
+        let startX, endX;
+        if (state.showingFullRange) {
+            // Show entire data range
+            startX = uniqueXValues[0];
+            endX = uniqueXValues[uniqueXValues.length - 1];
+        } else {
+            // Read duration from input and calculate range
+            const durationInput = document.getElementById('duration_input_choice_example');
+            const duration = parseFloat(durationInput.value) || state.duration;
+            const durationInUnits = duration * state.unitMultiplier;
+            startX = uniqueXValues[state.startIdx] || uniqueXValues[0];
+            endX = startX + durationInUnits;
+        }
+
+        // Find end index
+        let endIdx = state.startIdx;
+        for (let i = state.startIdx; i < uniqueXValues.length; i++) {
+            if (uniqueXValues[i] <= endX) {
+                endIdx = i;
+            } else {
+                break;
+            }
+        }
+
+        // Update interval display
+        updateIntervalDisplay_choice_example(startX, uniqueXValues[endIdx], state.timeUnit, state.unitMultiplier);
+
+        // Get unique facet values if faceting is selected
+        let facet1Values = facet1 ? [...new Set(filteredData.map(r => String(r[facet1])))] : [null];
+        let facet2Values = facet2 ? [...new Set(filteredData.map(r => String(r[facet2])))] : [null];
+        facet1Values.sort();
+        facet2Values.sort();
+
+        const nRows = facet2Values.length;
+        const nCols = facet1Values.length;
+        const hasFacets = facet1 !== null || facet2 !== null;
+
+        // Group FULL data by color (for computing cumulative on full range)
+        const fullGroupedData = {};
+        filteredData.forEach(row => {
+            const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+            const f1Val = facet1 ? String(row[facet1]) : '';
+            const f2Val = facet2 ? String(row[facet2]) : '';
+            const fullKey = colorVal + '|' + f1Val + '|' + f2Val;
+            if (!fullGroupedData[fullKey]) {
+                fullGroupedData[fullKey] = {
+                    color: colorVal,
+                    facet1: f1Val,
+                    facet2: f2Val,
+                    rows: []
+                };
+            }
+            fullGroupedData[fullKey].rows.push(row);
+        });
+
+        // Compute cumulative on FULL data for each group, then extract range and normalize
+        const mainTraces = [];
+
+        for (let fullKey in fullGroupedData) {
+            const groupInfo = fullGroupedData[fullKey];
+            const group = groupInfo.rows;
+            if (group.length === 0) continue;
+
+            // Sort by X within group
+            group.sort((a, b) => {
+                const aVal = a[X_COL];
+                const bVal = b[X_COL];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const fullXValues = group.map(row => row[X_COL]);
+            const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
+            let fullYValues = group.map(row => parseFloat(row[Y_COL]));
+
+            // Apply cumulative transform on FULL data
+            if (Y_TRANSFORM === 'cumulative') {
+                fullYValues = computeCumulativeSum(fullYValues);
+            } else if (Y_TRANSFORM === 'cumprod') {
+                fullYValues = computeCumulativeProduct(fullYValues);
+            }
+
+            // Extract range for main chart
+            const rangeIndices = [];
+            for (let i = 0; i < fullXNumeric.length; i++) {
+                if (fullXNumeric[i] >= startX && fullXNumeric[i] <= endX) {
+                    rangeIndices.push(i);
+                }
+            }
+
+            if (rangeIndices.length > 0) {
+                const rangeXValues = rangeIndices.map(i => fullXValues[i]);
+                let rangeYValues = rangeIndices.map(i => fullYValues[i]);
+
+                // Normalize so all lines start at the same point
+                const firstVal = rangeYValues[0];
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
+                }
+
+                // Determine which subplot this trace belongs to
+                let xAxisNum = 1;
+                let yAxisNum = 1;
+                if (hasFacets) {
+                    const f1Idx = facet1 ? facet1Values.indexOf(groupInfo.facet1) : 0;
+                    const f2Idx = facet2 ? facet2Values.indexOf(groupInfo.facet2) : 0;
+                    const plotIdx = f2Idx * nCols + f1Idx + 1;
+                    xAxisNum = plotIdx;
+                    yAxisNum = plotIdx;
+                }
+
+                mainTraces.push({
+                    x: rangeXValues,
+                    y: rangeYValues,
+                    type: 'scatter',
+                    mode: 0 > 0 ? 'lines+markers' : 'lines',
+                    name: groupInfo.color,
+                    legendgroup: groupInfo.color,
+                    showlegend: hasFacets ? (groupInfo.facet1 === facet1Values[0] && groupInfo.facet2 === facet2Values[0]) : true,
+                    line: {
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, groupInfo.color),
+                        width: 2
+                    },
+                    marker: { size: 0 },
+                    xaxis: xAxisNum === 1 ? 'x' : 'x' + xAxisNum,
+                    yaxis: yAxisNum === 1 ? 'y' : 'y' + yAxisNum
+                });
+            }
+        }
+
+        // Build layout
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            legend: {
+                orientation: 'h',
+                y: 1.02,
+                x: 0.5,
+                xanchor: 'center'
+            },
+            annotations: []
+        };
+
+        // Setup axes based on faceting
+        if (!hasFacets) {
+            layout.xaxis = {
+                title: X_COL,
+                domain: [0, 1],
+                anchor: 'y'
+            };
+            layout.yaxis = {
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
+                domain: [0, 1],
+                anchor: 'x'
+            };
+        } else {
+            // Faceted layout
+            const gapX = 0.05;
+            const gapY = 0.08;
+            const plotWidth = (1 - gapX * (nCols - 1)) / nCols;
+            const plotHeight = (1 - gapY * (nRows - 1)) / nRows;
+
+            for (let row = 0; row < nRows; row++) {
+                for (let col = 0; col < nCols; col++) {
+                    const plotIdx = row * nCols + col + 1;
+                    const x0 = col * (plotWidth + gapX);
+                    const x1 = x0 + plotWidth;
+                    const y1 = 1 - row * (plotHeight + gapY);
+                    const y0 = y1 - plotHeight;
+
+                    const xAxisName = plotIdx === 1 ? 'xaxis' : 'xaxis' + plotIdx;
+                    const yAxisName = plotIdx === 1 ? 'yaxis' : 'yaxis' + plotIdx;
+
+                    layout[xAxisName] = {
+                        domain: [x0, x1],
+                        anchor: plotIdx === 1 ? 'y' : 'y' + plotIdx,
+                        showticklabels: row === nRows - 1
+                    };
+                    layout[yAxisName] = {
+                        domain: [y0, y1],
+                        anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
+                        showticklabels: col === 0,
+                        title: col === 0 && row === Math.floor(nRows / 2) ?
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
+                    };
+
+                    // Add facet label annotation
+                    let facetLabel = '';
+                    if (facet1 && facet2) {
+                        facetLabel = facet1Values[col] + ' / ' + facet2Values[row];
+                    } else if (facet1) {
+                        facetLabel = facet1Values[col];
+                    } else if (facet2) {
+                        facetLabel = facet2Values[row];
+                    }
+
+                    layout.annotations.push({
+                        text: '<b>' + facetLabel + '</b>',
+                        x: (x0 + x1) / 2,
+                        y: y1 + 0.02,
+                        xref: 'paper',
+                        yref: 'paper',
+                        showarrow: false,
+                        font: { size: 11 }
+                    });
+                }
+            }
+        }
+
+        Plotly.newPlot('choice_example', mainTraces, layout, {responsive: true});
+    };
+
+    function updateIntervalDisplay_choice_example(startX, endX, timeUnit, unitMultiplier) {
+        const displayDiv = document.getElementById('interval_display_choice_example');
+        if (!displayDiv) return;
+
+        const isDate = startX > 946684800000;
+
+        if (isDate) {
+            const startDate = new Date(startX);
+            const endDate = new Date(endX);
+
+            const formatDate = (d) => {
+                if (timeUnit === 'days') {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0');
+                } else {
+                    return d.getFullYear() + '-' +
+                           String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(d.getDate()).padStart(2, '0') + ' ' +
+                           String(d.getHours()).padStart(2, '0') + ':' +
+                           String(d.getMinutes()).padStart(2, '0') + ':' +
+                           String(d.getSeconds()).padStart(2, '0');
+                }
+            };
+
+            const durationUnits = Math.round((endX - startX) / unitMultiplier * 100) / 100;
+
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + formatDate(startDate) +
+                                   ' &nbsp; <strong>End:</strong> ' + formatDate(endDate) +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        } else {
+            const durationUnits = Math.round((endX - startX) * 100) / 100;
+            displayDiv.innerHTML = '<strong>Start:</strong> ' + startX +
+                                   ' &nbsp; <strong>End:</strong> ' + endX +
+                                   ' &nbsp; <strong>Duration:</strong> ' + durationUnits + ' ' + timeUnit;
+        }
+    }
+
+    // Load and parse data using centralized parser
+    loadDataset('strategy_data').then(function(data) {
+        allData = data;
+        window.updateChart_choice_example(false);
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('choice_example');
+    }).catch(function(error) {
+        console.error('Error loading data for chart choice_example:', error);
+    });
+})();
+(function() {
+    // Configuration
     const FILTER_COLS = ['region', 'asset_class', 'risk_level'];
     const CATEGORICAL_FILTERS = ['region', 'asset_class', 'risk_level'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'asset_class', 'region', 'risk_level'];
@@ -4633,6 +5373,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         // Get current filter values
         const filters = {};
         const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_full_featured');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
 
         // Read categorical filters (dropdowns)
         CATEGORICAL_FILTERS.forEach(col => {
@@ -4673,7 +5422,9 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Sort data by X
@@ -4830,10 +5581,21 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 const rangeXValues = rangeIndices.map(i => fullXValues[i]);
                 let rangeYValues = rangeIndices.map(i => fullYValues[i]);
 
-                // Normalize: divide all values by the FIRST value in the range
+                // Normalize so all lines start at the same point
                 const firstVal = rangeYValues[0];
-                if (firstVal !== 0 && !isNaN(firstVal) && isFinite(firstVal)) {
-                    rangeYValues = rangeYValues.map(v => v / firstVal);
+                if (!isNaN(firstVal) && isFinite(firstVal)) {
+                    if (Y_TRANSFORM === 'cumprod') {
+                        // For cumprod: values are cumulative returns (cumprod(1+r)-1)
+                        // Convert to wealth (add 1), divide by first wealth, so lines start at 1
+                        const firstWealth = firstVal + 1;
+                        if (firstWealth !== 0) {
+                            rangeYValues = rangeYValues.map(v => (v + 1) / firstWealth);
+                        }
+                    } else {
+                        // For cumulative: subtract first value so lines start at 0
+                        // This shows relative PnL gain/loss from the start of the window
+                        rangeYValues = rangeYValues.map(v => v - firstVal);
+                    }
                 }
 
                 // Determine which subplot this trace belongs to
@@ -4887,7 +5649,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 anchor: 'y'
             };
             layout.yaxis = {
-                title: 'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')',
+                title: (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')'),
                 domain: [0, 1],
                 anchor: 'x'
             };
@@ -4919,7 +5681,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         anchor: plotIdx === 1 ? 'x' : 'x' + plotIdx,
                         showticklabels: col === 0,
                         title: col === 0 && row === Math.floor(nRows / 2) ?
-                            'Normalized ' + (Y_TRANSFORM === 'cumulative' ? 'Cumulative' : 'CumProd') + '(' + Y_COL + ')' : ''
+                            (Y_TRANSFORM === 'cumulative' ? 'Cumulative(' + Y_COL + ') - Relative' : 'Normalized CumProd(' + Y_COL + ')') : ''
                     };
 
                     // Add facet label annotation
@@ -12687,6 +13449,109 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
 <hr>
 <br>
     <div class="textblock-content">
+        <h2>Example 5b: Choices vs Filters</h2>
+<p>Choices enforce single-selection while filters allow multi-selection.</p>
+
+    </div>
+<br>
+<hr>
+<br>
+<h2>Example 5b: CumPlot with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **asset_class (choice)**: Single-select dropdown - pick exactly ONE asset class at a time
+- **region (filter)**: Multi-select dropdown - can select multiple regions
+
+Use choices when the user must select exactly one option.
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="choice_example_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="asset_class_choice_choice_example"><strong>asset_class</strong>: </label>
+                <select id="asset_class_choice_choice_example" onchange="updateChart_choice_example(true)" style="padding: 5px 10px; font-weight: bold;">
+                <option value="Equities" selected>Equities</option>
+                <option value="Fixed Income">Fixed Income</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="region_select_choice_example">region: </label>
+                <select id="region_select_choice_example" multiple onchange="updateChart_choice_example(true)">
+                <option value="Asia">Asia</option>
+                <option value="Europe" selected>Europe</option>
+                <option value="Global">Global</option>
+                <option value="US" selected>US</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="region_select_choice_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="color_col_select_choice_example">Color by: </label>
+                <select id="color_col_select_choice_example" onchange="updateChart_choice_example(true)">
+                <option value="strategy" selected>strategy</option>
+                <option value="risk_level">risk_level</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="color_col_select_choice_example_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;">
+    <div>
+        <label for="y_transform_select_choice_example">Metric: </label>
+        <select id="y_transform_select_choice_example" style="padding: 5px 10px;" onchange="updateChart_choice_example(true)">
+            <option value="0" selected>daily_pnl (cumulative)</option>
+<option value="1">daily_pnl_gross (cumulative)</option>
+        </select>
+    </div>
+</div>    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+        <button onclick="resetRange_choice_example()" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Reset</button>
+        <button onclick="stepRange_choice_example('backward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">&larr; Step Back</button>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Duration:</label>
+            <input type="number" id="duration_input_choice_example" style="width: 80px; padding: 5px;" onchange="updateDuration_choice_example()">
+            <span id="unit_label_choice_example">days</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <label>Step:</label>
+            <input type="number" id="step_input_choice_example" style="width: 80px; padding: 5px;">
+            <span>(<span id="unit_label2_choice_example">days</span>)</span>
+        </div>
+        <button onclick="stepRange_choice_example('forward')" style="padding: 8px 15px; cursor: pointer; font-size: 14px;">Step Forward &rarr;</button>
+    </div>
+    <div id="interval_display_choice_example" style="font-family: monospace; background: #f5f5f5; padding: 8px 15px; border-radius: 4px; margin-bottom: 10px;">
+        <strong>Start:</strong> -- &nbsp; <strong>End:</strong> -- &nbsp; <strong>Duration:</strong> --
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="choice_example_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="choice_example_aspect_ratio_label">0.5</span>
+    <input type="range" id="choice_example_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.6931471805599453"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="choice_example"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: strategy_data</p><br>
+<hr>
+<br>
+    <div class="textblock-content">
         <h2>Example 6: All Features Combined</h2>
 <p>Multiple metrics with transforms, multiple color options (some with custom colors), faceting, and filters.</p>
 
@@ -12851,6 +13716,6 @@ date,daily_pnl,daily_pnl_gross,daily_return,strategy,asset_class,region,risk_lev
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>

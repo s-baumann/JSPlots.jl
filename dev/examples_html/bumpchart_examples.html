@@ -241,7 +241,8 @@ function temporalValueToString(value) {
 // Centralized observation counting and filtering function
 // Applies filters incrementally while updating observation count displays
 // Returns filtered data
-function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters) {
+// Now supports optional choice filters (single-select) in addition to categorical filters (multi-select)
+function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, continuousFilters, filters, rangeFilters, choiceFilters, choices) {
     var totalObs = allData.length;
 
     // Update total observation count
@@ -252,6 +253,18 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
 
     // Apply filters incrementally to track observation counts
     var currentData = allData;
+
+    // Apply choice filters first (single-select, exact match)
+    if (choiceFilters && choices) {
+        choiceFilters.forEach(function(col) {
+            if (choices[col] !== undefined && choices[col] !== null && choices[col] !== '') {
+                currentData = currentData.filter(function(row) {
+                    var rowValueStr = temporalValueToString(row[col]);
+                    return rowValueStr === choices[col];
+                });
+            }
+        });
+    }
 
     // Apply categorical filters and update counts
     categoricalFilters.forEach(function(col) {
@@ -1381,6 +1394,7 @@ $(function(){
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'period';
     const PERFORMANCE_COLS = ['performance', 'volatility'];
     const ENTITY_COL = 'strategy';
@@ -1474,6 +1488,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_example1_bump');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_example1_bump');
         const facet2Select = document.getElementById('facet2_select_example1_bump');
@@ -1492,7 +1515,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Assign colors to entities in filtered data
@@ -1869,6 +1894,7 @@ $(function(){
     // Configuration
     const CATEGORICAL_FILTERS = ['region'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'quarter';
     const PERFORMANCE_COLS = ['sales', 'market_share'];
     const ENTITY_COL = 'product';
@@ -1962,6 +1988,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_example2_bump');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_example2_bump');
         const facet2Select = document.getElementById('facet2_select_example2_bump');
@@ -1980,7 +2015,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Assign colors to entities in filtered data
@@ -2355,8 +2392,509 @@ $(function(){
 })();
 (function() {
     // Configuration
+    const CATEGORICAL_FILTERS = ['product'];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = ['region'];
+    const X_COL = 'quarter';
+    const PERFORMANCE_COLS = ['sales', 'market_share'];
+    const ENTITY_COL = 'product';
+    const COLOR_MAP = {'Product A': '#636efa', 'Product C': '#00cc96', 'Product D': '#ab63fa', 'Product B': '#EF553B'};
+    const COLOR_PALETTE = ['#636efa', '#EF553B', '#00cc96', '#ab63fa', '#FFA15A',
+                           '#19d3f3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52'];
+    const DEFAULT_PERF_COL = 'sales';
+
+    let allData = [];
+    let entityColors = {};  // Store entity color assignments
+
+    // Calculate dense ranks for data
+    function calculateDenseRanks(data, xCol, perfCol) {
+        const xGroups = {};
+        data.forEach(row => {
+            const xVal = row[xCol];
+            const xKey = String(xVal);
+            if (!xGroups[xKey]) {
+                xGroups[xKey] = [];
+            }
+            xGroups[xKey].push(row);
+        });
+
+        const rankedData = [];
+        for (let xKey in xGroups) {
+            const group = xGroups[xKey];
+
+            // Sort by performance descending (best first)
+            const sorted = group.sort((a, b) => b[perfCol] - a[perfCol]);
+
+            // Get unique performance values
+            const uniqueValues = [...new Set(sorted.map(r => r[perfCol]))].sort((a, b) => b - a);
+
+            // Assign dense ranks (ties get same rank, next rank = current + 1)
+            const valueToRank = {};
+            uniqueValues.forEach((val, idx) => {
+                valueToRank[val] = idx + 1;  // Dense rank: 1, 2, 3, ... (no gaps)
+            });
+
+            sorted.forEach(row => {
+                rankedData.push({
+                    ...row,
+                    y_value: valueToRank[row[perfCol]],
+                    original_value: row[perfCol]
+                });
+            });
+        }
+
+        return rankedData;
+    }
+
+    // Assign colors to entities from filtered data
+    function assignEntityColors(data) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        entityColors = {};
+        entities.forEach((entity, idx) => {
+            entityColors[entity] = COLOR_MAP[entity] || COLOR_PALETTE[idx % COLOR_PALETTE.length];
+        });
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_example2b_bump = function() {
+        // Get current performance column
+        const perfColSelect = document.getElementById('perf_col_select_example2b_bump');
+        const PERF_COL = perfColSelect ? perfColSelect.value : DEFAULT_PERF_COL;
+
+        // Get Y-axis mode
+        const yModeSelect = document.getElementById('y_mode_select_example2b_bump');
+        const Y_MODE = yModeSelect ? yModeSelect.value : 'Ranking';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_example2b_bump');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_example2b_bump' + '_slider');
+            if (slider.length > 0) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_example2b_bump');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_example2b_bump');
+        const facet2Select = document.getElementById('facet2_select_example2b_bump');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Apply filters with observation counting
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'example2b_bump',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        // Assign colors to entities in filtered data
+        assignEntityColors(filteredData);
+
+        // Route to appropriate rendering function
+        // For facets, rankings will be calculated within each facet
+        if (FACET_COLS.length === 0) {
+            // No facets: calculate rankings globally
+            let processedData;
+            if (Y_MODE === 'Ranking') {
+                processedData = calculateDenseRanks(filteredData, X_COL, PERF_COL);
+            } else {
+                processedData = filteredData.map(row => ({
+                    ...row,
+                    y_value: row[PERF_COL],
+                    original_value: row[PERF_COL]
+                }));
+            }
+            renderNoFacets(processedData, X_COL, Y_MODE);
+        } else if (FACET_COLS.length === 1) {
+            // One facet: pass raw data and PERF_COL, rankings calculated per facet
+            renderOneFacet(filteredData, X_COL, Y_MODE, FACET_COLS[0], PERF_COL);
+        } else {
+            // Two facets: pass raw data and PERF_COL, rankings calculated per facet
+            renderTwoFacets(filteredData, X_COL, Y_MODE, FACET_COLS[0], FACET_COLS[1], PERF_COL);
+        }
+    };
+
+    // Render without facets
+    function renderNoFacets(data, xCol, yMode) {
+        const entities = [...new Set(data.map(row => String(row[ENTITY_COL])))].sort();
+        const traces = [];
+
+        entities.forEach(entity => {
+            const entityData = data.filter(row => String(row[ENTITY_COL]) === entity);
+            entityData.sort((a, b) => {
+                const aVal = a[xCol];
+                const bVal = b[xCol];
+                if (aVal instanceof Date && bVal instanceof Date) {
+                    return aVal - bVal;
+                }
+                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+            });
+
+            const xValues = entityData.map(row => row[xCol]);
+            const yValues = entityData.map(row => row.y_value);
+            const origValues = entityData.map(row => row.original_value);
+
+            traces.push({
+                x: xValues,
+                y: yValues,
+                type: 'scatter',
+                mode: 'lines+markers',
+                name: entity,
+                line: {
+                    color: entityColors[entity],
+                    width: 2
+                },
+                marker: {size: 6},
+                customdata: origValues,
+                hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                              (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                              '<extra></extra>'
+            });
+        });
+
+        const layout = {
+            xaxis: {title: xCol},
+            yaxis: {
+                title: yMode === 'Ranking' ? 'Rank' : 'Performance',
+                autorange: yMode === 'Ranking' ? 'reversed' : true  // Rank 1 at top
+            },
+            hovermode: 'closest',
+            showlegend: true
+        };
+
+        Plotly.newPlot('example2b_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example2b_bump', traces);
+        });
+    }
+
+    // Render with one facet
+    function renderOneFacet(data, xCol, yMode, facetCol, perfCol) {
+        const facetValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nFacets = facetValues.length;
+
+        // Calculate grid dimensions (prefer wider grids)
+        const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+        const nRows = Math.ceil(nFacets / nCols);
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        facetValues.forEach((facetVal, idx) => {
+            const rawFacetData = data.filter(row => row[facetCol] === facetVal);
+
+            // Calculate rankings within this facet
+            let facetData;
+            if (yMode === 'Ranking') {
+                facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+            } else {
+                facetData = rawFacetData.map(row => ({
+                    ...row,
+                    y_value: row[perfCol],
+                    original_value: row[perfCol]
+                }));
+            }
+
+            const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+            const row = Math.floor(idx / nCols) + 1;
+            const col = (idx % nCols) + 1;
+            const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+            const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+            entities.forEach(entity => {
+                const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                entityData.sort((a, b) => {
+                    const aVal = a[xCol];
+                    const bVal = b[xCol];
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+                    return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                });
+
+                const xValues = entityData.map(row => row[xCol]);
+                const yValues = entityData.map(row => row.y_value);
+                const origValues = entityData.map(row => row.original_value);
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: entity,
+                    legendgroup: entity,
+                    showlegend: idx === 0,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    line: {
+                        color: entityColors[entity],
+                        width: 2
+                    },
+                    marker: {size: 6},
+                    customdata: origValues,
+                    hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                  (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                  '<extra></extra>'
+                });
+            });
+
+            // Add axis configuration
+            layout[xaxis] = {
+                title: row === nRows ? xCol : '',
+                anchor: yaxis
+            };
+
+            if (yMode === 'Ranking') {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Rank' : '',
+                    anchor: xaxis,
+                    autorange: 'reversed'
+                };
+            } else {
+                layout[yaxis] = {
+                    title: col === 1 ? 'Performance' : '',
+                    anchor: xaxis,
+                    autorange: true
+                };
+            }
+
+            // Add annotation for facet label
+            if (!layout.annotations) layout.annotations = [];
+            layout.annotations.push({
+                text: facetCol + ': ' + facetVal,
+                showarrow: false,
+                xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                x: 0.5,
+                y: 1.05,
+                xanchor: 'center',
+                yanchor: 'bottom',
+                font: {size: 10}
+            });
+        });
+
+        Plotly.newPlot('example2b_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example2b_bump', traces);
+        });
+    }
+
+    // Render with two facets
+    function renderTwoFacets(data, xCol, yMode, facetRow, facetCol, perfCol) {
+        const rowValues = [...new Set(data.map(row => row[facetRow]))].sort();
+        const colValues = [...new Set(data.map(row => row[facetCol]))].sort();
+        const nRows = rowValues.length;
+        const nCols = colValues.length;
+
+        const traces = [];
+        const layout = {
+            hovermode: 'closest',
+            showlegend: true,
+            grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+        };
+
+        rowValues.forEach((rowVal, rowIdx) => {
+            colValues.forEach((colVal, colIdx) => {
+                const rawFacetData = data.filter(row =>
+                    row[facetRow] === rowVal && row[facetCol] === colVal
+                );
+
+                // Calculate rankings within this facet combination
+                let facetData;
+                if (yMode === 'Ranking') {
+                    facetData = calculateDenseRanks(rawFacetData, xCol, perfCol);
+                } else {
+                    facetData = rawFacetData.map(row => ({
+                        ...row,
+                        y_value: row[perfCol],
+                        original_value: row[perfCol]
+                    }));
+                }
+
+                const entities = [...new Set(facetData.map(row => String(row[ENTITY_COL])))].sort();
+
+                const idx = rowIdx * nCols + colIdx;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                entities.forEach(entity => {
+                    const entityData = facetData.filter(row => String(row[ENTITY_COL]) === entity);
+                    entityData.sort((a, b) => {
+                        const aVal = a[xCol];
+                        const bVal = b[xCol];
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+                        return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
+                    });
+
+                    const xValues = entityData.map(row => row[xCol]);
+                    const yValues = entityData.map(row => row.y_value);
+                    const origValues = entityData.map(row => row.original_value);
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: entity,
+                        legendgroup: entity,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: entityColors[entity],
+                            width: 2
+                        },
+                        marker: {size: 6},
+                        customdata: origValues,
+                        hovertemplate: entity + '<br>' + xCol + ': %{x}<br>' +
+                                      (yMode === 'Ranking' ? 'Rank: %{y}<br>Value: %{customdata}' : 'Value: %{y}') +
+                                      '<extra></extra>'
+                    });
+                });
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: rowIdx === nRows - 1 ? xCol : '',
+                    anchor: yaxis
+                };
+
+                if (yMode === 'Ranking') {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Rank' : '',
+                        anchor: xaxis,
+                        autorange: 'reversed'
+                    };
+                } else {
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? 'Performance' : '',
+                        anchor: xaxis,
+                        autorange: true
+                    };
+                }
+
+                // Add annotations for facet labels
+                if (!layout.annotations) layout.annotations = [];
+
+                // Column header
+                if (rowIdx === 0) {
+                    layout.annotations.push({
+                        text: facetCol + ': ' + colVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 0.5,
+                        y: 1.1,
+                        xanchor: 'center',
+                        yanchor: 'bottom',
+                        font: {size: 10}
+                    });
+                }
+
+                // Row label
+                if (colIdx === nCols - 1) {
+                    layout.annotations.push({
+                        text: facetRow + ': ' + rowVal,
+                        showarrow: false,
+                        xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                        yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                        x: 1.05,
+                        y: 0.5,
+                        xanchor: 'left',
+                        yanchor: 'middle',
+                        textangle: -90,
+                        font: {size: 10}
+                    });
+                }
+            });
+        });
+
+        Plotly.newPlot('example2b_bump', traces, layout, {responsive: true}).then(() => {
+            setupCrossFacetHighlighting('example2b_bump', traces);
+        });
+    }
+
+    // Setup cross-facet highlighting (hover over one line greys out all others)
+    function setupCrossFacetHighlighting(chartId, allTraces) {
+        const chartDiv = document.getElementById(chartId);
+        const originalColors = allTraces.map(t => t.line.color);
+
+        chartDiv.on('plotly_hover', function(data) {
+            if (!data.points || data.points.length === 0) return;
+
+            const hoveredEntity = data.points[0].data.name;
+
+            // Update all traces: hovered stays colored, others turn grey
+            const updates = allTraces.map((trace, idx) => {
+                if (trace.name === hoveredEntity) {
+                    return originalColors[idx];  // Keep original color
+                } else {
+                    return 'rgba(200, 200, 200, 0.3)';  // Grey out
+                }
+            });
+
+            Plotly.restyle(chartId, {'line.color': updates});
+        });
+
+        chartDiv.on('plotly_unhover', function() {
+            // Restore all original colors
+            Plotly.restyle(chartId, {'line.color': originalColors});
+        });
+    }
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('product_data').then(function(data) {
+        allData = data;
+        window.updateChart_example2b_bump();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('example2b_bump');
+    }).catch(function(error) {
+        console.error('Error loading data for chart example2b_bump:', error);
+    });
+})();
+(function() {
+    // Configuration
     const CATEGORICAL_FILTERS = ['company'];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'month';
     const PERFORMANCE_COLS = ['revenue', 'profit_margin'];
     const ENTITY_COL = 'company';
@@ -2450,6 +2988,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_example3_bump');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_example3_bump');
         const facet2Select = document.getElementById('facet2_select_example3_bump');
@@ -2468,7 +3015,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Assign colors to entities in filtered data
@@ -2845,6 +3394,7 @@ $(function(){
     // Configuration
     const CATEGORICAL_FILTERS = [];
     const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
     const X_COL = 'week';
     const PERFORMANCE_COLS = ['points'];
     const ENTITY_COL = 'team';
@@ -2938,6 +3488,15 @@ $(function(){
             }
         });
 
+        // Get choice filter values (single-select)
+        const choices = {};
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_example4_bump');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
         // Get current facet selections
         const facet1Select = document.getElementById('facet1_select_example4_bump');
         const facet2Select = document.getElementById('facet2_select_example4_bump');
@@ -2956,7 +3515,9 @@ $(function(){
             CATEGORICAL_FILTERS,
             CONTINUOUS_FILTERS,
             filters,
-            rangeFilters
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
         );
 
         // Assign colors to entities in filtered data
@@ -3696,6 +4257,89 @@ month,company,revenue,profit_margin
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: product_data</p><br>
 <hr>
 <br>
+<h2>Example 2b: Product Rankings with Single-Select Choice</h2>
+<p>This example demonstrates the difference between choices and filters:
+- **Region (choice)**: Single-select dropdown - pick exactly ONE region
+- **Product (filter)**: Multi-select dropdown - can select multiple products
+
+Use choices when the user must select exactly one option.
+</p>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #fff5f5;">
+    <h4 style="margin-top: 0; display: flex; justify-content: space-between; align-items: center;">
+        <span>Filters</span>
+        <span id="example2b_bump_total_obs" style="font-weight: normal; font-size: 0.9em; color: #666;"></span>
+    </h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 100%;">
+                <label for="region_choice_example2b_bump"><strong>region</strong>: </label>
+                <select id="region_choice_example2b_bump" onchange="updateChart_example2b_bump()" style="padding: 5px 10px; font-weight: bold;">
+                <option value="East">East</option>
+                <option value="North" selected>North</option>
+                <option value="South">South</option>
+                <option value="West">West</option>
+            </select>
+            </div>
+        </div>
+                <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="product_select_example2b_bump">product: </label>
+                <select id="product_select_example2b_bump" multiple onchange="updateChart_example2b_bump()">
+                <option value="Product A" selected>Product A</option>
+                <option value="Product B" selected>Product B</option>
+                <option value="Product C" selected>Product C</option>
+                <option value="Product D" selected>Product D</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="product_select_example2b_bump_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        
+</div>
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="y_mode_select_example2b_bump">Y-axis Mode: </label>
+                <select id="y_mode_select_example2b_bump" onchange="updateChart_example2b_bump()">
+                <option value="Ranking" selected>Ranking</option>
+                <option value="Absolute">Absolute</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="y_mode_select_example2b_bump_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+            <div style="background-color: #f0f8ff; padding: 10px; margin: 10px 0; border-radius: 5px;">
+        <h4 style="margin: 0 0 10px 0;">Performance Metric</h4>
+        <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="perf_col_select_example2b_bump">Metric: </label>
+                <select id="perf_col_select_example2b_bump" onchange="updateChart_example2b_bump()">
+                    <option value="sales" selected>sales</option>
+                    <option value="market_share">market_share</option>
+                </select>
+            </div>
+        </div>
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="example2b_bump_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="example2b_bump_aspect_ratio_label">0.3</span>
+    <input type="range" id="example2b_bump_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-1.2039728043259361"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="example2b_bump"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: product_data</p><br>
+<hr>
+<br>
 <h2>Example 3: Company Performance (Absolute Values)</h2>
 <p>Company metrics shown as absolute values rather than rankings. Toggle Y-axis mode to switch to rankings. Select which companies to display using the filter.</p>
 
@@ -3807,6 +4451,6 @@ month,company,revenue,profit_margin
 <div id="example4_bump"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: league.rankings</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.5.3.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
 </body>
 </html>
