@@ -413,14 +413,18 @@ function generate_appearance_html(controls::ChartHtmlControls;
     end
 
     # Combine all sections
+    # Only add chart div if chart_div_id is provided (some charts add their own container)
+    chart_div_html = isempty(controls.chart_div_id) ? "" : """
+        <!-- Chart -->
+        <div id="$(controls.chart_div_id)"></div>"""
+
     return """
         <h2>$(controls.title)</h2>
         <p>$(controls.notes)</p>
 
         $filters_html
         $attributes_html
-        <!-- Chart -->
-        <div id="$(controls.chart_div_id)"></div>
+        $chart_div_html
         """
 end
 

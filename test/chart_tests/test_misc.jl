@@ -68,7 +68,8 @@ include("test_data.jl")
             end
 
             @testset "Data elements" begin
-                @test occursin("id=\"test\"", content)
+                # Data elements have "data_" prefix to avoid ID collisions with chart containers
+                @test occursin("id=\"data_test\"", content)
                 @test occursin("data-format", content)
             end
 

@@ -76,7 +76,7 @@ const pivottable_function_template = raw"""
                 arrayData.push(rowArray);
             });
 
-            console.log('Converted array data for __NAME_OF_PLOT___:', arrayData.slice(0, 3));
+            console.log('Converted array data for __NAME_OF_PLOT___ (showing first 3 of ' + arrayData.length + ' rows):', arrayData.slice(0, 3));
 
             // Save current pivot state if exists
             var currentConfig = window.pivotTableConfig__NAME_OF_PLOT___;

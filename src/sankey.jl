@@ -149,9 +149,11 @@ struct SanKey <: JSPlotsType
         value_cols_js = build_js_array(String.(value_cols))
 
         # Build appearance HTML
+        # Use a unique ID for the sankey container to avoid collision with generic chart div
+        sankey_div_id = "sankey_" * chart_title_str
         controls = ChartHtmlControls(
             chart_title_str,
-            chart_title_str,
+            sankey_div_id,  # Use prefixed ID to avoid collisions
             update_function,
             choice_dropdowns,
             filter_dropdowns,
@@ -164,21 +166,15 @@ struct SanKey <: JSPlotsType
         )
         appearance_html_base = generate_appearance_html(controls; aspect_ratio_default=0.4)
 
-        # Add Sankey diagram styles
-        ribbon_styles = """
+        # Add Sankey diagram styles (the chart div is created by generate_appearance_html)
+        appearance_html = appearance_html_base * """
         <style>
-            .sankey-container-$chart_title_str {
+            #$sankey_div_id {
                 width: 100%;
                 max-width: 1200px;
                 margin: 20px auto;
             }
         </style>
-        """
-
-        appearance_html = appearance_html_base * ribbon_styles * """
-        <div class="sankey-container-$chart_title_str">
-            <div id="$chart_title"></div>
-        </div>
         """
 
         # Build functional HTML (JavaScript)
@@ -441,7 +437,7 @@ struct SanKey <: JSPlotsType
                     annotations: timeAnnotations
                 };
 
-                Plotly.newPlot('$chart_title', data, layout, {responsive: true});
+                Plotly.newPlot('$sankey_div_id', data, layout, {responsive: true});
             };
 
             // Load data
@@ -450,7 +446,7 @@ struct SanKey <: JSPlotsType
                 window.updateChart_$chart_title();
 
                 // Setup aspect ratio control after initial render
-                setupAspectRatioControl('$chart_title');
+                setupAspectRatioControl('$sankey_div_id');
             }).catch(function(error) {
                 console.error('Error loading data for chart $chart_title:', error);
             });

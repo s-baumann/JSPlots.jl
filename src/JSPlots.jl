@@ -115,6 +115,38 @@ console.log('Parquet-wasm library loaded successfully');
 
     export sanitize_chart_title
 
+    """
+        sanitize_html_id(label::Union{Symbol, String}; prefix::String="")
+
+    Sanitize a label for use as an HTML element ID.
+
+    HTML IDs cannot contain spaces and should avoid special characters.
+    This function replaces problematic characters with underscores and
+    optionally adds a prefix.
+
+    # Arguments
+    - `label`: The label to sanitize (Symbol or String)
+    - `prefix`: Optional prefix to add (e.g., "data_" for data elements)
+
+    # Returns
+    - `String`: A valid HTML ID string
+
+    # Examples
+    ```julia
+    sanitize_html_id(:my_chart)           # => "my_chart"
+    sanitize_html_id(Symbol("My Chart"))  # => "My_Chart"
+    sanitize_html_id(:sales, prefix="data_")  # => "data_sales"
+    ```
+    """
+    function sanitize_html_id(label::Union{Symbol, String}; prefix::String="")
+        str = string(label)
+        # Replace spaces, hyphens, dots, colons, and other special chars with underscores
+        sanitized = replace(str, r"[\s\-\.:/\\]" => "_")
+        return prefix * sanitized
+    end
+
+    export sanitize_html_id
+
     # Default color palette used across multiple chart types
     const DEFAULT_COLOR_PALETTE = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
                                     "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]

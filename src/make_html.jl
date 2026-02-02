@@ -1160,11 +1160,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -1511,7 +1515,7 @@ function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_
         html_str = replace(DATASET_TEMPLATE, "___DATA1___" => "")
     end
 
-    html_str = replace(html_str, "___DDATA_LABEL___" => replace(string(data_label), " " => "_"))
+    html_str = replace(html_str, "___DDATA_LABEL___" => sanitize_html_id(data_label, prefix="data_"))
     html_str = replace(html_str, "___DATA_FORMAT___" => string(format))
     html_str = replace(html_str, "___DATA_SRC___" => data_src)
     return html_str
