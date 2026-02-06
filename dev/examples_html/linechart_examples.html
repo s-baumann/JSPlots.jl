@@ -547,6 +547,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -635,6 +840,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1812,11 +2023,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_revenue_trend').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_revenue_trend').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_revenue_trend').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -1840,7 +2060,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -1955,7 +2175,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -2083,7 +2303,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -2437,11 +2657,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_series').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_series').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_multi_series').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -2465,7 +2694,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -2580,7 +2809,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -2708,7 +2937,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -3062,11 +3291,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_filtered_metrics').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_filtered_metrics').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_filtered_metrics').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -3090,7 +3328,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -3205,7 +3443,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -3333,7 +3571,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -3687,11 +3925,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_single_select_metrics').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_single_select_metrics').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_single_select_metrics').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -3715,7 +3962,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -3830,7 +4077,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -3958,7 +4205,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -4312,11 +4559,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_shorthand_choices').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_shorthand_choices').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_shorthand_choices').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -4340,7 +4596,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -4455,7 +4711,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -4583,7 +4839,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -4937,11 +5193,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_wrap_example').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_wrap_example').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_facet_wrap_example').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -4965,7 +5230,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -5080,7 +5345,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -5208,7 +5473,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -5562,11 +5827,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_grid_example').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_grid_example').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_facet_grid_example').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -5590,7 +5864,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -5705,7 +5979,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -5833,7 +6107,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -6187,11 +6461,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_dynamic_controls').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_dynamic_controls').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_dynamic_controls').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -6215,7 +6498,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -6330,7 +6613,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -6458,7 +6741,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -6812,11 +7095,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_aggregation_demo').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_aggregation_demo').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_aggregation_demo').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -6840,7 +7132,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -6955,7 +7247,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -7083,7 +7375,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -7437,11 +7729,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_dimensions').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_dimensions').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_multi_dimensions').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -7465,7 +7766,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -7580,7 +7881,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -7708,7 +8009,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -8062,11 +8363,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_continuous_filters').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_continuous_filters').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_continuous_filters').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -8090,7 +8400,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -8205,7 +8515,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -8333,7 +8643,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -8687,11 +8997,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_struct_prices').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_struct_prices').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_struct_prices').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -8715,7 +9034,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -8830,7 +9149,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -8958,7 +9277,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -9012,6 +9331,640 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         console.error('Error loading data for chart struct_prices:', error);
     });
 })();
+(function() {
+    // Configuration
+    const FILTER_COLS = [];
+    const CATEGORICAL_FILTERS = [];
+    const CONTINUOUS_FILTERS = [];
+    const CHOICE_FILTERS = [];
+    const X_COLS = ['Date'];
+    const Y_COLS = ['Price'];
+    const COLOR_COLS = ['Asset'];
+    const COLOR_MAPS = {'Asset': {'Stock A': '#636efa', 'Stock B': '#EF553B'}};
+    const COLOR_SCALES = {};
+    const DEFAULT_X_COL = 'Date';
+
+    // Interpolate color for continuous color scales
+function interpolateColor(stops, value) {
+    if (!stops || stops.length === 0) return '#000000';
+    if (stops.length === 1) return stops[0].color;
+
+    // Clamp to range
+    if (value <= stops[0].value) return stops[0].color;
+    if (value >= stops[stops.length - 1].value) return stops[stops.length - 1].color;
+
+    // Find surrounding stops
+    for (let i = 0; i < stops.length - 1; i++) {
+        if (value >= stops[i].value && value <= stops[i + 1].value) {
+            const t = (value - stops[i].value) / (stops[i + 1].value - stops[i].value);
+            return lerpColor(stops[i].color, stops[i + 1].color, t);
+        }
+    }
+    return stops[stops.length - 1].color;
+}
+
+// Linear interpolation between two hex colors
+function lerpColor(color1, color2, t) {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+
+    const r = Math.round(c1.r + (c2.r - c1.r) * t);
+    const g = Math.round(c1.g + (c2.g - c1.g) * t);
+    const b = Math.round(c1.b + (c2.b - c1.b) * t);
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Convert hex color to RGB object
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16)
+    } : null;
+}
+
+// Get color for a value, handling both categorical and continuous
+function getColor(colorMaps, colorScales, colorCol, value) {
+    // Check categorical first
+    if (colorMaps[colorCol] && colorMaps[colorCol][String(value)] !== undefined) {
+        return colorMaps[colorCol][String(value)];
+    }
+    // Check continuous
+    if (colorScales[colorCol]) {
+        const numVal = parseFloat(value);
+        if (!isNaN(numVal)) {
+            return interpolateColor(colorScales[colorCol], numVal);
+        }
+    }
+    // Fallback
+    return '#000000';
+}
+
+    const DEFAULT_Y_COL = 'Price';
+    const DEFAULT_COLOR_COL = 'Asset';
+
+    let allData = [];
+
+    // Aggregation functions
+    function aggregate(values, method) {
+        if (values.length === 0) return null;
+        if (method === 'none') return values;  // Return all values when no aggregation
+        if (method === 'count') return [values.length];
+
+        // Convert all values to numbers for numeric operations
+        const numericValues = values.map(v => parseFloat(v)).filter(v => !isNaN(v) && isFinite(v));
+        if (numericValues.length === 0) return [NaN];
+
+        if (method === 'sum') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum];
+        }
+        if (method === 'mean') {
+            const sum = numericValues.reduce((a, b) => a + b, 0);
+            return [sum / numericValues.length];
+        }
+        if (method === 'median') {
+            const sorted = [...numericValues].sort((a, b) => a - b);
+            const mid = Math.floor(sorted.length / 2);
+            return sorted.length % 2 === 0 ?
+                [(sorted[mid - 1] + sorted[mid]) / 2] :
+                [sorted[mid]];
+        }
+        if (method === 'min') return [Math.min(...numericValues)];
+        if (method === 'max') return [Math.max(...numericValues)];
+        return values;
+    }
+
+    // Centralized aggregation logic
+    // Takes data that has already been filtered by facets and color
+    // Groups by X and aggregates Y values
+    function aggregateGroupData(groupData, xCol, yCol, aggregator) {
+        // Note: Date parsing is now handled centrally in loadDataset()
+        // All dates are already JavaScript Date objects by the time we get here
+
+        let xValues, yValues;
+
+        if (aggregator === 'none') {
+            // No aggregation - return all rows with duplicates
+            xValues = groupData.map(row => row[xCol]);
+            yValues = groupData.map(row => row[yCol]);
+        } else {
+            // Group by x value and aggregate y values
+            // Keep track of original x values (including Date objects)
+            const xGroups = {};
+            const xOriginalValues = {};  // Store original values to preserve Date objects
+
+            groupData.forEach(row => {
+                const xVal = row[xCol];
+                const xKey = String(xVal);  // Use string as key
+                if (!xGroups[xKey]) {
+                    xGroups[xKey] = [];
+                    xOriginalValues[xKey] = xVal;  // Keep original value (Date object if it's a date)
+                }
+                xGroups[xKey].push(row[yCol]);
+            });
+
+            xValues = [];
+            yValues = [];
+
+            // Check first original value to determine type
+            const firstKey = Object.keys(xGroups)[0];
+            const firstOriginal = xOriginalValues[firstKey];
+            const isDate = firstOriginal instanceof Date;
+
+            // Sort keys appropriately
+            const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (isDate) {
+                    // For dates, compare the actual Date objects
+                    const dateA = xOriginalValues[a];
+                    const dateB = xOriginalValues[b];
+                    return dateA - dateB;  // Date subtraction gives milliseconds difference
+                }
+                const aNum = parseFloat(a);
+                const bNum = parseFloat(b);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return aNum - bNum;
+                }
+                return String(a).localeCompare(String(b));
+            });
+
+            // Aggregate y values for each unique x
+            sortedKeys.forEach(xKey => {
+                const aggregated = aggregate(xGroups[xKey], aggregator);
+                if (aggregated && aggregated.length > 0) {
+                    xValues.push(xOriginalValues[xKey]);  // Use original value (preserves Date objects)
+                    yValues.push(aggregated[0]);
+                }
+            });
+        }
+
+        return {xValues, yValues};
+    }
+
+    // Make it global so inline onchange can see it
+    window.updateChart_smoothing_demo = function() {
+        // Get current X and Y columns
+        const xColSelect = document.getElementById('x_col_select_smoothing_demo');
+        const X_COL = xColSelect ? xColSelect.value : DEFAULT_X_COL;
+
+        const yColSelect = document.getElementById('y_col_select_smoothing_demo');
+        const Y_COL = yColSelect ? yColSelect.value : DEFAULT_Y_COL;
+
+        // Get current Y axis transformation
+        const yTransformSelect = document.getElementById('y_transform_select_smoothing_demo');
+        const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
+
+        // Get current filter values
+        const filters = {};
+        const rangeFilters = {};
+        const choices = {};
+
+        // Read choice filters (single-select dropdowns)
+        CHOICE_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_choice_smoothing_demo');
+            if (select) {
+                choices[col] = select.value;
+            }
+        });
+
+        // Read categorical filters (dropdowns)
+        CATEGORICAL_FILTERS.forEach(col => {
+            const select = document.getElementById(col + '_select_smoothing_demo');
+            if (select) {
+                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
+            }
+        });
+
+        // Read continuous filters (range sliders)
+        CONTINUOUS_FILTERS.forEach(col => {
+            const slider = $('#' + col + '_range_smoothing_demo' + '_slider');
+            // Check slider is initialized before reading values
+            if (slider.length > 0 && slider.hasClass('ui-slider')) {
+                rangeFilters[col] = {
+                    min: slider.slider("values", 0),
+                    max: slider.slider("values", 1)
+                };
+            }
+        });
+
+        // Get current color column
+        const colorColSelect = document.getElementById('color_col_select_smoothing_demo');
+        const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
+
+        // Get current aggregator
+        const aggregatorSelect = document.getElementById('aggregator_select_smoothing_demo');
+        const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
+
+        // Get current facet selections
+        const facet1Select = document.getElementById('facet1_select_smoothing_demo');
+        const facet2Select = document.getElementById('facet2_select_smoothing_demo');
+        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+
+        // Build FACET_COLS array based on selections
+        const FACET_COLS = [];
+        if (facet1) FACET_COLS.push(facet1);
+        if (facet2) FACET_COLS.push(facet2);
+
+        // Get color map for current selection
+        const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
+
+        // Apply filters with observation counting (centralized function)
+        const filteredData = applyFiltersWithCounting(
+            allData,
+            'smoothing_demo',
+            CATEGORICAL_FILTERS,
+            CONTINUOUS_FILTERS,
+            filters,
+            rangeFilters,
+            CHOICE_FILTERS,
+            choices
+        );
+
+        if (FACET_COLS.length === 0) {
+            // No faceting - group by color
+            const groupedData = {};
+            filteredData.forEach(row => {
+                const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                if (!groupedData[colorVal]) {
+                    groupedData[colorVal] = {
+                        data: [],
+                        color: colorVal
+                    };
+                }
+                groupedData[colorVal].data.push(row);
+            });
+
+            const traces = [];
+            for (let groupKey in groupedData) {
+                const group = groupedData[groupKey];
+                // Robust sort that handles dates, numbers, and strings
+                group.data.sort((a, b) => {
+                    const aVal = a[X_COL];
+                    const bVal = b[X_COL];
+
+                    // Check if values are Date objects
+                    if (aVal instanceof Date && bVal instanceof Date) {
+                        return aVal - bVal;
+                    }
+
+                    const aStr = String(aVal);
+                    const bStr = String(bVal);
+
+                    // Try numeric comparison
+                    const aNum = parseFloat(aVal);
+                    const bNum = parseFloat(bVal);
+                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                        return aNum - bNum;
+                    }
+
+                    // Fall back to string comparison
+                    return aStr.localeCompare(bStr);
+                });
+
+                // Use centralized aggregation function
+                const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                let xValues = result.xValues;
+                let yValues = result.yValues;
+
+                // Apply Y axis transformation
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
+                if (Y_TRANSFORM === 'cumulative') {
+                    yValues = computeCumulativeSum(yValues);
+                } else if (Y_TRANSFORM === 'cumprod') {
+                    yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_smoothing_demo').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_smoothing_demo').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_smoothing_demo').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
+                } else {
+                    yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                }
+
+                traces.push({
+                    x: xValues,
+                    y: yValues,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: group.color,
+                    line: {
+                        color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                        width: 1
+                    },
+                    marker: { size: 1 }
+                });
+            }
+
+            const layout = {
+                xaxis: { title: X_COL },
+                yaxis: {
+                    title: getAxisLabel(Y_COL, Y_TRANSFORM),
+                    // Force linear type for cumulative transforms to prevent auto-date detection
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
+                },
+                hovermode: 'closest',
+                showlegend: true
+            };
+
+            Plotly.newPlot('smoothing_demo', traces, layout, {responsive: true});
+
+        } else if (FACET_COLS.length === 1) {
+            // Facet wrap
+            const facetCol = FACET_COLS[0];
+            const facetValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nFacets = facetValues.length;
+
+            // Calculate grid dimensions (prefer wider grids)
+            const nCols = Math.ceil(Math.sqrt(nFacets * 1.5));
+            const nRows = Math.ceil(nFacets / nCols);
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            facetValues.forEach((facetVal, idx) => {
+                const facetData = filteredData.filter(row => row[facetCol] === facetVal);
+
+                // Group by color within this facet
+                const groupedData = {};
+                facetData.forEach(row => {
+                    const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                    if (!groupedData[colorVal]) {
+                        groupedData[colorVal] = {
+                            data: [],
+                            color: colorVal
+                        };
+                    }
+                    groupedData[colorVal].data.push(row);
+                });
+
+                const row = Math.floor(idx / nCols) + 1;
+                const col = (idx % nCols) + 1;
+                const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                for (let groupKey in groupedData) {
+                    const group = groupedData[groupKey];
+                    // Robust sort that handles dates, numbers, and strings
+                    group.data.sort((a, b) => {
+                        const aVal = a[X_COL];
+                        const bVal = b[X_COL];
+
+                        // Check if values are Date objects
+                        if (aVal instanceof Date && bVal instanceof Date) {
+                            return aVal - bVal;
+                        }
+
+                        const aStr = String(aVal);
+                        const bStr = String(bVal);
+
+                        // Try numeric comparison
+                        const aNum = parseFloat(aVal);
+                        const bNum = parseFloat(bVal);
+                        if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                            return aNum - bNum;
+                        }
+
+                        // Fall back to string comparison
+                        return aStr.localeCompare(bStr);
+                    });
+
+                    // Use centralized aggregation function
+                    const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                    let xValues = result.xValues;
+                    let yValues = result.yValues;
+
+                    // Apply Y axis transformation
+                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    if (Y_TRANSFORM === 'cumulative') {
+                        yValues = computeCumulativeSum(yValues);
+                    } else if (Y_TRANSFORM === 'cumprod') {
+                        yValues = computeCumulativeProduct(yValues);
+                    } else {
+                        yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                    }
+
+                    const legendGroup = group.color;
+
+                    traces.push({
+                        x: xValues,
+                        y: yValues,
+                        type: 'scatter',
+                        mode: 'lines+markers',
+                        name: group.color,
+                        legendgroup: legendGroup,
+                        showlegend: idx === 0,
+                        xaxis: xaxis,
+                        yaxis: yaxis,
+                        line: {
+                            color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                            width: 1
+                        },
+                        marker: { size: 1 }
+                    });
+                }
+
+                // Add axis configuration
+                layout[xaxis] = {
+                    title: row === nRows ? X_COL : '',
+                    anchor: yaxis
+                };
+                layout[yaxis] = {
+                    title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                    anchor: xaxis,
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
+                };
+
+                // Add annotation for facet label
+                if (!layout.annotations) layout.annotations = [];
+                layout.annotations.push({
+                    text: facetCol + ': ' + facetVal,
+                    showarrow: false,
+                    xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                    yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                    x: 0.5,
+                    y: 1.05,
+                    xanchor: 'center',
+                    yanchor: 'bottom',
+                    font: {size: 10}
+                });
+            });
+
+            Plotly.newPlot('smoothing_demo', traces, layout, {responsive: true});
+
+        } else {
+            // Facet grid (2 facet columns)
+            const facetRow = FACET_COLS[0];
+            const facetCol = FACET_COLS[1];
+            const rowValues = [...new Set(filteredData.map(row => row[facetRow]))].sort();
+            const colValues = [...new Set(filteredData.map(row => row[facetCol]))].sort();
+            const nRows = rowValues.length;
+            const nCols = colValues.length;
+
+            const traces = [];
+            const layout = {
+                hovermode: 'closest',
+                showlegend: true,
+                grid: {rows: nRows, columns: nCols, pattern: 'independent'}
+            };
+
+            rowValues.forEach((rowVal, rowIdx) => {
+                colValues.forEach((colVal, colIdx) => {
+                    const facetData = filteredData.filter(row =>
+                        row[facetRow] === rowVal && row[facetCol] === colVal
+                    );
+
+                    // Group by color within this facet
+                    const groupedData = {};
+                    facetData.forEach(row => {
+                        const colorVal = (COLOR_COL === '__no_color__') ? 'all' : String(row[COLOR_COL]);
+                        if (!groupedData[colorVal]) {
+                            groupedData[colorVal] = {
+                                data: [],
+                                color: colorVal
+                            };
+                        }
+                        groupedData[colorVal].data.push(row);
+                    });
+
+                    const idx = rowIdx * nCols + colIdx;
+                    const xaxis = idx === 0 ? 'x' : 'x' + (idx + 1);
+                    const yaxis = idx === 0 ? 'y' : 'y' + (idx + 1);
+
+                    for (let groupKey in groupedData) {
+                        const group = groupedData[groupKey];
+                        // Robust sort that handles dates, numbers, and strings
+                        group.data.sort((a, b) => {
+                            const aVal = a[X_COL];
+                            const bVal = b[X_COL];
+
+                            // Check if values are Date objects
+                            if (aVal instanceof Date && bVal instanceof Date) {
+                                return aVal - bVal;
+                            }
+
+                            const aStr = String(aVal);
+                            const bStr = String(bVal);
+
+                            // Try numeric comparison
+                            const aNum = parseFloat(aVal);
+                            const bNum = parseFloat(bVal);
+                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+                                return aNum - bNum;
+                            }
+
+                            // Fall back to string comparison
+                            return aStr.localeCompare(bStr);
+                        });
+
+                        // Use centralized aggregation function
+                        const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
+                        let xValues = result.xValues;
+                        let yValues = result.yValues;
+
+                        // Apply Y axis transformation
+                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        if (Y_TRANSFORM === 'cumulative') {
+                            yValues = computeCumulativeSum(yValues);
+                        } else if (Y_TRANSFORM === 'cumprod') {
+                            yValues = computeCumulativeProduct(yValues);
+                        } else {
+                            yValues = applyAxisTransform(yValues, Y_TRANSFORM);
+                        }
+
+                        const legendGroup = group.color;
+
+                        traces.push({
+                            x: xValues,
+                            y: yValues,
+                            type: 'scatter',
+                            mode: 'lines+markers',
+                            name: group.color,
+                            legendgroup: legendGroup,
+                            showlegend: idx === 0,
+                            xaxis: xaxis,
+                            yaxis: yaxis,
+                            line: {
+                                color: getColor(COLOR_MAPS, COLOR_SCALES, COLOR_COL, group.color),
+                                width: 1
+                            },
+                            marker: { size: 1 }
+                        });
+                    }
+
+                    // Add axis configuration
+                    layout[xaxis] = {
+                        title: rowIdx === nRows - 1 ? X_COL : '',
+                        anchor: yaxis
+                    };
+                    layout[yaxis] = {
+                        title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
+                        anchor: xaxis,
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
+                    };
+
+                    // Add annotations for facet labels
+                    if (!layout.annotations) layout.annotations = [];
+
+                    // Column header
+                    if (rowIdx === 0) {
+                        layout.annotations.push({
+                            text: facetCol + ': ' + colVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 0.5,
+                            y: 1.1,
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {size: 10}
+                        });
+                    }
+
+                    // Row label
+                    if (colIdx === nCols - 1) {
+                        layout.annotations.push({
+                            text: facetRow + ': ' + rowVal,
+                            showarrow: false,
+                            xref: xaxis === 'x' ? 'x domain' : xaxis + ' domain',
+                            yref: yaxis === 'y' ? 'y domain' : yaxis + ' domain',
+                            x: 1.05,
+                            y: 0.5,
+                            xanchor: 'left',
+                            yanchor: 'middle',
+                            textangle: -90,
+                            font: {size: 10}
+                        });
+                    }
+                });
+            });
+
+            Plotly.newPlot('smoothing_demo', traces, layout, {responsive: true});
+        }
+    };
+
+    // Load and parse CSV data using centralized parser
+    loadDataset('smoothing_data').then(function(data) {
+        allData = data;
+        window.updateChart_smoothing_demo();
+
+        // Setup aspect ratio control after initial render
+        setupAspectRatioControl('smoothing_demo');
+    }).catch(function(error) {
+        console.error('Error loading data for chart smoothing_demo:', error);
+    });
+})();
 
 
 });
@@ -9019,7 +9972,487 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="data_financial_prices" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_sales_data" data-format="csv_embedded" data-src="">
+Month,Sales,Year
+1,120,2022
+2,135,2022
+3,150,2022
+4,145,2022
+5,160,2022
+6,175,2022
+7,190,2022
+8,185,2022
+9,200,2022
+10,210,2022
+11,230,2022
+12,250,2022
+1,130,2023
+2,145,2023
+3,165,2023
+4,160,2023
+5,180,2023
+6,195,2023
+7,210,2023
+8,205,2023
+9,220,2023
+10,235,2023
+11,255,2023
+12,280,2023
+1,145,2024
+2,165,2024
+3,185,2024
+4,180,2024
+5,200,2024
+6,220,2024
+7,240,2024
+8,235,2024
+9,250,2024
+10,270,2024
+11,290,2024
+12,320,2024
+
+</script><script type="text/plain" id="data_facet_data" data-format="csv_embedded" data-src="">
+Month,Sales,Product,Region,color
+1,147.47067733263407,Product A,North,North
+2,139.01637258057025,Product A,North,North
+3,124.2702716144009,Product A,North,North
+4,136.61319543228186,Product A,North,North
+5,166.5233366230693,Product A,North,North
+6,164.58512098052572,Product A,North,North
+7,170.98444446629827,Product A,North,North
+8,136.41668071555176,Product A,North,North
+9,176.2524587682287,Product A,North,North
+10,158.67626425858003,Product A,North,North
+11,184.99107585071508,Product A,North,North
+12,201.58319859070474,Product A,North,North
+1,101.60635325286252,Product A,South,South
+2,148.80637482331525,Product A,South,South
+3,127.3622642643724,Product A,South,South
+4,150.19005423598662,Product A,South,South
+5,149.8986774698636,Product A,South,South
+6,130.86860132538214,Product A,South,South
+7,174.1305551446788,Product A,South,South
+8,143.5050981833848,Product A,South,South
+9,153.3436328427996,Product A,South,South
+10,161.25014360281386,Product A,South,South
+11,189.7860506504099,Product A,South,South
+12,201.16307109378317,Product A,South,South
+1,123.94118238204771,Product A,East,East
+2,141.96115139734812,Product A,East,East
+3,120.68964221500181,Product A,East,East
+4,142.80166354262047,Product A,East,East
+5,166.9070903599692,Product A,East,East
+6,172.17870025571867,Product A,East,East
+7,149.11783925384546,Product A,East,East
+8,175.23876402794585,Product A,East,East
+9,162.77071430871138,Product A,East,East
+10,175.36458140809253,Product A,East,East
+11,197.7652429562071,Product A,East,East
+12,187.49995557784285,Product A,East,East
+1,133.45734802444028,Product A,West,West
+2,114.08652912617745,Product A,West,West
+3,130.87242492326303,Product A,West,West
+4,154.74411685755462,Product A,West,West
+5,159.0834176537349,Product A,West,West
+6,166.47076617495915,Product A,West,West
+7,176.70665404317373,Product A,West,West
+8,135.05154326345857,Product A,West,West
+9,147.22821614197483,Product A,West,West
+10,154.4794039806451,Product A,West,West
+11,168.69405820126295,Product A,West,West
+12,193.33672383801724,Product A,West,West
+1,128.86293618930694,Product B,North,North
+2,154.17023282559725,Product B,North,North
+3,145.2138035966246,Product B,North,North
+4,135.54660233232318,Product B,North,North
+5,127.78933360060817,Product B,North,North
+6,150.58888555147576,Product B,North,North
+7,143.69309589437833,Product B,North,North
+8,146.49357070454266,Product B,North,North
+9,183.65799548208548,Product B,North,North
+10,190.70038658434277,Product B,North,North
+11,185.3236442046341,Product B,North,North
+12,178.78057225144073,Product B,North,North
+1,145.4814114327472,Product B,South,South
+2,107.53810256623811,Product B,South,South
+3,126.07288360044278,Product B,South,South
+4,116.5692203225536,Product B,South,South
+5,127.44300235997675,Product B,South,South
+6,150.74861535733461,Product B,South,South
+7,145.6376346060346,Product B,South,South
+8,172.85601315368234,Product B,South,South
+9,186.5494642314958,Product B,South,South
+10,190.737046251929,Product B,South,South
+11,161.07148106506196,Product B,South,South
+12,185.27112860288963,Product B,South,South
+1,138.84802080756793,Product B,East,East
+2,146.00752085425847,Product B,East,East
+3,119.08722526721917,Product B,East,East
+4,117.03799370394844,Product B,East,East
+5,127.99778570842507,Product B,East,East
+6,129.49103649896892,Product B,East,East
+7,164.9632541854918,Product B,East,East
+8,150.63433524165416,Product B,East,East
+9,182.9861804529088,Product B,East,East
+10,170.54829952405447,Product B,East,East
+11,175.76370501234703,Product B,East,East
+12,168.6620608991382,Product B,East,East
+1,117.28259499801302,Product B,West,West
+2,131.5625870382897,Product B,West,West
+3,113.11392133511846,Product B,West,West
+4,151.02309300072767,Product B,West,West
+5,125.50199998889767,Product B,West,West
+6,128.2991908480613,Product B,West,West
+7,155.97891882200798,Product B,West,West
+8,163.5081140242035,Product B,West,West
+9,150.11666094555545,Product B,West,West
+10,174.1564400607353,Product B,West,West
+11,164.45918588701383,Product B,West,West
+12,181.94773232312752,Product B,West,West
+1,103.46448058901902,Product C,North,North
+2,127.28145436384014,Product C,North,North
+3,145.1497384709465,Product C,North,North
+4,122.45113352435942,Product C,North,North
+5,138.69802634790662,Product C,North,North
+6,142.41290653619848,Product C,North,North
+7,173.52720341799548,Product C,North,North
+8,135.21599475247575,Product C,North,North
+9,144.69053145911795,Product C,North,North
+10,154.94403300529189,Product C,North,North
+11,159.6183592745715,Product C,North,North
+12,157.25108219734352,Product C,North,North
+1,123.72283455233139,Product C,South,South
+2,123.67931394295204,Product C,South,South
+3,134.57887965621143,Product C,South,South
+4,153.937778143659,Product C,South,South
+5,121.71451246602692,Product C,South,South
+6,148.38325495471855,Product C,South,South
+7,152.61406963081112,Product C,South,South
+8,154.87175677752367,Product C,South,South
+9,154.91881315149274,Product C,South,South
+10,163.98467142434077,Product C,South,South
+11,189.91714661934617,Product C,South,South
+12,189.7985754056761,Product C,South,South
+1,132.90506435069275,Product C,East,East
+2,109.98309288234915,Product C,East,East
+3,128.54956118066946,Product C,East,East
+4,131.45060980022518,Product C,East,East
+5,156.33618461151949,Product C,East,East
+6,125.24890921499968,Product C,East,East
+7,130.45345115474248,Product C,East,East
+8,183.2738277455859,Product C,East,East
+9,169.7872247898336,Product C,East,East
+10,168.84446565843132,Product C,East,East
+11,158.4348159404313,Product C,East,East
+12,200.70955167032935,Product C,East,East
+1,147.1428965829283,Product C,West,West
+2,123.25726186025699,Product C,West,West
+3,147.1507966391107,Product C,West,West
+4,115.95235781343064,Product C,West,West
+5,156.70827421781223,Product C,West,West
+6,133.53617054261971,Product C,West,West
+7,155.44707415352732,Product C,West,West
+8,141.16573066389861,Product C,West,West
+9,171.10939627310745,Product C,West,West
+10,177.84009771113818,Product C,West,West
+11,153.8341975213385,Product C,West,West
+12,183.47288182364377,Product C,West,West
+1,127.78701347327996,Product D,North,North
+2,127.7346730313302,Product D,North,North
+3,157.6342330943199,Product D,North,North
+4,140.27084637843978,Product D,North,North
+5,134.67947546140897,Product D,North,North
+6,138.3559612550788,Product D,North,North
+7,159.9002614149651,Product D,North,North
+8,179.06760362783848,Product D,North,North
+9,178.27713930290173,Product D,North,North
+10,154.25073346357888,Product D,North,North
+11,162.06368727243319,Product D,North,North
+12,203.0127737800723,Product D,North,North
+1,106.61729896675429,Product D,South,South
+2,122.6223262223705,Product D,South,South
+3,148.19971958001747,Product D,South,South
+4,141.34084966119184,Product D,South,South
+5,139.02810166091146,Product D,South,South
+6,154.03939560950633,Product D,South,South
+7,163.07926010886706,Product D,South,South
+8,181.07566294456893,Product D,South,South
+9,166.24963552850525,Product D,South,South
+10,170.24165786099053,Product D,South,South
+11,181.5601579139266,Product D,South,South
+12,180.40866840908456,Product D,South,South
+1,121.41181764260216,Product D,East,East
+2,142.82920729980634,Product D,East,East
+3,147.17825697148317,Product D,East,East
+4,133.9837953243968,Product D,East,East
+5,143.73248679358426,Product D,East,East
+6,159.9353497653037,Product D,East,East
+7,168.8868716786574,Product D,East,East
+8,178.5357888614418,Product D,East,East
+9,173.42770739107328,Product D,East,East
+10,192.45699097654494,Product D,East,East
+11,189.108833013626,Product D,East,East
+12,170.10315308500853,Product D,East,East
+1,132.39723152917355,Product D,West,West
+2,107.58194408256239,Product D,West,West
+3,110.13818668299344,Product D,West,West
+4,159.96995224311536,Product D,West,West
+5,149.30686060185621,Product D,West,West
+6,126.71977691604118,Product D,West,West
+7,160.05791077428367,Product D,West,West
+8,181.16487835812228,Product D,West,West
+9,162.05290742784445,Product D,West,West
+10,150.52166825286494,Product D,West,West
+11,189.22406807564948,Product D,West,West
+12,156.12918169756023,Product D,West,West
+
+</script><script type="text/plain" id="data_facet_grid_data" data-format="csv_embedded" data-src="">
+Month,Sales,Product,Region,Year,color
+1,123.54097962383582,Product A,North,2023,2023
+2,113.9111444248085,Product A,North,2023,2023
+3,137.43894309253866,Product A,North,2023,2023
+4,146.39350470399876,Product A,North,2023,2023
+5,155.57739940290807,Product A,North,2023,2023
+6,168.0329177595181,Product A,North,2023,2023
+7,164.59575344105235,Product A,North,2023,2023
+8,160.21515383449855,Product A,North,2023,2023
+9,184.60944801848441,Product A,North,2023,2023
+10,145.37693287524115,Product A,North,2023,2023
+11,155.730692256923,Product A,North,2023,2023
+12,198.5169268240565,Product A,North,2023,2023
+1,130.50377540995373,Product A,North,2024,2024
+2,133.4885246744077,Product A,North,2024,2024
+3,118.02901971441605,Product A,North,2024,2024
+4,118.46594074561364,Product A,North,2024,2024
+5,149.5753389073098,Product A,North,2024,2024
+6,164.89959321513237,Product A,North,2024,2024
+7,161.12070547421334,Product A,North,2024,2024
+8,180.4385710460029,Product A,North,2024,2024
+9,178.53160002054852,Product A,North,2024,2024
+10,186.20951486831223,Product A,North,2024,2024
+11,163.9555191125449,Product A,North,2024,2024
+12,173.0917866123226,Product A,North,2024,2024
+1,105.98408885053837,Product A,South,2023,2023
+2,149.01635234059188,Product A,South,2023,2023
+3,146.20264933787308,Product A,South,2023,2023
+4,137.5135107804935,Product A,South,2023,2023
+5,139.05067464888356,Product A,South,2023,2023
+6,151.4814582710106,Product A,South,2023,2023
+7,153.62683446027776,Product A,South,2023,2023
+8,164.27288941733875,Product A,South,2023,2023
+9,148.19073944498638,Product A,South,2023,2023
+10,160.55997227314097,Product A,South,2023,2023
+11,174.64075401432945,Product A,South,2023,2023
+12,157.9104584916542,Product A,South,2023,2023
+1,129.1590781200147,Product A,South,2024,2024
+2,144.99587913011663,Product A,South,2024,2024
+3,138.5103468134281,Product A,South,2024,2024
+4,149.49755536945673,Product A,South,2024,2024
+5,141.44469399468173,Product A,South,2024,2024
+6,148.04430164046101,Product A,South,2024,2024
+7,135.23002783500883,Product A,South,2024,2024
+8,154.67548668675335,Product A,South,2024,2024
+9,188.01746670655683,Product A,South,2024,2024
+10,153.9453451782911,Product A,South,2024,2024
+11,189.74083424515985,Product A,South,2024,2024
+12,156.13570368366015,Product A,South,2024,2024
+1,139.46042270530168,Product B,North,2023,2023
+2,123.98347490355405,Product B,North,2023,2023
+3,133.41370730332403,Product B,North,2023,2023
+4,131.37324030767212,Product B,North,2023,2023
+5,146.09612373423434,Product B,North,2023,2023
+6,132.60399231955805,Product B,North,2023,2023
+7,154.53421671949732,Product B,North,2023,2023
+8,160.24990522893643,Product B,North,2023,2023
+9,177.4156035477484,Product B,North,2023,2023
+10,178.38277386619677,Product B,North,2023,2023
+11,191.7668557873213,Product B,North,2023,2023
+12,173.07457249476823,Product B,North,2023,2023
+1,123.69402811584563,Product B,North,2024,2024
+2,146.8260743219084,Product B,North,2024,2024
+3,134.03268883356986,Product B,North,2024,2024
+4,124.43477469739273,Product B,North,2024,2024
+5,130.27347578774067,Product B,North,2024,2024
+6,125.03943388936906,Product B,North,2024,2024
+7,153.71973111903898,Product B,North,2024,2024
+8,174.64305667005408,Product B,North,2024,2024
+9,174.45546781191587,Product B,North,2024,2024
+10,178.03215393445828,Product B,North,2024,2024
+11,164.10190218763302,Product B,North,2024,2024
+12,204.2963719820493,Product B,North,2024,2024
+1,132.69204026550642,Product B,South,2023,2023
+2,120.4236319760607,Product B,South,2023,2023
+3,125.89404859210289,Product B,South,2023,2023
+4,131.76427049690244,Product B,South,2023,2023
+5,124.21423792665506,Product B,South,2023,2023
+6,147.22962592292976,Product B,South,2023,2023
+7,154.24543281721347,Product B,South,2023,2023
+8,184.9076125190728,Product B,South,2023,2023
+9,188.23009821076823,Product B,South,2023,2023
+10,152.08674789356354,Product B,South,2023,2023
+11,178.97368022590354,Product B,South,2023,2023
+12,167.30013646271576,Product B,South,2023,2023
+1,107.66523204286646,Product B,South,2024,2024
+2,140.0860860995795,Product B,South,2024,2024
+3,127.40282802204106,Product B,South,2024,2024
+4,143.3620583519149,Product B,South,2024,2024
+5,126.30740302474916,Product B,South,2024,2024
+6,163.38707013542995,Product B,South,2024,2024
+7,134.56724702351642,Product B,South,2024,2024
+8,174.72911201657044,Product B,South,2024,2024
+9,140.22534099762765,Product B,South,2024,2024
+10,193.60957020697788,Product B,South,2024,2024
+11,183.12908200850478,Product B,South,2024,2024
+12,159.17340511918755,Product B,South,2024,2024
+
+</script><script type="text/plain" id="data_continuous_filter_data" data-format="csv_embedded" data-src="">
+Month,Sales,Profit_Margin,Units,Product,Region
+1,84371.0584872796,47.612502252168355,901.5722464052214,Widget,North
+2,123350.55777327913,29.95701087459849,283.06764249563514,Widget,North
+3,134119.1236788116,26.677145966588032,886.8407785019584,Widget,North
+4,111272.49025964597,37.220890344978,599.5861668948528,Widget,North
+5,147500.15315993645,16.764193861272766,307.2231463367196,Widget,North
+6,75470.12423166423,42.51114804724943,211.11647014177444,Widget,North
+7,84109.50995597302,12.821710075012687,232.69754458285863,Widget,North
+8,103087.54458792834,25.52576442301631,960.6051462121211,Widget,North
+9,148750.67066686595,40.83439712801355,134.3919141223557,Widget,North
+10,61219.36438339133,41.54811919443538,264.2820556974651,Widget,North
+11,59830.94506263829,32.19424811485434,578.8648633329042,Widget,North
+12,130236.78302234528,48.70494064403215,417.9141296737961,Widget,North
+1,115100.42383260769,32.23943117936631,254.2188424733496,Widget,South
+2,87442.56138858301,24.150923172405825,797.8442807581459,Widget,South
+3,107385.83201433832,19.199477223018867,584.2225383265402,Widget,South
+4,106423.87630027226,26.91332180225861,634.0460991347654,Widget,South
+5,110154.2008551331,25.921635021834703,331.0030440831245,Widget,South
+6,92553.67533331612,33.55968908437586,724.7244186608657,Widget,South
+7,133917.6270750171,6.438302861699967,598.8172241986849,Widget,South
+8,142746.43121693953,39.66740647673267,445.4013880995269,Widget,South
+9,127260.89855632593,8.745775187762334,868.2024945215064,Widget,South
+10,125479.88413436171,41.4642347261204,343.2121231221289,Widget,South
+11,98620.82405826429,21.402747097382377,192.28031671022308,Widget,South
+12,61003.21210073412,25.165369099582108,450.99047417206344,Widget,South
+1,52048.926614210766,31.210965601172653,697.2312054259755,Widget,East
+2,107790.31825705549,45.055112764163454,138.5712759047943,Widget,East
+3,79851.22580764441,28.699807100321316,835.6158218827485,Widget,East
+4,85026.78861819455,37.860070099977406,604.1558348732564,Widget,East
+5,54425.01468253471,7.2562587041824775,394.64807908805875,Widget,East
+6,56217.494091881636,45.23006255419931,926.9063866664444,Widget,East
+7,105855.746266728,36.46441167958443,406.4075319141033,Widget,East
+8,123444.49937503874,39.48822927489967,402.38992770258056,Widget,East
+9,61544.57649239256,5.284191816018071,661.7594591102811,Widget,East
+10,119267.13037681869,9.685594535189937,505.0226096423677,Widget,East
+11,99471.95182172488,41.90479867839563,585.8285197786514,Widget,East
+12,71582.84074413581,49.13048571195816,746.9446798374254,Widget,East
+1,96458.38306304239,34.89159980251687,716.2603745490314,Widget,West
+2,101102.4438327436,15.416739887617156,999.0845814117612,Widget,West
+3,148776.41696578555,18.831635627014172,802.0935104814557,Widget,West
+4,52850.116619724766,40.81530063162036,167.23933133166537,Widget,West
+5,63929.10528774456,28.492564036544184,192.41692250956586,Widget,West
+6,122152.82245459218,6.0733444713906675,759.161808967126,Widget,West
+7,126968.92024044544,12.309572443022825,166.12184174822625,Widget,West
+8,148513.53407338628,39.58311746193262,888.2280260295732,Widget,West
+9,113102.79072125902,23.547739173678437,659.8713213093368,Widget,West
+10,70113.02028201039,34.62574595864013,289.9832341401609,Widget,West
+11,125807.53939063543,25.42295026101817,734.6887147649724,Widget,West
+12,115232.14961456566,19.581303419339704,260.63575391007157,Widget,West
+1,69404.04903830591,46.3469951574891,160.6214681201477,Gadget,North
+2,77806.90150329062,11.384193752605967,689.4176551885503,Gadget,North
+3,82277.99955359152,36.801561576937765,350.55441345831133,Gadget,North
+4,96939.56072125427,10.631592591969914,521.0312259643822,Gadget,North
+5,140086.52084571274,17.34203960928579,717.81457492655,Gadget,North
+6,56185.29621711363,32.2450685830316,534.7944859525841,Gadget,North
+7,123468.96639767424,33.1608421274121,422.84519603565525,Gadget,North
+8,91565.85449722923,40.29674700093301,167.09609890695492,Gadget,North
+9,118778.52790925343,11.315676203236618,966.1318663181951,Gadget,North
+10,76810.16081280363,44.51699074127426,721.0799718842725,Gadget,North
+11,121349.26367983021,33.21730631503051,623.5482230218496,Gadget,North
+12,105144.42541159477,20.125602063243974,771.1724914338437,Gadget,North
+1,77488.35157223954,44.864186130093806,545.111103125896,Gadget,South
+2,62803.30421200246,19.84947700890683,942.4496730254908,Gadget,South
+3,131530.62460646976,35.92013171281954,737.7662681953456,Gadget,South
+4,69756.1844099359,11.42111857184687,435.06160665809057,Gadget,South
+5,109096.20919514901,46.566538979594654,139.73444342872983,Gadget,South
+6,120732.57014359337,7.405172800748878,274.1728632103915,Gadget,South
+7,119439.43110098872,31.22209341558439,913.4787600083686,Gadget,South
+8,106963.4964387685,27.146225951477795,917.7028281276547,Gadget,South
+9,60462.193443561875,7.646529088852928,594.0024585230826,Gadget,South
+10,92699.8674596984,22.27366408894,718.371999269346,Gadget,South
+11,143030.5165511925,22.448277207010754,685.5690489273715,Gadget,South
+12,51288.503580597,46.84698177995575,887.2611447575118,Gadget,South
+1,78244.71599565959,31.15486819495249,963.0483708893618,Gadget,East
+2,108269.81944005116,38.23148808112855,911.1050017498782,Gadget,East
+3,110172.03254687993,32.46908146492406,934.8222553638559,Gadget,East
+4,140001.64184776193,27.98021705027487,167.40324635154707,Gadget,East
+5,114071.5514354246,39.59365071633859,460.77360662805637,Gadget,East
+6,55566.88842173716,24.20115178621219,349.74737950604066,Gadget,East
+7,129524.74667925741,27.384189076337197,425.6756423586741,Gadget,East
+8,71852.08503134025,17.68898745202182,396.37060703241747,Gadget,East
+9,128377.89239827129,49.17275186658348,283.17880521785037,Gadget,East
+10,105960.30533999842,13.371312700802985,436.5280553048571,Gadget,East
+11,57523.76971446884,40.2343628172267,464.9497010301449,Gadget,East
+12,143680.03264925902,38.849784376746484,430.2502928250715,Gadget,East
+1,107594.67726517815,19.595287386537947,595.0301430705832,Gadget,West
+2,67842.99459752195,30.835104373152255,816.6846746599471,Gadget,West
+3,149977.9851320424,6.804575270353441,728.0426340177145,Gadget,West
+4,76092.62451320393,43.52087393045126,148.74266510638134,Gadget,West
+5,76822.05434761246,12.886669579727997,882.2419341099655,Gadget,West
+6,74307.41516015238,24.802460866939143,995.1484755141983,Gadget,West
+7,102779.54207730522,30.620143621012808,746.022438601955,Gadget,West
+8,134446.111387073,48.17524942035108,134.36714783273098,Gadget,West
+9,116010.06118214759,39.8721081542559,233.71109932627567,Gadget,West
+10,77181.38160762351,11.37394319888621,481.09809605547025,Gadget,West
+11,138792.36943356466,22.392881147787115,920.8716038738357,Gadget,West
+12,69638.87053012304,23.877961717612834,873.0731637093891,Gadget,West
+1,141215.6239047376,19.841515328612537,591.4390046171841,Doohickey,North
+2,136022.3542767605,27.201542254880756,135.62361699061597,Doohickey,North
+3,98609.3132100261,34.77055558945189,122.16182098959561,Doohickey,North
+4,80145.10941306093,11.233250410270017,249.86286335140852,Doohickey,North
+5,65527.45669243341,25.949421354232594,625.2979997207336,Doohickey,North
+6,144086.34578636978,20.11552628833727,953.2091163632081,Doohickey,North
+7,127584.44090529426,25.586701069597638,477.87650919757544,Doohickey,North
+8,117356.98933039527,21.96455305170022,482.19908685261134,Doohickey,North
+9,66575.2560081155,12.94965627527549,408.578347133153,Doohickey,North
+10,79766.00528050486,22.677317575991562,788.1145212215093,Doohickey,North
+11,103176.2020749631,17.699736907994627,411.6999005946509,Doohickey,North
+12,113421.9738437937,12.67571482072718,825.6174141084408,Doohickey,North
+1,59723.9010210336,14.951731974501184,430.42087001774365,Doohickey,South
+2,94767.35747306154,19.832782935648737,869.3505393659547,Doohickey,South
+3,79760.6228812834,10.3376818545911,653.3861090362296,Doohickey,South
+4,60527.33424479102,20.18561971033047,762.1246608547364,Doohickey,South
+5,97495.53442310193,34.4944558541946,554.7124796514354,Doohickey,South
+6,134090.4147222407,10.024963881445629,539.2466557235883,Doohickey,South
+7,67470.54169130087,25.74655832326522,360.0262570363614,Doohickey,South
+8,70478.63185854143,7.359074091353359,610.5830224541621,Doohickey,South
+9,100627.44126490106,38.34891918492216,199.98549990884726,Doohickey,South
+10,87877.90122312853,42.30628045807469,479.0717287513318,Doohickey,South
+11,57499.81104265967,49.48453411911737,285.7773752970696,Doohickey,South
+12,87039.4627362619,20.840315645247323,961.3938940442865,Doohickey,South
+1,141196.71461391356,34.58831016947762,907.3049011995784,Doohickey,East
+2,110416.05412816806,8.137189989584552,147.5706401950265,Doohickey,East
+3,67426.06600321931,13.834229281639454,809.8210434913602,Doohickey,East
+4,133840.68982934603,14.314239251218204,568.797331515208,Doohickey,East
+5,84740.58266818195,18.816967632706586,285.64588675681773,Doohickey,East
+6,53177.99871373761,28.834782568079007,633.4446814629802,Doohickey,East
+7,145956.9743093212,36.97824069193587,625.2345128199034,Doohickey,East
+8,55335.63553009959,27.855966353746382,390.6520866110526,Doohickey,East
+9,63753.62959597961,11.64742639563466,272.06438240903395,Doohickey,East
+10,54410.48387153185,45.200659133445726,694.2032875316124,Doohickey,East
+11,110983.6152806067,41.75152350290753,949.392387204171,Doohickey,East
+12,92145.23250427318,20.26852656166964,718.1088957721859,Doohickey,East
+1,79904.29169902825,24.65405089263026,851.7415413319676,Doohickey,West
+2,125984.33345720403,21.734059824538868,311.0751100172316,Doohickey,West
+3,64879.39379075269,45.81222894004783,267.19143053758336,Doohickey,West
+4,130062.77826988962,17.580179136475152,426.5459441763175,Doohickey,West
+5,51085.87393624287,13.104933138674234,867.4584515361199,Doohickey,West
+6,147426.1641030495,27.786724382985312,424.08700669771486,Doohickey,West
+7,120638.0209758821,39.36911510677357,276.29550575723437,Doohickey,West
+8,84715.00533803293,46.763480479814014,376.9785983714326,Doohickey,West
+9,109656.12215743578,45.79468300551243,802.1348067247274,Doohickey,West
+10,88411.30542451664,6.807111046835605,775.9610166378674,Doohickey,West
+11,67054.94446844497,29.624831999532926,816.8386019728241,Doohickey,West
+12,133628.60708046806,32.39766719670709,186.2857729434148,Doohickey,West
+
+</script><script type="text/plain" id="data_financial_prices" data-format="csv_embedded" data-src="">
 Date,Stock,Price,color
 2024-01-01,AAPL,179.91895320285877,AAPL
 2024-01-02,AAPL,180.4904102390327,AAPL
@@ -9389,240 +10822,6 @@ Date,AAPL,GOOGL,MSFT,color
 2024-03-30,2074601,3003953,6691278,Volume
 2024-03-31,8318739,1267732,7981953,Volume
 
-</script><script type="text/plain" id="data_sales_data" data-format="csv_embedded" data-src="">
-Month,Sales,Year
-1,120,2022
-2,135,2022
-3,150,2022
-4,145,2022
-5,160,2022
-6,175,2022
-7,190,2022
-8,185,2022
-9,200,2022
-10,210,2022
-11,230,2022
-12,250,2022
-1,130,2023
-2,145,2023
-3,165,2023
-4,160,2023
-5,180,2023
-6,195,2023
-7,210,2023
-8,205,2023
-9,220,2023
-10,235,2023
-11,255,2023
-12,280,2023
-1,145,2024
-2,165,2024
-3,185,2024
-4,180,2024
-5,200,2024
-6,220,2024
-7,240,2024
-8,235,2024
-9,250,2024
-10,270,2024
-11,290,2024
-12,320,2024
-
-</script><script type="text/plain" id="data_facet_data" data-format="csv_embedded" data-src="">
-Month,Sales,Product,Region,color
-1,147.47067733263407,Product A,North,North
-2,139.01637258057025,Product A,North,North
-3,124.2702716144009,Product A,North,North
-4,136.61319543228186,Product A,North,North
-5,166.5233366230693,Product A,North,North
-6,164.58512098052572,Product A,North,North
-7,170.98444446629827,Product A,North,North
-8,136.41668071555176,Product A,North,North
-9,176.2524587682287,Product A,North,North
-10,158.67626425858003,Product A,North,North
-11,184.99107585071508,Product A,North,North
-12,201.58319859070474,Product A,North,North
-1,101.60635325286252,Product A,South,South
-2,148.80637482331525,Product A,South,South
-3,127.3622642643724,Product A,South,South
-4,150.19005423598662,Product A,South,South
-5,149.8986774698636,Product A,South,South
-6,130.86860132538214,Product A,South,South
-7,174.1305551446788,Product A,South,South
-8,143.5050981833848,Product A,South,South
-9,153.3436328427996,Product A,South,South
-10,161.25014360281386,Product A,South,South
-11,189.7860506504099,Product A,South,South
-12,201.16307109378317,Product A,South,South
-1,123.94118238204771,Product A,East,East
-2,141.96115139734812,Product A,East,East
-3,120.68964221500181,Product A,East,East
-4,142.80166354262047,Product A,East,East
-5,166.9070903599692,Product A,East,East
-6,172.17870025571867,Product A,East,East
-7,149.11783925384546,Product A,East,East
-8,175.23876402794585,Product A,East,East
-9,162.77071430871138,Product A,East,East
-10,175.36458140809253,Product A,East,East
-11,197.7652429562071,Product A,East,East
-12,187.49995557784285,Product A,East,East
-1,133.45734802444028,Product A,West,West
-2,114.08652912617745,Product A,West,West
-3,130.87242492326303,Product A,West,West
-4,154.74411685755462,Product A,West,West
-5,159.0834176537349,Product A,West,West
-6,166.47076617495915,Product A,West,West
-7,176.70665404317373,Product A,West,West
-8,135.05154326345857,Product A,West,West
-9,147.22821614197483,Product A,West,West
-10,154.4794039806451,Product A,West,West
-11,168.69405820126295,Product A,West,West
-12,193.33672383801724,Product A,West,West
-1,128.86293618930694,Product B,North,North
-2,154.17023282559725,Product B,North,North
-3,145.2138035966246,Product B,North,North
-4,135.54660233232318,Product B,North,North
-5,127.78933360060817,Product B,North,North
-6,150.58888555147576,Product B,North,North
-7,143.69309589437833,Product B,North,North
-8,146.49357070454266,Product B,North,North
-9,183.65799548208548,Product B,North,North
-10,190.70038658434277,Product B,North,North
-11,185.3236442046341,Product B,North,North
-12,178.78057225144073,Product B,North,North
-1,145.4814114327472,Product B,South,South
-2,107.53810256623811,Product B,South,South
-3,126.07288360044278,Product B,South,South
-4,116.5692203225536,Product B,South,South
-5,127.44300235997675,Product B,South,South
-6,150.74861535733461,Product B,South,South
-7,145.6376346060346,Product B,South,South
-8,172.85601315368234,Product B,South,South
-9,186.5494642314958,Product B,South,South
-10,190.737046251929,Product B,South,South
-11,161.07148106506196,Product B,South,South
-12,185.27112860288963,Product B,South,South
-1,138.84802080756793,Product B,East,East
-2,146.00752085425847,Product B,East,East
-3,119.08722526721917,Product B,East,East
-4,117.03799370394844,Product B,East,East
-5,127.99778570842507,Product B,East,East
-6,129.49103649896892,Product B,East,East
-7,164.9632541854918,Product B,East,East
-8,150.63433524165416,Product B,East,East
-9,182.9861804529088,Product B,East,East
-10,170.54829952405447,Product B,East,East
-11,175.76370501234703,Product B,East,East
-12,168.6620608991382,Product B,East,East
-1,117.28259499801302,Product B,West,West
-2,131.5625870382897,Product B,West,West
-3,113.11392133511846,Product B,West,West
-4,151.02309300072767,Product B,West,West
-5,125.50199998889767,Product B,West,West
-6,128.2991908480613,Product B,West,West
-7,155.97891882200798,Product B,West,West
-8,163.5081140242035,Product B,West,West
-9,150.11666094555545,Product B,West,West
-10,174.1564400607353,Product B,West,West
-11,164.45918588701383,Product B,West,West
-12,181.94773232312752,Product B,West,West
-1,103.46448058901902,Product C,North,North
-2,127.28145436384014,Product C,North,North
-3,145.1497384709465,Product C,North,North
-4,122.45113352435942,Product C,North,North
-5,138.69802634790662,Product C,North,North
-6,142.41290653619848,Product C,North,North
-7,173.52720341799548,Product C,North,North
-8,135.21599475247575,Product C,North,North
-9,144.69053145911795,Product C,North,North
-10,154.94403300529189,Product C,North,North
-11,159.6183592745715,Product C,North,North
-12,157.25108219734352,Product C,North,North
-1,123.72283455233139,Product C,South,South
-2,123.67931394295204,Product C,South,South
-3,134.57887965621143,Product C,South,South
-4,153.937778143659,Product C,South,South
-5,121.71451246602692,Product C,South,South
-6,148.38325495471855,Product C,South,South
-7,152.61406963081112,Product C,South,South
-8,154.87175677752367,Product C,South,South
-9,154.91881315149274,Product C,South,South
-10,163.98467142434077,Product C,South,South
-11,189.91714661934617,Product C,South,South
-12,189.7985754056761,Product C,South,South
-1,132.90506435069275,Product C,East,East
-2,109.98309288234915,Product C,East,East
-3,128.54956118066946,Product C,East,East
-4,131.45060980022518,Product C,East,East
-5,156.33618461151949,Product C,East,East
-6,125.24890921499968,Product C,East,East
-7,130.45345115474248,Product C,East,East
-8,183.2738277455859,Product C,East,East
-9,169.7872247898336,Product C,East,East
-10,168.84446565843132,Product C,East,East
-11,158.4348159404313,Product C,East,East
-12,200.70955167032935,Product C,East,East
-1,147.1428965829283,Product C,West,West
-2,123.25726186025699,Product C,West,West
-3,147.1507966391107,Product C,West,West
-4,115.95235781343064,Product C,West,West
-5,156.70827421781223,Product C,West,West
-6,133.53617054261971,Product C,West,West
-7,155.44707415352732,Product C,West,West
-8,141.16573066389861,Product C,West,West
-9,171.10939627310745,Product C,West,West
-10,177.84009771113818,Product C,West,West
-11,153.8341975213385,Product C,West,West
-12,183.47288182364377,Product C,West,West
-1,127.78701347327996,Product D,North,North
-2,127.7346730313302,Product D,North,North
-3,157.6342330943199,Product D,North,North
-4,140.27084637843978,Product D,North,North
-5,134.67947546140897,Product D,North,North
-6,138.3559612550788,Product D,North,North
-7,159.9002614149651,Product D,North,North
-8,179.06760362783848,Product D,North,North
-9,178.27713930290173,Product D,North,North
-10,154.25073346357888,Product D,North,North
-11,162.06368727243319,Product D,North,North
-12,203.0127737800723,Product D,North,North
-1,106.61729896675429,Product D,South,South
-2,122.6223262223705,Product D,South,South
-3,148.19971958001747,Product D,South,South
-4,141.34084966119184,Product D,South,South
-5,139.02810166091146,Product D,South,South
-6,154.03939560950633,Product D,South,South
-7,163.07926010886706,Product D,South,South
-8,181.07566294456893,Product D,South,South
-9,166.24963552850525,Product D,South,South
-10,170.24165786099053,Product D,South,South
-11,181.5601579139266,Product D,South,South
-12,180.40866840908456,Product D,South,South
-1,121.41181764260216,Product D,East,East
-2,142.82920729980634,Product D,East,East
-3,147.17825697148317,Product D,East,East
-4,133.9837953243968,Product D,East,East
-5,143.73248679358426,Product D,East,East
-6,159.9353497653037,Product D,East,East
-7,168.8868716786574,Product D,East,East
-8,178.5357888614418,Product D,East,East
-9,173.42770739107328,Product D,East,East
-10,192.45699097654494,Product D,East,East
-11,189.108833013626,Product D,East,East
-12,170.10315308500853,Product D,East,East
-1,132.39723152917355,Product D,West,West
-2,107.58194408256239,Product D,West,West
-3,110.13818668299344,Product D,West,West
-4,159.96995224311536,Product D,West,West
-5,149.30686060185621,Product D,West,West
-6,126.71977691604118,Product D,West,West
-7,160.05791077428367,Product D,West,West
-8,181.16487835812228,Product D,West,West
-9,162.05290742784445,Product D,West,West
-10,150.52166825286494,Product D,West,West
-11,189.22406807564948,Product D,West,West
-12,156.12918169756023,Product D,West,West
-
 </script><script type="text/plain" id="data_agg_data" data-format="csv_embedded" data-src="">
 Month,Sales,Product,color
 1,154.60342962640883,Product A,Product A
@@ -9746,104 +10945,740 @@ Month,Sales,Product,color
 12,160.8160092024419,Product B,Product B
 12,206.71750170023512,Product B,Product B
 
-</script><script type="text/plain" id="data_facet_grid_data" data-format="csv_embedded" data-src="">
-Month,Sales,Product,Region,Year,color
-1,123.54097962383582,Product A,North,2023,2023
-2,113.9111444248085,Product A,North,2023,2023
-3,137.43894309253866,Product A,North,2023,2023
-4,146.39350470399876,Product A,North,2023,2023
-5,155.57739940290807,Product A,North,2023,2023
-6,168.0329177595181,Product A,North,2023,2023
-7,164.59575344105235,Product A,North,2023,2023
-8,160.21515383449855,Product A,North,2023,2023
-9,184.60944801848441,Product A,North,2023,2023
-10,145.37693287524115,Product A,North,2023,2023
-11,155.730692256923,Product A,North,2023,2023
-12,198.5169268240565,Product A,North,2023,2023
-1,130.50377540995373,Product A,North,2024,2024
-2,133.4885246744077,Product A,North,2024,2024
-3,118.02901971441605,Product A,North,2024,2024
-4,118.46594074561364,Product A,North,2024,2024
-5,149.5753389073098,Product A,North,2024,2024
-6,164.89959321513237,Product A,North,2024,2024
-7,161.12070547421334,Product A,North,2024,2024
-8,180.4385710460029,Product A,North,2024,2024
-9,178.53160002054852,Product A,North,2024,2024
-10,186.20951486831223,Product A,North,2024,2024
-11,163.9555191125449,Product A,North,2024,2024
-12,173.0917866123226,Product A,North,2024,2024
-1,105.98408885053837,Product A,South,2023,2023
-2,149.01635234059188,Product A,South,2023,2023
-3,146.20264933787308,Product A,South,2023,2023
-4,137.5135107804935,Product A,South,2023,2023
-5,139.05067464888356,Product A,South,2023,2023
-6,151.4814582710106,Product A,South,2023,2023
-7,153.62683446027776,Product A,South,2023,2023
-8,164.27288941733875,Product A,South,2023,2023
-9,148.19073944498638,Product A,South,2023,2023
-10,160.55997227314097,Product A,South,2023,2023
-11,174.64075401432945,Product A,South,2023,2023
-12,157.9104584916542,Product A,South,2023,2023
-1,129.1590781200147,Product A,South,2024,2024
-2,144.99587913011663,Product A,South,2024,2024
-3,138.5103468134281,Product A,South,2024,2024
-4,149.49755536945673,Product A,South,2024,2024
-5,141.44469399468173,Product A,South,2024,2024
-6,148.04430164046101,Product A,South,2024,2024
-7,135.23002783500883,Product A,South,2024,2024
-8,154.67548668675335,Product A,South,2024,2024
-9,188.01746670655683,Product A,South,2024,2024
-10,153.9453451782911,Product A,South,2024,2024
-11,189.74083424515985,Product A,South,2024,2024
-12,156.13570368366015,Product A,South,2024,2024
-1,139.46042270530168,Product B,North,2023,2023
-2,123.98347490355405,Product B,North,2023,2023
-3,133.41370730332403,Product B,North,2023,2023
-4,131.37324030767212,Product B,North,2023,2023
-5,146.09612373423434,Product B,North,2023,2023
-6,132.60399231955805,Product B,North,2023,2023
-7,154.53421671949732,Product B,North,2023,2023
-8,160.24990522893643,Product B,North,2023,2023
-9,177.4156035477484,Product B,North,2023,2023
-10,178.38277386619677,Product B,North,2023,2023
-11,191.7668557873213,Product B,North,2023,2023
-12,173.07457249476823,Product B,North,2023,2023
-1,123.69402811584563,Product B,North,2024,2024
-2,146.8260743219084,Product B,North,2024,2024
-3,134.03268883356986,Product B,North,2024,2024
-4,124.43477469739273,Product B,North,2024,2024
-5,130.27347578774067,Product B,North,2024,2024
-6,125.03943388936906,Product B,North,2024,2024
-7,153.71973111903898,Product B,North,2024,2024
-8,174.64305667005408,Product B,North,2024,2024
-9,174.45546781191587,Product B,North,2024,2024
-10,178.03215393445828,Product B,North,2024,2024
-11,164.10190218763302,Product B,North,2024,2024
-12,204.2963719820493,Product B,North,2024,2024
-1,132.69204026550642,Product B,South,2023,2023
-2,120.4236319760607,Product B,South,2023,2023
-3,125.89404859210289,Product B,South,2023,2023
-4,131.76427049690244,Product B,South,2023,2023
-5,124.21423792665506,Product B,South,2023,2023
-6,147.22962592292976,Product B,South,2023,2023
-7,154.24543281721347,Product B,South,2023,2023
-8,184.9076125190728,Product B,South,2023,2023
-9,188.23009821076823,Product B,South,2023,2023
-10,152.08674789356354,Product B,South,2023,2023
-11,178.97368022590354,Product B,South,2023,2023
-12,167.30013646271576,Product B,South,2023,2023
-1,107.66523204286646,Product B,South,2024,2024
-2,140.0860860995795,Product B,South,2024,2024
-3,127.40282802204106,Product B,South,2024,2024
-4,143.3620583519149,Product B,South,2024,2024
-5,126.30740302474916,Product B,South,2024,2024
-6,163.38707013542995,Product B,South,2024,2024
-7,134.56724702351642,Product B,South,2024,2024
-8,174.72911201657044,Product B,South,2024,2024
-9,140.22534099762765,Product B,South,2024,2024
-10,193.60957020697788,Product B,South,2024,2024
-11,183.12908200850478,Product B,South,2024,2024
-12,159.17340511918755,Product B,South,2024,2024
+</script><script type="text/plain" id="data_smoothing_data" data-format="csv_embedded" data-src="">
+Date,Price,Asset
+2024-01-01,100.74328432684754,Stock A
+2024-01-02,110.70909134682725,Stock A
+2024-01-03,100.72756826336794,Stock A
+2024-01-04,93.56617166740651,Stock A
+2024-01-05,100.18603235588138,Stock A
+2024-01-06,107.33946637661401,Stock A
+2024-01-07,95.26034955604855,Stock A
+2024-01-08,102.95582829125075,Stock A
+2024-01-09,112.15927771762114,Stock A
+2024-01-10,96.7561949606374,Stock A
+2024-01-11,118.73344655861501,Stock A
+2024-01-12,96.30128603145437,Stock A
+2024-01-13,104.98036127101821,Stock A
+2024-01-14,127.39056275766342,Stock A
+2024-01-15,122.3941055797982,Stock A
+2024-01-16,124.58781920557303,Stock A
+2024-01-17,107.64669169883521,Stock A
+2024-01-18,116.78266569135485,Stock A
+2024-01-19,134.61867899506635,Stock A
+2024-01-20,109.17565099350283,Stock A
+2024-01-21,118.88539024640812,Stock A
+2024-01-22,109.96606723731776,Stock A
+2024-01-23,95.38654946500434,Stock A
+2024-01-24,90.35720491750622,Stock A
+2024-01-25,122.90829001550725,Stock A
+2024-01-26,145.92900213979303,Stock A
+2024-01-27,115.94522877470608,Stock A
+2024-01-28,88.7217337550361,Stock A
+2024-01-29,95.73147757945746,Stock A
+2024-01-30,116.90898003480898,Stock A
+2024-01-31,97.6238863095848,Stock A
+2024-02-01,125.43013759666498,Stock A
+2024-02-02,134.46324440822346,Stock A
+2024-02-03,88.94269047626678,Stock A
+2024-02-04,108.57991011566419,Stock A
+2024-02-05,127.14182487675856,Stock A
+2024-02-06,109.16693634140691,Stock A
+2024-02-07,98.22734942033952,Stock A
+2024-02-08,135.7055271101578,Stock A
+2024-02-09,117.05869433960451,Stock A
+2024-02-10,129.750784609062,Stock A
+2024-02-11,119.59829356460673,Stock A
+2024-02-12,104.29641231365946,Stock A
+2024-02-13,96.18233269898606,Stock A
+2024-02-14,114.63882343361307,Stock A
+2024-02-15,122.47617877027406,Stock A
+2024-02-16,101.8755893076763,Stock A
+2024-02-17,104.78595863285057,Stock A
+2024-02-18,108.64518741288852,Stock A
+2024-02-19,117.53133224603,Stock A
+2024-02-20,135.72209737828535,Stock A
+2024-02-21,156.92912626871632,Stock A
+2024-02-22,129.68071983053795,Stock A
+2024-02-23,114.31072638778525,Stock A
+2024-02-24,107.7702459981644,Stock A
+2024-02-25,142.29350261010345,Stock A
+2024-02-26,124.3457572304699,Stock A
+2024-02-27,111.08441482299207,Stock A
+2024-02-28,127.00314704034055,Stock A
+2024-02-29,104.53772021509143,Stock A
+2024-03-01,115.84394258372028,Stock A
+2024-03-02,126.90652845668647,Stock A
+2024-03-03,99.0359039729816,Stock A
+2024-03-04,131.29698239510952,Stock A
+2024-03-05,126.63485105354653,Stock A
+2024-03-06,129.4776316119253,Stock A
+2024-03-07,108.79379204612664,Stock A
+2024-03-08,130.32061458787854,Stock A
+2024-03-09,88.2558964385338,Stock A
+2024-03-10,109.17812207883176,Stock A
+2024-03-11,132.26003363383342,Stock A
+2024-03-12,113.24109497872699,Stock A
+2024-03-13,107.94811956672584,Stock A
+2024-03-14,122.95576170647848,Stock A
+2024-03-15,126.64663047872158,Stock A
+2024-03-16,133.29743406821677,Stock A
+2024-03-17,130.32046493692226,Stock A
+2024-03-18,115.25722369839944,Stock A
+2024-03-19,103.61152347742433,Stock A
+2024-03-20,116.56937317047537,Stock A
+2024-03-21,121.60074283060118,Stock A
+2024-03-22,100.61340001729096,Stock A
+2024-03-23,122.75723926936675,Stock A
+2024-03-24,132.55665523204712,Stock A
+2024-03-25,129.17646581311294,Stock A
+2024-03-26,126.4416220123058,Stock A
+2024-03-27,157.66983779551038,Stock A
+2024-03-28,103.03089469270147,Stock A
+2024-03-29,116.27613503303368,Stock A
+2024-03-30,147.46147877942715,Stock A
+2024-03-31,127.69072950461938,Stock A
+2024-04-01,122.37140531425979,Stock A
+2024-04-02,106.17459756595778,Stock A
+2024-04-03,125.90324369307044,Stock A
+2024-04-04,125.29292891667023,Stock A
+2024-04-05,110.41770507441444,Stock A
+2024-04-06,108.86708605980589,Stock A
+2024-04-07,156.16999659838092,Stock A
+2024-04-08,119.03589697977554,Stock A
+2024-04-09,135.51634751846748,Stock A
+2024-04-10,130.33939124953918,Stock A
+2024-04-11,126.46436068623336,Stock A
+2024-04-12,112.56283117503943,Stock A
+2024-04-13,128.07729869347946,Stock A
+2024-04-14,144.1334382960812,Stock A
+2024-04-15,127.36197046331355,Stock A
+2024-04-16,120.52923347518667,Stock A
+2024-04-17,141.8062936328829,Stock A
+2024-04-18,145.41564920073918,Stock A
+2024-04-19,113.16545693213465,Stock A
+2024-04-20,122.54313530213523,Stock A
+2024-04-21,136.52227835196913,Stock A
+2024-04-22,136.70078446290975,Stock A
+2024-04-23,134.599303818056,Stock A
+2024-04-24,139.78262168875264,Stock A
+2024-04-25,154.92289528867423,Stock A
+2024-04-26,158.9855697998808,Stock A
+2024-04-27,132.11735906515668,Stock A
+2024-04-28,121.94765802415577,Stock A
+2024-04-29,133.58080235438612,Stock A
+2024-04-30,112.78960665747009,Stock A
+2024-05-01,124.8057693808836,Stock A
+2024-05-02,149.02301973060054,Stock A
+2024-05-03,123.90955827550255,Stock A
+2024-05-04,129.1127625792004,Stock A
+2024-05-05,139.78463911282722,Stock A
+2024-05-06,141.66058312557848,Stock A
+2024-05-07,124.49269517965587,Stock A
+2024-05-08,121.26424724984403,Stock A
+2024-05-09,148.96096011108477,Stock A
+2024-05-10,110.82587000870873,Stock A
+2024-05-11,135.21710439883907,Stock A
+2024-05-12,159.53727690361168,Stock A
+2024-05-13,158.94711904769468,Stock A
+2024-05-14,122.92433241065693,Stock A
+2024-05-15,130.54836783475162,Stock A
+2024-05-16,143.1350523749174,Stock A
+2024-05-17,128.77439837712362,Stock A
+2024-05-18,163.20806187209746,Stock A
+2024-05-19,132.95203330253273,Stock A
+2024-05-20,153.22640998116552,Stock A
+2024-05-21,137.74485773597746,Stock A
+2024-05-22,130.38836756090802,Stock A
+2024-05-23,130.64775735834576,Stock A
+2024-05-24,162.48209552803863,Stock A
+2024-05-25,113.8938087748205,Stock A
+2024-05-26,120.9045595990682,Stock A
+2024-05-27,151.72618609145937,Stock A
+2024-05-28,140.08662284623188,Stock A
+2024-05-29,145.38267473223175,Stock A
+2024-05-30,131.0667317914887,Stock A
+2024-05-31,149.3060356007555,Stock A
+2024-06-01,145.0408841179758,Stock A
+2024-06-02,148.18264909920163,Stock A
+2024-06-03,168.68856141419093,Stock A
+2024-06-04,148.91669161242112,Stock A
+2024-06-05,144.9454140682111,Stock A
+2024-06-06,161.7059836296187,Stock A
+2024-06-07,144.2905831375958,Stock A
+2024-06-08,154.0319029767384,Stock A
+2024-06-09,125.99033070006065,Stock A
+2024-06-10,141.52883542900244,Stock A
+2024-06-11,145.6069778617346,Stock A
+2024-06-12,117.35818653043223,Stock A
+2024-06-13,131.35252676439853,Stock A
+2024-06-14,160.52342116154637,Stock A
+2024-06-15,160.5031506099148,Stock A
+2024-06-16,149.47118227338058,Stock A
+2024-06-17,158.49595859118938,Stock A
+2024-06-18,132.23899477646185,Stock A
+2024-06-19,151.20526019733663,Stock A
+2024-06-20,143.52268282296706,Stock A
+2024-06-21,142.05296053924408,Stock A
+2024-06-22,144.13432307258378,Stock A
+2024-06-23,140.62076488908542,Stock A
+2024-06-24,167.21639686363366,Stock A
+2024-06-25,152.30529755694013,Stock A
+2024-06-26,145.03124692825222,Stock A
+2024-06-27,179.0084836019061,Stock A
+2024-06-28,155.79471375397387,Stock A
+2024-06-29,132.81479441587175,Stock A
+2024-06-30,151.61377075695353,Stock A
+2024-07-01,145.90138455442792,Stock A
+2024-07-02,152.10433539190305,Stock A
+2024-07-03,162.73570782576445,Stock A
+2024-07-04,143.75967891819968,Stock A
+2024-07-05,156.01251380959658,Stock A
+2024-07-06,135.7839053125368,Stock A
+2024-07-07,124.65666877637425,Stock A
+2024-07-08,129.82854250043349,Stock A
+2024-07-09,166.67391271927795,Stock A
+2024-07-10,140.44477544116157,Stock A
+2024-07-11,147.75486783748758,Stock A
+2024-07-12,168.25173069226426,Stock A
+2024-07-13,163.04538190717244,Stock A
+2024-07-14,134.567074103669,Stock A
+2024-07-15,155.94617533727936,Stock A
+2024-07-16,159.25948710326614,Stock A
+2024-07-17,152.79453886067625,Stock A
+2024-07-18,148.37850452334004,Stock A
+2024-07-19,170.0015724594253,Stock A
+2024-07-20,150.37550348377943,Stock A
+2024-07-21,177.52965928564788,Stock A
+2024-07-22,145.97427769002135,Stock A
+2024-07-23,156.95460905501093,Stock A
+2024-07-24,165.23511369799814,Stock A
+2024-07-25,159.37425085380931,Stock A
+2024-07-26,155.45483377753905,Stock A
+2024-07-27,171.1800788394637,Stock A
+2024-07-28,161.74562036132116,Stock A
+2024-07-29,165.2799849606569,Stock A
+2024-07-30,164.10654514568662,Stock A
+2024-07-31,151.54927080565116,Stock A
+2024-08-01,157.46695270336554,Stock A
+2024-08-02,157.01648528510802,Stock A
+2024-08-03,151.18452070268302,Stock A
+2024-08-04,144.6136664017834,Stock A
+2024-08-05,170.61326362417196,Stock A
+2024-08-06,183.19905601988057,Stock A
+2024-08-07,153.9637259969455,Stock A
+2024-08-08,163.35777098954304,Stock A
+2024-08-09,163.4171908001254,Stock A
+2024-08-10,175.3271853786368,Stock A
+2024-08-11,162.82459308755108,Stock A
+2024-08-12,182.1031238846831,Stock A
+2024-08-13,173.62774336521213,Stock A
+2024-08-14,175.0100725798542,Stock A
+2024-08-15,165.49574130419202,Stock A
+2024-08-16,180.1267562941269,Stock A
+2024-08-17,152.62323329173242,Stock A
+2024-08-18,156.32553782408155,Stock A
+2024-08-19,160.91829693158923,Stock A
+2024-08-20,150.1431485327014,Stock A
+2024-08-21,163.52542349707053,Stock A
+2024-08-22,167.79634377816728,Stock A
+2024-08-23,155.00491900221016,Stock A
+2024-08-24,158.9514417700173,Stock A
+2024-08-25,184.73308503153095,Stock A
+2024-08-26,170.50368202633092,Stock A
+2024-08-27,168.11620184184957,Stock A
+2024-08-28,171.7001657978596,Stock A
+2024-08-29,172.95632443406063,Stock A
+2024-08-30,151.22647616901057,Stock A
+2024-08-31,180.66131107388796,Stock A
+2024-09-01,152.90710970122254,Stock A
+2024-09-02,172.6030792994669,Stock A
+2024-09-03,171.94988320775573,Stock A
+2024-09-04,160.68569333292456,Stock A
+2024-09-05,186.05958431500565,Stock A
+2024-09-06,146.45450023540172,Stock A
+2024-09-07,165.1158377702451,Stock A
+2024-09-08,161.82325166182395,Stock A
+2024-09-09,155.34365606966537,Stock A
+2024-09-10,182.33943058476893,Stock A
+2024-09-11,168.09055971307325,Stock A
+2024-09-12,164.70036758915202,Stock A
+2024-09-13,167.83741333985455,Stock A
+2024-09-14,162.85497134354114,Stock A
+2024-09-15,155.88889235805286,Stock A
+2024-09-16,168.30068764957142,Stock A
+2024-09-17,205.15659264758074,Stock A
+2024-09-18,164.9213387209056,Stock A
+2024-09-19,143.9646386130744,Stock A
+2024-09-20,168.2670886771484,Stock A
+2024-09-21,182.91649645888722,Stock A
+2024-09-22,134.32801321689186,Stock A
+2024-09-23,169.1119654726323,Stock A
+2024-09-24,186.4815100216652,Stock A
+2024-09-25,187.2175423904953,Stock A
+2024-09-26,188.91972558238365,Stock A
+2024-09-27,166.1960752230665,Stock A
+2024-09-28,165.6591364444908,Stock A
+2024-09-29,158.13083963322612,Stock A
+2024-09-30,171.69722082210146,Stock A
+2024-10-01,191.24958804598384,Stock A
+2024-10-02,179.9790067613716,Stock A
+2024-10-03,191.6942117497073,Stock A
+2024-10-04,176.4488967203609,Stock A
+2024-10-05,185.51757203968893,Stock A
+2024-10-06,193.00803769479785,Stock A
+2024-10-07,172.19668867582075,Stock A
+2024-10-08,169.01765741671417,Stock A
+2024-10-09,176.07011901337367,Stock A
+2024-10-10,213.93501125229966,Stock A
+2024-10-11,168.81377623860777,Stock A
+2024-10-12,194.3573277617414,Stock A
+2024-10-13,152.78994224919083,Stock A
+2024-10-14,176.7106618017919,Stock A
+2024-10-15,167.91214198411168,Stock A
+2024-10-16,164.9020691528789,Stock A
+2024-10-17,159.75617913685923,Stock A
+2024-10-18,213.59232082059367,Stock A
+2024-10-19,154.46422385909383,Stock A
+2024-10-20,176.77437219359646,Stock A
+2024-10-21,157.0048528054273,Stock A
+2024-10-22,171.1592591604691,Stock A
+2024-10-23,180.81004458371103,Stock A
+2024-10-24,211.4087958880324,Stock A
+2024-10-25,183.7288448410377,Stock A
+2024-10-26,209.12648312434217,Stock A
+2024-10-27,177.1359696536102,Stock A
+2024-10-28,195.26493609759996,Stock A
+2024-10-29,183.2733118003219,Stock A
+2024-10-30,193.00560589539307,Stock A
+2024-10-31,192.0243927689341,Stock A
+2024-11-01,202.56134880650106,Stock A
+2024-11-02,173.75743937687562,Stock A
+2024-11-03,199.76819200608517,Stock A
+2024-11-04,177.00754853920228,Stock A
+2024-11-05,203.12434093275772,Stock A
+2024-11-06,148.64437085642834,Stock A
+2024-11-07,171.86053611483197,Stock A
+2024-11-08,207.4729516307402,Stock A
+2024-11-09,171.7175903450897,Stock A
+2024-11-10,198.84664985012287,Stock A
+2024-11-11,171.7700189314615,Stock A
+2024-11-12,213.1799512141266,Stock A
+2024-11-13,192.57694954832252,Stock A
+2024-11-14,208.1634113294575,Stock A
+2024-11-15,191.7961508085508,Stock A
+2024-11-16,185.15712267178844,Stock A
+2024-11-17,181.97283017209543,Stock A
+2024-11-18,173.73329199736963,Stock A
+2024-11-19,175.6412970138063,Stock A
+2024-11-20,190.58752502024527,Stock A
+2024-11-21,206.56305088627602,Stock A
+2024-11-22,186.28934395753683,Stock A
+2024-11-23,183.76021237976786,Stock A
+2024-11-24,170.45530452559132,Stock A
+2024-11-25,196.66417408556075,Stock A
+2024-11-26,159.82803272243558,Stock A
+2024-11-27,166.6673097088491,Stock A
+2024-11-28,221.4244401500449,Stock A
+2024-11-29,188.7790234589287,Stock A
+2024-11-30,200.15159605038176,Stock A
+2024-12-01,208.3826090707818,Stock A
+2024-12-02,179.86025118418195,Stock A
+2024-12-03,197.04260059225956,Stock A
+2024-12-04,187.76602564149556,Stock A
+2024-12-05,165.45073676599802,Stock A
+2024-12-06,210.81121940893658,Stock A
+2024-12-07,193.9898182057886,Stock A
+2024-12-08,200.50189382246623,Stock A
+2024-12-09,211.7775652949964,Stock A
+2024-12-10,203.6359044739494,Stock A
+2024-12-11,173.27265630786343,Stock A
+2024-12-12,195.59135082404188,Stock A
+2024-12-13,200.4638804204933,Stock A
+2024-12-14,175.3894582259886,Stock A
+2024-12-15,191.08965209630875,Stock A
+2024-12-16,208.96892259204944,Stock A
+2024-12-17,214.15099369368747,Stock A
+2024-12-18,206.6580293616782,Stock A
+2024-12-19,204.1118932082302,Stock A
+2024-12-20,203.91347463599513,Stock A
+2024-12-21,198.5465178694997,Stock A
+2024-12-22,200.96239295641686,Stock A
+2024-12-23,210.57852149254106,Stock A
+2024-12-24,210.42854716200247,Stock A
+2024-12-25,195.22849226208942,Stock A
+2024-12-26,197.67999660725314,Stock A
+2024-12-27,194.3397582763994,Stock A
+2024-12-28,201.04647723938646,Stock A
+2024-12-29,217.92618886172986,Stock A
+2024-12-30,193.51820653840127,Stock A
+2024-12-31,182.55396002258937,Stock A
+2024-01-01,118.13319155617963,Stock B
+2024-01-02,98.74025027889215,Stock B
+2024-01-03,131.9680755924686,Stock B
+2024-01-04,124.31720271640205,Stock B
+2024-01-05,111.19203577034956,Stock B
+2024-01-06,119.34116536910535,Stock B
+2024-01-07,84.2876199408551,Stock B
+2024-01-08,105.12290327968729,Stock B
+2024-01-09,129.92227516583694,Stock B
+2024-01-10,119.61908656976193,Stock B
+2024-01-11,136.30269905183692,Stock B
+2024-01-12,86.91475315509996,Stock B
+2024-01-13,127.94298402536336,Stock B
+2024-01-14,102.84296702314587,Stock B
+2024-01-15,94.8803361116675,Stock B
+2024-01-16,100.47669470439475,Stock B
+2024-01-17,110.04861855357538,Stock B
+2024-01-18,166.73203817114373,Stock B
+2024-01-19,132.2372289406,Stock B
+2024-01-20,112.31910277488865,Stock B
+2024-01-21,141.6091207409935,Stock B
+2024-01-22,110.78577547460358,Stock B
+2024-01-23,116.9021546786503,Stock B
+2024-01-24,125.09276488243431,Stock B
+2024-01-25,139.98914861400172,Stock B
+2024-01-26,108.95841620291745,Stock B
+2024-01-27,99.96747435076055,Stock B
+2024-01-28,103.85274315173533,Stock B
+2024-01-29,129.00281741367982,Stock B
+2024-01-30,120.79722476618674,Stock B
+2024-01-31,98.1401469845898,Stock B
+2024-02-01,111.36585172627932,Stock B
+2024-02-02,106.08129772141326,Stock B
+2024-02-03,126.20364087619033,Stock B
+2024-02-04,170.89514356461825,Stock B
+2024-02-05,140.7030029009889,Stock B
+2024-02-06,93.3070465911,Stock B
+2024-02-07,106.64021827267138,Stock B
+2024-02-08,126.67286946579729,Stock B
+2024-02-09,132.0629981771461,Stock B
+2024-02-10,139.88972764711013,Stock B
+2024-02-11,128.99719521728156,Stock B
+2024-02-12,118.88152274522392,Stock B
+2024-02-13,105.20044201558302,Stock B
+2024-02-14,106.00737865051961,Stock B
+2024-02-15,116.43264929455405,Stock B
+2024-02-16,128.19950748463904,Stock B
+2024-02-17,133.4067417367323,Stock B
+2024-02-18,136.07051155500704,Stock B
+2024-02-19,94.15934124615535,Stock B
+2024-02-20,152.55670620444567,Stock B
+2024-02-21,112.48502314993321,Stock B
+2024-02-22,113.23564061520523,Stock B
+2024-02-23,92.86224199765712,Stock B
+2024-02-24,97.1800207875442,Stock B
+2024-02-25,93.90555371705028,Stock B
+2024-02-26,108.9620253007954,Stock B
+2024-02-27,119.08006187783998,Stock B
+2024-02-28,127.13362176743962,Stock B
+2024-02-29,77.740237580767,Stock B
+2024-03-01,156.85345307369892,Stock B
+2024-03-02,117.9219497646076,Stock B
+2024-03-03,168.39130266658043,Stock B
+2024-03-04,132.28440442496836,Stock B
+2024-03-05,121.79413787652173,Stock B
+2024-03-06,155.44514774433605,Stock B
+2024-03-07,181.2082494163772,Stock B
+2024-03-08,124.76175997251997,Stock B
+2024-03-09,131.52798862287082,Stock B
+2024-03-10,154.78281362775667,Stock B
+2024-03-11,131.42694076327706,Stock B
+2024-03-12,89.77895784969273,Stock B
+2024-03-13,110.43944031761988,Stock B
+2024-03-14,130.91310242877486,Stock B
+2024-03-15,95.94020214061203,Stock B
+2024-03-16,117.50671789603383,Stock B
+2024-03-17,138.1703643875529,Stock B
+2024-03-18,96.76666506283946,Stock B
+2024-03-19,126.92921319862103,Stock B
+2024-03-20,134.36771787095662,Stock B
+2024-03-21,150.3389847185111,Stock B
+2024-03-22,110.62025725078718,Stock B
+2024-03-23,122.25834722898108,Stock B
+2024-03-24,167.0558894814779,Stock B
+2024-03-25,114.36998671230369,Stock B
+2024-03-26,137.08191744305097,Stock B
+2024-03-27,125.48258532299042,Stock B
+2024-03-28,113.18044450802486,Stock B
+2024-03-29,132.86744340244596,Stock B
+2024-03-30,143.0002456842678,Stock B
+2024-03-31,122.8662879136067,Stock B
+2024-04-01,161.79039280469897,Stock B
+2024-04-02,110.38691760647686,Stock B
+2024-04-03,141.66997601209027,Stock B
+2024-04-04,128.43856540817507,Stock B
+2024-04-05,143.5886196879224,Stock B
+2024-04-06,144.5551979989292,Stock B
+2024-04-07,110.4680149352991,Stock B
+2024-04-08,168.73792771163681,Stock B
+2024-04-09,103.96534525560726,Stock B
+2024-04-10,162.30688642979985,Stock B
+2024-04-11,166.13582859091295,Stock B
+2024-04-12,142.30163954655592,Stock B
+2024-04-13,137.02653298120055,Stock B
+2024-04-14,159.71444812105855,Stock B
+2024-04-15,132.80127211074193,Stock B
+2024-04-16,138.92104508289103,Stock B
+2024-04-17,143.4255867233573,Stock B
+2024-04-18,121.82683827394655,Stock B
+2024-04-19,151.324606786698,Stock B
+2024-04-20,141.02667332214972,Stock B
+2024-04-21,165.87197655093908,Stock B
+2024-04-22,146.85342929815263,Stock B
+2024-04-23,152.24185651989595,Stock B
+2024-04-24,134.83872343412662,Stock B
+2024-04-25,115.49792781599366,Stock B
+2024-04-26,153.99826070670474,Stock B
+2024-04-27,123.0495589733328,Stock B
+2024-04-28,161.8739026011207,Stock B
+2024-04-29,156.47566031438197,Stock B
+2024-04-30,153.98877453185239,Stock B
+2024-05-01,146.91009543337876,Stock B
+2024-05-02,125.57165755090523,Stock B
+2024-05-03,149.51876775513958,Stock B
+2024-05-04,144.42202498837187,Stock B
+2024-05-05,168.2152246370785,Stock B
+2024-05-06,163.92566918377423,Stock B
+2024-05-07,164.75694890853777,Stock B
+2024-05-08,157.379473276194,Stock B
+2024-05-09,145.19153955819428,Stock B
+2024-05-10,130.16259692665705,Stock B
+2024-05-11,149.9603848419035,Stock B
+2024-05-12,164.29985436999692,Stock B
+2024-05-13,151.77286751854024,Stock B
+2024-05-14,166.31803794339393,Stock B
+2024-05-15,178.4401777872928,Stock B
+2024-05-16,130.36017709396518,Stock B
+2024-05-17,139.51630921117024,Stock B
+2024-05-18,156.17119043529092,Stock B
+2024-05-19,157.7302409462271,Stock B
+2024-05-20,146.3503230536678,Stock B
+2024-05-21,137.7806186198376,Stock B
+2024-05-22,170.85934100675522,Stock B
+2024-05-23,157.5598792022965,Stock B
+2024-05-24,164.40618232966972,Stock B
+2024-05-25,156.931110843892,Stock B
+2024-05-26,163.77646538439143,Stock B
+2024-05-27,167.07880914965253,Stock B
+2024-05-28,153.84017777945266,Stock B
+2024-05-29,156.78519123677222,Stock B
+2024-05-30,147.20960684999477,Stock B
+2024-05-31,125.73829653130716,Stock B
+2024-06-01,165.7840293028008,Stock B
+2024-06-02,176.65520822320698,Stock B
+2024-06-03,161.43013366970064,Stock B
+2024-06-04,163.52745238534536,Stock B
+2024-06-05,153.45992638871138,Stock B
+2024-06-06,173.7108842605442,Stock B
+2024-06-07,131.12019237118542,Stock B
+2024-06-08,145.7006560097736,Stock B
+2024-06-09,158.74729900927215,Stock B
+2024-06-10,158.45483111043143,Stock B
+2024-06-11,135.06907278533254,Stock B
+2024-06-12,166.77490033013123,Stock B
+2024-06-13,177.85592058229875,Stock B
+2024-06-14,172.35246211930138,Stock B
+2024-06-15,175.15373509407894,Stock B
+2024-06-16,138.25157636554658,Stock B
+2024-06-17,177.36908655429013,Stock B
+2024-06-18,164.2501984307902,Stock B
+2024-06-19,179.0257243135838,Stock B
+2024-06-20,125.9675804115245,Stock B
+2024-06-21,186.42239906590163,Stock B
+2024-06-22,175.92775218817974,Stock B
+2024-06-23,159.84307517128101,Stock B
+2024-06-24,173.12938513756123,Stock B
+2024-06-25,138.38746962545935,Stock B
+2024-06-26,195.6857293559107,Stock B
+2024-06-27,167.15738312021446,Stock B
+2024-06-28,172.46846963205476,Stock B
+2024-06-29,133.01190825986396,Stock B
+2024-06-30,148.65413586114244,Stock B
+2024-07-01,130.68859466015206,Stock B
+2024-07-02,162.8301780177482,Stock B
+2024-07-03,150.9623090236343,Stock B
+2024-07-04,177.5241956113063,Stock B
+2024-07-05,163.97877218619973,Stock B
+2024-07-06,187.34393715468187,Stock B
+2024-07-07,174.7142369283873,Stock B
+2024-07-08,187.24523626869666,Stock B
+2024-07-09,199.95660666180635,Stock B
+2024-07-10,183.67197163594662,Stock B
+2024-07-11,136.41671306389964,Stock B
+2024-07-12,142.88825367444997,Stock B
+2024-07-13,163.53772077481204,Stock B
+2024-07-14,186.839694531798,Stock B
+2024-07-15,208.29083486181077,Stock B
+2024-07-16,158.46402508920713,Stock B
+2024-07-17,165.98637534802572,Stock B
+2024-07-18,160.91847075654053,Stock B
+2024-07-19,173.89430056944695,Stock B
+2024-07-20,174.63491155963598,Stock B
+2024-07-21,189.7225044223105,Stock B
+2024-07-22,196.994675929038,Stock B
+2024-07-23,198.59538117580595,Stock B
+2024-07-24,161.22474218568243,Stock B
+2024-07-25,156.09828216300843,Stock B
+2024-07-26,199.2263483547393,Stock B
+2024-07-27,199.224219652712,Stock B
+2024-07-28,143.9752413009726,Stock B
+2024-07-29,175.30835508628667,Stock B
+2024-07-30,194.69730740898598,Stock B
+2024-07-31,157.91487552063842,Stock B
+2024-08-01,178.64180500223603,Stock B
+2024-08-02,162.81760122155353,Stock B
+2024-08-03,205.82600852264528,Stock B
+2024-08-04,179.45291039766587,Stock B
+2024-08-05,205.08001392705012,Stock B
+2024-08-06,188.54624847310998,Stock B
+2024-08-07,170.87948239530124,Stock B
+2024-08-08,170.46832542221415,Stock B
+2024-08-09,191.2404661391111,Stock B
+2024-08-10,176.0140065022819,Stock B
+2024-08-11,170.89618583688764,Stock B
+2024-08-12,164.66936677421512,Stock B
+2024-08-13,155.85163159010418,Stock B
+2024-08-14,160.87303295549137,Stock B
+2024-08-15,181.36317609241607,Stock B
+2024-08-16,201.6926716119785,Stock B
+2024-08-17,168.70765097035942,Stock B
+2024-08-18,161.69532742588572,Stock B
+2024-08-19,203.94942568600152,Stock B
+2024-08-20,173.3278263162269,Stock B
+2024-08-21,153.12086524554655,Stock B
+2024-08-22,174.22220391458154,Stock B
+2024-08-23,174.69350618,Stock B
+2024-08-24,245.91641381999082,Stock B
+2024-08-25,175.1400570500954,Stock B
+2024-08-26,165.80168300230343,Stock B
+2024-08-27,156.67954308245638,Stock B
+2024-08-28,151.43494000266764,Stock B
+2024-08-29,171.49901961048195,Stock B
+2024-08-30,167.7902595390151,Stock B
+2024-08-31,184.14474736853563,Stock B
+2024-09-01,200.19360035786332,Stock B
+2024-09-02,212.0294952180076,Stock B
+2024-09-03,195.54318529878387,Stock B
+2024-09-04,171.8999494218645,Stock B
+2024-09-05,172.7012498657248,Stock B
+2024-09-06,166.79960385344745,Stock B
+2024-09-07,183.38723884944875,Stock B
+2024-09-08,158.62300092866462,Stock B
+2024-09-09,209.68656313247038,Stock B
+2024-09-10,191.09851318097418,Stock B
+2024-09-11,161.96809324943172,Stock B
+2024-09-12,148.43238093904995,Stock B
+2024-09-13,190.1838744748509,Stock B
+2024-09-14,191.0804490756605,Stock B
+2024-09-15,214.05507989227925,Stock B
+2024-09-16,207.23916937157517,Stock B
+2024-09-17,170.55146372717263,Stock B
+2024-09-18,192.57137339237084,Stock B
+2024-09-19,183.5788485111083,Stock B
+2024-09-20,159.02299707531125,Stock B
+2024-09-21,154.52963417221085,Stock B
+2024-09-22,244.65615149567523,Stock B
+2024-09-23,213.4864659709891,Stock B
+2024-09-24,171.16701638544222,Stock B
+2024-09-25,188.08579254846887,Stock B
+2024-09-26,200.90373571928086,Stock B
+2024-09-27,184.08233861636342,Stock B
+2024-09-28,190.38596326976545,Stock B
+2024-09-29,177.80294600724696,Stock B
+2024-09-30,181.42622243867197,Stock B
+2024-10-01,204.70058052116082,Stock B
+2024-10-02,168.16428405198988,Stock B
+2024-10-03,185.6869060467214,Stock B
+2024-10-04,231.9556005951674,Stock B
+2024-10-05,199.60575284978466,Stock B
+2024-10-06,209.37359243249026,Stock B
+2024-10-07,184.93161028392225,Stock B
+2024-10-08,189.6911204901408,Stock B
+2024-10-09,183.95616586231554,Stock B
+2024-10-10,198.36712728339285,Stock B
+2024-10-11,208.57238297757934,Stock B
+2024-10-12,197.44159326781786,Stock B
+2024-10-13,193.63588159597037,Stock B
+2024-10-14,208.24943723761973,Stock B
+2024-10-15,203.03849964375598,Stock B
+2024-10-16,213.38530817028533,Stock B
+2024-10-17,226.69878157734823,Stock B
+2024-10-18,197.52458168585974,Stock B
+2024-10-19,210.4419022048652,Stock B
+2024-10-20,198.69888980644245,Stock B
+2024-10-21,214.05682534789764,Stock B
+2024-10-22,169.5530942133995,Stock B
+2024-10-23,184.09994732871095,Stock B
+2024-10-24,229.90788216501412,Stock B
+2024-10-25,200.89502940060672,Stock B
+2024-10-26,225.6414960744857,Stock B
+2024-10-27,177.15927995846266,Stock B
+2024-10-28,179.53547909934426,Stock B
+2024-10-29,230.8765632438838,Stock B
+2024-10-30,237.907807081876,Stock B
+2024-10-31,175.15266371711678,Stock B
+2024-11-01,200.25179426969106,Stock B
+2024-11-02,223.96778713507626,Stock B
+2024-11-03,159.3362610976818,Stock B
+2024-11-04,234.1081516633513,Stock B
+2024-11-05,225.72612863230614,Stock B
+2024-11-06,200.81042895358792,Stock B
+2024-11-07,209.029634068935,Stock B
+2024-11-08,207.01954301701326,Stock B
+2024-11-09,195.2044572128893,Stock B
+2024-11-10,233.07086787447486,Stock B
+2024-11-11,223.90087869443167,Stock B
+2024-11-12,197.8311773442069,Stock B
+2024-11-13,208.10894472287782,Stock B
+2024-11-14,194.53520534169107,Stock B
+2024-11-15,206.9265521846976,Stock B
+2024-11-16,212.20561304844335,Stock B
+2024-11-17,204.52093137055218,Stock B
+2024-11-18,174.2867247751525,Stock B
+2024-11-19,215.3131866312814,Stock B
+2024-11-20,245.0308233784491,Stock B
+2024-11-21,248.92741646505044,Stock B
+2024-11-22,188.5175751956711,Stock B
+2024-11-23,186.93259681296868,Stock B
+2024-11-24,215.13412538700632,Stock B
+2024-11-25,199.13679038171372,Stock B
+2024-11-26,220.1759465245716,Stock B
+2024-11-27,205.58213949380814,Stock B
+2024-11-28,228.01201108744382,Stock B
+2024-11-29,199.81450184947622,Stock B
+2024-11-30,181.022156843967,Stock B
+2024-12-01,227.38442607690683,Stock B
+2024-12-02,207.42002154699532,Stock B
+2024-12-03,199.6254600056824,Stock B
+2024-12-04,240.66142228706943,Stock B
+2024-12-05,203.66025252885183,Stock B
+2024-12-06,153.61724205890488,Stock B
+2024-12-07,177.57435511019602,Stock B
+2024-12-08,192.89182792095949,Stock B
+2024-12-09,189.74183718601955,Stock B
+2024-12-10,182.73992724643477,Stock B
+2024-12-11,215.5807217506097,Stock B
+2024-12-12,210.653754271215,Stock B
+2024-12-13,207.20866745762393,Stock B
+2024-12-14,249.04394923287606,Stock B
+2024-12-15,230.45922480541162,Stock B
+2024-12-16,189.57858193499226,Stock B
+2024-12-17,218.1315805741715,Stock B
+2024-12-18,239.954938353571,Stock B
+2024-12-19,222.8589645359002,Stock B
+2024-12-20,205.39350476569606,Stock B
+2024-12-21,212.72230975871273,Stock B
+2024-12-22,212.29587678160019,Stock B
+2024-12-23,213.6526027760072,Stock B
+2024-12-24,215.21484952796067,Stock B
+2024-12-25,220.69508483886506,Stock B
+2024-12-26,220.86294646180485,Stock B
+2024-12-27,197.72288309684396,Stock B
+2024-12-28,217.51293577451014,Stock B
+2024-12-29,230.67999491800254,Stock B
+2024-12-30,188.46065078094674,Stock B
+2024-12-31,231.31207009641892,Stock B
 
 </script><script type="text/plain" id="data_metrics" data-format="csv_embedded" data-src="">
 Department,Quarter,Month,Value,Metric
@@ -10155,153 +11990,6 @@ time_hours,time_halfhours,temperature_celsius,temperature_fahrenheit,humidity_pe
 22,11.0,10.3796782438551,52.527544428823624,80.28727365873407,1013.2265674172484,Station A,default
 23,11.5,12.626659499821411,53.975895765346976,76.14763549988064,1017.1881382148124,Station A,default
 24,12.0,14.976902772397546,56.61843019454348,87.09323236125721,1014.9375876517355,Station A,default
-
-</script><script type="text/plain" id="data_continuous_filter_data" data-format="csv_embedded" data-src="">
-Month,Sales,Profit_Margin,Units,Product,Region
-1,84371.0584872796,47.612502252168355,901.5722464052214,Widget,North
-2,123350.55777327913,29.95701087459849,283.06764249563514,Widget,North
-3,134119.1236788116,26.677145966588032,886.8407785019584,Widget,North
-4,111272.49025964597,37.220890344978,599.5861668948528,Widget,North
-5,147500.15315993645,16.764193861272766,307.2231463367196,Widget,North
-6,75470.12423166423,42.51114804724943,211.11647014177444,Widget,North
-7,84109.50995597302,12.821710075012687,232.69754458285863,Widget,North
-8,103087.54458792834,25.52576442301631,960.6051462121211,Widget,North
-9,148750.67066686595,40.83439712801355,134.3919141223557,Widget,North
-10,61219.36438339133,41.54811919443538,264.2820556974651,Widget,North
-11,59830.94506263829,32.19424811485434,578.8648633329042,Widget,North
-12,130236.78302234528,48.70494064403215,417.9141296737961,Widget,North
-1,115100.42383260769,32.23943117936631,254.2188424733496,Widget,South
-2,87442.56138858301,24.150923172405825,797.8442807581459,Widget,South
-3,107385.83201433832,19.199477223018867,584.2225383265402,Widget,South
-4,106423.87630027226,26.91332180225861,634.0460991347654,Widget,South
-5,110154.2008551331,25.921635021834703,331.0030440831245,Widget,South
-6,92553.67533331612,33.55968908437586,724.7244186608657,Widget,South
-7,133917.6270750171,6.438302861699967,598.8172241986849,Widget,South
-8,142746.43121693953,39.66740647673267,445.4013880995269,Widget,South
-9,127260.89855632593,8.745775187762334,868.2024945215064,Widget,South
-10,125479.88413436171,41.4642347261204,343.2121231221289,Widget,South
-11,98620.82405826429,21.402747097382377,192.28031671022308,Widget,South
-12,61003.21210073412,25.165369099582108,450.99047417206344,Widget,South
-1,52048.926614210766,31.210965601172653,697.2312054259755,Widget,East
-2,107790.31825705549,45.055112764163454,138.5712759047943,Widget,East
-3,79851.22580764441,28.699807100321316,835.6158218827485,Widget,East
-4,85026.78861819455,37.860070099977406,604.1558348732564,Widget,East
-5,54425.01468253471,7.2562587041824775,394.64807908805875,Widget,East
-6,56217.494091881636,45.23006255419931,926.9063866664444,Widget,East
-7,105855.746266728,36.46441167958443,406.4075319141033,Widget,East
-8,123444.49937503874,39.48822927489967,402.38992770258056,Widget,East
-9,61544.57649239256,5.284191816018071,661.7594591102811,Widget,East
-10,119267.13037681869,9.685594535189937,505.0226096423677,Widget,East
-11,99471.95182172488,41.90479867839563,585.8285197786514,Widget,East
-12,71582.84074413581,49.13048571195816,746.9446798374254,Widget,East
-1,96458.38306304239,34.89159980251687,716.2603745490314,Widget,West
-2,101102.4438327436,15.416739887617156,999.0845814117612,Widget,West
-3,148776.41696578555,18.831635627014172,802.0935104814557,Widget,West
-4,52850.116619724766,40.81530063162036,167.23933133166537,Widget,West
-5,63929.10528774456,28.492564036544184,192.41692250956586,Widget,West
-6,122152.82245459218,6.0733444713906675,759.161808967126,Widget,West
-7,126968.92024044544,12.309572443022825,166.12184174822625,Widget,West
-8,148513.53407338628,39.58311746193262,888.2280260295732,Widget,West
-9,113102.79072125902,23.547739173678437,659.8713213093368,Widget,West
-10,70113.02028201039,34.62574595864013,289.9832341401609,Widget,West
-11,125807.53939063543,25.42295026101817,734.6887147649724,Widget,West
-12,115232.14961456566,19.581303419339704,260.63575391007157,Widget,West
-1,69404.04903830591,46.3469951574891,160.6214681201477,Gadget,North
-2,77806.90150329062,11.384193752605967,689.4176551885503,Gadget,North
-3,82277.99955359152,36.801561576937765,350.55441345831133,Gadget,North
-4,96939.56072125427,10.631592591969914,521.0312259643822,Gadget,North
-5,140086.52084571274,17.34203960928579,717.81457492655,Gadget,North
-6,56185.29621711363,32.2450685830316,534.7944859525841,Gadget,North
-7,123468.96639767424,33.1608421274121,422.84519603565525,Gadget,North
-8,91565.85449722923,40.29674700093301,167.09609890695492,Gadget,North
-9,118778.52790925343,11.315676203236618,966.1318663181951,Gadget,North
-10,76810.16081280363,44.51699074127426,721.0799718842725,Gadget,North
-11,121349.26367983021,33.21730631503051,623.5482230218496,Gadget,North
-12,105144.42541159477,20.125602063243974,771.1724914338437,Gadget,North
-1,77488.35157223954,44.864186130093806,545.111103125896,Gadget,South
-2,62803.30421200246,19.84947700890683,942.4496730254908,Gadget,South
-3,131530.62460646976,35.92013171281954,737.7662681953456,Gadget,South
-4,69756.1844099359,11.42111857184687,435.06160665809057,Gadget,South
-5,109096.20919514901,46.566538979594654,139.73444342872983,Gadget,South
-6,120732.57014359337,7.405172800748878,274.1728632103915,Gadget,South
-7,119439.43110098872,31.22209341558439,913.4787600083686,Gadget,South
-8,106963.4964387685,27.146225951477795,917.7028281276547,Gadget,South
-9,60462.193443561875,7.646529088852928,594.0024585230826,Gadget,South
-10,92699.8674596984,22.27366408894,718.371999269346,Gadget,South
-11,143030.5165511925,22.448277207010754,685.5690489273715,Gadget,South
-12,51288.503580597,46.84698177995575,887.2611447575118,Gadget,South
-1,78244.71599565959,31.15486819495249,963.0483708893618,Gadget,East
-2,108269.81944005116,38.23148808112855,911.1050017498782,Gadget,East
-3,110172.03254687993,32.46908146492406,934.8222553638559,Gadget,East
-4,140001.64184776193,27.98021705027487,167.40324635154707,Gadget,East
-5,114071.5514354246,39.59365071633859,460.77360662805637,Gadget,East
-6,55566.88842173716,24.20115178621219,349.74737950604066,Gadget,East
-7,129524.74667925741,27.384189076337197,425.6756423586741,Gadget,East
-8,71852.08503134025,17.68898745202182,396.37060703241747,Gadget,East
-9,128377.89239827129,49.17275186658348,283.17880521785037,Gadget,East
-10,105960.30533999842,13.371312700802985,436.5280553048571,Gadget,East
-11,57523.76971446884,40.2343628172267,464.9497010301449,Gadget,East
-12,143680.03264925902,38.849784376746484,430.2502928250715,Gadget,East
-1,107594.67726517815,19.595287386537947,595.0301430705832,Gadget,West
-2,67842.99459752195,30.835104373152255,816.6846746599471,Gadget,West
-3,149977.9851320424,6.804575270353441,728.0426340177145,Gadget,West
-4,76092.62451320393,43.52087393045126,148.74266510638134,Gadget,West
-5,76822.05434761246,12.886669579727997,882.2419341099655,Gadget,West
-6,74307.41516015238,24.802460866939143,995.1484755141983,Gadget,West
-7,102779.54207730522,30.620143621012808,746.022438601955,Gadget,West
-8,134446.111387073,48.17524942035108,134.36714783273098,Gadget,West
-9,116010.06118214759,39.8721081542559,233.71109932627567,Gadget,West
-10,77181.38160762351,11.37394319888621,481.09809605547025,Gadget,West
-11,138792.36943356466,22.392881147787115,920.8716038738357,Gadget,West
-12,69638.87053012304,23.877961717612834,873.0731637093891,Gadget,West
-1,141215.6239047376,19.841515328612537,591.4390046171841,Doohickey,North
-2,136022.3542767605,27.201542254880756,135.62361699061597,Doohickey,North
-3,98609.3132100261,34.77055558945189,122.16182098959561,Doohickey,North
-4,80145.10941306093,11.233250410270017,249.86286335140852,Doohickey,North
-5,65527.45669243341,25.949421354232594,625.2979997207336,Doohickey,North
-6,144086.34578636978,20.11552628833727,953.2091163632081,Doohickey,North
-7,127584.44090529426,25.586701069597638,477.87650919757544,Doohickey,North
-8,117356.98933039527,21.96455305170022,482.19908685261134,Doohickey,North
-9,66575.2560081155,12.94965627527549,408.578347133153,Doohickey,North
-10,79766.00528050486,22.677317575991562,788.1145212215093,Doohickey,North
-11,103176.2020749631,17.699736907994627,411.6999005946509,Doohickey,North
-12,113421.9738437937,12.67571482072718,825.6174141084408,Doohickey,North
-1,59723.9010210336,14.951731974501184,430.42087001774365,Doohickey,South
-2,94767.35747306154,19.832782935648737,869.3505393659547,Doohickey,South
-3,79760.6228812834,10.3376818545911,653.3861090362296,Doohickey,South
-4,60527.33424479102,20.18561971033047,762.1246608547364,Doohickey,South
-5,97495.53442310193,34.4944558541946,554.7124796514354,Doohickey,South
-6,134090.4147222407,10.024963881445629,539.2466557235883,Doohickey,South
-7,67470.54169130087,25.74655832326522,360.0262570363614,Doohickey,South
-8,70478.63185854143,7.359074091353359,610.5830224541621,Doohickey,South
-9,100627.44126490106,38.34891918492216,199.98549990884726,Doohickey,South
-10,87877.90122312853,42.30628045807469,479.0717287513318,Doohickey,South
-11,57499.81104265967,49.48453411911737,285.7773752970696,Doohickey,South
-12,87039.4627362619,20.840315645247323,961.3938940442865,Doohickey,South
-1,141196.71461391356,34.58831016947762,907.3049011995784,Doohickey,East
-2,110416.05412816806,8.137189989584552,147.5706401950265,Doohickey,East
-3,67426.06600321931,13.834229281639454,809.8210434913602,Doohickey,East
-4,133840.68982934603,14.314239251218204,568.797331515208,Doohickey,East
-5,84740.58266818195,18.816967632706586,285.64588675681773,Doohickey,East
-6,53177.99871373761,28.834782568079007,633.4446814629802,Doohickey,East
-7,145956.9743093212,36.97824069193587,625.2345128199034,Doohickey,East
-8,55335.63553009959,27.855966353746382,390.6520866110526,Doohickey,East
-9,63753.62959597961,11.64742639563466,272.06438240903395,Doohickey,East
-10,54410.48387153185,45.200659133445726,694.2032875316124,Doohickey,East
-11,110983.6152806067,41.75152350290753,949.392387204171,Doohickey,East
-12,92145.23250427318,20.26852656166964,718.1088957721859,Doohickey,East
-1,79904.29169902825,24.65405089263026,851.7415413319676,Doohickey,West
-2,125984.33345720403,21.734059824538868,311.0751100172316,Doohickey,West
-3,64879.39379075269,45.81222894004783,267.19143053758336,Doohickey,West
-4,130062.77826988962,17.580179136475152,426.5459441763175,Doohickey,West
-5,51085.87393624287,13.104933138674234,867.4584515361199,Doohickey,West
-6,147426.1641030495,27.786724382985312,424.08700669771486,Doohickey,West
-7,120638.0209758821,39.36911510677357,276.29550575723437,Doohickey,West
-8,84715.00533803293,46.763480479814014,376.9785983714326,Doohickey,West
-9,109656.12215743578,45.79468300551243,802.1348067247274,Doohickey,West
-10,88411.30542451664,6.807111046835605,775.9610166378674,Doohickey,West
-11,67054.94446844497,29.624831999532926,816.8386019728241,Doohickey,West
-12,133628.60708046806,32.39766719670709,186.2857729434148,Doohickey,West
 
 </script><script type="text/plain" id="data_dynamic_data" data-format="csv_embedded" data-src="">
 Month,Return,Stock,Strategy,Region
@@ -10690,7 +12378,13 @@ Month,Return,Stock,Strategy,Region
     </div>
     <div>
         <label for="y_transform_select_revenue_trend">Y Transform: </label>
-        <select id="y_transform_select_revenue_trend" style="padding: 5px 10px;" onchange="updateChart_revenue_trend()">
+        <select id="y_transform_select_revenue_trend" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_revenue_trend').value;
+    document.getElementById('ewma_param_revenue_trend').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_revenue_trend').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_revenue_trend').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_revenue_trend();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -10698,9 +12392,24 @@ Month,Return,Stock,Strategy,Region
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_revenue_trend" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_revenue_trend">EWMA weight: </label>
+        <input type="number" id="ewma_weight_revenue_trend" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_revenue_trend()">
+    </div>
+    <div id="ewmstd_param_revenue_trend" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_revenue_trend">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_revenue_trend" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_revenue_trend()">
+    </div>
+    <div id="sma_param_revenue_trend" style="display:none; margin-top: 5px;">
+        <label for="sma_window_revenue_trend">SMA window: </label>
+        <input type="number" id="sma_window_revenue_trend" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_revenue_trend()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="revenue_trend_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="revenue_trend_aspect_ratio_label">0.4</span>
@@ -10752,7 +12461,13 @@ Month,Return,Stock,Strategy,Region
     </div>
     <div>
         <label for="y_transform_select_multi_series">Y Transform: </label>
-        <select id="y_transform_select_multi_series" style="padding: 5px 10px;" onchange="updateChart_multi_series()">
+        <select id="y_transform_select_multi_series" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_multi_series').value;
+    document.getElementById('ewma_param_multi_series').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_multi_series').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_multi_series').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_multi_series();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -10760,9 +12475,24 @@ Month,Return,Stock,Strategy,Region
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_multi_series" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_multi_series">EWMA weight: </label>
+        <input type="number" id="ewma_weight_multi_series" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_multi_series()">
+    </div>
+    <div id="ewmstd_param_multi_series" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_multi_series">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_multi_series" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_multi_series()">
+    </div>
+    <div id="sma_param_multi_series" style="display:none; margin-top: 5px;">
+        <label for="sma_window_multi_series">SMA window: </label>
+        <input type="number" id="sma_window_multi_series" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_multi_series()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="multi_series_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="multi_series_aspect_ratio_label">0.4</span>
@@ -10861,7 +12591,13 @@ Month,Return,Stock,Strategy,Region
     </div>
     <div>
         <label for="y_transform_select_filtered_metrics">Y Transform: </label>
-        <select id="y_transform_select_filtered_metrics" style="padding: 5px 10px;" onchange="updateChart_filtered_metrics()">
+        <select id="y_transform_select_filtered_metrics" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_filtered_metrics').value;
+    document.getElementById('ewma_param_filtered_metrics').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_filtered_metrics').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_filtered_metrics').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_filtered_metrics();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -10869,9 +12605,24 @@ Month,Return,Stock,Strategy,Region
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_filtered_metrics" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_filtered_metrics">EWMA weight: </label>
+        <input type="number" id="ewma_weight_filtered_metrics" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_filtered_metrics()">
+    </div>
+    <div id="ewmstd_param_filtered_metrics" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_filtered_metrics">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_filtered_metrics" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_filtered_metrics()">
+    </div>
+    <div id="sma_param_filtered_metrics" style="display:none; margin-top: 5px;">
+        <label for="sma_window_filtered_metrics">SMA window: </label>
+        <input type="number" id="sma_window_filtered_metrics" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_filtered_metrics()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="filtered_metrics_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="filtered_metrics_aspect_ratio_label">0.4</span>
@@ -10958,7 +12709,13 @@ Use choices when the user must select exactly one option (like choosing a strate
     </div>
     <div>
         <label for="y_transform_select_single_select_metrics">Y Transform: </label>
-        <select id="y_transform_select_single_select_metrics" style="padding: 5px 10px;" onchange="updateChart_single_select_metrics()">
+        <select id="y_transform_select_single_select_metrics" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_single_select_metrics').value;
+    document.getElementById('ewma_param_single_select_metrics').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_single_select_metrics').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_single_select_metrics').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_single_select_metrics();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -10966,9 +12723,24 @@ Use choices when the user must select exactly one option (like choosing a strate
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_single_select_metrics" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_single_select_metrics">EWMA weight: </label>
+        <input type="number" id="ewma_weight_single_select_metrics" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_single_select_metrics()">
+    </div>
+    <div id="ewmstd_param_single_select_metrics" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_single_select_metrics">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_single_select_metrics" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_single_select_metrics()">
+    </div>
+    <div id="sma_param_single_select_metrics" style="display:none; margin-top: 5px;">
+        <label for="sma_window_single_select_metrics">SMA window: </label>
+        <input type="number" id="sma_window_single_select_metrics" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_single_select_metrics()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="single_select_metrics_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="single_select_metrics_aspect_ratio_label">0.4</span>
@@ -11052,7 +12824,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_shorthand_choices">Y Transform: </label>
-        <select id="y_transform_select_shorthand_choices" style="padding: 5px 10px;" onchange="updateChart_shorthand_choices()">
+        <select id="y_transform_select_shorthand_choices" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_shorthand_choices').value;
+    document.getElementById('ewma_param_shorthand_choices').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_shorthand_choices').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_shorthand_choices').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_shorthand_choices();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11060,9 +12838,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_shorthand_choices" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_shorthand_choices">EWMA weight: </label>
+        <input type="number" id="ewma_weight_shorthand_choices" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_shorthand_choices()">
+    </div>
+    <div id="ewmstd_param_shorthand_choices" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_shorthand_choices">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_shorthand_choices" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_shorthand_choices()">
+    </div>
+    <div id="sma_param_shorthand_choices" style="display:none; margin-top: 5px;">
+        <label for="sma_window_shorthand_choices">SMA window: </label>
+        <input type="number" id="sma_window_shorthand_choices" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_shorthand_choices()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="shorthand_choices_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="shorthand_choices_aspect_ratio_label">0.4</span>
@@ -11137,7 +12930,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_facet_wrap_example">Y Transform: </label>
-        <select id="y_transform_select_facet_wrap_example" style="padding: 5px 10px;" onchange="updateChart_facet_wrap_example()">
+        <select id="y_transform_select_facet_wrap_example" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_facet_wrap_example').value;
+    document.getElementById('ewma_param_facet_wrap_example').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_facet_wrap_example').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_facet_wrap_example').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_facet_wrap_example();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11145,9 +12944,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_facet_wrap_example" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_facet_wrap_example">EWMA weight: </label>
+        <input type="number" id="ewma_weight_facet_wrap_example" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_facet_wrap_example()">
+    </div>
+    <div id="ewmstd_param_facet_wrap_example" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_facet_wrap_example">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_facet_wrap_example" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_facet_wrap_example()">
+    </div>
+    <div id="sma_param_facet_wrap_example" style="display:none; margin-top: 5px;">
+        <label for="sma_window_facet_wrap_example">SMA window: </label>
+        <input type="number" id="sma_window_facet_wrap_example" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_facet_wrap_example()">
+    </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
 <div style="margin: 10px 0;">
     <label for="facet1_select_facet_wrap_example">Facet by: </label>
@@ -11208,7 +13022,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_facet_grid_example">Y Transform: </label>
-        <select id="y_transform_select_facet_grid_example" style="padding: 5px 10px;" onchange="updateChart_facet_grid_example()">
+        <select id="y_transform_select_facet_grid_example" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_facet_grid_example').value;
+    document.getElementById('ewma_param_facet_grid_example').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_facet_grid_example').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_facet_grid_example').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_facet_grid_example();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11216,9 +13036,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_facet_grid_example" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_facet_grid_example">EWMA weight: </label>
+        <input type="number" id="ewma_weight_facet_grid_example" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_facet_grid_example()">
+    </div>
+    <div id="ewmstd_param_facet_grid_example" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_facet_grid_example">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_facet_grid_example" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_facet_grid_example()">
+    </div>
+    <div id="sma_param_facet_grid_example" style="display:none; margin-top: 5px;">
+        <label for="sma_window_facet_grid_example">SMA window: </label>
+        <input type="number" id="sma_window_facet_grid_example" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_facet_grid_example()">
+    </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
 <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
     <div>
@@ -11303,7 +13138,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_dynamic_controls">Y Transform: </label>
-        <select id="y_transform_select_dynamic_controls" style="padding: 5px 10px;" onchange="updateChart_dynamic_controls()">
+        <select id="y_transform_select_dynamic_controls" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_dynamic_controls').value;
+    document.getElementById('ewma_param_dynamic_controls').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_dynamic_controls').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_dynamic_controls').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_dynamic_controls();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11311,9 +13152,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_dynamic_controls" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_dynamic_controls">EWMA weight: </label>
+        <input type="number" id="ewma_weight_dynamic_controls" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_dynamic_controls()">
+    </div>
+    <div id="ewmstd_param_dynamic_controls" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_dynamic_controls">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_dynamic_controls" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_dynamic_controls()">
+    </div>
+    <div id="sma_param_dynamic_controls" style="display:none; margin-top: 5px;">
+        <label for="sma_window_dynamic_controls">SMA window: </label>
+        <input type="number" id="sma_window_dynamic_controls" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_dynamic_controls()">
+    </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
 <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
     <div>
@@ -11387,7 +13243,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_aggregation_demo">Y Transform: </label>
-        <select id="y_transform_select_aggregation_demo" style="padding: 5px 10px;" onchange="updateChart_aggregation_demo()">
+        <select id="y_transform_select_aggregation_demo" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_aggregation_demo').value;
+    document.getElementById('ewma_param_aggregation_demo').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_aggregation_demo').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_aggregation_demo').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_aggregation_demo();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11395,9 +13257,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_aggregation_demo" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_aggregation_demo">EWMA weight: </label>
+        <input type="number" id="ewma_weight_aggregation_demo" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_aggregation_demo()">
+    </div>
+    <div id="ewmstd_param_aggregation_demo" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_aggregation_demo">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_aggregation_demo" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_aggregation_demo()">
+    </div>
+    <div id="sma_param_aggregation_demo" style="display:none; margin-top: 5px;">
+        <label for="sma_window_aggregation_demo">SMA window: </label>
+        <input type="number" id="sma_window_aggregation_demo" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_aggregation_demo()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="aggregation_demo_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="aggregation_demo_aspect_ratio_label">0.4</span>
@@ -11457,7 +13334,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_multi_dimensions">Y Transform: </label>
-        <select id="y_transform_select_multi_dimensions" style="padding: 5px 10px;" onchange="updateChart_multi_dimensions()">
+        <select id="y_transform_select_multi_dimensions" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_multi_dimensions').value;
+    document.getElementById('ewma_param_multi_dimensions').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_multi_dimensions').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_multi_dimensions').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_multi_dimensions();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11465,9 +13348,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_multi_dimensions" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_multi_dimensions">EWMA weight: </label>
+        <input type="number" id="ewma_weight_multi_dimensions" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_multi_dimensions()">
+    </div>
+    <div id="ewmstd_param_multi_dimensions" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_multi_dimensions">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_multi_dimensions" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_multi_dimensions()">
+    </div>
+    <div id="sma_param_multi_dimensions" style="display:none; margin-top: 5px;">
+        <label for="sma_window_multi_dimensions">SMA window: </label>
+        <input type="number" id="sma_window_multi_dimensions" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_multi_dimensions()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="multi_dimensions_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="multi_dimensions_aspect_ratio_label">0.4</span>
@@ -11657,7 +13555,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_continuous_filters">Y Transform: </label>
-        <select id="y_transform_select_continuous_filters" style="padding: 5px 10px;" onchange="updateChart_continuous_filters()">
+        <select id="y_transform_select_continuous_filters" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_continuous_filters').value;
+    document.getElementById('ewma_param_continuous_filters').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_continuous_filters').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_continuous_filters').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_continuous_filters();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11665,9 +13569,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_continuous_filters" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_continuous_filters">EWMA weight: </label>
+        <input type="number" id="ewma_weight_continuous_filters" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_continuous_filters()">
+    </div>
+    <div id="ewmstd_param_continuous_filters" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_continuous_filters">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_continuous_filters" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_continuous_filters()">
+    </div>
+    <div id="sma_param_continuous_filters" style="display:none; margin-top: 5px;">
+        <label for="sma_window_continuous_filters">SMA window: </label>
+        <input type="number" id="sma_window_continuous_filters" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_continuous_filters()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="continuous_filters_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="continuous_filters_aspect_ratio_label">0.4</span>
@@ -11733,7 +13652,13 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
     <div>
         <label for="y_transform_select_struct_prices">Y Transform: </label>
-        <select id="y_transform_select_struct_prices" style="padding: 5px 10px;" onchange="updateChart_struct_prices()">
+        <select id="y_transform_select_struct_prices" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_struct_prices').value;
+    document.getElementById('ewma_param_struct_prices').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_struct_prices').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_struct_prices').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_struct_prices();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -11741,9 +13666,24 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_struct_prices" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_struct_prices">EWMA weight: </label>
+        <input type="number" id="ewma_weight_struct_prices" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_struct_prices()">
+    </div>
+    <div id="ewmstd_param_struct_prices" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_struct_prices">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_struct_prices" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_struct_prices()">
+    </div>
+    <div id="sma_param_struct_prices" style="display:none; margin-top: 5px;">
+        <label for="sma_window_struct_prices">SMA window: </label>
+        <input type="number" id="sma_window_struct_prices" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_struct_prices()">
+    </div>
 <div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
     <label for="struct_prices_aspect_ratio_slider">Aspect Ratio: </label>
     <span id="struct_prices_aspect_ratio_label">0.4</span>
@@ -11758,6 +13698,96 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
 <!-- Chart -->
 <div id="struct_prices"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: financial.prices</p><br>
+<hr>
+<br>
+<h2>Smoothing Transforms Demo (EWMA, EWMSTD, SMA)</h2>
+<p>Use the **Y Transform** dropdown to apply smoothing:
+- **ewma**: Exponentially Weighted Moving Average — smooths prices with configurable weight (lower = smoother)
+- **ewmstd**: Exponentially Weighted Moving Std Dev — shows rolling volatility
+- **sma**: Simple Moving Average — trailing average over N periods
+
+Each smoothing transform reveals a parameter input box where you can adjust the weight or window size.
+The chart updates immediately when you change the parameter.
+</p>
+
+
+<div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
+    <h4 style="margin-top: 0;">Plot Attributes</h4>
+            <div style="margin: 10px; display: flex; align-items: center;">
+            <div style="flex: 0 0 70%;">
+                <label for="aggregator_select_smoothing_demo">Aggregator: </label>
+                <select id="aggregator_select_smoothing_demo" onchange="updateChart_smoothing_demo()">
+                <option value="none" selected>none</option>
+                <option value="mean">mean</option>
+                <option value="median">median</option>
+                <option value="count">count</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+                <option value="sum">sum</option>
+            </select>
+            </div>
+            <div style="flex: 0 0 30%; text-align: right; padding-right: 10px;">
+                <span id="aggregator_select_smoothing_demo_obs_count" style="font-size: 0.9em; color: #666;"></span>
+            </div>
+        </div>
+        <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Axes</h4>
+<div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+    <div>
+        <label>X: </label>
+        <span style="font-weight: bold;">Date</span>
+    </div>
+    <div>
+        <label>Y: </label>
+        <span style="font-weight: bold;">Price</span>
+    </div>
+    <div>
+        <label for="y_transform_select_smoothing_demo">Y Transform: </label>
+        <select id="y_transform_select_smoothing_demo" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_smoothing_demo').value;
+    document.getElementById('ewma_param_smoothing_demo').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_smoothing_demo').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_smoothing_demo').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_smoothing_demo();
+})()">
+            <option value="identity" selected>identity</option>
+<option value="log">log</option>
+<option value="z_score">z_score</option>
+<option value="quantile">quantile</option>
+<option value="inverse_cdf">inverse_cdf</option>
+<option value="cumulative">cumulative</option>
+<option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
+        </select>
+    </div>
+</div>
+    <div id="ewma_param_smoothing_demo" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_smoothing_demo">EWMA weight: </label>
+        <input type="number" id="ewma_weight_smoothing_demo" value="0.05" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_smoothing_demo()">
+    </div>
+    <div id="ewmstd_param_smoothing_demo" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_smoothing_demo">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_smoothing_demo" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_smoothing_demo()">
+    </div>
+    <div id="sma_param_smoothing_demo" style="display:none; margin-top: 5px;">
+        <label for="sma_window_smoothing_demo">SMA window: </label>
+        <input type="number" id="sma_window_smoothing_demo" value="20" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_smoothing_demo()">
+    </div>
+<div style="margin: 15px 0; padding-top: 10px; border-top: 1px solid #ddd;">
+    <label for="smoothing_demo_aspect_ratio_slider">Aspect Ratio: </label>
+    <span id="smoothing_demo_aspect_ratio_label">0.4</span>
+    <input type="range" id="smoothing_demo_aspect_ratio_slider"
+           min="-1.3862943611198906" max="0.9162907318741551" step="0.01" value="-0.916290731874155"
+           style="width: 75%; margin-left: 10px;">
+    <span style="margin-left: 10px; color: #666; font-size: 0.9em;">(0.25 - 2.5)</span>
+</div>
+
+</div>
+
+<!-- Chart -->
+<div id="smoothing_demo"></div>
+<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: smoothing_data</p><br>
 <hr>
 <br>
     <div class="textblock-content">
@@ -11778,6 +13808,6 @@ This is equivalent to: `Dict{Symbol,Any}(:Metric => first(unique(df.Metric)), :Q
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.2.</small></p>
 </body>
 </html>
