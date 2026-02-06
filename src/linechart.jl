@@ -28,6 +28,9 @@ Time series or sequential data visualization with interactive filtering.
 - `title::String`: Chart title (default: `"Line Chart"`)
 - `line_width::Int`: Width of lines (default: `1`)
 - `marker_size::Int`: Size of markers (default: `1`)
+- `default_ewma_weight::Float64`: Default weight for EWMA smoothing transform (default: `0.1`)
+- `default_ewmstd_weight::Float64`: Default weight for EWMSTD smoothing transform (default: `0.1`)
+- `default_sma_window::Int`: Default window size for SMA smoothing transform (default: `10`)
 - `notes::String`: Descriptive text shown below the chart (default: `""`)
 
 # Examples
@@ -64,6 +67,9 @@ struct LineChart <: JSPlotsType
                             title::String="Line Chart",
                             line_width::Int=1,
                             marker_size::Int=1,
+                            default_ewma_weight::Float64=0.1,
+                            default_ewmstd_weight::Float64=0.1,
+                            default_sma_window::Int=10,
                             notes::String="")
 
         # Normalize filters and choices to standard Dict{Symbol, Any} format
@@ -367,11 +373,20 @@ struct LineChart <: JSPlotsType
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_$chart_title').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_$chart_title').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_$chart_title').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -395,7 +410,7 @@ struct LineChart <: JSPlotsType
                         yaxis: {
                             title: getAxisLabel(Y_COL, Y_TRANSFORM),
                             // Force linear type for cumulative transforms to prevent auto-date detection
-                            type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                            type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                         },
                         hovermode: 'closest',
                         showlegend: true
@@ -510,7 +525,7 @@ struct LineChart <: JSPlotsType
                         layout[yaxis] = {
                             title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                             anchor: xaxis,
-                            type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                            type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                         };
 
                         // Add annotation for facet label
@@ -638,7 +653,7 @@ struct LineChart <: JSPlotsType
                             layout[yaxis] = {
                                 title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                                 anchor: xaxis,
-                                type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                                type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                             };
 
                             // Add annotations for facet labels
@@ -701,7 +716,11 @@ struct LineChart <: JSPlotsType
             x_cols = valid_x_cols,
             y_cols = valid_y_cols,
             default_x = valid_x_cols[1],
-            default_y = valid_y_cols[1]
+            default_y = valid_y_cols[1],
+            include_smoothing = true,
+            default_ewma_weight = default_ewma_weight,
+            default_ewmstd_weight = default_ewmstd_weight,
+            default_sma_window = default_sma_window
         )
 
         # Build attribute dropdowns

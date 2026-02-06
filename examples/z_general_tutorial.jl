@@ -700,7 +700,7 @@ line_chart = LineChart(:LineChart, df, :sales_data,
         (:segment, :default)
     ],
     facet_cols=[:region, :segment, :product, :month],
-    notes="A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LineChart examples</a>")
+    notes="A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. Try the Y Transform dropdown — in addition to log, z-score, cumulative, etc., there are smoothing transforms: EWMA (exponentially weighted moving average), EWMSTD (exponentially weighted moving standard deviation), and SMA (simple moving average). Each smoothing option shows a parameter input for weight or window size. <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html\" style=\"color: blue; font-weight: bold;\">See here for LineChart examples</a>")
 
 # AreaChart
 area_chart = AreaChart(:AreaChart, df, :sales_data,
@@ -822,6 +822,7 @@ cum_plot = CumPlot(:cum_plot, strategy_df, :strategy_data,
     title = "Strategy Performance Comparison",
     notes = "CumPlot compares cumulative performance of multiple strategies over time. All lines are normalized to start at 1 at the selected start date. Custom colors for asset_class (Equities=blue, Fixed Income=red). <a href=\"https://s-baumann.github.io/JSPlots.jl/dev/examples_html/cumplot_examples.html\" style=\"color: blue; font-weight: bold;\">See here for CumPlot examples</a>"
 )
+
 
 # More Exotic Plot Types
 # Corrplot.

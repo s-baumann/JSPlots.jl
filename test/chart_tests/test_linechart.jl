@@ -456,4 +456,81 @@ include("test_data.jl")
         # B and C should get default palette colors
         @test occursin("category", chart.functional_html)
     end
+
+    @testset "Smoothing - default parameters" begin
+        chart = LineChart(:smooth_defaults, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y]
+        )
+        # Smoothing options should appear in Y transform dropdown
+        @test occursin("ewma", chart.appearance_html)
+        @test occursin("ewmstd", chart.appearance_html)
+        @test occursin("sma", chart.appearance_html)
+        # Default parameter values should be present
+        @test occursin("ewma_weight_smooth_defaults", chart.appearance_html)
+        @test occursin("ewmstd_weight_smooth_defaults", chart.appearance_html)
+        @test occursin("sma_window_smooth_defaults", chart.appearance_html)
+        # JS should reference the smoothing functions
+        @test occursin("computeEWMA", chart.functional_html)
+        @test occursin("computeEWMSTD", chart.functional_html)
+        @test occursin("computeSMA", chart.functional_html)
+    end
+
+    @testset "Smoothing - custom parameters" begin
+        chart = LineChart(:smooth_custom, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y],
+            default_ewma_weight = 0.05,
+            default_ewmstd_weight = 0.2,
+            default_sma_window = 30
+        )
+        # Custom default values should appear in the HTML inputs
+        @test occursin("value=\"0.05\"", chart.appearance_html)
+        @test occursin("value=\"0.2\"", chart.appearance_html)
+        @test occursin("value=\"30\"", chart.appearance_html)
+    end
+
+    @testset "Smoothing - parameter boxes hidden by default" begin
+        chart = LineChart(:smooth_hidden, test_df, :test_df;
+            x_cols = [:x],
+            y_cols = [:y]
+        )
+        # Parameter divs should be hidden initially
+        @test occursin("id=\"ewma_param_smooth_hidden\" style=\"display:none", chart.appearance_html)
+        @test occursin("id=\"ewmstd_param_smooth_hidden\" style=\"display:none", chart.appearance_html)
+        @test occursin("id=\"sma_param_smooth_hidden\" style=\"display:none", chart.appearance_html)
+    end
+
+    @testset "Smoothing - HTML generation with smoothing" begin
+        mktempdir() do tmpdir
+            df_test = DataFrame(
+                x = 1:50,
+                y = cumsum(randn(50)),
+                category = repeat(["A", "B"], 25)
+            )
+
+            chart = LineChart(:smooth_page, df_test, :test_data;
+                x_cols = [:x],
+                y_cols = [:y],
+                color_cols = [:category],
+                default_ewma_weight = 0.15,
+                default_sma_window = 5
+            )
+
+            page = JSPlotPage(Dict(:test_data => df_test), [chart])
+            outfile = joinpath(tmpdir, "smooth_test.html")
+            create_html(page, outfile)
+
+            @test isfile(outfile)
+            content = read(outfile, String)
+            # Centralized JS functions should be in the HTML
+            @test occursin("function computeEWMA(", content)
+            @test occursin("function computeEWMSTD(", content)
+            @test occursin("function computeSMA(", content)
+            # getAxisLabel should handle smoothing labels
+            @test occursin("'ewma'", content)
+            @test occursin("'ewmstd'", content)
+            @test occursin("'sma'", content)
+        end
+    end
 end

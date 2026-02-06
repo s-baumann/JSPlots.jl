@@ -70,16 +70,25 @@ JSPlots.jl generates standalone, interactive HTML visualizations from Julia Data
 
 ### Adding a New Chart Type
 
+**Workflow: Do steps 1-5 first, then STOP and wait for user approval before proceeding to steps 6-10.** The user will review the chart in the examples file and may request changes before the full integration work is done.
+
+**Phase 1 — Implement and demo (do these, then stop):**
 1. Create `src/newchart.jl` with a struct extending `JSPlotsType`
 2. Implement constructor that builds `functional_html` and `appearance_html`
 3. Implement `dependencies(chart)` returning data labels used
 4. Implement `js_dependencies(chart)` returning required JS libraries (use `JS_DEP_*` constants)
 5. Add `include()` and `export` in `src/JSPlots.jl`
-6. Create test file `test/chart_tests/test_newchart.jl`
-7. Create example file `examples/newchart_examples.jl`
-8. Add to `examples/z_general_tutorial.jl` in the appropriate section page
-9. Add to the LinkList in z_general_tutorial.jl
-10. Add to README.md under the appropriate chart category
+6. Create example file `examples/newchart_examples.jl` demonstrating ALL optional kwargs
+7. Run the example file to generate the HTML so the user can review it
+
+**STOP here and wait for user approval.** Do NOT run the full test suite, add tests, update z_general_tutorial.jl, or update README.md until the user confirms the chart type is correct.
+
+**Phase 2 — Full integration (only after user approves):**
+8. Create test file `test/chart_tests/test_newchart.jl`
+9. Add to `examples/z_general_tutorial.jl` in the appropriate section page
+10. Add to the LinkList in z_general_tutorial.jl
+11. Add to README.md under the appropriate chart category
+12. Run the full test suite
 
 ### Common Patterns
 

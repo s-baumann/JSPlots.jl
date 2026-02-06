@@ -876,6 +876,7 @@ console.log('Parquet-wasm library loaded successfully');
     include("drawdownplot.jl")
     export DrawdownPlot
 
+
     include("localgaussiancorrelationplot.jl")
     export LocalGaussianCorrelationPlot
 

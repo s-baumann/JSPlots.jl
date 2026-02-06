@@ -1009,7 +1009,11 @@ function build_axis_controls_html(chart_title_safe::String,
                                   default_z::Union{Symbol,Nothing}=nothing,
                                   include_x_transform::Bool=false,
                                   include_y_transform::Bool=true,
-                                  include_cumulative::Bool=true)::String
+                                  include_cumulative::Bool=true,
+                                  include_smoothing::Bool=false,
+                                  default_ewma_weight::Float64=0.1,
+                                  default_ewmstd_weight::Float64=0.1,
+                                  default_sma_window::Int=10)::String
 
     if isempty(x_cols) && isempty(y_cols) && isempty(z_cols)
         return ""
@@ -1019,8 +1023,10 @@ function build_axis_controls_html(chart_title_safe::String,
     base_transform_options = ["identity", "log", "z_score", "quantile", "inverse_cdf"]
     # Cumulative options only for certain chart types (like LineChart)
     cumulative_options = include_cumulative ? ["cumulative", "cumprod"] : String[]
-    y_transform_options = vcat(base_transform_options, cumulative_options)
-    x_transform_options = base_transform_options  # X never has cumulative
+    # Smoothing options only for certain chart types (like LineChart)
+    smoothing_options = include_smoothing ? ["ewma", "ewmstd", "sma"] : String[]
+    y_transform_options = vcat(base_transform_options, cumulative_options, smoothing_options)
+    x_transform_options = base_transform_options  # X never has cumulative or smoothing
     transform_default = "identity"
 
     axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"
@@ -1095,14 +1101,29 @@ function build_axis_controls_html(chart_title_safe::String,
         if include_y_transform
             y_transform_opts = join(["""<option value="$(opt)"$(opt == transform_default ? " selected" : "")>$(opt)</option>"""
                                   for opt in y_transform_options], "\n")
+
+            # Build onchange handler: show/hide smoothing param boxes + call update function
+            y_transform_onchange = if include_smoothing
+                """(function(){
+                    var sel = document.getElementById('y_transform_select_$chart_title_safe').value;
+                    document.getElementById('ewma_param_$chart_title_safe').style.display = (sel === 'ewma') ? '' : 'none';
+                    document.getElementById('ewmstd_param_$chart_title_safe').style.display = (sel === 'ewmstd') ? '' : 'none';
+                    document.getElementById('sma_param_$chart_title_safe').style.display = (sel === 'sma') ? '' : 'none';
+                    $update_function;
+                })()"""
+            else
+                update_function
+            end
+
             axes_html *= """
                 <div>
                     <label for="y_transform_select_$chart_title_safe">Y Transform: </label>
-                    <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$update_function">
+                    <select id="y_transform_select_$chart_title_safe" style="padding: 5px 10px;" onchange="$y_transform_onchange">
                         $y_transform_opts
                     </select>
                 </div>
             """
+
         end
     end
 
@@ -1132,6 +1153,24 @@ function build_axis_controls_html(chart_title_safe::String,
     end
 
     axes_html *= "</div>\n"
+
+    # Add smoothing parameter input boxes below the axes flex row (hidden by default)
+    if include_smoothing
+        axes_html *= """
+            <div id="ewma_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+                <label for="ewma_weight_$chart_title_safe">EWMA weight: </label>
+                <input type="number" id="ewma_weight_$chart_title_safe" value="$default_ewma_weight" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="$update_function">
+            </div>
+            <div id="ewmstd_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+                <label for="ewmstd_weight_$chart_title_safe">EWMSTD weight: </label>
+                <input type="number" id="ewmstd_weight_$chart_title_safe" value="$default_ewmstd_weight" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="$update_function">
+            </div>
+            <div id="sma_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+                <label for="sma_window_$chart_title_safe">SMA window: </label>
+                <input type="number" id="sma_window_$chart_title_safe" value="$default_sma_window" min="1" step="1" style="width: 80px; padding: 3px;" onchange="$update_function">
+            </div>
+        """
+    end
 
     return axes_html
 end

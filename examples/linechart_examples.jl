@@ -377,6 +377,37 @@ struct_intro = TextBlock("""
 <p>Pass the struct to JSPlotPage and reference fields using dot notation: <code>Symbol("struct_name.field_name")</code></p>
 """)
 
+# Example 12: Smoothing Transforms (EWMA, EWMSTD, SMA)
+# Create noisy data where smoothing reveals the underlying trend
+smoothing_dates = Date(2024, 1, 1):Day(1):Date(2024, 12, 31)
+n_smooth = length(smoothing_dates)
+trend = range(100, 200, length=n_smooth)
+noise = randn(rng, n_smooth) .* 15
+smoothing_df = DataFrame(
+    Date = repeat(collect(smoothing_dates), 2),
+    Price = vcat(trend .+ noise, trend .* 1.1 .+ randn(rng, n_smooth) .* 20),
+    Asset = vcat(repeat(["Stock A"], n_smooth), repeat(["Stock B"], n_smooth))
+)
+
+chart12 = LineChart(:smoothing_demo, smoothing_df, :smoothing_data;
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:Asset],
+    default_ewma_weight = 0.05,
+    default_ewmstd_weight = 0.1,
+    default_sma_window = 20,
+    title = "Smoothing Transforms Demo (EWMA, EWMSTD, SMA)",
+    notes = """
+    Use the **Y Transform** dropdown to apply smoothing:
+    - **ewma**: Exponentially Weighted Moving Average — smooths prices with configurable weight (lower = smoother)
+    - **ewmstd**: Exponentially Weighted Moving Std Dev — shows rolling volatility
+    - **sma**: Simple Moving Average — trailing average over N periods
+
+    Each smoothing transform reveals a parameter input box where you can adjust the weight or window size.
+    The chart updates immediately when you change the parameter.
+    """
+)
+
 conclusion = TextBlock("""
 <h2>Key Features Summary</h2>
 <ul>
@@ -406,19 +437,26 @@ page = JSPlotPage(
         :agg_data => agg_df,
         :multi_data => df_multi,
         :continuous_filter_data => continuous_filter_df,
-        :financial => financial_data  # Struct with prices and volumes DataFrames
+        :financial => financial_data,  # Struct with prices and volumes DataFrames
+        :smoothing_data => smoothing_df
     ),
-    [header, chart1, chart2, chart3, chart3b, chart3c, pic, chart5, chart6, chart7, chart8, chart9, chart10, struct_intro, struct_chart, conclusion],
+    [header, chart1, chart2, chart3, chart3b, chart3c, pic, chart5, chart6, chart7, chart8, chart9, chart10, struct_intro, struct_chart, chart12, conclusion],
     tab_title = "LineChart Examples"
 )
+
+# Output to the main generated_html_examples directory
+output_dir = joinpath(dirname(@__DIR__), "generated_html_examples")
+if !isdir(output_dir)
+    mkpath(output_dir)
+end
+
 
 # Manifest entry for report index
 manifest_entry = ManifestEntry(path="..", html_filename="linechart_examples.html",
                                description="LineChart Examples", date=today(),
                                extra_columns=Dict(:chart_type => "2D Charts", :page_type => "Chart Tutorial"))
-create_html(page, "generated_html_examples/linechart_examples.html";
-            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry)
-
+create_html(page, joinpath(output_dir, "linechart_examples.html");
+            manifest=joinpath(output_dir, "z_general_example/manifest.csv"), manifest_entry=manifest_entry)
 println("\n" * "="^60)
 println("LineChart examples created successfully!")
 println("="^60)
@@ -434,4 +472,5 @@ println("  • Aggregation demo (mean, median, count, min, max)")
 println("  • Dynamic X and Y dimension selection")
 println("  • Continuous range filters with jQuery UI sliders")
 println("  • Struct data source (referencing struct fields via dot notation)")
+println("  • Smoothing transforms (EWMA, EWMSTD, SMA)")
 println("  • Integration with images and text")
