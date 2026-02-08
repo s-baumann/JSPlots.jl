@@ -863,11 +863,11 @@ function build_corrplot_functional_html(chart_title_str, data_label, scenarios,
                         positions[clusterId] = mergePos;
                         heights[clusterId] = height;
 
-                        // Draw U-shaped connection
+                        // Draw U-shaped connection (xref/yref must be 'x'/'y' for data coordinates)
                         shapes.push(
-                            {type: 'line', x0: leftPos, y0: leftHeight, x1: leftPos, y1: height, line: {color: '#636efa', width: 2}},
-                            {type: 'line', x0: leftPos, y0: height, x1: rightPos, y1: height, line: {color: '#636efa', width: 2}},
-                            {type: 'line', x0: rightPos, y0: rightHeight, x1: rightPos, y1: height, line: {color: '#636efa', width: 2}}
+                            {type: 'line', xref: 'x', yref: 'y', x0: leftPos, y0: leftHeight, x1: leftPos, y1: height, line: {color: '#636efa', width: 2}},
+                            {type: 'line', xref: 'x', yref: 'y', x0: leftPos, y0: height, x1: rightPos, y1: height, line: {color: '#636efa', width: 2}},
+                            {type: 'line', xref: 'x', yref: 'y', x0: rightPos, y0: rightHeight, x1: rightPos, y1: height, line: {color: '#636efa', width: 2}}
                         );
                     } else if (leftInSelection) {
                         positions[clusterId] = positions[left];
@@ -923,6 +923,8 @@ function build_corrplot_functional_html(chart_title_str, data_label, scenarios,
                     scaledShapes = shapes.map(function(shape) {
                         return {
                             type: shape.type,
+                            xref: shape.xref,
+                            yref: shape.yref,
                             x0: shape.x0,
                             y0: shape.y0 * scaleFactor,
                             x1: shape.x1,
