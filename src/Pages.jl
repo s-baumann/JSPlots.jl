@@ -205,24 +205,28 @@ struct JSPlotPage
 end
 
 """
-    Pages(coverpage::JSPlotPage, pages::Vector{JSPlotPage}; dataformat=nothing)
+    Pages(coverpage::JSPlotPage, pages::Vector{<:Union{JSPlotPage, Pages}}; dataformat=nothing)
 
 A container for multiple linked HTML pages with a coverpage.
 
 Creates a multi-page report with a main landing page (coverpage) and additional subpages.
-All HTML files are created at the same level in a flat project folder structure.
+Supports nesting: children can be `JSPlotPage` (flat HTML files) or `Pages` (subdirectories
+with their own coverpage and children). Nested `Pages` get their own subdirectory and data
+directory, so data labels are isolated between siblings.
 
 # Arguments
 - `coverpage::JSPlotPage`: The main landing page (index page) for the report
-- `pages::Vector{JSPlotPage}`: Vector of additional pages to include
+- `pages::Vector{<:Union{JSPlotPage, Pages}}`: Vector of additional pages or nested sub-reports
 
 # Keyword Arguments
 - `dataformat::Union{Nothing,Symbol}`: Optional data format override that applies to all pages (default: `nothing`, uses coverpage format)
 
 # Alternate Constructor
-    Pages(coverpage_content::Vector, pages::Vector{JSPlotPage}; tab_title="Home", page_header="", dataformat=:parquet)
+    Pages(coverpage_content::Vector, pages::Vector{<:Union{JSPlotPage, Pages}}; tab_title="Home", page_header="", dataformat=:parquet)
 
 Easy constructor that automatically builds a LinkList from pages and creates the coverpage.
+For `JSPlotPage` children, links point to flat HTML files. For nested `Pages` children, links
+point into the subdirectory.
 
 # Examples
 ```julia
@@ -233,28 +237,33 @@ page2 = JSPlotPage(dfs, [chart2], tab_title="Cost Analysis")
 # Create multi-page report using easy constructor
 report = Pages([TextBlock("<h1>Welcome</h1>")], [page1, page2], dataformat=:parquet)
 create_html(report, "report.html")
+
+# Nested Pages (sub-reports get their own subdirectory)
+sub_report = Pages([TextBlock("<h1>Sub</h1>")], [page1], tab_title="Sub Report", dataformat=:parquet)
+report = Pages([TextBlock("<h1>Main</h1>")], [page2, sub_report], dataformat=:parquet)
+create_html(report, "report.html")
 ```
 """
 struct Pages
     coverpage::JSPlotPage
-    pages::Vector{JSPlotPage}
+    pages::Vector{Union{JSPlotPage, Pages}}
     dataformat::Symbol
 
-    function Pages(coverpage::JSPlotPage, pages::Vector{JSPlotPage}; dataformat::Union{Nothing,Symbol}=nothing)
+    function Pages(coverpage::JSPlotPage, pages::Vector{<:Union{JSPlotPage, Pages}}; dataformat::Union{Nothing,Symbol}=nothing)
         # If dataformat is specified, it overrides all page dataformats
         if dataformat !== nothing
             if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
                 error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
             end
-            new(coverpage, pages, dataformat)
+            new(coverpage, Vector{Union{JSPlotPage, Pages}}(pages), dataformat)
         else
             # Use the coverpage's dataformat as default
-            new(coverpage, pages, coverpage.dataformat)
+            new(coverpage, Vector{Union{JSPlotPage, Pages}}(pages), coverpage.dataformat)
         end
     end
 
     # Easy constructor that automatically builds LinkList from pages
-    function Pages(coverpage_content::Vector, pages::Vector{JSPlotPage};
+    function Pages(coverpage_content::Vector, pages::Vector{<:Union{JSPlotPage, Pages}};
                    tab_title::String="Home",
                    page_header::String="",
                    dataformat::Symbol=:parquet)
@@ -265,13 +274,22 @@ struct Pages
 
         # Build the LinkList automatically from the pages
         links = Tuple{String, String, String}[]
-        for page in pages
-            # Use sanitized tab_title for the filename
-            sanitized_name = sanitize_filename(page.tab_title)
-            link_url = "$(sanitized_name).html"
-            link_title = page.tab_title
-            link_blurb = page.notes
-            push!(links, (link_title, link_url, link_blurb))
+        for item in pages
+            if item isa JSPlotPage
+                # Flat page: link to HTML file at same level
+                sanitized_name = sanitize_filename(item.tab_title)
+                link_url = "$(sanitized_name).html"
+                link_title = item.tab_title
+                link_blurb = item.notes
+                push!(links, (link_title, link_url, link_blurb))
+            elseif item isa Pages
+                # Nested Pages: link into subdirectory
+                sanitized_name = sanitize_filename(item.coverpage.tab_title)
+                link_url = "$(sanitized_name)/$(sanitized_name).html"
+                link_title = item.coverpage.tab_title
+                link_blurb = item.coverpage.notes
+                push!(links, (link_title, link_url, link_blurb))
+            end
         end
 
         # Create the LinkList
@@ -287,11 +305,11 @@ struct Pages
             dataformat = dataformat
         )
 
-        new(coverpage, pages, dataformat)
+        new(coverpage, Vector{Union{JSPlotPage, Pages}}(pages), dataformat)
     end
 
     # Easy constructor with grouped pages that creates LinkList with subheadings
-    function Pages(coverpage_content::Vector, grouped_pages::OrderedCollections.OrderedDict{String, Vector{JSPlotPage}};
+    function Pages(coverpage_content::Vector, grouped_pages::OrderedCollections.OrderedDict{String, <:Vector{<:Union{JSPlotPage, Pages}}};
                    tab_title::String="Home",
                    page_header::String="",
                    dataformat::Symbol=:parquet)
@@ -302,18 +320,25 @@ struct Pages
 
         # Build the grouped LinkList automatically from the grouped pages
         grouped_links = OrderedCollections.OrderedDict{String, Vector{Tuple{String, String, String}}}()
-        all_pages = JSPlotPage[]
+        all_pages = Vector{Union{JSPlotPage, Pages}}()
 
         for (heading, pages_in_group) in grouped_pages
             links = Tuple{String, String, String}[]
-            for page in pages_in_group
-                # Use sanitized tab_title for the filename
-                sanitized_name = sanitize_filename(page.tab_title)
-                link_url = "$(sanitized_name).html"
-                link_title = page.tab_title
-                link_blurb = page.notes
-                push!(links, (link_title, link_url, link_blurb))
-                push!(all_pages, page)
+            for item in pages_in_group
+                if item isa JSPlotPage
+                    sanitized_name = sanitize_filename(item.tab_title)
+                    link_url = "$(sanitized_name).html"
+                    link_title = item.tab_title
+                    link_blurb = item.notes
+                    push!(links, (link_title, link_url, link_blurb))
+                elseif item isa Pages
+                    sanitized_name = sanitize_filename(item.coverpage.tab_title)
+                    link_url = "$(sanitized_name)/$(sanitized_name).html"
+                    link_title = item.coverpage.tab_title
+                    link_blurb = item.coverpage.notes
+                    push!(links, (link_title, link_url, link_blurb))
+                end
+                push!(all_pages, item)
             end
             grouped_links[heading] = links
         end

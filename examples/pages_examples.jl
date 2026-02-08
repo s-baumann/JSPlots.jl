@@ -393,10 +393,177 @@ println("  - data/struct_data/aa.parquet")
 println("  - data/struct_data/bb.parquet")
 println("  - data/standalone_data.parquet")
 
+# ==============================================================================
+# Example 4: Nested Pages (Hierarchical Multi-Page Report)
+# ==============================================================================
+println("\n=== Example 4: Nested Pages (Hierarchical Report) ===")
+
+# --- Commodities Sub-Report ---
+println("  Creating Commodities sub-report...")
+
+# Oil data
+dates_oil = Date(2024, 1, 1):Day(1):Date(2024, 6, 30)
+df_oil_prices = DataFrame(
+    Date = dates_oil,
+    Price = cumsum(randn(rng, length(dates_oil)) .* 2 .+ 75),
+    Volume = rand(rng, 1000:5000, length(dates_oil)),
+    Grade = rand(rng, ["WTI", "Brent"], length(dates_oil))
+)
+
+oil_chart = LineChart(:oil_price, df_oil_prices, :prices;
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:Grade],
+    title = "Oil Prices by Grade"
+)
+
+oil_page = JSPlotPage(
+    Dict(:prices => df_oil_prices),
+    [TextBlock("<h2>Oil Analysis</h2><p>Daily oil price movements by grade.</p>"), oil_chart],
+    tab_title = "Oil Analysis",
+    page_header = "Oil Price Analysis",
+    notes = "WTI and Brent crude oil price tracking"
+)
+
+# Gold data
+df_gold_prices = DataFrame(
+    Date = dates_oil,
+    Price = cumsum(randn(rng, length(dates_oil)) .* 5 .+ 1950),
+    Volume = rand(rng, 500:3000, length(dates_oil)),
+    Market = rand(rng, ["London", "New York"], length(dates_oil))
+)
+
+gold_chart = LineChart(:gold_price, df_gold_prices, :prices;
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:Market],
+    title = "Gold Prices by Market"
+)
+
+gold_page = JSPlotPage(
+    Dict(:prices => df_gold_prices),
+    [TextBlock("<h2>Gold Analysis</h2><p>Daily gold price movements by market.</p>"), gold_chart],
+    tab_title = "Gold Analysis",
+    page_header = "Gold Price Analysis",
+    notes = "London and New York gold price tracking"
+)
+
+commodities_report = Pages(
+    [TextBlock("""
+    <h1>Commodities Report</h1>
+    <p>Analysis of commodity markets including oil and gold prices.</p>
+    """)],
+    [oil_page, gold_page],
+    tab_title = "Commodities",
+    page_header = "Commodities Report",
+    dataformat = :parquet
+)
+
+# --- Equities Sub-Report ---
+println("  Creating Equities sub-report...")
+
+# Tech stocks data
+df_tech_prices = DataFrame(
+    Date = dates_oil,
+    Price = cumsum(randn(rng, length(dates_oil)) .* 3 .+ 150),
+    Volume = rand(rng, 10000:50000, length(dates_oil)),
+    Ticker = rand(rng, ["AAPL", "MSFT", "GOOGL"], length(dates_oil))
+)
+
+tech_chart = LineChart(:tech_price, df_tech_prices, :prices;
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:Ticker],
+    title = "Tech Stock Prices"
+)
+
+tech_page = JSPlotPage(
+    Dict(:prices => df_tech_prices),
+    [TextBlock("<h2>Tech Stocks</h2><p>Major technology stock price movements.</p>"), tech_chart],
+    tab_title = "Tech Stocks",
+    page_header = "Technology Sector Analysis",
+    notes = "AAPL, MSFT, and GOOGL price tracking"
+)
+
+# Finance stocks data
+df_finance_prices = DataFrame(
+    Date = dates_oil,
+    Price = cumsum(randn(rng, length(dates_oil)) .* 2 .+ 45),
+    Volume = rand(rng, 5000:30000, length(dates_oil)),
+    Ticker = rand(rng, ["JPM", "GS", "BAC"], length(dates_oil))
+)
+
+finance_chart = LineChart(:finance_price, df_finance_prices, :prices;
+    x_cols = [:Date],
+    y_cols = [:Price],
+    color_cols = [:Ticker],
+    title = "Finance Stock Prices"
+)
+
+finance_page = JSPlotPage(
+    Dict(:prices => df_finance_prices),
+    [TextBlock("<h2>Finance Stocks</h2><p>Major financial sector stock prices.</p>"), finance_chart],
+    tab_title = "Finance Stocks",
+    page_header = "Financial Sector Analysis",
+    notes = "JPM, GS, and BAC price tracking"
+)
+
+equities_report = Pages(
+    [TextBlock("""
+    <h1>Equities Report</h1>
+    <p>Analysis of equity markets including technology and financial sectors.</p>
+    """)],
+    [tech_page, finance_page],
+    tab_title = "Equities",
+    page_header = "Equities Report",
+    dataformat = :parquet
+)
+
+# --- Top-Level Investment Report ---
+println("  Creating top-level Investment Report...")
+
+investment_report = Pages(
+    [TextBlock("""
+    <a href="https://github.com/s-baumann/JSPlots.jl/blob/main/examples/pages_examples.jl" style="color: blue; font-weight: bold;">See here for the example code that generated this page</a>
+    <h1>Investment Report</h1>
+    <p>This is a hierarchical multi-page report demonstrating <strong>nested Pages</strong>.</p>
+    <p>Each sub-report (Commodities, Equities) has its own directory with its own data files.
+    Both use a <code>:prices</code> data label, but with different DataFrames — demonstrating data isolation.</p>
+    <p>Navigate into each sub-report and check the footer for <strong>breadcrumb navigation</strong>
+    linking back to parent levels.</p>
+    """)],
+    [commodities_report, equities_report],
+    tab_title = "Investment Report",
+    page_header = "Investment Report",
+    dataformat = :parquet
+)
+
+manifest_entry4 = ManifestEntry(path="../nested_report", html_filename="nested_report.html",
+                               description="Nested Multi-Page Report", date=today(),
+                               extra_columns=Dict(:chart_type => "Multi-Page Reports", :page_type => "Multi-Page Example"))
+create_html(investment_report, joinpath("generated_html_examples", "nested_report.html");
+            manifest="generated_html_examples/z_general_example/manifest.csv", manifest_entry=manifest_entry4)
+
+println("\n" * "="^60)
+println("Nested Pages example complete!")
+println("="^60)
+println("Output location: generated_html_examples/nested_report/")
+println("  - nested_report.html (top-level coverpage)")
+println("  - commodities/")
+println("    - commodities.html (commodities coverpage)")
+println("    - oil_analysis.html")
+println("    - gold_analysis.html")
+println("    - data/prices.parquet")
+println("  - equities/")
+println("    - equities.html (equities coverpage)")
+println("    - tech_stocks.html")
+println("    - finance_stocks.html")
+println("    - data/prices.parquet")
+
 println("\n" * "="^70)
 println("Pages examples complete!")
 println("="^70)
-println("\nThree examples created:")
+println("\nFour examples created:")
 println("\n1. Manual LinkList Construction:")
 println("   - generated_html_examples/annual_report/annual_report.html")
 println("   - Full control over link descriptions")
@@ -409,6 +576,12 @@ println("\n3. Dataset Selection with Parquet:")
 println("   - generated_html_examples/dataset_selection_parquet/dataset_selection_parquet.html")
 println("   - Struct with DataFrames automatically extracted")
 println("   - Dataset dropdown to switch between parquet files")
+println("\n4. Nested Pages (Hierarchical Report):")
+println("   - generated_html_examples/nested_report/nested_report.html")
+println("   - Commodities and Equities sub-reports in subdirectories")
+println("   - Data isolation: same :prices label, different data")
+println("   - Breadcrumb navigation in footer")
 println("\nOpen with: cd generated_html_examples/annual_report && ./open.sh (Linux/Mac)")
 println("       or: cd generated_html_examples/easy_report && ./open.sh (Linux/Mac)")
 println("       or: cd generated_html_examples/dataset_selection_parquet && ./open.sh (Linux/Mac)")
+println("       or: cd generated_html_examples/nested_report && ./open.sh (Linux/Mac)")

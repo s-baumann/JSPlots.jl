@@ -1013,7 +1013,8 @@ function build_axis_controls_html(chart_title_safe::String,
                                   include_smoothing::Bool=false,
                                   default_ewma_weight::Float64=0.1,
                                   default_ewmstd_weight::Float64=0.1,
-                                  default_sma_window::Int=10)::String
+                                  default_sma_window::Int=10,
+                                  default_y_transform::String="identity")::String
 
     if isempty(x_cols) && isempty(y_cols) && isempty(z_cols)
         return ""
@@ -1027,7 +1028,7 @@ function build_axis_controls_html(chart_title_safe::String,
     smoothing_options = include_smoothing ? ["ewma", "ewmstd", "sma"] : String[]
     y_transform_options = vcat(base_transform_options, cumulative_options, smoothing_options)
     x_transform_options = base_transform_options  # X never has cumulative or smoothing
-    transform_default = "identity"
+    transform_default = default_y_transform
 
     axes_html = "<h4 style=\"margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;\">Axes</h4>\n"
 
@@ -1157,15 +1158,15 @@ function build_axis_controls_html(chart_title_safe::String,
     # Add smoothing parameter input boxes below the axes flex row (hidden by default)
     if include_smoothing
         axes_html *= """
-            <div id="ewma_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+            <div id="ewma_param_$chart_title_safe" style="display:$(transform_default == "ewma" ? "" : "none"); margin-top: 5px;">
                 <label for="ewma_weight_$chart_title_safe">EWMA weight: </label>
                 <input type="number" id="ewma_weight_$chart_title_safe" value="$default_ewma_weight" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="$update_function">
             </div>
-            <div id="ewmstd_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+            <div id="ewmstd_param_$chart_title_safe" style="display:$(transform_default == "ewmstd" ? "" : "none"); margin-top: 5px;">
                 <label for="ewmstd_weight_$chart_title_safe">EWMSTD weight: </label>
                 <input type="number" id="ewmstd_weight_$chart_title_safe" value="$default_ewmstd_weight" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="$update_function">
             </div>
-            <div id="sma_param_$chart_title_safe" style="display:none; margin-top: 5px;">
+            <div id="sma_param_$chart_title_safe" style="display:$(transform_default == "sma" ? "" : "none"); margin-top: 5px;">
                 <label for="sma_window_$chart_title_safe">SMA window: </label>
                 <input type="number" id="sma_window_$chart_title_safe" value="$default_sma_window" min="1" step="1" style="width: 80px; padding: 3px;" onchange="$update_function">
             </div>

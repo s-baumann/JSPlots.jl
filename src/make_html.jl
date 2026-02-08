@@ -45,6 +45,61 @@ function convert_zoneddatetime_to_datetime(df::DataFrame)
     return df_converted
 end
 
+"""
+    period_to_minutes(p::Dates.Period) -> Int
+
+Convert a Dates.Period to integer minutes. For fixed-length periods (Day, Hour, Minute, etc.)
+the conversion is exact (sub-minute periods are rounded). For variable-length periods
+(Month, Quarter, Year) we use standard approximations (30.44 days/month, 365.25 days/year)
+so that ordering is preserved in the browser.
+"""
+function period_to_minutes(p::Dates.FixedPeriod)::Int
+    return round(Int, Dates.value(Dates.Millisecond(p)) / 60_000)
+end
+function period_to_minutes(p::Dates.Month)::Int
+    return round(Int, Dates.value(p) * 30.44 * 24 * 60)
+end
+function period_to_minutes(p::Dates.Quarter)::Int
+    return round(Int, Dates.value(p) * 3 * 30.44 * 24 * 60)
+end
+function period_to_minutes(p::Dates.Year)::Int
+    return round(Int, Dates.value(p) * 365.25 * 24 * 60)
+end
+
+"""
+    convert_period_to_minutes(df::DataFrame) -> DataFrame
+
+Convert Dates.Period columns to integer minutes for DuckDB/parquet compatibility
+and correct ordering in the browser. Fixed-length periods (Day, Hour, etc.) are converted
+exactly; variable-length periods (Month, Year) use standard approximations.
+"""
+function convert_period_to_minutes(df::DataFrame)
+    needs_conversion = false
+    for col in names(df)
+        col_type = eltype(df[!, col])
+        base_type = col_type isa Union ? Base.uniontypes(col_type) : (col_type,)
+        if any(t -> t <: Dates.Period, base_type)
+            needs_conversion = true
+            break
+        end
+    end
+
+    if !needs_conversion
+        return df
+    end
+
+    df_converted = copy(df)
+    for col in names(df_converted)
+        col_type = eltype(df_converted[!, col])
+        base_type = col_type isa Union ? Base.uniontypes(col_type) : (col_type,)
+        if any(t -> t <: Dates.Period, base_type)
+            df_converted[!, col] = [ismissing(x) ? missing : period_to_minutes(x) for x in df_converted[!, col]]
+        end
+    end
+
+    return df_converted
+end
+
 const FULL_PAGE_TEMPLATE = raw"""
 <!DOCTYPE html>
 <html>
@@ -1665,7 +1720,10 @@ ___DATASETS___
 
 ___PIVOT_TABLES___
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v___VERSION___.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small>___BREADCRUMB___</small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v___VERSION___.</small>
+</div>
 </body>
 </html>
 """
@@ -1673,6 +1731,8 @@ ___PIVOT_TABLES___
 function dataset_to_html(data_label::Symbol, df::DataFrame, format::Symbol=:csv_embedded)
     # Convert ZonedDateTime columns to DateTime for proper display
     df = convert_zoneddatetime_to_datetime(df)
+    # Convert Period columns to milliseconds for correct ordering in the browser
+    df = convert_period_to_minutes(df)
 
     data_string = ""
     data_src = ""
@@ -2095,6 +2155,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
         full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
+        full_page_html = replace(full_page_html, "___BREADCRUMB___" => "")
 
         # Save HTML file
         open(actual_html_path, "w") do outfile
@@ -2200,6 +2261,7 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
         full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
         full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
         full_page_html = replace(full_page_html, "___VERSION___" => version_str)
+        full_page_html = replace(full_page_html, "___BREADCRUMB___" => "")
 
         open(outfile_path, "w") do outfile
             write(outfile, full_page_html)
@@ -2266,7 +2328,7 @@ end
 Helper function to generate HTML content for a single page without creating folders.
 Returns the HTML string directly.
 """
-function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol, project_dir::String="")
+function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol, project_dir::String=""; breadcrumb_html::String="")
     # Collect extra styles
     extra_styles = ""
     has_textblock = any(p -> isa(p, TextBlock), page.pivot_tables)
@@ -2385,6 +2447,7 @@ function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}
     full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
     full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
     full_page_html = replace(full_page_html, "___VERSION___" => version_str)
+    full_page_html = replace(full_page_html, "___BREADCRUMB___" => breadcrumb_html)
 
     return full_page_html
 end
@@ -2399,6 +2462,9 @@ For example, `Symbol("my_struct.field")` saves to `data/my_struct/field.parquet`
 function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dataformat::Symbol)
     # Convert ZonedDateTime columns to DateTime for proper display
     df = convert_zoneddatetime_to_datetime(df)
+
+    # Convert Period columns to milliseconds (DuckDB/parquet cannot handle Dates.Period types)
+    df = convert_period_to_minutes(df)
 
     # Check if this is a struct-extracted DataFrame (contains '.')
     # Struct-extracted DataFrames use subfolder structure: data/struct_name/field.parquet
@@ -2457,107 +2523,159 @@ function save_dataframe(data_label::Symbol, df::DataFrame, data_dir::String, dat
     end
 end
 
-# Method for Pages - creates multiple HTML files with shared data in a flat structure
+# Method for Pages - creates multiple HTML files with shared data
+# Supports nested Pages (subdirectories) and breadcrumb navigation
 function create_html(jsp::Pages, outfile_path::String="index.html";
                      manifest::Union{String,Nothing}=nothing,
-                     manifest_entry::Union{ManifestEntry,Nothing}=nothing)
+                     manifest_entry::Union{ManifestEntry,Nothing}=nothing,
+                     breadcrumbs::Vector{Tuple{String,String}}=Tuple{String,String}[])
     # Extract directory and base name
     original_dir = dirname(outfile_path)
     original_name = basename(outfile_path)
     name_without_ext = splitext(original_name)[1]
 
-    # Create project folder (flat structure: all HTML files at same level)
+    # Create project folder
     project_dir = isempty(original_dir) ? name_without_ext : joinpath(original_dir, name_without_ext)
     if !isdir(project_dir)
         mkpath(project_dir)
     end
 
-    # Collect all unique dataframes across all pages
+    # Build breadcrumb HTML from the breadcrumbs vector
+    breadcrumb_html = if isempty(breadcrumbs)
+        ""
+    else
+        join(["""<a href="$(url)">$(title)</a>""" for (title, url) in breadcrumbs], " &gt; ")
+    end
+
+    # Collect dataframes only from JSPlotPage items at this level (not nested Pages)
+    # This ensures data isolation between nested Pages
     all_dataframes = Dict{Symbol, DataFrame}()
     merge!(all_dataframes, jsp.coverpage.dataframes)
-    for page in jsp.pages
-        merge!(all_dataframes, page.dataframes)
+    for item in jsp.pages
+        if item isa JSPlotPage
+            merge!(all_dataframes, item.dataframes)
+        end
+        # Skip Pages items - they manage their own data
     end
 
     # If using external data format, create data directory and save each datasource once
     if jsp.dataformat in [:csv_external, :json_external, :parquet]
-        data_dir = joinpath(project_dir, "data")
-        if !isdir(data_dir)
-            mkpath(data_dir)
-        end
-
-        # Collect all data dependencies across all pages
+        # Collect data dependencies only from JSPlotPage items at this level
         all_dependencies = Set{Symbol}()
         for pt in jsp.coverpage.pivot_tables
             union!(all_dependencies, dependencies(pt))
         end
-        for page in jsp.pages
-            for pt in page.pivot_tables
-                union!(all_dependencies, dependencies(pt))
+        for item in jsp.pages
+            if item isa JSPlotPage
+                for pt in item.pivot_tables
+                    union!(all_dependencies, dependencies(pt))
+                end
             end
         end
 
-        # Save each unique datasource only once
-        for data_label in all_dependencies
-            if haskey(all_dataframes, data_label)
-                save_dataframe(data_label, all_dataframes[data_label], data_dir, jsp.dataformat)
+        # Only create data dir if there are dependencies to save
+        if !isempty(all_dependencies)
+            data_dir = joinpath(project_dir, "data")
+            if !isdir(data_dir)
+                mkpath(data_dir)
+            end
+
+            # Save each unique datasource only once
+            for data_label in all_dependencies
+                if haskey(all_dataframes, data_label)
+                    save_dataframe(data_label, all_dataframes[data_label], data_dir, jsp.dataformat)
+                end
             end
         end
     end
 
     # Generate coverpage HTML
     coverpage_path = joinpath(project_dir, original_name)
-    coverpage_html = generate_page_html(jsp.coverpage, all_dataframes, jsp.dataformat, project_dir)
+    coverpage_html = generate_page_html(jsp.coverpage, all_dataframes, jsp.dataformat, project_dir; breadcrumb_html=breadcrumb_html)
     open(coverpage_path, "w") do f
         write(f, coverpage_html)
     end
     println("Created coverpage: $coverpage_path")
 
-    # Generate each subpage HTML using sanitized tab_title
-    # Note: We need to use the same sanitize_filename function used in Pages.jl
-    # to ensure links match filenames
-    for (i, page) in enumerate(jsp.pages)
-        sanitized_name = sanitize_filename(page.tab_title)
-        page_filename = "$(sanitized_name).html"
-        page_path = joinpath(project_dir, page_filename)
-        page_html = generate_page_html(page, all_dataframes, jsp.dataformat, project_dir)
-        open(page_path, "w") do f
-            write(f, page_html)
+    # Build breadcrumb HTML for child pages: includes this level's coverpage too
+    # (the coverpage itself only shows parent breadcrumbs, but child pages also link back to the coverpage)
+    child_page_breadcrumb_html = if isempty(breadcrumbs)
+        """<a href="$(original_name)">$(jsp.coverpage.tab_title)</a>"""
+    else
+        breadcrumb_html * """ &gt; <a href="$(original_name)">$(jsp.coverpage.tab_title)</a>"""
+    end
+
+    # Generate each child: JSPlotPage gets a flat HTML file, Pages gets a subdirectory
+    for item in jsp.pages
+        if item isa JSPlotPage
+            sanitized_name = sanitize_filename(item.tab_title)
+            page_filename = "$(sanitized_name).html"
+            page_path = joinpath(project_dir, page_filename)
+            page_html = generate_page_html(item, all_dataframes, jsp.dataformat, project_dir; breadcrumb_html=child_page_breadcrumb_html)
+            open(page_path, "w") do f
+                write(f, page_html)
+            end
+            println("Created page '$(item.tab_title)': $page_path")
+        elseif item isa Pages
+            # Nested Pages: create subdirectory and recurse
+            # Pass outfile inside project_dir so the function creates sub_name/ automatically
+            sub_name = sanitize_filename(item.coverpage.tab_title)
+            sub_outfile = joinpath(project_dir, "$(sub_name).html")
+
+            # Build breadcrumbs for the child: prepend ../ to all existing URLs, then add this level
+            child_breadcrumbs = Tuple{String,String}[]
+            for (title, url) in breadcrumbs
+                push!(child_breadcrumbs, (title, "../$url"))
+            end
+            # Add this level's coverpage as a breadcrumb
+            push!(child_breadcrumbs, (jsp.coverpage.tab_title, "../$original_name"))
+
+            create_html(item, sub_outfile; breadcrumbs=child_breadcrumbs)
+            println("Created nested sub-report '$(item.coverpage.tab_title)': $(joinpath(project_dir, sub_name))/")
         end
-        println("Created page '$(page.tab_title)': $page_path")
     end
 
-    # Generate launcher scripts at project root
-    bat_path = joinpath(project_dir, "open.bat")
-    sh_path = joinpath(project_dir, "open.sh")
-    readme_path = joinpath(project_dir, "README.md")
+    # Generate launcher scripts only at the top level (not in nested sub-reports)
+    if isempty(breadcrumbs)
+        bat_path = joinpath(project_dir, "open.bat")
+        sh_path = joinpath(project_dir, "open.sh")
+        readme_path = joinpath(project_dir, "README.md")
 
-    open(bat_path, "w") do f
-        write(f, generate_bat_launcher(original_name))
+        open(bat_path, "w") do f
+            write(f, generate_bat_launcher(original_name))
+        end
+
+        open(sh_path, "w") do f
+            write(f, generate_sh_launcher(original_name))
+        end
+
+        open(readme_path, "w") do f
+            write(f, generate_readme_content(original_name))
+        end
+
+        # Make shell script executable on Unix-like systems
+        try
+            chmod(sh_path, 0o755)
+        catch
+            # Silently fail on Windows
+        end
     end
 
-    open(sh_path, "w") do f
-        write(f, generate_sh_launcher(original_name))
-    end
-
-    open(readme_path, "w") do f
-        write(f, generate_readme_content(original_name))
-    end
-
-    # Make shell script executable on Unix-like systems
-    try
-        chmod(sh_path, 0o755)
-    catch
-        # Silently fail on Windows
-    end
-
+    # Print summary
     println("\nMulti-page project created:")
     println("  Location: $project_dir")
     println("  Main page: $original_name")
-    println("  Subpages: $(length(jsp.pages))")
-    for page in jsp.pages
-        sanitized_name = sanitize_filename(page.tab_title)
-        println("    - $(page.tab_title): $(sanitized_name).html")
+    n_flat = count(item -> item isa JSPlotPage, jsp.pages)
+    n_nested = count(item -> item isa Pages, jsp.pages)
+    println("  Subpages: $n_flat flat, $n_nested nested")
+    for item in jsp.pages
+        if item isa JSPlotPage
+            sanitized_name = sanitize_filename(item.tab_title)
+            println("    - $(item.tab_title): $(sanitized_name).html")
+        elseif item isa Pages
+            sub_name = sanitize_filename(item.coverpage.tab_title)
+            println("    - $(item.coverpage.tab_title): $(sub_name)/ (sub-report)")
+        end
     end
     if jsp.dataformat in [:csv_external, :json_external, :parquet]
         println("  Data format: $(jsp.dataformat) (shared in data/ folder)")
@@ -2565,7 +2683,7 @@ function create_html(jsp::Pages, outfile_path::String="index.html";
         println("  Data format: $(jsp.dataformat) (embedded in each HTML)")
     end
 
-    # Add to manifest if specified
+    # Add to manifest if specified (only at top level)
     if manifest !== nothing && manifest_entry !== nothing
         add_to_manifest(manifest, manifest_entry; fill_missing=true)
     end

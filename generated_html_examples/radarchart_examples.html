@@ -521,6 +521,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -609,6 +814,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1208,11 +1419,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -4045,7 +4260,7 @@ $(function(){
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="investments_data" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_investments_data" data-format="csv_embedded" data-src="">
 label,asset_class,Expected_Return,Risk_Adjusted_Return,Liquidity,Diversification,Tax_Efficiency,Inflation_Protection
 US Stocks,Equity,8.0,6.5,9.5,8.0,6.0,7.0
 International Stocks,Equity,7.5,6.0,9.0,9.0,5.5,7.5
@@ -4054,51 +4269,51 @@ Real Estate,Alternative,6.0,5.5,4.0,7.0,8.0,8.0
 Commodities,Alternative,5.0,4.0,7.0,8.5,6.5,9.0
 Cash,Cash,1.5,1.5,10.0,0.0,9.0,1.0
 
-</script><script type="text/plain" id="phones_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_phones_data" data-format="csv_embedded" data-src="">
 label,Battery,Camera,Performance,Display,Price_Value,Build_Quality
 iPhone 15 Pro,85.0,95.0,98.0,92.0,70.0,95.0
 Samsung S24 Ultra,95.0,98.0,96.0,98.0,65.0,93.0
 Google Pixel 8 Pro,80.0,92.0,90.0,90.0,85.0,88.0
 OnePlus 12,90.0,88.0,94.0,95.0,90.0,90.0
 
-</script><script type="text/plain" id="universities_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_universities_data" data-format="csv_embedded" data-src="">
 label,region,scenario,Academic_Reputation,Research_Output,Faculty_Quality,Industry_Connections,International_Outlook,Student_Satisfaction
-MIT,North America,Overall Rankings,98.0,95.0,97.0,92.0,90.0,90.0
-Stanford,North America,Overall Rankings,92.0,97.0,94.0,87.0,83.0,96.0
-Harvard,North America,Overall Rankings,91.0,95.0,93.0,84.0,78.0,93.0
-Berkeley,North America,Overall Rankings,93.0,91.0,92.0,84.0,86.0,89.0
-Caltech,North America,Overall Rankings,96.0,93.0,93.0,85.0,84.0,90.0
-Oxford,Europe,Overall Rankings,89.0,94.0,94.0,82.0,77.0,89.0
-Cambridge,Europe,Overall Rankings,93.0,92.0,91.0,92.0,79.0,89.0
-ETH Zurich,Europe,Overall Rankings,92.0,88.0,92.0,85.0,74.0,89.0
-Tokyo,Asia,Overall Rankings,84.0,87.0,82.0,75.0,95.0,83.0
-NUS,Asia,Overall Rankings,85.0,85.0,88.0,82.0,95.0,86.0
-MIT,North America,Research Focus,99.0,101.0,100.0,83.0,86.0,88.0
-Stanford,North America,Research Focus,96.0,94.0,92.0,85.0,87.0,94.0
-Harvard,North America,Research Focus,86.0,91.0,86.0,80.0,78.0,83.0
-Berkeley,North America,Research Focus,94.0,93.0,91.0,79.0,85.0,92.0
-Caltech,North America,Research Focus,99.0,98.0,96.0,88.0,89.0,94.0
-Oxford,Europe,Research Focus,93.0,96.0,94.0,87.0,86.0,82.0
-Cambridge,Europe,Research Focus,94.0,92.0,94.0,83.0,80.0,90.0
-ETH Zurich,Europe,Research Focus,93.0,95.0,96.0,85.0,85.0,93.0
-Tokyo,Asia,Research Focus,87.0,90.0,87.0,82.0,95.0,86.0
-NUS,Asia,Research Focus,87.0,87.0,87.0,72.0,95.0,83.0
+MIT,North America,Overall Rankings,93.0,93.0,94.0,95.0,83.0,90.0
+Stanford,North America,Overall Rankings,93.0,95.0,93.0,86.0,83.0,92.0
+Harvard,North America,Overall Rankings,90.0,95.0,90.0,93.0,82.0,94.0
+Berkeley,North America,Overall Rankings,93.0,91.0,94.0,87.0,84.0,86.0
+Caltech,North America,Overall Rankings,96.0,94.0,95.0,93.0,79.0,89.0
+Oxford,Europe,Overall Rankings,90.0,93.0,95.0,86.0,86.0,85.0
+Cambridge,Europe,Overall Rankings,92.0,92.0,95.0,85.0,84.0,93.0
+ETH Zurich,Europe,Overall Rankings,88.0,88.0,86.0,80.0,81.0,85.0
+Tokyo,Asia,Overall Rankings,84.0,85.0,83.0,81.0,95.0,78.0
+NUS,Asia,Overall Rankings,87.0,83.0,83.0,76.0,95.0,78.0
+MIT,North America,Research Focus,96.0,100.0,100.0,91.0,88.0,90.0
+Stanford,North America,Research Focus,96.0,94.0,95.0,84.0,88.0,88.0
+Harvard,North America,Research Focus,87.0,91.0,86.0,78.0,75.0,86.0
+Berkeley,North America,Research Focus,94.0,95.0,95.0,87.0,89.0,85.0
+Caltech,North America,Research Focus,98.0,98.0,97.0,85.0,87.0,89.0
+Oxford,Europe,Research Focus,92.0,94.0,90.0,79.0,87.0,90.0
+Cambridge,Europe,Research Focus,94.0,94.0,93.0,84.0,86.0,89.0
+ETH Zurich,Europe,Research Focus,92.0,94.0,92.0,86.0,82.0,94.0
+Tokyo,Asia,Research Focus,87.0,90.0,89.0,74.0,95.0,82.0
+NUS,Asia,Research Focus,88.0,91.0,89.0,79.0,95.0,81.0
 
-</script><script type="text/plain" id="cars.specifications" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_cars_specifications" data-format="csv_embedded" data-src="">
 label,category,Performance,Efficiency,Interior_Quality,Technology,Safety,Value
 Tesla Model 3,Electric,92.0,95.0,78.0,95.0,92.0,85.0
 BMW 3 Series,Gasoline,85.0,65.0,90.0,85.0,88.0,72.0
 Mercedes C-Class,Gasoline,82.0,62.0,92.0,88.0,90.0,70.0
 Audi A4,Gasoline,84.0,68.0,88.0,86.0,87.0,75.0
 
-</script><script type="text/plain" id="cars.pricing" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_cars_pricing" data-format="csv_embedded" data-src="">
 model,base_price,as_tested
 Tesla Model 3,42000,52000
 BMW 3 Series,45000,58000
 Mercedes C-Class,47000,62000
 Audi A4,44000,56000
 
-</script><script type="text/plain" id="foods_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_foods_data" data-format="csv_embedded" data-src="">
 label,category,Vitamin_C,Fiber,Antioxidants,Sweetness,Aroma,Acidity,Juiciness,Firmness,Smoothness,Affordability,Price,Yield,CO2e,Water_use,Pesticides,Biodiversity
 Organic Apple,Fruit,8.0,4.0,7.5,8.0,7.0,6.0,8.5,7.0,9.0,5.0,4.0,6.0,8.0,7.0,9.0,8.5
 Conventional Apple,Fruit,6.0,4.0,5.0,7.5,6.0,6.5,8.0,6.5,8.5,8.0,7.0,7.0,6.0,5.0,3.0,4.0
@@ -4107,7 +4322,7 @@ Conventional Banana,Fruit,9.0,2.6,4.5,8.5,6.0,2.5,4.5,4.5,7.5,9.0,8.0,8.0,5.0,4.
 Organic Broccoli,Vegetable,95.0,5.0,9.0,2.0,5.0,3.0,3.0,8.0,4.0,4.0,3.0,5.0,9.0,8.0,9.5,9.0
 Conventional Broccoli,Vegetable,85.0,4.5,7.0,2.5,4.5,3.5,3.0,7.5,4.5,7.0,6.0,6.0,7.0,6.0,3.5,4.5
 
-</script><script type="text/plain" id="skills_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_skills_data" data-format="csv_embedded" data-src="">
 label,department,Programming,System_Design,Data_Analysis,Communication,Presentation,Negotiation,Leadership,Project_Management,Team_Building,Product_Knowledge,Market_Knowledge,Technical_Writing
 Alice (Eng),Engineering,95.0,85.0,75.0,70.0,65.0,50.0,60.0,75.0,65.0,80.0,40.0,85.0
 Bob (Eng),Engineering,90.0,80.0,85.0,65.0,60.0,55.0,55.0,70.0,70.0,75.0,35.0,80.0
@@ -4449,6 +4664,9 @@ Each axis represents a different variable, and values are plotted as a polygon.<
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

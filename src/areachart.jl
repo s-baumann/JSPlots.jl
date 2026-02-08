@@ -63,7 +63,8 @@ struct AreaChart <: JSPlotsType
                             stack_mode::String="stack",
                             title::String="Area Chart",
                             fill_opacity::Float64=0.6,
-                            notes::String="")
+                            notes::String="",
+                            x_order::Union{Nothing, Vector}=nothing)
 
         # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
@@ -142,6 +143,9 @@ struct AreaChart <: JSPlotsType
             ], ", ") * "}"
         end
 
+        # Build x_order JS array
+        x_order_js = isnothing(x_order) ? "[]" : "[" * join(["'$(string(val))'" for val in x_order], ", ") * "]"
+
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
@@ -159,6 +163,7 @@ struct AreaChart <: JSPlotsType
             const COLOR_MAPS = $color_maps_js;
             const COLOR_SCALES = $color_scales_js;
             const GROUP_ORDER = $group_order_js;
+            const X_ORDER = $x_order_js;
             const DEFAULT_X_COL = '$default_x_col';
             const DEFAULT_Y_COL = '$default_y_col';
             const DEFAULT_COLOR_COL = '$default_color_col';
@@ -284,6 +289,13 @@ struct AreaChart <: JSPlotsType
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -360,8 +372,14 @@ struct AreaChart <: JSPlotsType
                         traces.push(trace);
                     }
 
+                    const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+                    if (X_ORDER.length > 0) {
+                        xaxisConfig.categoryorder = 'array';
+                        xaxisConfig.categoryarray = X_ORDER;
+                    }
+
                     const layout = {
-                        xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                        xaxis: xaxisConfig,
                         yaxis: {
                             title: STACK_MODE === 'normalised_stack' ?
                                 getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -425,6 +443,13 @@ struct AreaChart <: JSPlotsType
                             groupData.sort((a, b) => {
                                 const aVal = a[X_COL];
                                 const bVal = b[X_COL];
+                                if (X_ORDER.length > 0) {
+                                    const aIdx = X_ORDER.indexOf(String(aVal));
+                                    const bIdx = X_ORDER.indexOf(String(bVal));
+                                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                    if (aIdx >= 0) return -1;
+                                    if (bIdx >= 0) return 1;
+                                }
                                 if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                                 return aVal - bVal;
                             });
@@ -498,10 +523,15 @@ struct AreaChart <: JSPlotsType
                         }
 
                         // Add axis configuration
-                        layout[xaxis] = {
+                        const xaxisCfg1 = {
                             title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                             anchor: yaxis
                         };
+                        if (X_ORDER.length > 0) {
+                            xaxisCfg1.categoryorder = 'array';
+                            xaxisCfg1.categoryarray = X_ORDER;
+                        }
+                        layout[xaxis] = xaxisCfg1;
                         layout[yaxis] = {
                             title: col === 1 ?
                                 (STACK_MODE === 'normalised_stack' ?
@@ -577,6 +607,13 @@ struct AreaChart <: JSPlotsType
                                 groupData.sort((a, b) => {
                                     const aVal = a[X_COL];
                                     const bVal = b[X_COL];
+                                    if (X_ORDER.length > 0) {
+                                        const aIdx = X_ORDER.indexOf(String(aVal));
+                                        const bIdx = X_ORDER.indexOf(String(bVal));
+                                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                        if (aIdx >= 0) return -1;
+                                        if (bIdx >= 0) return 1;
+                                    }
                                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                                     return aVal - bVal;
                                 });
@@ -650,10 +687,15 @@ struct AreaChart <: JSPlotsType
                             }
 
                             // Add axis configuration
-                            layout[xaxis] = {
+                            const xaxisCfg2 = {
                                 title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                                 anchor: yaxis
                             };
+                            if (X_ORDER.length > 0) {
+                                xaxisCfg2.categoryorder = 'array';
+                                xaxisCfg2.categoryarray = X_ORDER;
+                            }
+                            layout[xaxis] = xaxisCfg2;
                             layout[yaxis] = {
                                 title: colIdx === 0 ?
                                     (STACK_MODE === 'normalised_stack' ?

@@ -1094,4 +1094,298 @@ using DataFrames
         @test !haskey(page.dataframes, Symbol("opt_data.data1"))
         @test !haskey(page.dataframes, Symbol("opt_data.data2"))
     end
+
+    # ========================================
+    # Tests for nested Pages
+    # ========================================
+
+    @testset "Nested Pages basic creation" begin
+        df = DataFrame(x = 1:5, y = rand(5))
+
+        inner_page = JSPlotPage(
+            Dict(:data => df),
+            [TextBlock("<p>Inner</p>")],
+            tab_title = "Inner Page"
+        )
+
+        inner_report = Pages(
+            [TextBlock("<h1>Sub Report</h1>")],
+            [inner_page],
+            tab_title = "Sub Report",
+            dataformat = :parquet
+        )
+
+        outer_page = JSPlotPage(
+            Dict(:data2 => df),
+            [TextBlock("<p>Outer flat page</p>")],
+            tab_title = "Outer Page"
+        )
+
+        outer_report = Pages(
+            [TextBlock("<h1>Main</h1>")],
+            Union{JSPlotPage, Pages}[outer_page, inner_report],
+            tab_title = "Main Report",
+            dataformat = :parquet
+        )
+
+        @test outer_report.coverpage.tab_title == "Main Report"
+        @test length(outer_report.pages) == 2
+        @test outer_report.pages[1] isa JSPlotPage
+        @test outer_report.pages[2] isa Pages
+    end
+
+    @testset "Nested Pages HTML generation" begin
+        mktempdir() do tmpdir
+            df1 = DataFrame(x = 1:5, y = rand(5))
+            df2 = DataFrame(x = 1:3, y = rand(3))
+
+            chart1 = LineChart(:c1, df1, :data1; x_cols=[:x], y_cols=[:y])
+            chart2 = LineChart(:c2, df2, :data2; x_cols=[:x], y_cols=[:y])
+
+            sub_page1 = JSPlotPage(
+                Dict(:data1 => df1),
+                [chart1],
+                tab_title = "Sub Page One"
+            )
+
+            sub_page2 = JSPlotPage(
+                Dict(:data2 => df2),
+                [chart2],
+                tab_title = "Sub Page Two"
+            )
+
+            sub_report = Pages(
+                [TextBlock("<h1>Sub Report</h1>")],
+                [sub_page1, sub_page2],
+                tab_title = "Sub Report",
+                dataformat = :parquet
+            )
+
+            main_report = Pages(
+                [TextBlock("<h1>Main</h1>")],
+                Union{JSPlotPage, Pages}[sub_report],
+                tab_title = "Main",
+                dataformat = :parquet
+            )
+
+            outfile = joinpath(tmpdir, "nested.html")
+            create_html(main_report, outfile)
+
+            project_dir = joinpath(tmpdir, "nested")
+            @test isdir(project_dir)
+
+            # Top-level coverpage
+            @test isfile(joinpath(project_dir, "nested.html"))
+
+            # Subdirectory for the nested Pages
+            sub_dir = joinpath(project_dir, "sub_report")
+            @test isdir(sub_dir)
+
+            # Sub-report coverpage and pages
+            @test isfile(joinpath(sub_dir, "sub_report.html"))
+            @test isfile(joinpath(sub_dir, "sub_page_one.html"))
+            @test isfile(joinpath(sub_dir, "sub_page_two.html"))
+
+            # Data in the sub-report's own data directory
+            @test isdir(joinpath(sub_dir, "data"))
+            @test isfile(joinpath(sub_dir, "data", "data1.parquet"))
+            @test isfile(joinpath(sub_dir, "data", "data2.parquet"))
+
+            # Launcher scripts only at top level
+            @test isfile(joinpath(project_dir, "open.sh"))
+            @test isfile(joinpath(project_dir, "open.bat"))
+            @test !isfile(joinpath(sub_dir, "open.sh"))
+            @test !isfile(joinpath(sub_dir, "open.bat"))
+        end
+    end
+
+    @testset "Nested Pages data isolation" begin
+        mktempdir() do tmpdir
+            # Two nested Pages with same :prices label but different DataFrames
+            df_a = DataFrame(x = 1:5, y = rand(5))
+            df_b = DataFrame(x = 10:15, y = rand(6))
+
+            chart_a = LineChart(:ca, df_a, :prices; x_cols=[:x], y_cols=[:y])
+            chart_b = LineChart(:cb, df_b, :prices; x_cols=[:x], y_cols=[:y])
+
+            page_a = JSPlotPage(
+                Dict(:prices => df_a),
+                [chart_a],
+                tab_title = "Page A"
+            )
+
+            page_b = JSPlotPage(
+                Dict(:prices => df_b),
+                [chart_b],
+                tab_title = "Page B"
+            )
+
+            sub_a = Pages(
+                [TextBlock("<h1>Sub A</h1>")],
+                [page_a],
+                tab_title = "Sub A",
+                dataformat = :parquet
+            )
+
+            sub_b = Pages(
+                [TextBlock("<h1>Sub B</h1>")],
+                [page_b],
+                tab_title = "Sub B",
+                dataformat = :parquet
+            )
+
+            main = Pages(
+                [TextBlock("<h1>Main</h1>")],
+                Union{JSPlotPage, Pages}[sub_a, sub_b],
+                tab_title = "Main",
+                dataformat = :parquet
+            )
+
+            outfile = joinpath(tmpdir, "isolation.html")
+            create_html(main, outfile)
+
+            project_dir = joinpath(tmpdir, "isolation")
+
+            # Each sub-report should have its own data directory with its own prices.parquet
+            @test isfile(joinpath(project_dir, "sub_a", "data", "prices.parquet"))
+            @test isfile(joinpath(project_dir, "sub_b", "data", "prices.parquet"))
+
+            # Top level should NOT have a data directory (no flat JSPlotPage children)
+            @test !isdir(joinpath(project_dir, "data"))
+        end
+    end
+
+    @testset "Nested Pages breadcrumbs" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            inner_page = JSPlotPage(
+                Dict(:data => df),
+                [TextBlock("<p>Deep page</p>")],
+                tab_title = "Deep Page"
+            )
+
+            inner_report = Pages(
+                [TextBlock("<h1>Inner</h1>")],
+                [inner_page],
+                tab_title = "Inner Report",
+                dataformat = :csv_embedded
+            )
+
+            outer_report = Pages(
+                [TextBlock("<h1>Outer</h1>")],
+                Union{JSPlotPage, Pages}[inner_report],
+                tab_title = "Outer Report",
+                dataformat = :csv_embedded
+            )
+
+            outfile = joinpath(tmpdir, "bc.html")
+            create_html(outer_report, outfile)
+
+            project_dir = joinpath(tmpdir, "bc")
+
+            # Read a page inside the inner report
+            inner_page_html = read(joinpath(project_dir, "inner_report", "deep_page.html"), String)
+
+            # Should contain breadcrumb link back to the outer report
+            @test occursin("Outer Report", inner_page_html)
+            @test occursin("../bc.html", inner_page_html)
+
+            # Read the inner report coverpage
+            inner_cover_html = read(joinpath(project_dir, "inner_report", "inner_report.html"), String)
+            @test occursin("Outer Report", inner_cover_html)
+        end
+    end
+
+    @testset "Nested Pages auto-LinkList" begin
+        df = DataFrame(x = 1:5, y = rand(5))
+
+        flat_page = JSPlotPage(
+            Dict(:data => df),
+            [TextBlock("<p>Flat</p>")],
+            tab_title = "Flat Page",
+            notes = "A flat page"
+        )
+
+        nested = Pages(
+            [TextBlock("<h1>Nested</h1>")],
+            JSPlotPage[],
+            tab_title = "Nested Section",
+            dataformat = :csv_embedded
+        )
+
+        report = Pages(
+            [TextBlock("<h1>Home</h1>")],
+            Union{JSPlotPage, Pages}[flat_page, nested],
+            tab_title = "Home",
+            dataformat = :csv_embedded
+        )
+
+        # Check that the coverpage has correct link URLs
+        coverpage_items = report.coverpage.pivot_tables
+        # The last item should be the auto-generated LinkList
+        link_list = coverpage_items[end]
+        @test link_list isa LinkList
+
+        # For flat page: link should be "flat_page.html"
+        # For nested Pages: link should be "nested_section/nested_section.html"
+        coverpage_html = link_list.appearance_html
+        @test occursin("flat_page.html", coverpage_html)
+        @test occursin("nested_section/nested_section.html", coverpage_html)
+    end
+
+    @testset "Nested Pages with mixed children" begin
+        mktempdir() do tmpdir
+            df = DataFrame(x = 1:5, y = rand(5))
+
+            flat_chart = LineChart(:fc, df, :flat_data; x_cols=[:x], y_cols=[:y])
+            flat_page = JSPlotPage(
+                Dict(:flat_data => df),
+                [flat_chart],
+                tab_title = "Flat Page"
+            )
+
+            nested_chart = LineChart(:nc, df, :nested_data; x_cols=[:x], y_cols=[:y])
+            nested_page = JSPlotPage(
+                Dict(:nested_data => df),
+                [nested_chart],
+                tab_title = "Nested Child"
+            )
+
+            nested_report = Pages(
+                [TextBlock("<h1>Nested</h1>")],
+                [nested_page],
+                tab_title = "Nested Report",
+                dataformat = :parquet
+            )
+
+            report = Pages(
+                [TextBlock("<h1>Mixed</h1>")],
+                Union{JSPlotPage, Pages}[flat_page, nested_report],
+                tab_title = "Mixed Report",
+                dataformat = :parquet
+            )
+
+            outfile = joinpath(tmpdir, "mixed_nested.html")
+            create_html(report, outfile)
+
+            project_dir = joinpath(tmpdir, "mixed_nested")
+
+            # Flat page at project root
+            @test isfile(joinpath(project_dir, "flat_page.html"))
+
+            # Nested report in subdirectory
+            @test isdir(joinpath(project_dir, "nested_report"))
+            @test isfile(joinpath(project_dir, "nested_report", "nested_report.html"))
+            @test isfile(joinpath(project_dir, "nested_report", "nested_child.html"))
+
+            # Flat page data at top level
+            @test isdir(joinpath(project_dir, "data"))
+            @test isfile(joinpath(project_dir, "data", "flat_data.parquet"))
+
+            # Nested report data in its own directory
+            @test isdir(joinpath(project_dir, "nested_report", "data"))
+            @test isfile(joinpath(project_dir, "nested_report", "data", "nested_data.parquet"))
+        end
+    end
 end

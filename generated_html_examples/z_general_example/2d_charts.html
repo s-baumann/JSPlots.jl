@@ -527,6 +527,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -615,6 +820,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1214,11 +1425,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -1499,6 +1714,7 @@ $(function(){
     const COLOR_COLS = ['product', 'region', 'segment'];
     const COLOR_MAPS = {'segment': {'SMB': '#636efa', 'Enterprise': '#00cc96', 'Consumer': '#EF553B'}, 'region': {'West': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}, 'product': {'Phone': '#00cc96', 'Laptop': '#636efa', 'Tablet': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'date';
 
     // Interpolate color for continuous color scales
@@ -1634,6 +1850,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -1763,6 +1986,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -1788,11 +2020,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 let yValues = result.yValues;
 
                 // Apply Y axis transformation
-                // Special handling for cumulative transforms (computed per group after aggregation)
+                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                 if (Y_TRANSFORM === 'cumulative') {
                     yValues = computeCumulativeSum(yValues);
                 } else if (Y_TRANSFORM === 'cumprod') {
                     yValues = computeCumulativeProduct(yValues);
+                } else if (Y_TRANSFORM === 'ewma') {
+                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_LineChart').value) || 0.1;
+                    yValues = computeEWMA(yValues, ewmaWeight);
+                } else if (Y_TRANSFORM === 'ewmstd') {
+                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_LineChart').value) || 0.1;
+                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                } else if (Y_TRANSFORM === 'sma') {
+                    var smaWindow = parseInt(document.getElementById('sma_window_LineChart').value) || 10;
+                    yValues = computeSMA(yValues, smaWindow);
                 } else {
                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                 }
@@ -1811,12 +2052,18 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 },
                 hovermode: 'closest',
                 showlegend: true
@@ -1869,6 +2116,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -1894,11 +2150,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_LineChart').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_LineChart').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_LineChart').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -1924,14 +2189,19 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
-                    type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                    type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                 };
 
                 // Add annotation for facet label
@@ -1997,6 +2267,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -2022,11 +2301,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_LineChart').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_LineChart').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_LineChart').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -2052,14 +2340,19 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
-                        type: (Y_TRANSFORM === 'cumulative' || Y_TRANSFORM === 'cumprod') ? 'linear' : undefined
+                        type: (['cumulative','cumprod','ewma','ewmstd','sma'].indexOf(Y_TRANSFORM) >= 0) ? 'linear' : undefined
                     };
 
                     // Add annotations for facet labels
@@ -2124,6 +2417,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'segment': {'SMB': '#636efa', 'Enterprise': '#00cc96', 'Consumer': '#EF553B'}, 'region': {'West': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}, 'product': {'Phone': '#00cc96', 'Laptop': '#636efa', 'Tablet': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'segment': ['SMB', 'Consumer', 'Enterprise'], 'region': ['North', 'South', 'West'], 'product': ['Laptop', 'Tablet', 'Phone']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'date';
     const DEFAULT_Y_COL = 'sales';
     const DEFAULT_COLOR_COL = 'product';
@@ -2307,6 +2601,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -2383,8 +2684,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -2448,6 +2755,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -2521,10 +2835,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -2600,6 +2919,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -2673,10 +2999,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -4684,7 +5015,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="strategy_data" data-format="parquet" data-src="data/strategy_data.parquet"></script><script type="text/plain" id="product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="exec_data.tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="exec_data.summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="exec_data.fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="lgc_stock_data" data-format="parquet" data-src="data/lgc_stock_data.parquet"></script><script type="text/plain" id="surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="exec_data.summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="exec_data.summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="exec_data.fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="exec_data.volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="drawdown_data" data-format="parquet" data-src="data/drawdown_data.parquet"></script><script type="text/plain" id="tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
+<script type="text/plain" id="data_countries_geo_data" data-format="parquet" data-src="data/countries_geo_data.parquet"></script><script type="text/plain" id="data_strategy_data" data-format="parquet" data-src="data/strategy_data.parquet"></script><script type="text/plain" id="data_product_summary" data-format="parquet" data-src="data/product_summary.parquet"></script><script type="text/plain" id="data_sankey_data" data-format="parquet" data-src="data/sankey_data.parquet"></script><script type="text/plain" id="data_stock_corr_data" data-format="parquet" data-src="data/stock_corr_data.parquet"></script><script type="text/plain" id="data_exec_data_tob" data-format="parquet" data-src="data/exec_data/tob.parquet"></script><script type="text/plain" id="data_exec_data_summary_usd" data-format="parquet" data-src="data/exec_data/summary_usd.parquet"></script><script type="text/plain" id="data_exec_data_fill_returns" data-format="parquet" data-src="data/exec_data/fill_returns.parquet"></script><script type="text/plain" id="data_lgc_stock_data" data-format="parquet" data-src="data/lgc_stock_data.parquet"></script><script type="text/plain" id="data_surface_df" data-format="parquet" data-src="data/surface_df.parquet"></script><script type="text/plain" id="data_exec_data_summary_bps" data-format="parquet" data-src="data/exec_data/summary_bps.parquet"></script><script type="text/plain" id="data_radar_data" data-format="parquet" data-src="data/radar_data.parquet"></script><script type="text/plain" id="data_cities_geo_data" data-format="parquet" data-src="data/cities_geo_data.parquet"></script><script type="text/plain" id="data_rankings_data" data-format="parquet" data-src="data/rankings_data.parquet"></script><script type="text/plain" id="data_exec_data_summary_pct" data-format="parquet" data-src="data/exec_data/summary_pct.parquet"></script><script type="text/plain" id="data_exec_data_fills" data-format="parquet" data-src="data/exec_data/fills.parquet"></script><script type="text/plain" id="data_sales_data" data-format="parquet" data-src="data/sales_data.parquet"></script><script type="text/plain" id="data_exec_data_volume" data-format="parquet" data-src="data/exec_data/volume.parquet"></script><script type="text/plain" id="data_drawdown_data" data-format="parquet" data-src="data/drawdown_data.parquet"></script><script type="text/plain" id="data_tsne_stock_data" data-format="parquet" data-src="data/tsne_stock_data.parquet"></script><script type="text/plain" id="data_daily_product" data-format="parquet" data-src="data/daily_product.parquet"></script><script type="text/plain" id="data_business_path_data" data-format="parquet" data-src="data/business_path_data.parquet"></script><script type="text/plain" id="data_boxwhiskers_data" data-format="parquet" data-src="data/boxwhiskers_data.parquet"></script><script type="text/plain" id="data_waterfall_data" data-format="parquet" data-src="data/waterfall_data.parquet"></script><script type="text/plain" id="data_candlestick_data" data-format="parquet" data-src="data/candlestick_data.parquet"></script>
 
 <!-- ACTUAL CONTENT -->
 
@@ -4698,7 +5029,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 <hr>
 <br>
 <h2>Line Chart</h2>
-<p>A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html" style="color: blue; font-weight: bold;">See here for LineChart examples</a></p>
+<p>A linechart with custom colors for products. There are optional controls to change the variables on the x and or y axis. It is also possible to change the faceting, the grouping variable, the aggregation variable (if there are multiple y values per x value) as well as filters. Try the Y Transform dropdown — in addition to log, z-score, cumulative, etc., there are smoothing transforms: EWMA (exponentially weighted moving average), EWMSTD (exponentially weighted moving standard deviation), and SMA (simple moving average). Each smoothing option shows a parameter input for weight or window size. <a href="https://s-baumann.github.io/JSPlots.jl/dev/examples_html/linechart_examples.html" style="color: blue; font-weight: bold;">See here for LineChart examples</a></p>
 
 
 <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; background-color: #f0fff0;">
@@ -4754,7 +5085,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     </div>
     <div>
         <label for="y_transform_select_LineChart">Y Transform: </label>
-        <select id="y_transform_select_LineChart" style="padding: 5px 10px;" onchange="updateChart_LineChart()">
+        <select id="y_transform_select_LineChart" style="padding: 5px 10px;" onchange="(function(){
+    var sel = document.getElementById('y_transform_select_LineChart').value;
+    document.getElementById('ewma_param_LineChart').style.display = (sel === 'ewma') ? '' : 'none';
+    document.getElementById('ewmstd_param_LineChart').style.display = (sel === 'ewmstd') ? '' : 'none';
+    document.getElementById('sma_param_LineChart').style.display = (sel === 'sma') ? '' : 'none';
+    updateChart_LineChart();
+})()">
             <option value="identity" selected>identity</option>
 <option value="log">log</option>
 <option value="z_score">z_score</option>
@@ -4762,9 +5099,24 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 <option value="inverse_cdf">inverse_cdf</option>
 <option value="cumulative">cumulative</option>
 <option value="cumprod">cumprod</option>
+<option value="ewma">ewma</option>
+<option value="ewmstd">ewmstd</option>
+<option value="sma">sma</option>
         </select>
     </div>
 </div>
+    <div id="ewma_param_LineChart" style="display:none; margin-top: 5px;">
+        <label for="ewma_weight_LineChart">EWMA weight: </label>
+        <input type="number" id="ewma_weight_LineChart" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_LineChart()">
+    </div>
+    <div id="ewmstd_param_LineChart" style="display:none; margin-top: 5px;">
+        <label for="ewmstd_weight_LineChart">EWMSTD weight: </label>
+        <input type="number" id="ewmstd_weight_LineChart" value="0.1" min="0.001" max="1" step="0.01" style="width: 80px; padding: 3px;" onchange="updateChart_LineChart()">
+    </div>
+    <div id="sma_param_LineChart" style="display:none; margin-top: 5px;">
+        <label for="sma_window_LineChart">SMA window: </label>
+        <input type="number" id="sma_window_LineChart" value="10" min="1" step="1" style="width: 80px; padding: 3px;" onchange="updateChart_LineChart()">
+    </div>
 <h4 style="margin-top: 15px; margin-bottom: 10px; border-top: 1px solid #ddd; padding-top: 10px;">Facets</h4>
 <div style="margin: 10px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
     <div>
@@ -5468,6 +5820,9 @@ Try expressions like: <code>:profit + :sales</code>, <code>z(:profit, [:product,
 <div id="cum_plot"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: strategy_data.parquet</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small><a href="z_general_example.html">JSPlots.jl</a></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

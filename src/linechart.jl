@@ -70,7 +70,9 @@ struct LineChart <: JSPlotsType
                             default_ewma_weight::Float64=0.1,
                             default_ewmstd_weight::Float64=0.1,
                             default_sma_window::Int=10,
-                            notes::String="")
+                            notes::String="",
+                            x_order::Union{Nothing, Vector}=nothing,
+                            default_y_transform::String="identity")
 
         # Normalize filters and choices to standard Dict{Symbol, Any} format
         normalized_filters = normalize_filters(filters, df)
@@ -125,6 +127,9 @@ struct LineChart <: JSPlotsType
         # Create color scales as nested JavaScript object (continuous)
         color_scales_js = build_color_scales_js(color_scales)
 
+        # Build x_order JS array
+        x_order_js = isnothing(x_order) ? "[]" : "[" * join(["'$(string(val))'" for val in x_order], ", ") * "]"
+
         # Default columns
         default_x_col = string(valid_x_cols[1])
         default_y_col = string(valid_y_cols[1])
@@ -142,6 +147,7 @@ struct LineChart <: JSPlotsType
             const COLOR_COLS = $color_cols_js;
             const COLOR_MAPS = $color_maps_js;
             const COLOR_SCALES = $color_scales_js;
+            const X_ORDER = $x_order_js;
             const DEFAULT_X_COL = '$default_x_col';
 
             $JS_COLOR_INTERPOLATION
@@ -219,6 +225,13 @@ struct LineChart <: JSPlotsType
 
                     // Sort keys appropriately
                     const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(a));
+                            const bIdx = X_ORDER.indexOf(String(b));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (isDate) {
                             // For dates, compare the actual Date objects
                             const dateA = xOriginalValues[a];
@@ -348,6 +361,15 @@ struct LineChart <: JSPlotsType
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -405,8 +427,14 @@ struct LineChart <: JSPlotsType
                         });
                     }
 
+                    const xaxisConfig = { title: X_COL };
+                    if (X_ORDER.length > 0) {
+                        xaxisConfig.categoryorder = 'array';
+                        xaxisConfig.categoryarray = X_ORDER;
+                    }
+
                     const layout = {
-                        xaxis: { title: X_COL },
+                        xaxis: xaxisConfig,
                         yaxis: {
                             title: getAxisLabel(Y_COL, Y_TRANSFORM),
                             // Force linear type for cumulative transforms to prevent auto-date detection
@@ -463,6 +491,15 @@ struct LineChart <: JSPlotsType
                                 const aVal = a[X_COL];
                                 const bVal = b[X_COL];
 
+                                // Custom x-axis ordering
+                                if (X_ORDER.length > 0) {
+                                    const aIdx = X_ORDER.indexOf(String(aVal));
+                                    const bIdx = X_ORDER.indexOf(String(bVal));
+                                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                    if (aIdx >= 0) return -1;
+                                    if (bIdx >= 0) return 1;
+                                }
+
                                 // Check if values are Date objects
                                 if (aVal instanceof Date && bVal instanceof Date) {
                                     return aVal - bVal;
@@ -488,11 +525,20 @@ struct LineChart <: JSPlotsType
                             let yValues = result.yValues;
 
                             // Apply Y axis transformation
-                            // Special handling for cumulative transforms (computed per group after aggregation)
+                            // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                             if (Y_TRANSFORM === 'cumulative') {
                                 yValues = computeCumulativeSum(yValues);
                             } else if (Y_TRANSFORM === 'cumprod') {
                                 yValues = computeCumulativeProduct(yValues);
+                            } else if (Y_TRANSFORM === 'ewma') {
+                                var ewmaWeight = parseFloat(document.getElementById('ewma_weight_$chart_title').value) || 0.1;
+                                yValues = computeEWMA(yValues, ewmaWeight);
+                            } else if (Y_TRANSFORM === 'ewmstd') {
+                                var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_$chart_title').value) || 0.1;
+                                yValues = computeEWMSTD(yValues, ewmstdWeight);
+                            } else if (Y_TRANSFORM === 'sma') {
+                                var smaWindow = parseInt(document.getElementById('sma_window_$chart_title').value) || 10;
+                                yValues = computeSMA(yValues, smaWindow);
                             } else {
                                 yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                             }
@@ -518,10 +564,15 @@ struct LineChart <: JSPlotsType
                         }
 
                         // Add axis configuration
-                        layout[xaxis] = {
+                        const xaxisCfg1 = {
                             title: row === nRows ? X_COL : '',
                             anchor: yaxis
                         };
+                        if (X_ORDER.length > 0) {
+                            xaxisCfg1.categoryorder = 'array';
+                            xaxisCfg1.categoryarray = X_ORDER;
+                        }
+                        layout[xaxis] = xaxisCfg1;
                         layout[yaxis] = {
                             title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                             anchor: xaxis,
@@ -591,6 +642,15 @@ struct LineChart <: JSPlotsType
                                     const aVal = a[X_COL];
                                     const bVal = b[X_COL];
 
+                                    // Custom x-axis ordering
+                                    if (X_ORDER.length > 0) {
+                                        const aIdx = X_ORDER.indexOf(String(aVal));
+                                        const bIdx = X_ORDER.indexOf(String(bVal));
+                                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                        if (aIdx >= 0) return -1;
+                                        if (bIdx >= 0) return 1;
+                                    }
+
                                     // Check if values are Date objects
                                     if (aVal instanceof Date && bVal instanceof Date) {
                                         return aVal - bVal;
@@ -616,11 +676,20 @@ struct LineChart <: JSPlotsType
                                 let yValues = result.yValues;
 
                                 // Apply Y axis transformation
-                                // Special handling for cumulative transforms (computed per group after aggregation)
+                                // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                                 if (Y_TRANSFORM === 'cumulative') {
                                     yValues = computeCumulativeSum(yValues);
                                 } else if (Y_TRANSFORM === 'cumprod') {
                                     yValues = computeCumulativeProduct(yValues);
+                                } else if (Y_TRANSFORM === 'ewma') {
+                                    var ewmaWeight = parseFloat(document.getElementById('ewma_weight_$chart_title').value) || 0.1;
+                                    yValues = computeEWMA(yValues, ewmaWeight);
+                                } else if (Y_TRANSFORM === 'ewmstd') {
+                                    var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_$chart_title').value) || 0.1;
+                                    yValues = computeEWMSTD(yValues, ewmstdWeight);
+                                } else if (Y_TRANSFORM === 'sma') {
+                                    var smaWindow = parseInt(document.getElementById('sma_window_$chart_title').value) || 10;
+                                    yValues = computeSMA(yValues, smaWindow);
                                 } else {
                                     yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                                 }
@@ -646,10 +715,15 @@ struct LineChart <: JSPlotsType
                             }
 
                             // Add axis configuration
-                            layout[xaxis] = {
+                            const xaxisCfg2 = {
                                 title: rowIdx === nRows - 1 ? X_COL : '',
                                 anchor: yaxis
                             };
+                            if (X_ORDER.length > 0) {
+                                xaxisCfg2.categoryorder = 'array';
+                                xaxisCfg2.categoryarray = X_ORDER;
+                            }
+                            layout[xaxis] = xaxisCfg2;
                             layout[yaxis] = {
                                 title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                                 anchor: xaxis,
@@ -720,7 +794,8 @@ struct LineChart <: JSPlotsType
             include_smoothing = true,
             default_ewma_weight = default_ewma_weight,
             default_ewmstd_weight = default_ewmstd_weight,
-            default_sma_window = default_sma_window
+            default_sma_window = default_sma_window,
+            default_y_transform = default_y_transform
         )
 
         # Build attribute dropdowns
