@@ -521,6 +521,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -609,6 +814,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1208,11 +1419,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -1493,6 +1708,7 @@ $(function(){
     const COLOR_MAPS = {'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East', 'West']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Region';
@@ -1676,6 +1892,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -1752,8 +1975,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -1817,6 +2046,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -1890,10 +2126,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -1969,6 +2210,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -2042,10 +2290,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -2116,6 +2369,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Product': ['Product A', 'Product B', 'Product C']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Time';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Product';
@@ -2299,6 +2553,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -2375,8 +2636,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -2440,6 +2707,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -2513,10 +2787,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -2592,6 +2871,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -2665,10 +2951,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -2739,6 +3030,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Category': {'Category D': '#ab63fa', 'Category C': '#00cc96', 'Category B': '#EF553B', 'Category A': '#636efa'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Category A', 'Category B', 'Category C', 'Category D']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
     const DEFAULT_Y_COL = 'MarketShare';
     const DEFAULT_COLOR_COL = 'Category';
@@ -2922,6 +3214,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -2998,8 +3297,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -3063,6 +3368,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -3136,10 +3448,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -3215,6 +3532,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -3288,10 +3612,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -3362,6 +3691,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Team': {'Team C': '#00cc96', 'Team B': '#EF553B', 'Team A': '#636efa'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Team': ['Team A', 'Team B', 'Team C']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Department';
     const DEFAULT_Y_COL = 'Headcount';
     const DEFAULT_COLOR_COL = 'Team';
@@ -3545,6 +3875,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -3621,8 +3958,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -3686,6 +4029,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -3759,10 +4109,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -3838,6 +4193,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -3911,10 +4273,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -3985,6 +4352,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Channel': {'Retail': '#EF553B', 'Online': '#636efa', 'Wholesale': '#00cc96'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Channel': ['Online', 'Retail', 'Wholesale']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'Channel';
@@ -4168,6 +4536,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -4244,8 +4619,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -4309,6 +4690,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -4382,10 +4770,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -4461,6 +4854,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -4534,10 +4934,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -4608,6 +5013,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Channel': {'Retail': '#EF553B', 'Online': '#636efa', 'Wholesale': '#00cc96'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Channel': ['Online', 'Retail', 'Wholesale']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'Channel';
@@ -4791,6 +5197,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -4867,8 +5280,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -4932,6 +5351,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -5005,10 +5431,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -5084,6 +5515,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -5157,10 +5595,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -5231,6 +5674,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Source': {'Source 1': '#636efa', 'Source 2': '#EF553B', 'Source 3': '#00cc96'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Source': ['Source 1', 'Source 2', 'Source 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Week';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Source';
@@ -5414,6 +5858,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -5490,8 +5941,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -5555,6 +6012,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -5628,10 +6092,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -5707,6 +6176,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -5780,10 +6256,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -5854,6 +6335,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Segment': {'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Segment';
@@ -6037,6 +6519,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -6113,8 +6602,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -6178,6 +6673,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -6251,10 +6753,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -6330,6 +6837,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -6403,10 +6917,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -6477,6 +6996,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Industry': {'Finance': '#EF553B', 'Healthcare': '#00cc96', 'Tech': '#636efa'}, 'CompanySize': {'Medium': '#EF553B', 'Small': '#636efa', 'Large': '#00cc96'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Industry': ['Tech', 'Finance', 'Healthcare'], 'CompanySize': ['Small', 'Medium', 'Large']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Quarter';
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'Industry';
@@ -6660,6 +7180,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -6736,8 +7263,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -6801,6 +7334,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -6874,10 +7414,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -6953,6 +7498,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -7026,10 +7578,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -7100,6 +7657,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Time';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Category';
@@ -7283,6 +7841,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -7359,8 +7924,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -7424,6 +7995,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -7497,10 +8075,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -7576,6 +8159,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -7649,10 +8239,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -7723,6 +8318,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Time';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Category';
@@ -7906,6 +8502,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -7982,8 +8585,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -8047,6 +8656,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -8120,10 +8736,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -8199,6 +8820,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -8272,10 +8900,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -8346,6 +8979,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Time';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Category';
@@ -8529,6 +9163,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -8605,8 +9246,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -8670,6 +9317,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -8743,10 +9397,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -8822,6 +9481,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -8895,10 +9561,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -8969,6 +9640,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Region': {'East': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Quarter';
     const DEFAULT_Y_COL = 'Revenue';
     const DEFAULT_COLOR_COL = 'Region';
@@ -9152,6 +9824,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -9228,8 +9907,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -9293,6 +9978,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -9366,10 +10058,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -9445,6 +10142,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -9518,10 +10222,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -9592,6 +10301,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Product': ['Product A', 'Product B', 'Product C']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Store';
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Product';
@@ -9775,6 +10485,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -9851,8 +10568,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -9916,6 +10639,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -9989,10 +10719,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -10068,6 +10803,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -10141,10 +10883,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -10215,6 +10962,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Segment': {'Segment 3': '#00cc96', 'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2', 'Segment 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Category';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Segment';
@@ -10398,6 +11146,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -10474,8 +11229,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -10539,6 +11300,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -10612,10 +11380,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -10691,6 +11464,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -10764,10 +11544,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -10838,6 +11623,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Segment': {'Segment 3': '#00cc96', 'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2', 'Segment 3']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Category';
     const DEFAULT_Y_COL = 'Value';
     const DEFAULT_COLOR_COL = 'Segment';
@@ -11021,6 +11807,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -11097,8 +11890,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -11162,6 +11961,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -11235,10 +12041,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -11314,6 +12125,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -11387,10 +12205,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -11461,6 +12284,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_MAPS = {'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East', 'West']};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
     const DEFAULT_Y_COL = 'Sales';
     const DEFAULT_COLOR_COL = 'Region';
@@ -11644,6 +12468,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 groupData.sort((a, b) => {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
                     if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                     return aVal - bVal;
                 });
@@ -11720,8 +12551,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 traces.push(trace);
             }
 
+            const xaxisConfig = { title: getAxisLabel(X_COL, X_TRANSFORM) };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: getAxisLabel(X_COL, X_TRANSFORM) },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: STACK_MODE === 'normalised_stack' ?
                         getAxisLabel(Y_COL, Y_TRANSFORM) + ' (%)' :
@@ -11785,6 +12622,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     groupData.sort((a, b) => {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
                         if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                         return aVal - bVal;
                     });
@@ -11858,10 +12702,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ?
                         (STACK_MODE === 'normalised_stack' ?
@@ -11937,6 +12786,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         groupData.sort((a, b) => {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
                             if (typeof aVal === 'string') return aVal.localeCompare(bVal);
                             return aVal - bVal;
                         });
@@ -12010,10 +12866,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? getAxisLabel(X_COL, X_TRANSFORM) : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ?
                             (STACK_MODE === 'normalised_stack' ?
@@ -12080,7 +12941,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="regional.quarterly_summary" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_regional_quarterly_summary" data-format="csv_embedded" data-src="">
 Quarter,Region,TotalSales
 1,North,185360.55657410153
 2,North,225739.17964640696
@@ -12099,7 +12960,7 @@ Quarter,Region,TotalSales
 3,West,190969.3425529161
 4,West,196390.50090969558
 
-</script><script type="text/plain" id="market_share" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_market_share" data-format="csv_embedded" data-src="">
 Month,MarketShare,Category
 1,39.02064270720871,Category A
 2,9.248901645855234,Category A
@@ -12150,7 +13011,7 @@ Month,MarketShare,Category
 11,26.753220455318047,Category D
 12,20.508544409174068,Category D
 
-</script><script type="text/plain" id="regional.monthly_sales" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_regional_monthly_sales" data-format="csv_embedded" data-src="">
 Month,Sales,Units,Region
 1,46264.149103069736,363.1607565505013,North
 2,56338.172536777085,394.3235347046134,North
@@ -12201,7 +13062,7 @@ Month,Sales,Units,Region
 11,39387.238919614305,709.8490231963076,West
 12,76894.3490100334,690.9220701926721,West
 
-</script><script type="text/plain" id="grid_sales" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_grid_sales" data-format="csv_embedded" data-src="">
 Month,Sales,Product,Region,Segment
 1,36046.976772548085,Product X,East,Segment 1
 2,43541.33537345861,Product X,East,Segment 1
@@ -12252,7 +13113,7 @@ Month,Sales,Product,Region,Segment
 5,57129.56067873115,Product Y,West,Segment 2
 6,55966.25248784129,Product Y,West,Segment 2
 
-</script><script type="text/plain" id="business_metrics" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_business_metrics" data-format="csv_embedded" data-src="">
 Quarter,Revenue,Profit,Growth,Industry,CompanySize
 1,63.09250860062127,31.85523725839545,9.95526882073147,Tech,Small
 2,76.96260057165777,17.82933725901385,3.419069411901583,Tech,Small
@@ -12291,7 +13152,7 @@ Quarter,Revenue,Profit,Growth,Industry,CompanySize
 3,99.73218744484261,26.331809229723568,0.45047938932926446,Healthcare,Large
 4,105.72769853575487,19.563160032629,6.3866361240305265,Healthcare,Large
 
-</script><script type="text/plain" id="comparison_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_comparison_data" data-format="csv_embedded" data-src="">
 Category,Value,Segment
 Category A,53.95007814346774,Segment 1
 Category A,46.02952527014863,Segment 2
@@ -12306,7 +13167,7 @@ Category D,54.20106300104339,Segment 1
 Category D,51.79942862920912,Segment 2
 Category D,43.2005941081019,Segment 3
 
-</script><script type="text/plain" id="channel_revenue" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_channel_revenue" data-format="csv_embedded" data-src="">
 Date,Revenue,Channel,Region,Year
 2024-01-01,128898.19162286987,Online,North,2022
 2024-01-08,110260.82341098026,Online,North,2022
@@ -13263,7 +14124,7 @@ Date,Revenue,Channel,Region,Year
 2024-12-23,188794.786555183,Wholesale,South,2024
 2024-12-30,85255.25988182443,Wholesale,South,2024
 
-</script><script type="text/plain" id="metrics_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_metrics_data" data-format="csv_embedded" data-src="">
 Week,Value,Metric,Source
 1,91.14620637457325,Metric A,Source 1
 2,106.73864467610528,Metric A,Source 1
@@ -13410,7 +14271,7 @@ Week,Value,Metric,Source
 11,131.9580008662773,Metric D,Source 3
 12,157.83583841545737,Metric D,Source 3
 
-</script><script type="text/plain" id="sales_by_store" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_sales_by_store" data-format="csv_embedded" data-src="">
 Store,Sales,Product
 Store 1,10900.432966386328,Product A
 Store 2,11601.842531347982,Product A
@@ -13428,7 +14289,7 @@ Store 3,6438.2534052344035,Product C
 Store 4,7990.599579042465,Product C
 Store 5,9099.478495641937,Product C
 
-</script><script type="text/plain" id="sales_by_region" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_sales_by_region" data-format="csv_embedded" data-src="">
 Date,Sales,Region
 2024-01-01,10071.563954462172,North
 2024-01-02,11421.363406598672,North
@@ -14159,7 +15020,7 @@ Date,Sales,Region
 2024-06-29,16697.639561270447,West
 2024-06-30,19692.856301682652,West
 
-</script><script type="text/plain" id="compare_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_compare_data" data-format="csv_embedded" data-src="">
 Time,Value,Category
 1,11.967080399780984,Cat 1
 2,6.021390753085862,Cat 1
@@ -14222,7 +15083,7 @@ Time,Value,Category
 19,23.87303354478853,Cat 3
 20,19.603420037749856,Cat 3
 
-</script><script type="text/plain" id="sales_data_x" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_sales_data_x" data-format="csv_embedded" data-src="">
 Quarter,Month,Week,Revenue,Units,Region,Product
 1,1,1,53780.22065916621,503.5001771235509,North,Widget
 2,4,14,62545.75113168249,553.9065693242377,North,Widget
@@ -14333,7 +15194,7 @@ Quarter,Month,Week,Revenue,Units,Region,Product
 11,31,131,77881.88276135846,696.0783299692671,East,Gizmo
 12,34,144,67251.8420301661,655.805643899863,East,Gizmo
 
-</script><script type="text/plain" id="product_values" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_product_values" data-format="csv_embedded" data-src="">
 Time,Value,Product
 0.0,62.55052931327036,Product A
 0.5,69.06379229118593,Product A
@@ -14459,7 +15320,7 @@ Time,Value,Product
 19.5,60.679333416071536,Product C
 20.0,56.41554881364987,Product C
 
-</script><script type="text/plain" id="headcount_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_headcount_data" data-format="csv_embedded" data-src="">
 Department,Headcount,Team
 Engineering,23,Team A
 Engineering,18,Team B
@@ -15760,6 +16621,9 @@ Charts reference the monthly sales using <code>Symbol("regional.monthly_sales")<
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

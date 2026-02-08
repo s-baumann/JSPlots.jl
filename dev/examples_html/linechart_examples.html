@@ -1734,6 +1734,7 @@ $(function(){
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'Revenue': '#636efa'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
 
     // Interpolate color for continuous color scales
@@ -1869,6 +1870,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -1998,6 +2006,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -2055,8 +2072,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -2113,6 +2136,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -2138,11 +2170,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_revenue_trend').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_revenue_trend').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_revenue_trend').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -2168,10 +2209,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -2241,6 +2287,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -2266,11 +2321,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_revenue_trend').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_revenue_trend').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_revenue_trend').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -2296,10 +2360,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -2368,6 +2437,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Year'];
     const COLOR_MAPS = {'Year': {'2022': '#4169E1', '2023': '#32CD32', '2024': '#FF6347'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -2503,6 +2573,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -2632,6 +2709,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -2689,8 +2775,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -2747,6 +2839,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -2772,11 +2873,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_series').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_series').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_multi_series').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -2802,10 +2912,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -2875,6 +2990,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -2900,11 +3024,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_series').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_series').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_multi_series').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -2930,10 +3063,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -3002,6 +3140,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Department', 'Metric'];
     const COLOR_MAPS = {'Metric': {'Sick_Days': '#EF553B', 'Productivity': '#636efa'}, 'Department': {'Engineering': '#0066cc', 'Sales': '#00cc66', 'Operations': '#cc0066', 'Marketing': '#cc6600'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -3137,6 +3276,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -3266,6 +3412,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -3323,8 +3478,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -3381,6 +3542,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -3406,11 +3576,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_filtered_metrics').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_filtered_metrics').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_filtered_metrics').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -3436,10 +3615,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -3509,6 +3693,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -3534,11 +3727,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_filtered_metrics').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_filtered_metrics').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_filtered_metrics').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -3564,10 +3766,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -3636,6 +3843,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Department'];
     const COLOR_MAPS = {'Department': {'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -3771,6 +3979,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -3900,6 +4115,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -3957,8 +4181,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -4015,6 +4245,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -4040,11 +4279,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_single_select_metrics').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_single_select_metrics').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_single_select_metrics').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -4070,10 +4318,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -4143,6 +4396,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -4168,11 +4430,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_single_select_metrics').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_single_select_metrics').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_single_select_metrics').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -4198,10 +4469,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -4270,6 +4546,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Department'];
     const COLOR_MAPS = {'Department': {'Engineering': '#636efa', 'Sales': '#EF553B', 'Operations': '#ab63fa', 'Marketing': '#00cc96'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -4405,6 +4682,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -4534,6 +4818,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -4591,8 +4884,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -4649,6 +4948,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -4674,11 +4982,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_shorthand_choices').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_shorthand_choices').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_shorthand_choices').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -4704,10 +5021,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -4777,6 +5099,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -4802,11 +5133,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_shorthand_choices').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_shorthand_choices').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_shorthand_choices').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -4832,10 +5172,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -4904,6 +5249,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['color', 'Product'];
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product D': '#ab63fa', 'Product B': '#EF553B'}, 'color': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -5039,6 +5385,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -5168,6 +5521,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -5225,8 +5587,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -5283,6 +5651,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -5308,11 +5685,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_wrap_example').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_wrap_example').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_facet_wrap_example').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -5338,10 +5724,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -5411,6 +5802,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -5436,11 +5836,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_wrap_example').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_wrap_example').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_facet_wrap_example').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -5466,10 +5875,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -5538,6 +5952,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'2023': '#636efa', '2024': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -5673,6 +6088,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -5802,6 +6224,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -5859,8 +6290,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -5917,6 +6354,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -5942,11 +6388,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_grid_example').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_grid_example').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_facet_grid_example').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -5972,10 +6427,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -6045,6 +6505,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -6070,11 +6539,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_facet_grid_example').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_facet_grid_example').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_facet_grid_example').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -6100,10 +6578,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -6172,6 +6655,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Stock', 'Strategy', 'Region'];
     const COLOR_MAPS = {'Stock': {'GOOGL': '#EF553B', 'MSFT': '#00cc96', 'AAPL': '#636efa'}, 'Strategy': {'Hold': '#00cc96', 'Sell': '#EF553B', 'Buy': '#636efa'}, 'Region': {'EU': '#EF553B', 'ASIA': '#00cc96', 'US': '#636efa'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -6307,6 +6791,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -6436,6 +6927,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -6493,8 +6993,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -6551,6 +7057,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -6576,11 +7091,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_dynamic_controls').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_dynamic_controls').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_dynamic_controls').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -6606,10 +7130,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -6679,6 +7208,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -6704,11 +7242,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_dynamic_controls').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_dynamic_controls').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_dynamic_controls').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -6734,10 +7281,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -6806,6 +7358,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Product'];
     const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product B': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -6941,6 +7494,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -7070,6 +7630,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -7127,8 +7696,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -7185,6 +7760,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -7210,11 +7794,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_aggregation_demo').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_aggregation_demo').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_aggregation_demo').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -7240,10 +7833,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -7313,6 +7911,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -7338,11 +7945,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_aggregation_demo').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_aggregation_demo').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_aggregation_demo').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -7368,10 +7984,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -7440,6 +8061,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'default': '#636efa'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'time_hours';
 
     // Interpolate color for continuous color scales
@@ -7575,6 +8197,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -7704,6 +8333,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -7761,8 +8399,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -7819,6 +8463,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -7844,11 +8497,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_dimensions').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_dimensions').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_multi_dimensions').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -7874,10 +8536,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -7947,6 +8614,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -7972,11 +8648,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_multi_dimensions').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_multi_dimensions').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_multi_dimensions').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -8002,10 +8687,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -8074,6 +8764,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Product'];
     const COLOR_MAPS = {'Product': {'Doohickey': '#00cc96', 'Widget': '#636efa', 'Gadget': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Month';
 
     // Interpolate color for continuous color scales
@@ -8209,6 +8900,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -8338,6 +9036,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -8395,8 +9102,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -8453,6 +9166,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -8478,11 +9200,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_continuous_filters').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_continuous_filters').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_continuous_filters').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -8508,10 +9239,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -8581,6 +9317,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -8606,11 +9351,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_continuous_filters').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_continuous_filters').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_continuous_filters').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -8636,10 +9390,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -8708,6 +9467,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['color'];
     const COLOR_MAPS = {'color': {'GOOGL': '#EF553B', 'MSFT': '#00cc96', 'AAPL': '#636efa'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
 
     // Interpolate color for continuous color scales
@@ -8843,6 +9603,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -8972,6 +9739,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -9029,8 +9805,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -9087,6 +9869,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -9112,11 +9903,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_struct_prices').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_struct_prices').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_struct_prices').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -9142,10 +9942,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -9215,6 +10020,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -9240,11 +10054,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_struct_prices').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_struct_prices').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_struct_prices').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -9270,10 +10093,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -9342,6 +10170,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const COLOR_COLS = ['Asset'];
     const COLOR_MAPS = {'Asset': {'Stock A': '#636efa', 'Stock B': '#EF553B'}};
     const COLOR_SCALES = {};
+    const X_ORDER = [];
     const DEFAULT_X_COL = 'Date';
 
     // Interpolate color for continuous color scales
@@ -9477,6 +10306,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             // Sort keys appropriately
             const sortedKeys = Object.keys(xGroups).sort((a, b) => {
+                if (X_ORDER.length > 0) {
+                    const aIdx = X_ORDER.indexOf(String(a));
+                    const bIdx = X_ORDER.indexOf(String(b));
+                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                    if (aIdx >= 0) return -1;
+                    if (bIdx >= 0) return 1;
+                }
                 if (isDate) {
                     // For dates, compare the actual Date objects
                     const dateA = xOriginalValues[a];
@@ -9606,6 +10442,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     const aVal = a[X_COL];
                     const bVal = b[X_COL];
 
+                    // Custom x-axis ordering
+                    if (X_ORDER.length > 0) {
+                        const aIdx = X_ORDER.indexOf(String(aVal));
+                        const bIdx = X_ORDER.indexOf(String(bVal));
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                        if (aIdx >= 0) return -1;
+                        if (bIdx >= 0) return 1;
+                    }
+
                     // Check if values are Date objects
                     if (aVal instanceof Date && bVal instanceof Date) {
                         return aVal - bVal;
@@ -9663,8 +10508,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 });
             }
 
+            const xaxisConfig = { title: X_COL };
+            if (X_ORDER.length > 0) {
+                xaxisConfig.categoryorder = 'array';
+                xaxisConfig.categoryarray = X_ORDER;
+            }
+
             const layout = {
-                xaxis: { title: X_COL },
+                xaxis: xaxisConfig,
                 yaxis: {
                     title: getAxisLabel(Y_COL, Y_TRANSFORM),
                     // Force linear type for cumulative transforms to prevent auto-date detection
@@ -9721,6 +10572,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         const aVal = a[X_COL];
                         const bVal = b[X_COL];
 
+                        // Custom x-axis ordering
+                        if (X_ORDER.length > 0) {
+                            const aIdx = X_ORDER.indexOf(String(aVal));
+                            const bIdx = X_ORDER.indexOf(String(bVal));
+                            if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                            if (aIdx >= 0) return -1;
+                            if (bIdx >= 0) return 1;
+                        }
+
                         // Check if values are Date objects
                         if (aVal instanceof Date && bVal instanceof Date) {
                             return aVal - bVal;
@@ -9746,11 +10606,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     let yValues = result.yValues;
 
                     // Apply Y axis transformation
-                    // Special handling for cumulative transforms (computed per group after aggregation)
+                    // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                     if (Y_TRANSFORM === 'cumulative') {
                         yValues = computeCumulativeSum(yValues);
                     } else if (Y_TRANSFORM === 'cumprod') {
                         yValues = computeCumulativeProduct(yValues);
+                    } else if (Y_TRANSFORM === 'ewma') {
+                        var ewmaWeight = parseFloat(document.getElementById('ewma_weight_smoothing_demo').value) || 0.1;
+                        yValues = computeEWMA(yValues, ewmaWeight);
+                    } else if (Y_TRANSFORM === 'ewmstd') {
+                        var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_smoothing_demo').value) || 0.1;
+                        yValues = computeEWMSTD(yValues, ewmstdWeight);
+                    } else if (Y_TRANSFORM === 'sma') {
+                        var smaWindow = parseInt(document.getElementById('sma_window_smoothing_demo').value) || 10;
+                        yValues = computeSMA(yValues, smaWindow);
                     } else {
                         yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                     }
@@ -9776,10 +10645,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                 }
 
                 // Add axis configuration
-                layout[xaxis] = {
+                const xaxisCfg1 = {
                     title: row === nRows ? X_COL : '',
                     anchor: yaxis
                 };
+                if (X_ORDER.length > 0) {
+                    xaxisCfg1.categoryorder = 'array';
+                    xaxisCfg1.categoryarray = X_ORDER;
+                }
+                layout[xaxis] = xaxisCfg1;
                 layout[yaxis] = {
                     title: col === 1 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                     anchor: xaxis,
@@ -9849,6 +10723,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                             const aVal = a[X_COL];
                             const bVal = b[X_COL];
 
+                            // Custom x-axis ordering
+                            if (X_ORDER.length > 0) {
+                                const aIdx = X_ORDER.indexOf(String(aVal));
+                                const bIdx = X_ORDER.indexOf(String(bVal));
+                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+                                if (aIdx >= 0) return -1;
+                                if (bIdx >= 0) return 1;
+                            }
+
                             // Check if values are Date objects
                             if (aVal instanceof Date && bVal instanceof Date) {
                                 return aVal - bVal;
@@ -9874,11 +10757,20 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                         let yValues = result.yValues;
 
                         // Apply Y axis transformation
-                        // Special handling for cumulative transforms (computed per group after aggregation)
+                        // Special handling for cumulative and smoothing transforms (computed per group after aggregation)
                         if (Y_TRANSFORM === 'cumulative') {
                             yValues = computeCumulativeSum(yValues);
                         } else if (Y_TRANSFORM === 'cumprod') {
                             yValues = computeCumulativeProduct(yValues);
+                        } else if (Y_TRANSFORM === 'ewma') {
+                            var ewmaWeight = parseFloat(document.getElementById('ewma_weight_smoothing_demo').value) || 0.1;
+                            yValues = computeEWMA(yValues, ewmaWeight);
+                        } else if (Y_TRANSFORM === 'ewmstd') {
+                            var ewmstdWeight = parseFloat(document.getElementById('ewmstd_weight_smoothing_demo').value) || 0.1;
+                            yValues = computeEWMSTD(yValues, ewmstdWeight);
+                        } else if (Y_TRANSFORM === 'sma') {
+                            var smaWindow = parseInt(document.getElementById('sma_window_smoothing_demo').value) || 10;
+                            yValues = computeSMA(yValues, smaWindow);
                         } else {
                             yValues = applyAxisTransform(yValues, Y_TRANSFORM);
                         }
@@ -9904,10 +10796,15 @@ function getColor(colorMaps, colorScales, colorCol, value) {
                     }
 
                     // Add axis configuration
-                    layout[xaxis] = {
+                    const xaxisCfg2 = {
                         title: rowIdx === nRows - 1 ? X_COL : '',
                         anchor: yaxis
                     };
+                    if (X_ORDER.length > 0) {
+                        xaxisCfg2.categoryorder = 'array';
+                        xaxisCfg2.categoryarray = X_ORDER;
+                    }
+                    layout[xaxis] = xaxisCfg2;
                     layout[yaxis] = {
                         title: colIdx === 0 ? getAxisLabel(Y_COL, Y_TRANSFORM) : '',
                         anchor: xaxis,
@@ -13808,6 +14705,9 @@ The chart updates immediately when you change the parameter.
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.2.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

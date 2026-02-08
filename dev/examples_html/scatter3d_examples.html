@@ -521,6 +521,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -609,6 +814,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1208,11 +1419,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -7281,7 +7496,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="df7" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_df7" data-format="csv_embedded" data-src="">
 measurement1,measurement2,measurement3,measurement4,measurement5,temperature,pressure,location,experiment,quality
 -1.2694768894335993,0.748562940041818,-0.09471368400436564,0.7005325888372966,1.5274984118411665,15.4,1005.4,Site C,Exp 2,High
 -2.785381511687595,1.83583125207358,-0.40190493083038903,0.061414811365212485,1.9614030773701887,32.5,1001.8,Site C,Exp 1,Low
@@ -7784,7 +7999,7 @@ measurement1,measurement2,measurement3,measurement4,measurement5,temperature,pre
 -1.370136037422774,1.5975306975311576,2.5427489865478465,2.1543193671215604,0.40504686764163395,24.5,1023.9,Site D,Exp 2,High
 -2.2198711624448535,-2.0789822314786375,0.6716817959834651,0.9969142901966368,0.48258814319742727,26.2,1013.9,Site B,Exp 3,Low
 
-</script><script type="text/plain" id="df2" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df2" data-format="csv_embedded" data-src="">
 dim1,dim2,dim3,dim4,dim5,dim6,cluster
 -1.064768289430715,-0.9413188222796196,2.7952067788221964,0.21226773487435252,-1.4733640656796485,-3.0942291949493397,Cluster 1
 1.126021920863558,-3.1539983269474448,1.2789267227255587,0.21583376794434483,-0.7822559222342546,-1.7466703734784175,Cluster 2
@@ -8087,7 +8302,7 @@ dim1,dim2,dim3,dim4,dim5,dim6,cluster
 -0.061045618371021335,-0.49972010081962814,0.83994651227013,0.5204872411726724,-0.48761014306730344,0.4597987118569969,Cluster 3
 1.2376047120825564,0.545585758707286,1.0705086155489842,0.5570666764499389,-1.612790324225532,0.5053248205014764,Cluster 2
 
-</script><script type="text/plain" id="df6" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df6" data-format="csv_embedded" data-src="">
 x,y,z,experiment,condition
 -0.37889687931570903,3.3436000393095062,-1.2078800821915434,Exp 1,Control
 -1.7056296412467384,1.9458046481734268,-0.00834545940373597,Exp 1,Treatment
@@ -8390,7 +8605,7 @@ x,y,z,experiment,condition
 3.919526426135147,-2.6553300373835755,0.041114454035860046,Exp 3,Control
 2.0512861705817027,-1.4213946794548442,0.05507758858747996,Exp 3,Control
 
-</script><script type="text/plain" id="df3" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df3" data-format="csv_embedded" data-src="">
 x,y,z,temperature,region,category
 -1.7074180513061494,1.2703136392187222,-0.24252090766435463,30.8,West,Type A
 0.6536190803796783,0.03753559247116162,0.9740354147369717,19.9,South,Type C
@@ -8793,7 +9008,7 @@ x,y,z,temperature,region,category
 -3.1189814184348177,0.5512694933336029,2.4553722960042927,17.2,South,Type A
 -2.483747703714361,0.4159748558192907,0.8090973817187435,18.6,North,Type C
 
-</script><script type="text/plain" id="df4" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df4" data-format="csv_embedded" data-src="">
 x,y,z,w,cluster,density
 1.120391940489215,3.211284261313306,1.0861076138413406,0.7713082498866958,Cluster 1,Low
 2.5279808153751793,1.3802984410056593,2.595041355907572,-0.6753450665137156,Cluster 1,High
@@ -8946,7 +9161,7 @@ x,y,z,w,cluster,density
 0.10474867444224678,-3.5774868534845448,2.5071282567104065,-1.6740429723302688,Cluster 3,Low
 1.424220873709669,-2.8188164040105312,2.758013109866571,-0.9553398715462492,Cluster 3,Low
 
-</script><script type="text/plain" id="df1" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df1" data-format="csv_embedded" data-src="">
 x,y,z,category
 -0.030108872938460988,-4.670400682592565,-0.045862971951126125,Group B
 -1.292634655885265,-0.22424380823190182,0.08499845502895112,Group B
@@ -9149,7 +9364,7 @@ x,y,z,category
 -3.494170831765245,0.8105453459876595,1.4628609024420225,Group C
 1.8783620317421328,-0.9196033913020134,1.3856169351480312,Group C
 
-</script><script type="text/plain" id="df5" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df5" data-format="csv_embedded" data-src="">
 x,y,z,phase,time
 0.9463164027727169,-0.006796706149312552,-0.03418868505421401,Early,0.0
 0.992940308631519,0.1901588948359751,0.14950903441960658,Early,0.10506998841437436
@@ -10610,6 +10825,9 @@ filtering by continuous and categorical variables, faceting, and eigenvector vis
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

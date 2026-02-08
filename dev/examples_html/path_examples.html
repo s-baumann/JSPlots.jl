@@ -521,6 +521,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -609,6 +814,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1208,11 +1419,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -8095,7 +8310,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="strategy_data" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_strategy_data" data-format="csv_embedded" data-src="">
 strategy,year,Sharpe,volatility,max_drawdown,returns
 momentum,2015,0.44482043372464286,0.10939919569522001,0.1503587646711654,5.640958487179665
 momentum,2016,0.6703927687193942,0.11866321037982888,0.1645960593733665,18.86724643930465
@@ -8128,7 +8343,7 @@ value,2022,0.9499806016741549,0.14852124496418334,0.17205462359675822,16.6559457
 value,2023,1.0188641073178897,0.09217553559204232,0.07266960368243937,9.863035252320943
 value,2024,1.1146469389004352,0.08739299094872424,0.09939270458087962,5.0845967035936965
 
-</script><script type="text/plain" id="regional_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_regional_data" data-format="csv_embedded" data-src="">
 strategy,region,year,Sharpe,volatility,drawdown,winrate
 momentum,US,2015,0.7377685071170699,0.12633323193733278,0.05978842878111511,0.5901412497097819
 momentum,US,2016,0.5777844886946407,0.08448667940464612,0.14811835827019132,0.6007680569429155
@@ -8221,7 +8436,7 @@ value,Asia,2022,0.8754047488412242,0.09516474820569597,0.08726296535372878,0.507
 value,Asia,2023,0.9549519007730531,0.13163054686473352,0.05280636119658744,0.6731015552352309
 value,Asia,2024,0.5473533643555275,0.14856434443301142,0.15756311315971755,0.6058530514718842
 
-</script><script type="text/plain" id="asset_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_asset_data" data-format="csv_embedded" data-src="">
 asset_class,year,volatility,returns,Sharpe
 Equity,2016,0.18101930088898008,0.13261271406611114,1.1625891609596097
 Equity,2017,0.15341055884244667,0.13692616199131646,0.6030931726436497
@@ -8251,7 +8466,7 @@ Commodities,2022,0.17702153501919893,0.04986293064529518,0.982759099412839
 Commodities,2023,0.15914070255322685,0.04477479232479341,0.9989167797994921
 Commodities,2024,0.23112521352801926,0.03206271060240436,0.9718573319560108
 
-</script><script type="text/plain" id="product_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_product_data" data-format="csv_embedded" data-src="">
 product,quarter,development_cost,features_completed,user_satisfaction,bug_count
 Product A,1,124.90245465174576,3.7271324159608685,71.55286181885042,63.40001291213859
 Product A,2,150.72179347768457,7.288272096168161,67.48500140022563,46.718535511337734
@@ -8290,7 +8505,7 @@ Product C,10,325.12174855547465,32.05404527379932,91.47379764875012,25.258610581
 Product C,11,333.2553545967444,36.77884660077861,93.41647296736652,25.443635977832997
 Product C,12,345.73781747570365,39.02203690121489,96.74726383342161,30.355337430821407
 
-</script><script type="text/plain" id="business_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_business_data" data-format="csv_embedded" data-src="">
 date,customer_acquisition_cost,customer_lifetime_value,churn_rate,monthly_revenue,company
 2023-01-01,50.41791706164911,335.5651265523867,0.10408139881487434,112.75253473438224,Company
 2023-02-01,59.054184636476,309.45884804378375,0.11708647751841003,116.21152746258561,Company
@@ -8317,7 +8532,7 @@ date,customer_acquisition_cost,customer_lifetime_value,churn_rate,monthly_revenu
 2024-11-01,97.10815131465152,423.1639432677414,0.06548080162351436,285.2125323861279,Company
 2024-12-01,104.6544863254237,438.6982751647452,0.07031429998393397,302.8886353641653,Company
 
-</script><script type="text/plain" id="optimization_data" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_optimization_data" data-format="csv_embedded" data-src="">
 iteration,portfolio_risk,portfolio_return,diversification,transaction_cost,stage
 1,0.20007554587681017,0.09141451909655106,0.35405862337209887,0.0147782344500886,Initial
 2,0.1995708547319676,0.09073262343649026,0.3582090607559229,0.011602445164265876,Initial
@@ -9005,6 +9220,9 @@ Use choices when the user must select exactly one option.
 <div id="business_metrics"></div>
 <br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: business_data</p>
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>

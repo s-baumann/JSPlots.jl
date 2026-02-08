@@ -521,6 +521,211 @@ function computeCumulativeProduct(values) {
     return result;
 }
 
+// Compute Exponentially Weighted Moving Average
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMA(values, weight) {
+    var result = [];
+    var ewma = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(ewma);
+        } else if (isNaN(ewma)) {
+            ewma = v;
+            result.push(ewma);
+        } else {
+            ewma = v * wt + ewma * (1 - wt);
+            result.push(ewma);
+        }
+    }
+    return result;
+}
+
+// Compute Exponentially Weighted Moving Standard Deviation
+// Tracks EWMA of value and EWMA of value squared, std = sqrt(E[X^2] - E[X]^2)
+// weight: weight on newest observation, with warmup max(1/(i+1), weight)
+function computeEWMSTD(values, weight) {
+    var result = [];
+    var ewmaMean = NaN;
+    var ewmaSq = NaN;
+    for (var i = 0; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        var wt = Math.max(1 / (i + 1), weight);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(isNaN(ewmaMean) ? NaN : Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        } else if (isNaN(ewmaMean)) {
+            ewmaMean = v;
+            ewmaSq = v * v;
+            result.push(0);
+        } else {
+            ewmaMean = v * wt + ewmaMean * (1 - wt);
+            ewmaSq = (v * v) * wt + ewmaSq * (1 - wt);
+            result.push(Math.sqrt(Math.max(0, ewmaSq - ewmaMean * ewmaMean)));
+        }
+    }
+    return result;
+}
+
+// Compute Simple Moving Average over last windowSize periods
+function computeSMA(values, windowSize) {
+    var result = [];
+    for (var i = 0; i < values.length; i++) {
+        var start = Math.max(0, i - windowSize + 1);
+        var sum = 0, count = 0;
+        for (var j = start; j <= i; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) { sum += v; count++; }
+        }
+        result.push(count > 0 ? sum / count : NaN);
+    }
+    return result;
+}
+
+// Compute a moving statistic on an array of values
+// windowType: "fixed_interval" | "fixed_interval_around" | "exponential_decay"
+// aggregation: "mean" | "std" | "skewness" | "kurtosis"
+// parameter: window size (for fixed_interval/fixed_interval_around) or decay weight (for exponential_decay)
+function computeMovingStatistic(values, windowType, aggregation, parameter) {
+    if (!values || values.length === 0) return [];
+
+    if (windowType === 'exponential_decay') {
+        return computeEWMStatistic(values, aggregation, parameter);
+    }
+
+    var result = [];
+    var windowSize = Math.max(1, Math.round(parameter));
+
+    for (var i = 0; i < values.length; i++) {
+        var start, end;
+        if (windowType === 'fixed_interval') {
+            // Backward-looking: [i - windowSize + 1, i]
+            start = Math.max(0, i - windowSize + 1);
+            end = i + 1;
+        } else {
+            // Centered: [i - half, i + half]
+            var half = Math.floor(windowSize / 2);
+            start = Math.max(0, i - half);
+            end = Math.min(values.length, i + half + 1);
+        }
+
+        var windowValues = [];
+        for (var j = start; j < end; j++) {
+            var v = parseFloat(values[j]);
+            if (!isNaN(v) && isFinite(v)) {
+                windowValues.push(v);
+            }
+        }
+
+        result.push(computeWindowAggregation(windowValues, aggregation));
+    }
+    return result;
+}
+
+// Compute aggregation over a window of values
+function computeWindowAggregation(windowValues, aggregation) {
+    var n = windowValues.length;
+    if (n === 0) return NaN;
+
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += windowValues[i];
+    var mean = sum / n;
+
+    if (aggregation === 'mean') return mean;
+
+    // For std, skewness, kurtosis we need central moments
+    var m2 = 0, m3 = 0, m4 = 0;
+    for (var i = 0; i < n; i++) {
+        var d = windowValues[i] - mean;
+        m2 += d * d;
+        m3 += d * d * d;
+        m4 += d * d * d * d;
+    }
+
+    var variance = n > 1 ? m2 / (n - 1) : 0;
+    var stddev = Math.sqrt(variance);
+
+    if (aggregation === 'std') return stddev;
+
+    // Population moments for skewness/kurtosis
+    var popM2 = m2 / n;
+    var popM3 = m3 / n;
+    var popM4 = m4 / n;
+
+    if (popM2 === 0) return 0;
+
+    if (aggregation === 'skewness') {
+        return popM3 / Math.pow(popM2, 1.5);
+    }
+
+    if (aggregation === 'kurtosis') {
+        // Excess kurtosis (normal = 0)
+        return (popM4 / (popM2 * popM2)) - 3;
+    }
+
+    return NaN;
+}
+
+// Exponentially weighted moving statistic
+// alpha is weight on the LATEST value: EWMA_t = alpha * x_t + (1 - alpha) * EWMA_{t-1}
+function computeEWMStatistic(values, aggregation, alpha) {
+    if (!values || values.length === 0) return [];
+    var result = [];
+
+    if (aggregation === 'mean') {
+        var ewma = parseFloat(values[0]);
+        result.push(isNaN(ewma) ? NaN : ewma);
+        for (var i = 1; i < values.length; i++) {
+            var v = parseFloat(values[i]);
+            if (!isNaN(v) && isFinite(v)) {
+                ewma = alpha * v + (1 - alpha) * ewma;
+            }
+            result.push(ewma);
+        }
+        return result;
+    }
+
+    // For std, skewness, kurtosis: track exponentially weighted moments
+    var ewmMean = parseFloat(values[0]);
+    var ewmVar = 0;
+    var ewmM3 = 0;
+    var ewmM4 = 0;
+
+    result.push(0);  // First value: no variance/skew/kurtosis yet
+
+    for (var i = 1; i < values.length; i++) {
+        var v = parseFloat(values[i]);
+        if (isNaN(v) || !isFinite(v)) {
+            result.push(result[result.length - 1]);
+            continue;
+        }
+        var delta = v - ewmMean;
+        ewmMean = alpha * v + (1 - alpha) * ewmMean;
+        var delta2 = v - ewmMean;
+        ewmVar = (1 - alpha) * (ewmVar + alpha * delta * delta2);
+
+        if (aggregation === 'std') {
+            result.push(Math.sqrt(Math.max(0, ewmVar)));
+        } else {
+            var ewmStd = Math.sqrt(Math.max(0, ewmVar));
+            ewmM3 = (1 - alpha) * (ewmM3 + alpha * delta * delta * delta);
+            ewmM4 = (1 - alpha) * (ewmM4 + alpha * delta * delta * delta * delta);
+
+            if (ewmStd > 0 && ewmVar > 0) {
+                if (aggregation === 'skewness') {
+                    result.push(ewmM3 / (ewmStd * ewmStd * ewmStd));
+                } else {
+                    // Excess kurtosis
+                    result.push((ewmM4 / (ewmVar * ewmVar)) - 3);
+                }
+            } else {
+                result.push(0);
+            }
+        }
+    }
+    return result;
+}
+
 // Compute quantile transformation of values (rank-based, maps to [0, 1])
 function computeQuantileTransform(values) {
     if (!values || values.length === 0) return [];
@@ -609,6 +814,12 @@ function getAxisLabel(originalLabel, transformType) {
             return 'cumulative(' + originalLabel + ')';
         case 'cumprod':
             return 'cumprod(' + originalLabel + ')';
+        case 'ewma':
+            return 'ewma(' + originalLabel + ')';
+        case 'ewmstd':
+            return 'ewmstd(' + originalLabel + ')';
+        case 'sma':
+            return 'sma(' + originalLabel + ')';
         default:
             return originalLabel;
     }
@@ -1208,11 +1419,15 @@ function setupAspectRatioControl(chartId, updateCallback) {
 // This function parses data from embedded or external sources and returns a Promise
 // Supports CSV (embedded/external), JSON (embedded/external), and Parquet (external) formats
 // Usage: loadDataset('dataLabel').then(function(data) { /* use data */ });
+// Note: Data elements have IDs prefixed with "data_" to avoid collisions with chart container IDs
 function loadDataset(dataLabel) {
     return new Promise(function(resolve, reject) {
-        var dataElement = document.getElementById(dataLabel);
+        // Sanitize the label: replace spaces and special chars with underscores
+        var sanitizedLabel = dataLabel.replace(/[\s\-\.:/\\]/g, '_');
+        var dataElementId = 'data_' + sanitizedLabel;
+        var dataElement = document.getElementById(dataElementId);
         if (!dataElement) {
-            reject(new Error('Data element not found: ' + dataLabel));
+            reject(new Error('Data element not found: ' + dataElementId + ' (from label: ' + dataLabel + ')'));
             return;
         }
 
@@ -5325,7 +5540,7 @@ if (currentGroupCol) {
 
 <!-- DATASETS -->
 
-<script type="text/plain" id="survey.responses" data-format="csv_embedded" data-src="">
+<script type="text/plain" id="data_survey_responses" data-format="csv_embedded" data-src="">
 satisfaction_score,recommendation_score,response_time,survey_type,age_group
 99.79668964008006,60.758559984339996,61.74465777704205,Online,26-40
 80.61355025867822,72.04471918347116,73.95337550792898,Online,18-25
@@ -5728,7 +5943,7 @@ satisfaction_score,recommendation_score,response_time,survey_type,age_group
 87.28329863068232,71.31151999440547,113.12521935357927,In-Person,41-60
 63.23570155323883,45.44310897514191,10.090819729093546,In-Person,26-40
 
-</script><script type="text/plain" id="df7" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df7" data-format="csv_embedded" data-src="">
 value,date_col,datetime_col,zoneddatetime_col,time_col,category
 129.79467380342726,2024-01-02,2024-01-01T01:00:00.0,2024-01-01T01:00:00.0,00:10:00.0,A
 141.35678931407355,2024-01-03,2024-01-01T02:00:00.0,2024-01-01T02:00:00.0,00:20:00.0,A
@@ -5831,7 +6046,7 @@ value,date_col,datetime_col,zoneddatetime_col,time_col,category
 113.20383330754736,2024-04-09,2024-01-05T03:00:00.0,2024-01-05T03:00:00.0,16:30:00.0,C
 79.84383680563157,2024-04-10,2024-01-05T04:00:00.0,2024-01-05T04:00:00.0,16:40:00.0,B
 
-</script><script type="text/plain" id="df2" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df2" data-format="csv_embedded" data-src="">
 value,group
 101.89928371916528,Control
 100.26368096101072,Control
@@ -7334,7 +7549,7 @@ value,group
 95.64631092127154,Treatment B
 106.89514266778573,Treatment B
 
-</script><script type="text/plain" id="df3" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df3" data-format="csv_embedded" data-src="">
 score,age,department
 47.25555157006697,62,Engineering
 62.45113484914165,59,Marketing
@@ -8537,7 +8752,7 @@ score,age,department
 100.15492370912096,57,HR
 66.11209897684881,25,HR
 
-</script><script type="text/plain" id="df6_custom" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df6_custom" data-format="csv_embedded" data-src="">
 score,team
 81.47348697428313,Red Team
 76.60767456243825,Red Team
@@ -9140,7 +9355,7 @@ score,team
 96.65112390498719,Green Team
 102.70791790175402,Green Team
 
-</script><script type="text/plain" id="df4" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df4" data-format="csv_embedded" data-src="">
 height,weight,age_value,gender,country,category
 163.0283089787568,61.527603114121746,31.458823502977364,Male,USA,C
 167.02236514461177,68.47234668984737,36.07934698713515,Male,USA,B
@@ -9943,14 +10158,14 @@ height,weight,age_value,gender,country,category
 171.51571376536455,117.57295545824729,25.311681756379535,Female,UK,B
 164.13890143621686,76.23597704007685,37.61199334673011,Male,Canada,B
 
-</script><script type="text/plain" id="survey.demographics" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_survey_demographics" data-format="csv_embedded" data-src="">
 age_group,count
 18-25,120
 26-40,150
 41-60,90
 60+,40
 
-</script><script type="text/plain" id="df1" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df1" data-format="csv_embedded" data-src="">
 value
 31.73515365000369
 58.27514379359563
@@ -10953,7 +11168,7 @@ value
 49.41480276785652
 49.065486227472164
 
-</script><script type="text/plain" id="df5" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df5" data-format="csv_embedded" data-src="">
 measurement,time_point
 98.90552094622916,Baseline
 107.56602188446038,Baseline
@@ -11556,7 +11771,7 @@ measurement,time_point
 109.7095840992145,Week 4
 117.95181023046115,Week 4
 
-</script><script type="text/plain" id="df8" data-format="csv_embedded" data-src="">
+</script><script type="text/plain" id="data_df8" data-format="csv_embedded" data-src="">
 value,date_cat,datetime_cat,zoneddatetime_cat,time_cat,region
 82.84740752309993,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.0,01:00:00.0,East
 83.97881115363779,2024-01-02,2024-01-01T02:00:00.0,2024-01-01T02:00:00.0,01:00:00.0,East
@@ -12977,6 +13192,9 @@ Charts reference the responses DataFrame using <code>Symbol("survey.responses")<
     </div>
 
 
-<hr><p align="right"><small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.0.</small></p>
+<hr><div style="display: flex; justify-content: space-between; align-items: center;">
+<small></small>
+<small>This page was created using <a href="https://github.com/s-baumann/JSPlots.jl">JSPlots.jl</a> v0.6.3.</small>
+</div>
 </body>
 </html>
