@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1814,50 +1891,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_strategy_evolution_arrows');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_strategy_evolution_arrows');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_strategy_evolution_arrows');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_strategy_evolution_arrows' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('strategy_evolution_arrows', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_strategy_evolution_arrows');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_strategy_evolution_arrows');
-        const facet2Select = document.getElementById('facet2_select_strategy_evolution_arrows');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('strategy_evolution_arrows');
 
 
         // Apply filters with observation counting (centralized function)
@@ -2548,50 +2589,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_strategy_evolution_alpha');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_strategy_evolution_alpha');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_strategy_evolution_alpha');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_strategy_evolution_alpha' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('strategy_evolution_alpha', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_strategy_evolution_alpha');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_strategy_evolution_alpha');
-        const facet2Select = document.getElementById('facet2_select_strategy_evolution_alpha');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('strategy_evolution_alpha');
 
 
         // Apply filters with observation counting (centralized function)
@@ -3282,50 +3287,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_regional_paths');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_regional_paths');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_regional_paths');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_regional_paths' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('regional_paths', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_regional_paths');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_regional_paths');
-        const facet2Select = document.getElementById('facet2_select_regional_paths');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('regional_paths');
 
 
         // Apply filters with observation counting (centralized function)
@@ -4016,50 +3985,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_choice_example');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_choice_example');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_choice_example');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_choice_example' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('choice_example', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_choice_example');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_choice_example');
-        const facet2Select = document.getElementById('facet2_select_choice_example');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('choice_example');
 
 
         // Apply filters with observation counting (centralized function)
@@ -4750,50 +4683,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_asset_performance');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_asset_performance');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_asset_performance');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_asset_performance' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('asset_performance', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_asset_performance');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_asset_performance');
-        const facet2Select = document.getElementById('facet2_select_asset_performance');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('asset_performance');
 
 
         // Apply filters with observation counting (centralized function)
@@ -5484,50 +5381,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_facet_by_region');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_facet_by_region');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_facet_by_region');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_facet_by_region' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('facet_by_region', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_facet_by_region');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_facet_by_region');
-        const facet2Select = document.getElementById('facet2_select_facet_by_region');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('facet_by_region');
 
 
         // Apply filters with observation counting (centralized function)
@@ -6218,50 +6079,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_product_development');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_product_development');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_product_development');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_product_development' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('product_development', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_product_development');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_product_development');
-        const facet2Select = document.getElementById('facet2_select_product_development');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('product_development');
 
 
         // Apply filters with observation counting (centralized function)
@@ -6952,50 +6777,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_optimization_path');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_optimization_path');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_optimization_path');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_optimization_path' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('optimization_path', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_optimization_path');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_optimization_path');
-        const facet2Select = document.getElementById('facet2_select_optimization_path');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('optimization_path');
 
 
         // Apply filters with observation counting (centralized function)
@@ -7686,50 +7475,14 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_business_metrics');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_business_metrics');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_business_metrics');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_business_metrics' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('business_metrics', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current color column
         const colorColSelect = document.getElementById('color_col_select_business_metrics');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_business_metrics');
-        const facet2Select = document.getElementById('facet2_select_business_metrics');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('business_metrics');
 
 
         // Apply filters with observation counting (centralized function)

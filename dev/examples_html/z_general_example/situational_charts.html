@@ -315,6 +315,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -2110,35 +2187,8 @@ $(function(){
             return;
         }
 
-        // Get categorical filter values
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_ribbon');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_ribbon' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
-
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_ribbon');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('ribbon', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2739,47 +2789,9 @@ $(function(){
         const Y_MODE = yModeSelect ? yModeSelect.value : 'Ranking';
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
+        const { filters, rangeFilters, choices } = readFilterValues('bump_rankings', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
-        // Read categorical filters (dropdowns)
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_bump_rankings');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Read continuous filters (range sliders)
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_bump_rankings' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
-
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_bump_rankings');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_bump_rankings');
-        const facet2Select = document.getElementById('facet2_select_bump_rankings');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('bump_rankings');
 
         // Apply filters with observation counting
         const filteredData = applyFiltersWithCounting(
