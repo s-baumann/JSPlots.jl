@@ -68,9 +68,16 @@ JSPlots.jl generates standalone, interactive HTML visualizations from Julia Data
 - `:csv_external` / `:json_external` - Data in separate files (enables deduplication)
 - `:parquet` - Compressed binary format (smallest size, uses parquet-wasm)
 
+### Chart Type Interface
+
+Every chart struct must implement:
+- **Fields**: `chart_title::Symbol`, `data_label::Symbol`, `functional_html::String`, `appearance_html::String` (set by the constructor)
+- **`dependencies(chart)`**: Returns `Vector{Symbol}` of data labels used (e.g., `[chart.data_label]`). Charts without data (TextBlock, LinkList, etc.) return `Symbol[]`.
+- **`js_dependencies(chart)`**: Returns `Vector{String}` of HTML script/link tags using `JS_DEP_*` constants (e.g., `vcat(JS_DEP_JQUERY, JS_DEP_PLOTLY)`). Default returns `String[]`.
+
 ### Adding a New Chart Type
 
-**Workflow: Do steps 1-5 first, then STOP and wait for user approval before proceeding to steps 6-10.** The user will review the chart in the examples file and may request changes before the full integration work is done.
+**Workflow: Do steps 1-7 first, then STOP and wait for user approval before proceeding to steps 8-12.** The user will review the chart in the examples file and may request changes before the full integration work is done.
 
 **Phase 1 — Implement and demo (do these, then stop):**
 1. Create `src/newchart.jl` with a struct extending `JSPlotsType`
@@ -121,3 +128,23 @@ Usage patterns:
 - `[(:col1, Dict(0 => "#blue", 100 => "#red"))]` - Continuous color interpolation with numeric keys
 
 Use `build_color_maps_extended()` to process ColorColSpec, which returns `(color_maps, color_scales, valid_cols)`.
+
+### HTML Template System
+
+`FULL_PAGE_TEMPLATE` in `make_html.jl` contains placeholders like `___TITLE_OF_PAGE___`, `___JS_DEPENDENCIES___`, `___DATASETS___`, `___BREADCRUMB___`, etc. **Critical**: When adding new placeholders, they must be replaced in ALL code paths — `generate_page_html()` and both branches of `create_html(JSPlotPage)` (external and embedded format paths). Missing a replacement in any path causes raw placeholder text in output.
+
+### Filters vs Choices
+
+- **Filters** (`normalize_filters()`): Multi-select — user can select multiple values simultaneously. Accepts `Vector{Symbol}` or `Dict{Symbol, Any}`.
+- **Choices** (`normalize_choices()`): Single-select — user picks exactly ONE value at a time. Same input formats but constrains to a single selection in the UI.
+
+### Pages and Multi-Page Reports
+
+`Pages` wraps a coverpage `JSPlotPage` with child pages. `create_html(Pages, outfile_path)` auto-creates a subdirectory named after the output file (e.g., `report.html` creates `report/`). When building `LinkList` URLs for a `Pages` coverpage manually, use `sanitize_filename(page.tab_title) * ".html"` to match the generated filenames.
+
+### Test Conventions
+
+- Shared test data lives in `test/chart_tests/test_data.jl` — include it before any test file when running individually
+- Each chart type has `test/chart_tests/test_<charttype>.jl`
+- Tests verify struct creation, field values, and that `functional_html` contains expected strings
+- `test/chart_tests/test_dataformats.jl` tests HTML generation across all data format options
