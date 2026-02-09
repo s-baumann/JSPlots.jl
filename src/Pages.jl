@@ -179,9 +179,7 @@ struct JSPlotPage
     notes::String
     dataformat::Symbol
     function JSPlotPage(dataframes::AbstractDict{Symbol}, pivot_tables::Vector; tab_title::String="JSPlots.jl", page_header::String="", notes::String="", dataformat::Symbol=:csv_embedded)
-        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
-            error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
-        end
+        validate_dataformat(dataformat)
 
         # Process input dictionary - expand structs containing DataFrames
         enhanced_dataframes = Dict{Symbol,DataFrame}()
@@ -252,9 +250,7 @@ struct Pages
     function Pages(coverpage::JSPlotPage, pages::Vector{<:Union{JSPlotPage, Pages}}; dataformat::Union{Nothing,Symbol}=nothing)
         # If dataformat is specified, it overrides all page dataformats
         if dataformat !== nothing
-            if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
-                error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
-            end
+            validate_dataformat(dataformat)
             new(coverpage, Vector{Union{JSPlotPage, Pages}}(pages), dataformat)
         else
             # Use the coverpage's dataformat as default
@@ -268,9 +264,7 @@ struct Pages
                    page_header::String="",
                    dataformat::Symbol=:parquet)
 
-        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
-            error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
-        end
+        validate_dataformat(dataformat)
 
         # Build the LinkList automatically from the pages
         links = Tuple{String, String, String}[]
@@ -314,9 +308,7 @@ struct Pages
                    page_header::String="",
                    dataformat::Symbol=:parquet)
 
-        if !(dataformat in [:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet])
-            error("dataformat must be :csv_embedded, :json_embedded, :csv_external, :json_external, or :parquet")
-        end
+        validate_dataformat(dataformat)
 
         # Build the grouped LinkList automatically from the grouped pages
         grouped_links = OrderedCollections.OrderedDict{String, Vector{Tuple{String, String, String}}}()

@@ -119,8 +119,8 @@ function generate_boxandwhiskers_html(chart_title_safe, data_label, df,
     choice_dropdowns = build_choice_dropdowns(string(chart_title_safe), normalized_choices, df, update_function)
 
     # Separate categorical and continuous filters for JavaScript
-    categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-    continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+    categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+    continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
     choice_cols = collect(keys(normalized_choices))
     categorical_filters_js = build_js_array(categorical_filter_cols)
     continuous_filters_js = build_js_array(continuous_filter_cols)

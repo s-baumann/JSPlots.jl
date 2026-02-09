@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1803,35 +1880,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_market_share');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_market_share');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_market_share' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('market_share', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -1845,11 +1895,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_market_share');
-        const facet2Select = document.getElementById('facet2_select_market_share');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('market_share');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -2140,35 +2186,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_budget_donut');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_budget_donut');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_budget_donut' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('budget_donut', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2182,11 +2201,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_budget_donut');
-        const facet2Select = document.getElementById('facet2_select_budget_donut');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('budget_donut');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -2477,35 +2492,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_sales_filtered');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_sales_filtered');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_sales_filtered' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('sales_filtered', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2519,11 +2507,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_sales_filtered');
-        const facet2Select = document.getElementById('facet2_select_sales_filtered');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('sales_filtered');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -2814,35 +2798,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_sales_choice');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_sales_choice');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_sales_choice' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('sales_choice', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2856,11 +2813,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_sales_choice');
-        const facet2Select = document.getElementById('facet2_select_sales_choice');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('sales_choice');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -3151,35 +3104,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_sales_by_region');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_sales_by_region');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_sales_by_region' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('sales_by_region', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3193,11 +3119,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_sales_by_region');
-        const facet2Select = document.getElementById('facet2_select_sales_by_region');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('sales_by_region');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -3488,35 +3410,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_demographics_grid');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_demographics_grid');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_demographics_grid' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('demographics_grid', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3530,11 +3425,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_demographics_grid');
-        const facet2Select = document.getElementById('facet2_select_demographics_grid');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('demographics_grid');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -3825,35 +3716,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_dept_expenses');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_dept_expenses');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_dept_expenses' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('dept_expenses', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3867,11 +3731,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_dept_expenses');
-        const facet2Select = document.getElementById('facet2_select_dept_expenses');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('dept_expenses');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -4162,35 +4022,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_customer_segments');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_customer_segments');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_customer_segments' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('customer_segments', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -4204,11 +4037,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_customer_segments');
-        const facet2Select = document.getElementById('facet2_select_customer_segments');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('customer_segments');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -4499,35 +4328,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_store_comparison');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_store_comparison');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_store_comparison' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('store_comparison', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -4541,11 +4343,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_store_comparison');
-        const facet2Select = document.getElementById('facet2_select_store_comparison');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('store_comparison');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -4836,35 +4634,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_traffic_analysis');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_traffic_analysis');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_traffic_analysis' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('traffic_analysis', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -4878,11 +4649,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_traffic_analysis');
-        const facet2Select = document.getElementById('facet2_select_traffic_analysis');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('traffic_analysis');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -5173,35 +4940,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_comprehensive_sales');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_comprehensive_sales');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_comprehensive_sales' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('comprehensive_sales', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -5215,11 +4955,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_comprehensive_sales');
-        const facet2Select = document.getElementById('facet2_select_comprehensive_sales');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('comprehensive_sales');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -5510,35 +5246,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_struct_pie');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_struct_pie');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_struct_pie' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('struct_pie', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -5552,11 +5261,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             choices
         );
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_struct_pie');
-        const facet2Select = document.getElementById('facet2_select_struct_pie');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('struct_pie');
 
         if (!facet1) {
             // No faceting - single pie chart
@@ -6381,7 +6086,7 @@ Company E,8000,250
                 range: true,
                 min: 2022.0,
                 max: 2024.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [2022.0, 2024.0],
                 slide: function(event, ui) {
                     // Update display during sliding
@@ -6503,7 +6208,7 @@ Use choices when the user must select exactly one option (like choosing a specif
                 range: true,
                 min: 2022.0,
                 max: 2024.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [2022.0, 2024.0],
                 slide: function(event, ui) {
                     // Update display during sliding

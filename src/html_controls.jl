@@ -226,7 +226,7 @@ function generate_range_slider_html(slider::RangeSliderControl)::String
                             range: true,
                             min: $(slider.min_value),
                             max: $(slider.max_value),
-                            step: $(slider.value_type == :integer ? "1.0" : string((slider.max_value - slider.min_value) / 1000)),  // Integer steps for integers, smooth for others
+                            step: $(slider.value_type == :integer ? "1" : string((slider.max_value - slider.min_value) / 1000)),  // Integer steps for integers, smooth for others
                             values: [$(slider.default_min), $(slider.default_max)],
                             slide: function(event, ui) {
                                 // Update display during sliding

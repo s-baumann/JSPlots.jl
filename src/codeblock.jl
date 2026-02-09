@@ -319,10 +319,7 @@ Generate HTML for displaying a code block with syntax highlighting.
 """
 function generate_codeblock_html(code::String, language::String, notes::String, chart_title::Symbol; file_path::Union{String, Nothing}=nothing)
     # Escape HTML in code
-    code_escaped = replace(code, "&" => "&amp;")
-    code_escaped = replace(code_escaped, "<" => "&lt;")
-    code_escaped = replace(code_escaped, ">" => "&gt;")
-    code_escaped = replace(code_escaped, "\"" => "&quot;")
+    code_escaped = html_escape(code)
 
     # Determine language class for Prism.js
     lang_lower = lowercase(language)
@@ -609,5 +606,5 @@ function get_languages_from_codeblocks(charts::Vector)
     return collect(languages)
 end
 
-dependencies(a::CodeBlock) = []
+dependencies(a::CodeBlock) = Symbol[]
 js_dependencies(::CodeBlock) = vcat(JS_DEP_JQUERY, JS_DEP_PRISM)

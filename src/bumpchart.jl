@@ -85,7 +85,7 @@ struct BumpChart <: JSPlotsType
         end
 
         # Build color maps for entities
-        color_maps, _ = build_color_maps([entity_col], df)
+        color_maps, _, _ = build_color_maps_extended([entity_col], df)
 
         # Build HTML controls using abstraction
         update_function = "updateChart_$chart_title_safe()"
@@ -192,47 +192,9 @@ struct BumpChart <: JSPlotsType
                 const Y_MODE = yModeSelect ? yModeSelect.value : '$y_mode';
 
                 // Get current filter values
-                const filters = {};
-                const rangeFilters = {};
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title_safe', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
-                // Read categorical filters (dropdowns)
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title_safe');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Read continuous filters (range sliders)
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title_safe' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
-
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title_safe');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title_safe');
-                const facet2Select = document.getElementById('facet2_select_$chart_title_safe');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-                // Build FACET_COLS array based on selections
-                const FACET_COLS = [];
-                if (facet1) FACET_COLS.push(facet1);
-                if (facet2) FACET_COLS.push(facet2);
+                const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('$chart_title_safe');
 
                 // Apply filters with observation counting
                 const filteredData = applyFiltersWithCounting(

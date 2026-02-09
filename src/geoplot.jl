@@ -132,8 +132,8 @@ struct GeoPlot <: JSPlotsType
         filters_html = join([generate_dropdown_html(dd, multiselect=true) for dd in filter_dropdowns], "\n") *
                        join([generate_range_slider_html(sl) for sl in filter_sliders], "\n")
 
-        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
         choice_cols = collect(keys(normalized_choices))
 
         categorical_filters_js = build_js_array(categorical_filter_cols)
@@ -665,34 +665,8 @@ struct GeoPlot <: JSPlotsType
                     VALUE_COL = overlaySelect.value;
                 }
 
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title_str');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Get filter values
-                const filters = {};
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title_str');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                const rangeFilters = {};
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title_str' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
+                // Get current filter values
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title_str', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Apply filters
                 const filteredData = applyFiltersWithCounting(

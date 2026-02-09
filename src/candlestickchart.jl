@@ -174,36 +174,7 @@ struct CandlestickChart <: JSPlotsType
                 const DISPLAY_MODE = displayModeSelect ? displayModeSelect.value : '$display_mode';
 
                 // Get current filter values
-                const filters = {};
-                const rangeFilters = {};
-
-                // Read categorical filters (dropdowns)
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title_safe');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Read continuous filters (range sliders)
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title_safe' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
-
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title_safe');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title_safe', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Apply filters with observation counting
                 const filteredData = applyFiltersWithCounting(

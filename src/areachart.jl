@@ -91,9 +91,6 @@ struct AreaChart <: JSPlotsType
             error("fill_opacity must be between 0.0 and 1.0")
         end
 
-        # Get unique values for each filter column
-        filter_options = build_filter_options(normalized_filters, df)
-
         # Build color maps for all possible group columns that exist (with optional custom colors)
         color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
         # Build group order maps (preserving order of first appearance)
@@ -121,14 +118,7 @@ struct AreaChart <: JSPlotsType
         color_cols_js = build_js_array(valid_color_cols)
 
         # Create color maps as nested JavaScript object (categorical)
-        color_maps_js = if isempty(color_maps)
-            "{}"
-        else
-            "{" * join([
-                "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-                for (col, map) in color_maps
-            ], ", ") * "}"
-        end
+        color_maps_js = JSON.json(color_maps)
 
         # Create color scales as nested JavaScript object (continuous)
         color_scales_js = build_color_scales_js(color_scales)
@@ -200,35 +190,8 @@ struct AreaChart <: JSPlotsType
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title_safe');
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title_safe');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Get categorical filter values (multiple selections)
-                const filters = {};
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title_safe');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Get continuous filter values (range sliders)
-                const rangeFilters = {};
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title_safe' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
+                // Get current filter values
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title_safe', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Get current group column
                 const groupColSelect = document.getElementById('color_col_select_$chart_title_safe');
@@ -238,16 +201,7 @@ struct AreaChart <: JSPlotsType
                 const stackModeSelect = document.getElementById('stack_mode_select_$chart_title_safe');
                 const STACK_MODE = stackModeSelect ? stackModeSelect.value : '$stack_mode';
 
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title_safe');
-                const facet2Select = document.getElementById('facet2_select_$chart_title_safe');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-                // Build FACET_COLS array based on selections
-                const FACET_COLS = [];
-                if (facet1) FACET_COLS.push(facet1);
-                if (facet2) FACET_COLS.push(facet2);
+                const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('$chart_title_safe');
 
                 // Get color map and group order for current selection
                 const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -286,19 +240,7 @@ struct AreaChart <: JSPlotsType
 
                     for (let groupKey of orderedGroups) {
                         const groupData = groupedData[groupKey];
-                        groupData.sort((a, b) => {
-                            const aVal = a[X_COL];
-                            const bVal = b[X_COL];
-                            if (X_ORDER.length > 0) {
-                                const aIdx = X_ORDER.indexOf(String(aVal));
-                                const bIdx = X_ORDER.indexOf(String(bVal));
-                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                                if (aIdx >= 0) return -1;
-                                if (bIdx >= 0) return 1;
-                            }
-                            if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                            return aVal - bVal;
-                        });
+                        groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                         let xValues = groupData.map(row => row[X_COL]);
                         let yValues = groupData.map(row => row[Y_COL]);

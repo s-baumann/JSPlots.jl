@@ -92,9 +92,6 @@ normalized_choices = normalize_choices(choices, df)
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
-        # Get unique values for each filter column
-        filter_options = build_filter_options(normalized_filters, df)
-
         # Build color maps for all possible color columns that exist
         color_col_names = extract_color_col_names(color_cols)
         valid_color_cols = isempty(color_col_names) ? Symbol[] : validate_and_filter_columns(color_col_names, df, "color_cols")
@@ -109,12 +106,11 @@ normalized_choices = normalize_choices(choices, df)
         choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Separate categorical and continuous filters for JavaScript
-        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
-        choice_cols = [string(d.id)[1:findfirst("_choice_", string(d.id))[1]-1] for d in choice_dropdowns]
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         # Create JavaScript arrays for columns
-        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
         choice_filters_js = build_js_array(choice_cols)
@@ -188,50 +184,14 @@ normalized_choices = normalize_choices(choices, df)
                 const yTransformSelect = document.getElementById('y_transform_select_$chart_title');
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Get categorical filter values (multiple selections)
-                const filters = {};
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Get continuous filter values (range sliders)
-                const rangeFilters = {};
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
+                // Get current filter values
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Get current color column
                 const colorColSelect = document.getElementById('color_col_select_$chart_title');
                 const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-                // Build FACET_COLS array based on selections
-                const FACET_COLS = [];
-                if (facet1) FACET_COLS.push(facet1);
-                if (facet2) FACET_COLS.push(facet2);
+                const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('$chart_title');
 
 
                 // Apply filters with observation counting (centralized function)

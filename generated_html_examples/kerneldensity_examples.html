@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -2072,35 +2149,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_simple_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_simple_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_simple_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_simple_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('simple_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2518,35 +2568,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_group_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_multi_group_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_multi_group_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_multi_group_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('multi_group_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -2964,35 +2987,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_filtered_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_filtered_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_filtered_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_filtered_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('filtered_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3410,35 +3406,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_choice_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_choice_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_choice_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_choice_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('choice_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -3856,35 +3825,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_facet_one_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_facet_one_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_facet_one_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_facet_one_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('facet_one_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -4302,35 +4244,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_facet_grid_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_facet_grid_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_facet_grid_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_facet_grid_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('facet_grid_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -4748,35 +4663,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_bimodal_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_bimodal_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_bimodal_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_bimodal_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('bimodal_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -5194,35 +5082,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_custom_bandwidth_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_custom_bandwidth_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_custom_bandwidth_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_custom_bandwidth_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('custom_bandwidth_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -5640,35 +5501,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_multi_dropdown_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_multi_dropdown_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_multi_dropdown_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_multi_dropdown_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('multi_dropdown_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -6089,35 +5923,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_comprehensive_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_comprehensive_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_comprehensive_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_comprehensive_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('comprehensive_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -6538,35 +6345,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
     // Filter and update function
     window.updatePlotWithFilters_custom_colors_kde = function() {
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_custom_colors_kde');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_custom_colors_kde');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_custom_colors_kde' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('custom_colors_kde', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Apply filters with observation counting (centralized function)
         const filteredData = applyFiltersWithCounting(
@@ -18103,7 +17883,7 @@ value,treatment,timepoint
                 range: true,
                 min: 18.0,
                 max: 80.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [18.0, 80.0],
                 slide: function(event, ui) {
                     // Update display during sliding
@@ -18230,7 +18010,7 @@ Use choices when the user must select exactly one option (e.g., comparing one re
                 range: true,
                 min: 18.0,
                 max: 80.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [18.0, 80.0],
                 slide: function(event, ui) {
                     // Update display during sliding
@@ -18620,7 +18400,7 @@ Use choices when the user must select exactly one option (e.g., comparing one re
                 range: true,
                 min: 20.0,
                 max: 65.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [20.0, 65.0],
                 slide: function(event, ui) {
                     // Update display during sliding

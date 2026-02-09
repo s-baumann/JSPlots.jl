@@ -242,5 +242,5 @@ function generate_textblock_html(tb::TextBlock, dataformat::Symbol, project_dir:
     return html
 end
 
-dependencies(a::TextBlock) = []
+dependencies(a::TextBlock) = Symbol[]
 js_dependencies(::TextBlock) = vcat(JS_DEP_JQUERY)

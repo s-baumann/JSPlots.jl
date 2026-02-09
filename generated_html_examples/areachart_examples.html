@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1705,7 +1782,7 @@ $(function(){
     const X_COLS = ['Date'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Region'];
-    const COLOR_MAPS = {'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
+    const COLOR_MAPS = {"Region":{"East":"#00cc96","West":"#ab63fa","North":"#636efa","South":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East', 'West']};
     const X_ORDER = [];
@@ -1803,35 +1880,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_stacked_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_stacked_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_stacked_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_stacked_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('stacked_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_stacked_area');
@@ -1841,16 +1891,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_stacked_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_stacked_area');
-        const facet2Select = document.getElementById('facet2_select_stacked_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('stacked_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -1889,19 +1930,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -2366,7 +2395,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Time'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Product'];
-    const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
+    const COLOR_MAPS = {"Product":{"Product A":"#636efa","Product C":"#00cc96","Product B":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Product': ['Product A', 'Product B', 'Product C']};
     const X_ORDER = [];
@@ -2464,35 +2493,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_unstacked_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_unstacked_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_unstacked_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_unstacked_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('unstacked_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_unstacked_area');
@@ -2502,16 +2504,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_unstacked_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'unstack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_unstacked_area');
-        const facet2Select = document.getElementById('facet2_select_unstacked_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('unstacked_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -2550,19 +2543,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -3027,7 +3008,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Month'];
     const Y_COLS = ['MarketShare'];
     const COLOR_COLS = ['Category'];
-    const COLOR_MAPS = {'Category': {'Category D': '#ab63fa', 'Category C': '#00cc96', 'Category B': '#EF553B', 'Category A': '#636efa'}};
+    const COLOR_MAPS = {"Category":{"Category D":"#ab63fa","Category C":"#00cc96","Category B":"#EF553B","Category A":"#636efa"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Category A', 'Category B', 'Category C', 'Category D']};
     const X_ORDER = [];
@@ -3125,35 +3106,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_normalized_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_normalized_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_normalized_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_normalized_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('normalized_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_normalized_area');
@@ -3163,16 +3117,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_normalized_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'normalised_stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_normalized_area');
-        const facet2Select = document.getElementById('facet2_select_normalized_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('normalized_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -3211,19 +3156,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -3688,7 +3621,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Department'];
     const Y_COLS = ['Headcount'];
     const COLOR_COLS = ['Team'];
-    const COLOR_MAPS = {'Team': {'Team C': '#00cc96', 'Team B': '#EF553B', 'Team A': '#636efa'}};
+    const COLOR_MAPS = {"Team":{"Team C":"#00cc96","Team B":"#EF553B","Team A":"#636efa"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Team': ['Team A', 'Team B', 'Team C']};
     const X_ORDER = [];
@@ -3786,35 +3719,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_discrete_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_discrete_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_discrete_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_discrete_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('discrete_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_discrete_area');
@@ -3824,16 +3730,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_discrete_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_discrete_area');
-        const facet2Select = document.getElementById('facet2_select_discrete_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('discrete_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -3872,19 +3769,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -4349,7 +4234,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Date'];
     const Y_COLS = ['Revenue'];
     const COLOR_COLS = ['Channel'];
-    const COLOR_MAPS = {'Channel': {'Retail': '#EF553B', 'Online': '#636efa', 'Wholesale': '#00cc96'}};
+    const COLOR_MAPS = {"Channel":{"Retail":"#EF553B","Online":"#636efa","Wholesale":"#00cc96"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Channel': ['Online', 'Retail', 'Wholesale']};
     const X_ORDER = [];
@@ -4447,35 +4332,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_filtered_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_filtered_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_filtered_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_filtered_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('filtered_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_filtered_area');
@@ -4485,16 +4343,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_filtered_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_filtered_area');
-        const facet2Select = document.getElementById('facet2_select_filtered_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('filtered_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -4533,19 +4382,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -5010,7 +4847,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Date'];
     const Y_COLS = ['Revenue'];
     const COLOR_COLS = ['Channel'];
-    const COLOR_MAPS = {'Channel': {'Retail': '#EF553B', 'Online': '#636efa', 'Wholesale': '#00cc96'}};
+    const COLOR_MAPS = {"Channel":{"Retail":"#EF553B","Online":"#636efa","Wholesale":"#00cc96"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Channel': ['Online', 'Retail', 'Wholesale']};
     const X_ORDER = [];
@@ -5108,35 +4945,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_choice_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_choice_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_choice_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_choice_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('choice_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_choice_area');
@@ -5146,16 +4956,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_choice_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_choice_area');
-        const facet2Select = document.getElementById('facet2_select_choice_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('choice_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -5194,19 +4995,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -5671,7 +5460,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Week'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Source'];
-    const COLOR_MAPS = {'Source': {'Source 1': '#636efa', 'Source 2': '#EF553B', 'Source 3': '#00cc96'}};
+    const COLOR_MAPS = {"Source":{"Source 1":"#636efa","Source 2":"#EF553B","Source 3":"#00cc96"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Source': ['Source 1', 'Source 2', 'Source 3']};
     const X_ORDER = [];
@@ -5769,35 +5558,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_facet_wrap_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_facet_wrap_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_facet_wrap_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_facet_wrap_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('facet_wrap_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_facet_wrap_area');
@@ -5807,16 +5569,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_facet_wrap_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_facet_wrap_area');
-        const facet2Select = document.getElementById('facet2_select_facet_wrap_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('facet_wrap_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -5855,19 +5608,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -6332,7 +6073,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Segment'];
-    const COLOR_MAPS = {'Segment': {'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
+    const COLOR_MAPS = {"Segment":{"Segment 1":"#636efa","Segment 2":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2']};
     const X_ORDER = [];
@@ -6430,35 +6171,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_facet_grid_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_facet_grid_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_facet_grid_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_facet_grid_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('facet_grid_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_facet_grid_area');
@@ -6468,16 +6182,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_facet_grid_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_facet_grid_area');
-        const facet2Select = document.getElementById('facet2_select_facet_grid_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('facet_grid_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -6516,19 +6221,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -6993,7 +6686,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Quarter'];
     const Y_COLS = ['Revenue', 'Profit', 'Growth'];
     const COLOR_COLS = ['Industry', 'CompanySize'];
-    const COLOR_MAPS = {'Industry': {'Finance': '#EF553B', 'Healthcare': '#00cc96', 'Tech': '#636efa'}, 'CompanySize': {'Medium': '#EF553B', 'Small': '#636efa', 'Large': '#00cc96'}};
+    const COLOR_MAPS = {"Industry":{"Finance":"#EF553B","Healthcare":"#00cc96","Tech":"#636efa"},"CompanySize":{"Medium":"#EF553B","Small":"#636efa","Large":"#00cc96"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Industry': ['Tech', 'Finance', 'Healthcare'], 'CompanySize': ['Small', 'Medium', 'Large']};
     const X_ORDER = [];
@@ -7091,35 +6784,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_dynamic_grouping');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_dynamic_grouping');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_dynamic_grouping');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_dynamic_grouping' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('dynamic_grouping', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_dynamic_grouping');
@@ -7129,16 +6795,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_dynamic_grouping');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_dynamic_grouping');
-        const facet2Select = document.getElementById('facet2_select_dynamic_grouping');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('dynamic_grouping');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -7177,19 +6834,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -7654,7 +7299,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Time'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Category'];
-    const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
+    const COLOR_MAPS = {"Category":{"Cat 3":"#00cc96","Cat 2":"#EF553B","Cat 1":"#636efa"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
     const X_ORDER = [];
@@ -7752,35 +7397,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_unstack_mode');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_unstack_mode');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_unstack_mode');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_unstack_mode' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('unstack_mode', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_unstack_mode');
@@ -7790,16 +7408,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_unstack_mode');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'unstack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_unstack_mode');
-        const facet2Select = document.getElementById('facet2_select_unstack_mode');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('unstack_mode');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -7838,19 +7447,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -8315,7 +7912,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Time'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Category'];
-    const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
+    const COLOR_MAPS = {"Category":{"Cat 3":"#00cc96","Cat 2":"#EF553B","Cat 1":"#636efa"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
     const X_ORDER = [];
@@ -8413,35 +8010,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_stack_mode');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_stack_mode');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_stack_mode');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_stack_mode' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('stack_mode', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_stack_mode');
@@ -8451,16 +8021,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_stack_mode');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_stack_mode');
-        const facet2Select = document.getElementById('facet2_select_stack_mode');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('stack_mode');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -8499,19 +8060,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -8976,7 +8525,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Time'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Category'];
-    const COLOR_MAPS = {'Category': {'Cat 3': '#00cc96', 'Cat 2': '#EF553B', 'Cat 1': '#636efa'}};
+    const COLOR_MAPS = {"Category":{"Cat 3":"#00cc96","Cat 2":"#EF553B","Cat 1":"#636efa"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Category': ['Cat 1', 'Cat 2', 'Cat 3']};
     const X_ORDER = [];
@@ -9074,35 +8623,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_normalized_mode');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_normalized_mode');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_normalized_mode');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_normalized_mode' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('normalized_mode', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_normalized_mode');
@@ -9112,16 +8634,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_normalized_mode');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'normalised_stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_normalized_mode');
-        const facet2Select = document.getElementById('facet2_select_normalized_mode');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('normalized_mode');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -9160,19 +8673,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -9637,7 +9138,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Quarter', 'Month', 'Week'];
     const Y_COLS = ['Revenue', 'Units'];
     const COLOR_COLS = ['Region'];
-    const COLOR_MAPS = {'Region': {'East': '#00cc96', 'North': '#636efa', 'South': '#EF553B'}};
+    const COLOR_MAPS = {"Region":{"East":"#00cc96","North":"#636efa","South":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East']};
     const X_ORDER = [];
@@ -9735,35 +9236,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_dynamic_x_axis');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_dynamic_x_axis');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_dynamic_x_axis');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_dynamic_x_axis' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('dynamic_x_axis', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_dynamic_x_axis');
@@ -9773,16 +9247,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_dynamic_x_axis');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_dynamic_x_axis');
-        const facet2Select = document.getElementById('facet2_select_dynamic_x_axis');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('dynamic_x_axis');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -9821,19 +9286,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -10298,7 +9751,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Store'];
     const Y_COLS = ['Sales'];
     const COLOR_COLS = ['Product'];
-    const COLOR_MAPS = {'Product': {'Product A': '#636efa', 'Product C': '#00cc96', 'Product B': '#EF553B'}};
+    const COLOR_MAPS = {"Product":{"Product A":"#636efa","Product C":"#00cc96","Product B":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Product': ['Product A', 'Product B', 'Product C']};
     const X_ORDER = [];
@@ -10396,35 +9849,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_dodge_mode');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_dodge_mode');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_dodge_mode');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_dodge_mode' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('dodge_mode', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_dodge_mode');
@@ -10434,16 +9860,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_dodge_mode');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'dodge';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_dodge_mode');
-        const facet2Select = document.getElementById('facet2_select_dodge_mode');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('dodge_mode');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -10482,19 +9899,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -10959,7 +10364,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Category'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Segment'];
-    const COLOR_MAPS = {'Segment': {'Segment 3': '#00cc96', 'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
+    const COLOR_MAPS = {"Segment":{"Segment 3":"#00cc96","Segment 1":"#636efa","Segment 2":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2', 'Segment 3']};
     const X_ORDER = [];
@@ -11057,35 +10462,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_dodge_comparison');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_dodge_comparison');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_dodge_comparison');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_dodge_comparison' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('dodge_comparison', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_dodge_comparison');
@@ -11095,16 +10473,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_dodge_comparison');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'dodge';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_dodge_comparison');
-        const facet2Select = document.getElementById('facet2_select_dodge_comparison');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('dodge_comparison');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -11143,19 +10512,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -11620,7 +10977,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Category'];
     const Y_COLS = ['Value'];
     const COLOR_COLS = ['Segment'];
-    const COLOR_MAPS = {'Segment': {'Segment 3': '#00cc96', 'Segment 1': '#636efa', 'Segment 2': '#EF553B'}};
+    const COLOR_MAPS = {"Segment":{"Segment 3":"#00cc96","Segment 1":"#636efa","Segment 2":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Segment': ['Segment 1', 'Segment 2', 'Segment 3']};
     const X_ORDER = [];
@@ -11718,35 +11075,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_stack_comparison');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_stack_comparison');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_stack_comparison');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_stack_comparison' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('stack_comparison', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_stack_comparison');
@@ -11756,16 +11086,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_stack_comparison');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_stack_comparison');
-        const facet2Select = document.getElementById('facet2_select_stack_comparison');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('stack_comparison');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -11804,19 +11125,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -12281,7 +11590,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COLS = ['Month'];
     const Y_COLS = ['Sales', 'Units'];
     const COLOR_COLS = ['Region'];
-    const COLOR_MAPS = {'Region': {'East': '#00cc96', 'West': '#ab63fa', 'North': '#636efa', 'South': '#EF553B'}};
+    const COLOR_MAPS = {"Region":{"East":"#00cc96","West":"#ab63fa","North":"#636efa","South":"#EF553B"}};
     const COLOR_SCALES = {};
     const GROUP_ORDER = {'Region': ['North', 'South', 'East', 'West']};
     const X_ORDER = [];
@@ -12379,35 +11688,8 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const yTransformSelect = document.getElementById('y_transform_select_struct_area');
         const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
-        // Get choice filter values (single-select)
-        const choices = {};
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_struct_area');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        // Get categorical filter values (multiple selections)
-        const filters = {};
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_struct_area');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        // Get continuous filter values (range sliders)
-        const rangeFilters = {};
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_struct_area' + '_slider');
-            if (slider.length > 0) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        // Get current filter values
+        const { filters, rangeFilters, choices } = readFilterValues('struct_area', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         // Get current group column
         const groupColSelect = document.getElementById('color_col_select_struct_area');
@@ -12417,16 +11699,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const stackModeSelect = document.getElementById('stack_mode_select_struct_area');
         const STACK_MODE = stackModeSelect ? stackModeSelect.value : 'stack';
 
-        // Get current facet selections
-        const facet1Select = document.getElementById('facet1_select_struct_area');
-        const facet2Select = document.getElementById('facet2_select_struct_area');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-        // Build FACET_COLS array based on selections
-        const FACET_COLS = [];
-        if (facet1) FACET_COLS.push(facet1);
-        if (facet2) FACET_COLS.push(facet2);
+        const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('struct_area');
 
         // Get color map and group order for current selection
         const COLOR_MAP = COLOR_MAPS[GROUP_COL] || {};
@@ -12465,19 +11738,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
 
             for (let groupKey of orderedGroups) {
                 const groupData = groupedData[groupKey];
-                groupData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (X_ORDER.length > 0) {
-                        const aIdx = X_ORDER.indexOf(String(aVal));
-                        const bIdx = X_ORDER.indexOf(String(bVal));
-                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                        if (aIdx >= 0) return -1;
-                        if (bIdx >= 0) return 1;
-                    }
-                    if (typeof aVal === 'string') return aVal.localeCompare(bVal);
-                    return aVal - bVal;
-                });
+                groupData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                 let xValues = groupData.map(row => row[X_COL]);
                 let yValues = groupData.map(row => row[Y_COL]);
@@ -15640,7 +14901,7 @@ HR,6,Team C
                 range: true,
                 min: 2022.0,
                 max: 2024.0,
-                step: 1.0,  // Integer steps for integers, smooth for others
+                step: 1,  // Integer steps for integers, smooth for others
                 values: [2022.0, 2024.0],
                 slide: function(event, ui) {
                     // Update display during sliding

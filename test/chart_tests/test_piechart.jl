@@ -96,7 +96,7 @@ using DataFrames
         @test occursin("region", chart.appearance_html)
         @test occursin("facet1_select", chart.appearance_html)
         @test !occursin("facet2_select", chart.appearance_html)  # Only one facet, no facet2
-        @test occursin("facet1Select", chart.functional_html)
+        @test occursin("readFacetSelections", chart.functional_html)
     end
 
     @testset "With multiple facet columns (facet grid)" begin
@@ -116,7 +116,7 @@ using DataFrames
         @test occursin("year", chart.appearance_html)
         @test occursin("facet1_select", chart.appearance_html)
         @test occursin("facet2_select", chart.appearance_html)
-        @test occursin("facet1Select", chart.functional_html)
+        @test occursin("readFacetSelections", chart.functional_html)
     end
 
     @testset "Facet cols as vector" begin

@@ -105,9 +105,6 @@ struct CumPlot <: JSPlotsType
         # Normalize and validate facets using centralized helper
         facet_choices, default_facet_array = normalize_and_validate_facets(facet_cols, default_facet_cols)
 
-        # Get unique values for each filter column
-        filter_options = build_filter_options(normalized_filters, df)
-
         # Build color maps for all possible color columns that exist (with optional custom colors)
         color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
 
@@ -118,9 +115,9 @@ struct CumPlot <: JSPlotsType
         choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Separate categorical and continuous filters
-        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
-        choice_cols = [string(d.id)[1:findfirst("_choice_", string(d.id))[1]-1] for d in choice_dropdowns]
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
@@ -135,10 +132,7 @@ struct CumPlot <: JSPlotsType
         ], ", ") * "]"
 
         # Create color maps as nested JavaScript object (categorical)
-        color_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in color_maps
-        ], ", ") * "}"
+        color_maps_js = JSON.json(color_maps)
 
         # Create color scales as nested JavaScript object (continuous)
         color_scales_js = build_color_scales_js(color_scales)
@@ -313,46 +307,13 @@ struct CumPlot <: JSPlotsType
                 const Y_TRANSFORM = selectedYTransform.transform;
 
                 // Get current filter values
-                const filters = {};
-                const rangeFilters = {};
-                const choices = {};
-
-                // Read choice filters (single-select dropdowns)
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Read categorical filters (dropdowns)
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Read continuous filters (range sliders)
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
-                    if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Get current color column
                 const colorColSelect = document.getElementById('color_col_select_$chart_title');
                 const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+                const { facet1, facet2 } = readFacetSelections('$chart_title');
 
                 // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
@@ -370,14 +331,7 @@ struct CumPlot <: JSPlotsType
                 );
 
                 // Sort data by X
-                filteredData.sort((a, b) => {
-                    const aVal = a[X_COL];
-                    const bVal = b[X_COL];
-                    if (aVal instanceof Date && bVal instanceof Date) {
-                        return aVal - bVal;
-                    }
-                    return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-                });
+                filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
                 // Get unique X values
                 const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -491,14 +445,7 @@ struct CumPlot <: JSPlotsType
                     if (group.length === 0) continue;
 
                     // Sort by X within group
-                    group.sort((a, b) => {
-                        const aVal = a[X_COL];
-                        const bVal = b[X_COL];
-                        if (aVal instanceof Date && bVal instanceof Date) {
-                            return aVal - bVal;
-                        }
-                        return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-                    });
+                    group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
                     const fullXValues = group.map(row => row[X_COL]);
                     const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);

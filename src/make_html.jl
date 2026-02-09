@@ -407,6 +407,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1997,55 +2074,133 @@ report = Pages(coverpage, [page1, page2])
 create_html(report, "index.html")
 ```
 """
+# =============================================================================
+# Helper functions for HTML page assembly (shared across create_html code paths)
+# =============================================================================
+
+"""Collect CSS styles needed based on chart types present on a page."""
+function _collect_extra_styles(pivot_tables::Vector)::String
+    extra_styles = ""
+    any(p -> isa(p, TextBlock), pivot_tables) && (extra_styles *= TEXTBLOCK_STYLE)
+    any(p -> isa(p, Notes), pivot_tables) && (extra_styles *= NOTES_STYLE)
+    any(p -> isa(p, Picture), pivot_tables) && (extra_styles *= PICTURE_STYLE)
+    any(p -> isa(p, Table), pivot_tables) && (extra_styles *= TABLE_STYLE)
+    return extra_styles
+end
+
+"""Collect Prism.js language script tags for CodeBlocks."""
+function _collect_prism_scripts(pivot_tables::Vector)::String
+    prism_languages = get_languages_from_codeblocks(pivot_tables)
+    isempty(prism_languages) && return ""
+    return join(["""    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-$lang.min.js"></script>"""
+                 for lang in prism_languages], "\n")
+end
+
+"""Collect and deduplicate JavaScript dependency tags for all charts on a page."""
+function _collect_js_dependencies_html(pivot_tables::Vector, dataformat::Symbol)::String
+    all_js_deps = reduce(vcat, js_dependencies.(pivot_tables); init=String[])
+    if dataformat in [:csv_embedded, :csv_external]
+        append!(all_js_deps, JS_DEP_CSV)
+    end
+    unique_js_deps = unique(all_js_deps)
+    return isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
+end
+
+"""Get the parquet-wasm script block if using parquet format, empty string otherwise."""
+_get_parquet_script(dataformat::Symbol)::String = dataformat == :parquet ? join(JS_DEP_PARQUET, "\n") : ""
+
+"""Get the JSPlots package version string."""
+function _get_version_string()::String
+    try
+        string(pkgversion(@__MODULE__))
+    catch
+        "unknown"
+    end
+end
+
+"""Process pivot_tables into functional_html and table_html strings."""
+function _process_pivot_tables(pivot_tables::Vector, dataformat::Symbol, project_dir::String)
+    functional_bit = ""
+    table_bit = ""
+
+    for (i, pti) in enumerate(pivot_tables)
+        sp = i == 1 ? "" : SEGMENT_SEPARATOR
+        if isa(pti, Picture)
+            if !isempty(pti.functional_html)
+                functional_bit *= pti.functional_html
+            end
+            table_bit *= sp * generate_picture_html(pti, dataformat, project_dir)
+            if pti.image_path !== nothing
+                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
+            end
+        elseif isa(pti, TextBlock)
+            if !isempty(pti.images)
+                table_bit *= sp * generate_textblock_html(pti, dataformat, project_dir)
+            else
+                table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
+            end
+        elseif isa(pti, Notes)
+            notes_result = generate_notes_html(pti, dataformat, project_dir)
+            table_bit *= sp * notes_result.html
+            if !isempty(notes_result.js)
+                functional_bit *= notes_result.js
+            end
+        elseif isa(pti, Slides)
+            functional_bit *= pti.functional_html
+            table_bit *= sp * generate_slides_html(pti, dataformat, project_dir)
+        elseif isa(pti, Table)
+            functional_bit *= pti.functional_html
+            table_bit *= sp * pti.appearance_html
+            table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
+        elseif hasfield(typeof(pti), :data_label)
+            functional_bit *= pti.functional_html
+            table_bit *= sp * pti.appearance_html
+            table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, dataformat)
+        else
+            if hasfield(typeof(pti), :functional_html)
+                functional_bit *= pti.functional_html
+            end
+            table_bit *= sp * pti.appearance_html
+        end
+    end
+
+    return functional_bit, table_bit
+end
+
+"""Apply all template replacements to FULL_PAGE_TEMPLATE and return the final HTML string."""
+function _apply_page_template(;
+    data_set_bit::String, table_bit::String, functional_bit::String,
+    tab_title::String, page_header::String, notes::String,
+    extra_styles::String, js_dependencies_html::String,
+    prism_scripts::String, parquet_script::String,
+    breadcrumb_html::String="")::String
+
+    version_str = _get_version_string()
+
+    full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
+    full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
+    full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
+    full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => tab_title)
+    full_page_html = replace(full_page_html, "___PAGE_HEADER___" => page_header)
+    full_page_html = replace(full_page_html, "___NOTES___" => notes)
+    full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
+    full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
+    full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
+    full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
+    full_page_html = replace(full_page_html, "___VERSION___" => version_str)
+    full_page_html = replace(full_page_html, "___BREADCRUMB___" => breadcrumb_html)
+    return full_page_html
+end
+
+# =============================================================================
+
 function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
                      manifest::Union{String,Nothing}=nothing,
                      manifest_entry::Union{ManifestEntry,Nothing}=nothing)
-    # Collect extra styles needed for TextBlock, Notes, Picture, and Table
-    extra_styles = ""
-    has_textblock = any(p -> isa(p, TextBlock), pt.pivot_tables)
-    has_notes = any(p -> isa(p, Notes), pt.pivot_tables)
-    has_picture = any(p -> isa(p, Picture), pt.pivot_tables)
-    has_table = any(p -> isa(p, Table), pt.pivot_tables)
-
-    if has_textblock
-        extra_styles *= TEXTBLOCK_STYLE
-    end
-    if has_notes
-        extra_styles *= NOTES_STYLE
-    end
-    if has_picture
-        extra_styles *= PICTURE_STYLE
-    end
-    if has_table
-        extra_styles *= TABLE_STYLE
-    end
-
-    # Collect Prism.js language components needed for CodeBlocks (base Prism is in JS_DEP_PRISM)
-    prism_languages = JSPlots.get_languages_from_codeblocks(pt.pivot_tables)
-    prism_scripts = if isempty(prism_languages)
-        ""
-    else
-        join(["""    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-$lang.min.js"></script>"""
-              for lang in prism_languages], "\n")
-    end
-
-    # Collect JavaScript dependencies from all plot types on this page
-    all_js_deps = reduce(vcat, js_dependencies.(pt.pivot_tables); init=String[])
-
-    # Add dataformat-specific dependencies (PapaParse for CSV formats)
-    if pt.dataformat in [:csv_embedded, :csv_external]
-        append!(all_js_deps, JS_DEP_CSV)
-    end
-
-    unique_js_deps = unique(all_js_deps)
-    js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
-
-    # Parquet support script (only needed for parquet dataformat)
-    parquet_script = if pt.dataformat == :parquet
-        join(JS_DEP_PARQUET, "\n")
-    else
-        ""
-    end
+    extra_styles = _collect_extra_styles(pt.pivot_tables)
+    prism_scripts = _collect_prism_scripts(pt.pivot_tables)
+    js_dependencies_html = _collect_js_dependencies_html(pt.pivot_tables, pt.dataformat)
+    parquet_script = _get_parquet_script(pt.dataformat)
 
     # Handle external formats (csv_external, json_external, parquet) differently
     if pt.dataformat in [:csv_external, :json_external, :parquet]
@@ -2083,79 +2238,15 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
             save_dataframe(data_label, df, data_dir, pt.dataformat)
         end
 
-        # Generate HTML content - handle Picture types specially
-        data_set_bit   = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
-        functional_bit = ""
-        table_bit = ""
+        # Generate HTML content
+        data_set_bit = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
+        functional_bit, table_bit = _process_pivot_tables(pt.pivot_tables, pt.dataformat, project_dir)
 
-        for (i, pti) in enumerate(pt.pivot_tables)
-            sp = i == 1 ? "" : SEGMENT_SEPARATOR
-            if isa(pti, Picture)
-                # Generate Picture HTML based on dataformat
-                if !isempty(pti.functional_html)
-                    functional_bit *= pti.functional_html
-                end
-                table_bit *= sp * generate_picture_html(pti, pt.dataformat, project_dir)
-                # Add picture attribution only for single-image Pictures
-                if pti.image_path !== nothing
-                    table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
-                end
-            elseif isa(pti, TextBlock)
-                # Generate TextBlock HTML, handling images if present
-                if !isempty(pti.images)
-                    table_bit *= sp * generate_textblock_html(pti, pt.dataformat, project_dir)
-                else
-                    # No images, use original appearance_html for backward compatibility
-                    table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
-                end
-                # TextBlock has no functional HTML
-            elseif isa(pti, Notes)
-                # Generate Notes HTML and JavaScript based on dataformat
-                notes_result = generate_notes_html(pti, pt.dataformat, project_dir)
-                table_bit *= sp * notes_result.html
-                if !isempty(notes_result.js)
-                    functional_bit *= notes_result.js
-                end
-            elseif isa(pti, Slides)
-                # Generate Slides HTML based on dataformat
-                functional_bit *= pti.functional_html
-                table_bit *= sp * generate_slides_html(pti, pt.dataformat, project_dir)
-                # Slides has no data attribution (uses :no_data label)
-            elseif isa(pti, Table)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-                # Add table attribution (Table is self-contained, use chart_title)
-                table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
-            elseif hasfield(typeof(pti), :data_label)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-                # Add data source attribution for charts with data_label
-                table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, pt.dataformat)
-            else
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-            end
-        end
-
-        # Get package version
-        version_str = try
-            string(pkgversion(JSPlots))
-        catch
-            "unknown"
-        end
-
-        full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
-        full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
-        full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
-        full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => pt.tab_title)
-        full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
-        full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
-        full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
-        full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
-        full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-        full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
-        full_page_html = replace(full_page_html, "___VERSION___" => version_str)
-        full_page_html = replace(full_page_html, "___BREADCRUMB___" => "")
+        full_page_html = _apply_page_template(
+            data_set_bit=data_set_bit, table_bit=table_bit, functional_bit=functional_bit,
+            tab_title=pt.tab_title, page_header=pt.page_header, notes=pt.notes,
+            extra_styles=extra_styles, js_dependencies_html=js_dependencies_html,
+            prism_scripts=prism_scripts, parquet_script=parquet_script)
 
         # Save HTML file
         open(actual_html_path, "w") do outfile
@@ -2187,81 +2278,15 @@ function create_html(pt::JSPlotPage, outfile_path::String="pivottable.html";
 
 
     else
-        # Original embedded format logic
-        data_set_bit   = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
-        functional_bit = ""
-        table_bit = ""
+        # Embedded format logic
+        data_set_bit = isempty(pt.dataframes) ? "" : reduce(*, [dataset_to_html(k, v, pt.dataformat) for (k,v) in pt.dataframes])
+        functional_bit, table_bit = _process_pivot_tables(pt.pivot_tables, pt.dataformat, "")
 
-
-
-        for (i, pti) in enumerate(pt.pivot_tables)
-            sp = i == 1 ? "" : SEGMENT_SEPARATOR
-            if isa(pti, Picture)
-                # Generate Picture HTML based on dataformat (embedded)
-                if !isempty(pti.functional_html)
-                    functional_bit *= pti.functional_html
-                end
-                table_bit *= sp * generate_picture_html(pti, pt.dataformat, "")
-                # Add picture attribution only for single-image Pictures
-                if pti.image_path !== nothing
-                    table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
-                end
-            elseif isa(pti, TextBlock)
-                # Generate TextBlock HTML, handling images if present
-                if !isempty(pti.images)
-                    table_bit *= sp * generate_textblock_html(pti, pt.dataformat, "")
-                else
-                    # No images, use original template for backward compatibility
-                    table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
-                end
-                # TextBlock has no functional HTML
-            elseif isa(pti, Notes)
-                # Generate Notes HTML and JavaScript based on dataformat (embedded)
-                notes_result = generate_notes_html(pti, pt.dataformat, "")
-                table_bit *= sp * notes_result.html
-                if !isempty(notes_result.js)
-                    functional_bit *= notes_result.js
-                end
-            elseif isa(pti, Slides)
-                # Generate Slides HTML based on dataformat (embedded)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * generate_slides_html(pti, pt.dataformat, "")
-                # Slides has no data attribution (uses :no_data label)
-            elseif isa(pti, Table)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-                # Add table attribution (Table is self-contained, use chart_title)
-                table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
-            elseif hasfield(typeof(pti), :data_label)
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-                # Add data source attribution for charts with data_label
-                table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, pt.dataformat)
-            else
-                functional_bit *= pti.functional_html
-                table_bit *= sp * pti.appearance_html
-            end
-        end
-
-        # Get package version
-        version_str = try
-            string(pkgversion(JSPlots))
-        catch
-            "unknown"
-        end
-
-        full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
-        full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
-        full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
-        full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => pt.tab_title)
-        full_page_html = replace(full_page_html, "___PAGE_HEADER___" => pt.page_header)
-        full_page_html = replace(full_page_html, "___NOTES___" => pt.notes)
-        full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
-        full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
-        full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-        full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
-        full_page_html = replace(full_page_html, "___VERSION___" => version_str)
-        full_page_html = replace(full_page_html, "___BREADCRUMB___" => "")
+        full_page_html = _apply_page_template(
+            data_set_bit=data_set_bit, table_bit=table_bit, functional_bit=functional_bit,
+            tab_title=pt.tab_title, page_header=pt.page_header, notes=pt.notes,
+            extra_styles=extra_styles, js_dependencies_html=js_dependencies_html,
+            prism_scripts=prism_scripts, parquet_script=parquet_script)
 
         open(outfile_path, "w") do outfile
             write(outfile, full_page_html)
@@ -2329,127 +2354,21 @@ Helper function to generate HTML content for a single page without creating fold
 Returns the HTML string directly.
 """
 function generate_page_html(page::JSPlotPage, dataframes::Dict{Symbol,DataFrame}, dataformat::Symbol, project_dir::String=""; breadcrumb_html::String="")
-    # Collect extra styles
-    extra_styles = ""
-    has_textblock = any(p -> isa(p, TextBlock), page.pivot_tables)
-    has_notes = any(p -> isa(p, Notes), page.pivot_tables)
-    has_picture = any(p -> isa(p, Picture), page.pivot_tables)
-    has_table = any(p -> isa(p, Table), page.pivot_tables)
+    extra_styles = _collect_extra_styles(page.pivot_tables)
+    prism_scripts = _collect_prism_scripts(page.pivot_tables)
+    js_dependencies_html = _collect_js_dependencies_html(page.pivot_tables, dataformat)
+    parquet_script = _get_parquet_script(dataformat)
 
-    if has_textblock
-        extra_styles *= TEXTBLOCK_STYLE
-    end
-    if has_notes
-        extra_styles *= NOTES_STYLE
-    end
-    if has_picture
-        extra_styles *= PICTURE_STYLE
-    end
-    if has_table
-        extra_styles *= TABLE_STYLE
-    end
-
-    # Collect Prism.js language components needed for CodeBlocks
-    prism_languages = JSPlots.get_languages_from_codeblocks(page.pivot_tables)
-    prism_scripts = if isempty(prism_languages)
-        ""
-    else
-        join(["""    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-$lang.min.js"></script>"""
-              for lang in prism_languages], "\n")
-    end
-
-    # Collect JavaScript dependencies from all plot types on this page
-    all_js_deps = reduce(vcat, js_dependencies.(page.pivot_tables); init=String[])
-
-    # Add dataformat-specific dependencies (PapaParse for CSV formats)
-    if dataformat in [:csv_embedded, :csv_external]
-        append!(all_js_deps, JS_DEP_CSV)
-    end
-
-    unique_js_deps = unique(all_js_deps)
-    js_dependencies_html = isempty(unique_js_deps) ? "" : join(["    " * dep for dep in unique_js_deps], "\n")
-
-    # Parquet support script (only needed for parquet dataformat)
-    parquet_script = if dataformat == :parquet
-        join(JS_DEP_PARQUET, "\n")
-    else
-        ""
-    end
-
-    # Generate datasets HTML
     data_set_bit = isempty(dataframes) ? "" : reduce(*, [dataset_to_html(k, v, dataformat) for (k,v) in dataframes])
+    # Pictures/TextBlocks in generate_page_html always use embedded format for simplicity
+    functional_bit, table_bit = _process_pivot_tables(page.pivot_tables, dataformat, project_dir)
 
-    # Generate functional and appearance HTML for plots
-    functional_bit = ""
-    table_bit = ""
-
-    for (i, pti) in enumerate(page.pivot_tables)
-        sp = i == 1 ? "" : SEGMENT_SEPARATOR
-
-        if isa(pti, Picture)
-            # Pictures are embedded as base64 for simplicity in multi-page context
-            if !isempty(pti.functional_html)
-                functional_bit *= pti.functional_html
-            end
-            table_bit *= sp * generate_picture_html(pti, :csv_embedded, "")
-            if pti.image_path !== nothing
-                table_bit *= "<br>" * generate_picture_attribution(pti.image_path)
-            end
-        elseif isa(pti, TextBlock)
-            if !isempty(pti.images)
-                table_bit *= sp * generate_textblock_html(pti, :csv_embedded, "")
-            else
-                table_bit *= sp * replace(TEXTBLOCK_TEMPLATE, "___HTML_CONTENT___" => pti.html_content)
-            end
-        elseif isa(pti, Notes)
-            # Generate Notes HTML and JavaScript based on dataformat
-            notes_result = generate_notes_html(pti, dataformat, project_dir)
-            table_bit *= sp * notes_result.html
-            if !isempty(notes_result.js)
-                functional_bit *= notes_result.js
-            end
-        elseif isa(pti, Slides)
-            # Slides always use external images in slides/ directory
-            functional_bit *= pti.functional_html
-            table_bit *= sp * generate_slides_html(pti, dataformat, project_dir)
-        elseif isa(pti, Table)
-            functional_bit *= pti.functional_html
-            table_bit *= sp * pti.appearance_html
-            table_bit *= """<br><p style="text-align: right; font-size: 0.8em; color: #666; margin-top: -10px; margin-bottom: 10px;">Data: $(string(pti.chart_title))</p>"""
-        elseif hasfield(typeof(pti), :data_label)
-            functional_bit *= pti.functional_html
-            table_bit *= sp * pti.appearance_html
-            table_bit *= "<br>" * generate_data_source_attribution(pti.data_label, dataformat)
-        else
-            if hasfield(typeof(pti), :functional_html)
-                functional_bit *= pti.functional_html
-            end
-            table_bit *= sp * pti.appearance_html
-        end
-    end
-
-    # Build full page HTML
-    # Get package version
-    version_str = try
-        string(pkgversion(@__MODULE__))
-    catch
-        "unknown"
-    end
-
-    full_page_html = replace(FULL_PAGE_TEMPLATE, "___DATASETS___" => data_set_bit)
-    full_page_html = replace(full_page_html, "___PIVOT_TABLES___" => table_bit)
-    full_page_html = replace(full_page_html, "___FUNCTIONAL_BIT___" => functional_bit)
-    full_page_html = replace(full_page_html, "___TITLE_OF_PAGE___" => page.tab_title)
-    full_page_html = replace(full_page_html, "___PAGE_HEADER___" => page.page_header)
-    full_page_html = replace(full_page_html, "___NOTES___" => page.notes)
-    full_page_html = replace(full_page_html, "___EXTRA_STYLES___" => extra_styles)
-    full_page_html = replace(full_page_html, "___JS_DEPENDENCIES___" => js_dependencies_html)
-    full_page_html = replace(full_page_html, "___PRISM_LANGUAGES___" => prism_scripts)
-    full_page_html = replace(full_page_html, "___PARQUET_SCRIPT___" => parquet_script)
-    full_page_html = replace(full_page_html, "___VERSION___" => version_str)
-    full_page_html = replace(full_page_html, "___BREADCRUMB___" => breadcrumb_html)
-
-    return full_page_html
+    return _apply_page_template(
+        data_set_bit=data_set_bit, table_bit=table_bit, functional_bit=functional_bit,
+        tab_title=page.tab_title, page_header=page.page_header, notes=page.notes,
+        extra_styles=extra_styles, js_dependencies_html=js_dependencies_html,
+        prism_scripts=prism_scripts, parquet_script=parquet_script,
+        breadcrumb_html=breadcrumb_html)
 end
 
 """

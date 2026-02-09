@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1706,7 +1783,7 @@ $(function(){
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -1924,42 +2001,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_basic_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_basic_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_basic_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('basic_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_basic_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_basic_drawdown');
-        const facet2Select = document.getElementById('facet2_select_basic_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('basic_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -1975,14 +2022,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -2080,14 +2120,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -2295,7 +2328,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'style'];
-    const COLOR_MAPS = {'style': {'Alternative': '#EF553B', 'Factor': '#636efa'}, 'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"style":{"Alternative":"#EF553B","Factor":"#636efa"},"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -2513,42 +2546,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_multi_metric_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_multi_metric_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_multi_metric_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('multi_metric_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_multi_metric_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_multi_metric_drawdown');
-        const facet2Select = document.getElementById('facet2_select_multi_metric_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('multi_metric_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -2564,14 +2567,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -2669,14 +2665,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -2884,7 +2873,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['style', 'strategy'];
-    const COLOR_MAPS = {'style': {'Alternative': '#EF553B', 'Factor': '#636efa'}, 'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"style":{"Alternative":"#EF553B","Factor":"#636efa"},"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'style';
 
@@ -3102,42 +3091,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_style_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_style_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_style_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('style_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_style_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_style_drawdown');
-        const facet2Select = document.getElementById('facet2_select_style_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('style_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -3153,14 +3112,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -3258,14 +3210,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -3473,7 +3418,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"},"risk_level":{"Medium":"#636efa","Low":"#EF553B","High":"#00cc96"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -3691,42 +3636,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_filtered_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_filtered_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_filtered_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('filtered_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_filtered_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_filtered_drawdown');
-        const facet2Select = document.getElementById('facet2_select_filtered_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('filtered_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -3742,14 +3657,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -3847,14 +3755,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -4062,7 +3963,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"},"risk_level":{"Medium":"#636efa","Low":"#EF553B","High":"#00cc96"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -4280,42 +4181,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_choices_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_choices_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_choices_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('choices_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_choices_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_choices_drawdown');
-        const facet2Select = document.getElementById('facet2_select_choices_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('choices_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -4331,14 +4202,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -4436,14 +4300,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -4651,7 +4508,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_pnl_gross', transform: 'cumulative', label: 'daily_pnl_gross (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"},"risk_level":{"Medium":"#636efa","Low":"#EF553B","High":"#00cc96"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -4869,42 +4726,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_faceted_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_faceted_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_faceted_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('faceted_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_faceted_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_faceted_drawdown');
-        const facet2Select = document.getElementById('facet2_select_faceted_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('faceted_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -4920,14 +4747,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -5025,14 +4845,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -5240,7 +5053,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}, 'risk_level': {'Medium': '#f39c12', 'Low': '#27ae60', 'High': '#e74c3c'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"},"risk_level":{"Medium":"#f39c12","Low":"#27ae60","High":"#e74c3c"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -5458,42 +5271,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_custom_colors_dd');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_custom_colors_dd');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_custom_colors_dd' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('custom_colors_dd', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_custom_colors_dd');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_custom_colors_dd');
-        const facet2Select = document.getElementById('facet2_select_custom_colors_dd');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('custom_colors_dd');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -5509,14 +5292,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -5614,14 +5390,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -5829,7 +5598,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -6047,42 +5816,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_nofill_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_nofill_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_nofill_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('nofill_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_nofill_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_nofill_drawdown');
-        const facet2Select = document.getElementById('facet2_select_nofill_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('nofill_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -6098,14 +5837,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -6203,14 +5935,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -6418,7 +6143,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -6636,42 +6361,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_day_filter_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_day_filter_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_day_filter_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('day_filter_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_day_filter_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_day_filter_drawdown');
-        const facet2Select = document.getElementById('facet2_select_day_filter_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('day_filter_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -6687,14 +6382,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -6792,14 +6480,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -7007,7 +6688,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}, {col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy', 'style'];
-    const COLOR_MAPS = {'style': {'Alternative': '#EF553B', 'Factor': '#636efa'}, 'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"style":{"Alternative":"#EF553B","Factor":"#636efa"},"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -7225,42 +6906,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_weekday_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_weekday_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_weekday_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('weekday_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_weekday_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_weekday_drawdown');
-        const facet2Select = document.getElementById('facet2_select_weekday_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('weekday_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -7276,14 +6927,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -7381,14 +7025,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -7596,7 +7233,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_pnl', transform: 'cumulative', label: 'daily_pnl (cumulative)'}];
     const COLOR_COLS = ['strategy', 'risk_level'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}, 'risk_level': {'Medium': '#636efa', 'Low': '#EF553B', 'High': '#00cc96'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"},"risk_level":{"Medium":"#636efa","Low":"#EF553B","High":"#00cc96"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -7814,42 +7451,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_day_style_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_day_style_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_day_style_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('day_style_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_day_style_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_day_style_drawdown');
-        const facet2Select = document.getElementById('facet2_select_day_style_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('day_style_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -7865,14 +7472,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -7970,14 +7570,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);
@@ -8185,7 +7778,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
     const X_COL = 'date';
     const Y_TRANSFORMS = [{col: 'daily_return', transform: 'cumprod', label: 'daily_return (cumprod)'}];
     const COLOR_COLS = ['strategy'];
-    const COLOR_MAPS = {'strategy': {'Quality': '#ab63fa', 'Trend': '#B6E880', 'Value': '#EF553B', 'Growth': '#00cc96', 'Carry': '#FF6692', 'Momentum': '#636efa', 'Size': '#FFA15A', 'Volatility': '#19d3f3'}};
+    const COLOR_MAPS = {"strategy":{"Quality":"#ab63fa","Trend":"#B6E880","Value":"#EF553B","Growth":"#00cc96","Carry":"#FF6692","Momentum":"#636efa","Size":"#FFA15A","Volatility":"#19d3f3"}};
     const COLOR_SCALES = {};
     const DEFAULT_COLOR_COL = 'strategy';
 
@@ -8403,42 +7996,12 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = selectedYTransform.transform;
 
         // Get current filter values
-        const filters = {};
-        const rangeFilters = {};
-        const choices = {};
-
-        // Read choice filters (single-select dropdowns)
-        CHOICE_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_choice_wealth_drawdown');
-            if (select) {
-                choices[col] = select.value;
-            }
-        });
-
-        CATEGORICAL_FILTERS.forEach(col => {
-            const select = document.getElementById(col + '_select_wealth_drawdown');
-            if (select) {
-                filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-            }
-        });
-
-        CONTINUOUS_FILTERS.forEach(col => {
-            const slider = $('#' + col + '_range_wealth_drawdown' + '_slider');
-            if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                rangeFilters[col] = {
-                    min: slider.slider("values", 0),
-                    max: slider.slider("values", 1)
-                };
-            }
-        });
+        const { filters, rangeFilters, choices } = readFilterValues('wealth_drawdown', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
         const colorColSelect = document.getElementById('color_col_select_wealth_drawdown');
         const COLOR_COL = colorColSelect ? colorColSelect.value : DEFAULT_COLOR_COL;
 
-        const facet1Select = document.getElementById('facet1_select_wealth_drawdown');
-        const facet2Select = document.getElementById('facet2_select_wealth_drawdown');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('wealth_drawdown');
 
         const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
 
@@ -8454,14 +8017,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         );
 
         // Sort data by X
-        filteredData.sort((a, b) => {
-            const aVal = a[X_COL];
-            const bVal = b[X_COL];
-            if (aVal instanceof Date && bVal instanceof Date) {
-                return aVal - bVal;
-            }
-            return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-        });
+        filteredData.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
         // Get unique X values
         const uniqueXValues = [...new Set(filteredData.map(row => {
@@ -8559,14 +8115,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             if (group.length === 0) continue;
 
             // Sort by X within group
-            group.sort((a, b) => {
-                const aVal = a[X_COL];
-                const bVal = b[X_COL];
-                if (aVal instanceof Date && bVal instanceof Date) {
-                    return aVal - bVal;
-                }
-                return aVal < bVal ? -1 : (aVal > bVal ? 1 : 0);
-            });
+            group.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], []));
 
             const fullXValues = group.map(row => row[X_COL]);
             const fullXNumeric = fullXValues.map(v => v instanceof Date ? v.getTime() : v);

@@ -91,9 +91,6 @@ struct LineChart <: JSPlotsType
             error("aggregator must be one of: $(join(valid_aggregators, ", "))")
         end
 
-        # Get unique values for each filter column
-        filter_options = build_filter_options(normalized_filters, df)
-
         # Build color maps for all possible color columns that exist (with optional custom colors)
         color_maps, color_scales, valid_color_cols = build_color_maps_extended(color_cols, df)
         # If no color columns specified or valid, we'll use a default black color for all lines
@@ -106,9 +103,9 @@ struct LineChart <: JSPlotsType
 
         # Create JavaScript arrays for columns
         # Separate categorical and continuous filters
-        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
-        choice_cols = [string(d.id)[1:findfirst("_choice_", string(d.id))[1]-1] for d in choice_dropdowns]
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df, col)]
+        choice_cols = collect(keys(normalized_choices))
 
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         categorical_filters_js = build_js_array(categorical_filter_cols)
@@ -119,10 +116,7 @@ struct LineChart <: JSPlotsType
         color_cols_js = build_js_array(valid_color_cols)
 
         # Create color maps as nested JavaScript object (categorical)
-        color_maps_js = "{" * join([
-            "'$col': {" * join(["'$k': '$v'" for (k, v) in map], ", ") * "}"
-            for (col, map) in color_maps
-        ], ", ") * "}"
+        color_maps_js = JSON.json(color_maps)
 
         # Create color scales as nested JavaScript object (continuous)
         color_scales_js = build_color_scales_js(color_scales)
@@ -273,37 +267,7 @@ struct LineChart <: JSPlotsType
                 const Y_TRANSFORM = yTransformSelect ? yTransformSelect.value : 'identity';
 
                 // Get current filter values
-                const filters = {};
-                const rangeFilters = {};
-                const choices = {};
-
-                // Read choice filters (single-select dropdowns)
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
-
-                // Read categorical filters (dropdowns)
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Read continuous filters (range sliders)
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
-                    // Check slider is initialized before reading values
-                    if (slider.length > 0 && slider.hasClass('ui-slider')) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Get current color column
                 const colorColSelect = document.getElementById('color_col_select_$chart_title');
@@ -313,16 +277,7 @@ struct LineChart <: JSPlotsType
                 const aggregatorSelect = document.getElementById('aggregator_select_$chart_title');
                 const AGGREGATOR = aggregatorSelect ? aggregatorSelect.value : 'none';
 
-                // Get current facet selections
-                const facet1Select = document.getElementById('facet1_select_$chart_title');
-                const facet2Select = document.getElementById('facet2_select_$chart_title');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
-
-                // Build FACET_COLS array based on selections
-                const FACET_COLS = [];
-                if (facet1) FACET_COLS.push(facet1);
-                if (facet2) FACET_COLS.push(facet2);
+                const { facet1, facet2, facetCols: FACET_COLS } = readFacetSelections('$chart_title');
 
                 // Get color map for current selection
                 const COLOR_MAP = COLOR_MAPS[COLOR_COL] || {};
@@ -356,38 +311,7 @@ struct LineChart <: JSPlotsType
                     const traces = [];
                     for (let groupKey in groupedData) {
                         const group = groupedData[groupKey];
-                        // Robust sort that handles dates, numbers, and strings
-                        group.data.sort((a, b) => {
-                            const aVal = a[X_COL];
-                            const bVal = b[X_COL];
-
-                            // Custom x-axis ordering
-                            if (X_ORDER.length > 0) {
-                                const aIdx = X_ORDER.indexOf(String(aVal));
-                                const bIdx = X_ORDER.indexOf(String(bVal));
-                                if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                                if (aIdx >= 0) return -1;
-                                if (bIdx >= 0) return 1;
-                            }
-
-                            // Check if values are Date objects
-                            if (aVal instanceof Date && bVal instanceof Date) {
-                                return aVal - bVal;
-                            }
-
-                            const aStr = String(aVal);
-                            const bStr = String(bVal);
-
-                            // Try numeric comparison
-                            const aNum = parseFloat(aVal);
-                            const bNum = parseFloat(bVal);
-                            if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
-                                return aNum - bNum;
-                            }
-
-                            // Fall back to string comparison
-                            return aStr.localeCompare(bStr);
-                        });
+                        group.data.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                         // Use centralized aggregation function
                         const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
@@ -486,38 +410,7 @@ struct LineChart <: JSPlotsType
 
                         for (let groupKey in groupedData) {
                             const group = groupedData[groupKey];
-                            // Robust sort that handles dates, numbers, and strings
-                            group.data.sort((a, b) => {
-                                const aVal = a[X_COL];
-                                const bVal = b[X_COL];
-
-                                // Custom x-axis ordering
-                                if (X_ORDER.length > 0) {
-                                    const aIdx = X_ORDER.indexOf(String(aVal));
-                                    const bIdx = X_ORDER.indexOf(String(bVal));
-                                    if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                                    if (aIdx >= 0) return -1;
-                                    if (bIdx >= 0) return 1;
-                                }
-
-                                // Check if values are Date objects
-                                if (aVal instanceof Date && bVal instanceof Date) {
-                                    return aVal - bVal;
-                                }
-
-                                const aStr = String(aVal);
-                                const bStr = String(bVal);
-
-                                // Try numeric comparison
-                                const aNum = parseFloat(aVal);
-                                const bNum = parseFloat(bVal);
-                                if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
-                                    return aNum - bNum;
-                                }
-
-                                // Fall back to string comparison
-                                return aStr.localeCompare(bStr);
-                            });
+                            group.data.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                             // Use centralized aggregation function
                             const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);
@@ -637,38 +530,7 @@ struct LineChart <: JSPlotsType
 
                             for (let groupKey in groupedData) {
                                 const group = groupedData[groupKey];
-                                // Robust sort that handles dates, numbers, and strings
-                                group.data.sort((a, b) => {
-                                    const aVal = a[X_COL];
-                                    const bVal = b[X_COL];
-
-                                    // Custom x-axis ordering
-                                    if (X_ORDER.length > 0) {
-                                        const aIdx = X_ORDER.indexOf(String(aVal));
-                                        const bIdx = X_ORDER.indexOf(String(bVal));
-                                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
-                                        if (aIdx >= 0) return -1;
-                                        if (bIdx >= 0) return 1;
-                                    }
-
-                                    // Check if values are Date objects
-                                    if (aVal instanceof Date && bVal instanceof Date) {
-                                        return aVal - bVal;
-                                    }
-
-                                    const aStr = String(aVal);
-                                    const bStr = String(bVal);
-
-                                    // Try numeric comparison
-                                    const aNum = parseFloat(aVal);
-                                    const bNum = parseFloat(bVal);
-                                    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
-                                        return aNum - bNum;
-                                    }
-
-                                    // Fall back to string comparison
-                                    return aStr.localeCompare(bStr);
-                                });
+                                group.data.sort((a, b) => robustSortComparator(a[X_COL], b[X_COL], X_ORDER));
 
                                 // Use centralized aggregation function
                                 const result = aggregateGroupData(group.data, X_COL, Y_COL, AGGREGATOR);

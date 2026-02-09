@@ -120,7 +120,7 @@ struct Waterfall <: JSPlotsType
         choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df, update_function)
 
         # Build color maps for category-based coloring
-        color_maps, _ = build_color_maps(color_cols, df, DEFAULT_COLOR_PALETTE)
+        color_maps, _, _ = build_color_maps_extended(color_cols, df, DEFAULT_COLOR_PALETTE)
 
         # Create JavaScript arrays for columns
         filter_cols_js = build_js_array(collect(keys(normalized_filters)))

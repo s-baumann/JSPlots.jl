@@ -252,20 +252,6 @@ function dataframe_to_html_table(df::DataFrame, table_id::String)
     return String(take!(io))
 end
 
-"""
-    html_escape(s::AbstractString)
-
-Escape HTML special characters in a string.
-"""
-function html_escape(s::AbstractString)
-    s = replace(s, "&" => "&amp;")
-    s = replace(s, "<" => "&lt;")
-    s = replace(s, ">" => "&gt;")
-    s = replace(s, "\"" => "&quot;")
-    s = replace(s, "'" => "&#39;")
-    return s
-end
-
-dependencies(a::Table) = []
+dependencies(a::Table) = Symbol[]
 js_dependencies(::Table) = vcat(JS_DEP_JQUERY)
 

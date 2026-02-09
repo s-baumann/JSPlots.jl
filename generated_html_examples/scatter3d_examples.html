@@ -400,6 +400,83 @@ function applyFiltersWithCounting(allData, chartTitle, categoricalFilters, conti
     return currentData;
 }
 
+// Read all filter values from the DOM for a given chart
+// Returns { filters, rangeFilters, choices } ready for applyFiltersWithCounting
+function readFilterValues(chartTitle, categoricalFilters, continuousFilters, choiceFilters) {
+    const choices = {};
+    choiceFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_choice_' + chartTitle);
+        if (select) {
+            choices[col] = select.value;
+        }
+    });
+
+    const filters = {};
+    categoricalFilters.forEach(function(col) {
+        const select = document.getElementById(col + '_select_' + chartTitle);
+        if (select) {
+            filters[col] = Array.from(select.selectedOptions).map(function(opt) { return opt.value; });
+        }
+    });
+
+    const rangeFilters = {};
+    continuousFilters.forEach(function(col) {
+        const slider = $('#' + col + '_range_' + chartTitle + '_slider');
+        if (slider.length > 0 && slider.hasClass('ui-slider')) {
+            rangeFilters[col] = {
+                min: slider.slider("values", 0),
+                max: slider.slider("values", 1)
+            };
+        }
+    });
+
+    return { filters: filters, rangeFilters: rangeFilters, choices: choices };
+}
+
+// Read facet selections from the DOM for a given chart
+// Returns { facet1, facet2, facetCols } where facet1/facet2 are column names or null
+function readFacetSelections(chartTitle) {
+    const facet1Select = document.getElementById('facet1_select_' + chartTitle);
+    const facet2Select = document.getElementById('facet2_select_' + chartTitle);
+    const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
+    const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+    const facetCols = [];
+    if (facet1) facetCols.push(facet1);
+    if (facet2) facetCols.push(facet2);
+    return { facet1: facet1, facet2: facet2, facetCols: facetCols };
+}
+
+// Robust sort comparator that handles dates, numbers, strings, and optional custom ordering
+// xOrder is an optional array of values defining custom sort order (pass [] to skip)
+function robustSortComparator(aVal, bVal, xOrder) {
+    // Custom ordering
+    if (xOrder && xOrder.length > 0) {
+        const aIdx = xOrder.indexOf(String(aVal));
+        const bIdx = xOrder.indexOf(String(bVal));
+        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx;
+        if (aIdx >= 0) return -1;
+        if (bIdx >= 0) return 1;
+    }
+
+    // Date objects
+    if (aVal instanceof Date && bVal instanceof Date) {
+        return aVal - bVal;
+    }
+
+    const aStr = String(aVal);
+    const bStr = String(bVal);
+
+    // Try numeric comparison
+    const aNum = parseFloat(aVal);
+    const bNum = parseFloat(bVal);
+    if (!isNaN(aNum) && !isNaN(bNum) && aStr === String(aNum) && bStr === String(bNum)) {
+        return aNum - bNum;
+    }
+
+    // Fall back to string comparison
+    return aStr.localeCompare(bStr);
+}
+
 // Axis transformation functions
 // These transform data values according to selected transformation type
 function applyAxisTransform(values, transformType) {
@@ -1935,15 +2012,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_basic_3d_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_basic_3d_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_basic_3d_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_basic_3d_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('basic_3d_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_basic_3d_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -2374,11 +2449,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_basic_3d_scatter');
-        const facet2Select = document.getElementById('facet2_select_basic_3d_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('basic_3d_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_basic_3d_scatter.filter(row => {
@@ -2659,15 +2730,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_multi_dim_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_multi_dim_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_multi_dim_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_multi_dim_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('multi_dim_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_multi_dim_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -3098,11 +3167,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_multi_dim_scatter');
-        const facet2Select = document.getElementById('facet2_select_multi_dim_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('multi_dim_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_multi_dim_scatter.filter(row => {
@@ -3383,15 +3448,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_filtered_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_filtered_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_filtered_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_filtered_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('filtered_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_filtered_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -3822,11 +3885,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_filtered_scatter');
-        const facet2Select = document.getElementById('facet2_select_filtered_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('filtered_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_filtered_scatter.filter(row => {
@@ -4107,15 +4166,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_choice_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_choice_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_choice_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_choice_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('choice_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_choice_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_choice_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_choice_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_choice_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -4546,11 +4603,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_choice_scatter');
-        const facet2Select = document.getElementById('facet2_select_choice_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('choice_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_choice_scatter.filter(row => {
@@ -4831,15 +4884,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_cluster_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_cluster_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_cluster_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_cluster_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('cluster_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_cluster_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -5270,11 +5321,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_cluster_scatter');
-        const facet2Select = document.getElementById('facet2_select_cluster_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('cluster_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_cluster_scatter.filter(row => {
@@ -5555,15 +5602,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_timeseries_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_timeseries_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_timeseries_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_timeseries_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('timeseries_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_timeseries_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -5994,11 +6039,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_timeseries_scatter');
-        const facet2Select = document.getElementById('facet2_select_timeseries_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('timeseries_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_timeseries_scatter.filter(row => {
@@ -6279,15 +6320,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_faceted_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_faceted_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_faceted_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_faceted_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('faceted_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_faceted_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -6718,11 +6757,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_faceted_scatter');
-        const facet2Select = document.getElementById('facet2_select_faceted_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('faceted_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_faceted_scatter.filter(row => {
@@ -7003,15 +7038,13 @@ function getColor(colorMaps, colorScales, colorCol, value) {
         const Y_TRANSFORM = getCol('y_transform_select_comprehensive_scatter', 'identity');
         const Z_TRANSFORM = getCol('z_transform_select_comprehensive_scatter', 'identity');
 
-        // Get facet selections
-        const FACET1_COL = getCol('facet1_select_comprehensive_scatter', 'None');
-        const FACET2_COL = getCol('facet2_select_comprehensive_scatter', 'None');
+        const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('comprehensive_scatter');
 
-        if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+        if (!FACET1_COL && !FACET2_COL) {
             renderNoFacets_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+        } else if (FACET1_COL && !FACET2_COL) {
             renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-        } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+        } else if (FACET1_COL && FACET2_COL) {
             renderFacetGrid_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
         } else {
             renderFacetWrap_comprehensive_scatter(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -7442,11 +7475,7 @@ function getColor(colorMaps, colorScales, colorCol, value) {
             }
         });
 
-        // Get facet selections
-        const facet1Select = document.getElementById('facet1_select_comprehensive_scatter');
-        const facet2Select = document.getElementById('facet2_select_comprehensive_scatter');
-        const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-        const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+        const { facet1, facet2 } = readFacetSelections('comprehensive_scatter');
 
         // Filter data (support multiple selections per filter and choice filters)
         const filteredData = window.allData_comprehensive_scatter.filter(row => {

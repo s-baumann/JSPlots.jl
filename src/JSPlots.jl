@@ -147,6 +147,31 @@ console.log('Parquet-wasm library loaded successfully');
 
     export sanitize_html_id
 
+    # Valid data format options for JSPlotPage and Pages
+    const VALID_DATAFORMATS = (:csv_embedded, :json_embedded, :csv_external, :json_external, :parquet)
+
+    function validate_dataformat(dataformat::Symbol)
+        if !(dataformat in VALID_DATAFORMATS)
+            error("dataformat must be one of $VALID_DATAFORMATS, got :$dataformat")
+        end
+    end
+
+    """
+        html_escape(s::AbstractString)
+
+    Escape HTML special characters in a string.
+    """
+    function html_escape(s::AbstractString)
+        s = replace(s, "&" => "&amp;")
+        s = replace(s, "<" => "&lt;")
+        s = replace(s, ">" => "&gt;")
+        s = replace(s, "\"" => "&quot;")
+        s = replace(s, "'" => "&#39;")
+        return s
+    end
+
+    export html_escape
+
     # Default color palette used across multiple chart types
     const DEFAULT_COLOR_PALETTE = ["#636efa", "#EF553B", "#00cc96", "#ab63fa", "#FFA15A",
                                     "#19d3f3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
@@ -324,40 +349,11 @@ console.log('Parquet-wasm library loaded successfully');
     """
         build_color_maps(cols::Vector{Symbol}, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
 
-    Build color maps for categorical columns, mapping unique values to colors from a palette.
-    Returns (color_maps, valid_cols) where color_maps is a Dict{String, Dict{String, String}}.
-
-    # Arguments
-    - `cols::Vector{Symbol}`: Columns to build color maps for
-    - `df::DataFrame`: DataFrame containing the columns
-    - `palette`: Vector of color hex codes (default: DEFAULT_COLOR_PALETTE)
-
-    # Returns
-    - `color_maps`: Dict mapping column name to Dict of value->color mappings
-    - `valid_cols`: Vector of column names that existed in df
-
-    # Examples
-    ```julia
-    color_maps, valid_cols = build_color_maps([:species, :region], df)
-    # color_maps["species"]["setosa"] => "#636efa"
-    ```
+    Thin wrapper around `build_color_maps_extended` for backward compatibility.
+    Returns (color_maps, valid_cols) — ignores continuous color scales.
     """
     function build_color_maps(cols::Vector{Symbol}, df::DataFrame, palette=DEFAULT_COLOR_PALETTE)
-        available_cols = Set(names(df))
-        color_maps = Dict()
-        valid_cols = Symbol[]
-
-        for col in cols
-            if string(col) in available_cols
-                push!(valid_cols, col)
-                unique_vals = unique(df[!, col])
-                color_maps[string(col)] = Dict(
-                    string(key) => palette[(i - 1) % length(palette) + 1]
-                    for (i, key) in enumerate(unique_vals)
-                )
-            end
-        end
-
+        color_maps, _, valid_cols = build_color_maps_extended(cols, df, palette)
         return color_maps, valid_cols
     end
 
@@ -680,33 +676,6 @@ console.log('Parquet-wasm library loaded successfully');
         return result
     end
 
-    # Handle empty choices Dict
-    function normalize_choices(choices::Dict{Symbol, Any}, df::DataFrame)::Dict{Symbol, Any}
-        if isempty(choices)
-            return Dict{Symbol, Any}()
-        end
-        # Fall through to generic Dict handling
-        result = Dict{Symbol, Any}()
-        for (col, default_val) in choices
-            col_sym = col isa Symbol ? col : Symbol(col)
-            if !(string(col_sym) in names(df))
-                @warn "Choice column $col_sym not found in dataframe, skipping"
-                continue
-            end
-
-            unique_vals = collect(unique(skipmissing(df[!, col_sym])))
-
-            if isnothing(default_val)
-                if !isempty(unique_vals)
-                    result[col_sym] = first(unique_vals)
-                end
-            else
-                result[col_sym] = default_val
-            end
-        end
-        return result
-    end
-
     """
         is_continuous_column(df::DataFrame, col::Symbol)
 
@@ -788,10 +757,6 @@ console.log('Parquet-wasm library loaded successfully');
     export DEFAULT_COLOR_PALETTE, normalize_to_symbol_vector, validate_column, validate_columns, normalize_and_validate_facets
     export validate_and_filter_columns, build_color_maps, normalize_filters, normalize_choices, build_filter_options, build_js_array, select_default_column, is_continuous_column
     export ColorColSpec, normalize_color_cols, extract_color_col_names, build_color_maps_extended, build_color_scales_js, JS_COLOR_INTERPOLATION, is_continuous_color_spec
-
-    get_filter_vars(filters::Vector{Symbol}) = filters
-    get_filter_vars(filters::Dict) = Symbol.(keys(filters))
-    get_choice_vars(choices::Dict) = Symbol.(keys(choices))
 
     include("html_controls.jl")
 

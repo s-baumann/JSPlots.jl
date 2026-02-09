@@ -216,12 +216,7 @@ function generate_notes_html(notes::Notes, dataformat::Symbol, project_dir::Stri
         content = if isempty(strip(notes.template))
             "<span class=\"notes-no-content\">No notes provided</span>"
         else
-            # Escape HTML
-            replace(replace(replace(replace(notes.template,
-                "&" => "&amp;"),
-                "<" => "&lt;"),
-                ">" => "&gt;"),
-                "\"" => "&quot;")
+            html_escape(notes.template)
         end
 
         html = replace(NOTES_EMBEDDED_TEMPLATE, "___CHART_ID___" => chart_id_str)

@@ -110,8 +110,8 @@ struct SanKey <: JSPlotsType
         choice_dropdowns = build_choice_dropdowns(chart_title_str, normalized_choices, df_work, update_function)
 
         # Separate categorical, continuous, and choice filters for JavaScript
-        categorical_filter_cols = [string(d.id)[1:findfirst("_select_", string(d.id))[1]-1] for d in filter_dropdowns]
-        continuous_filter_cols = [string(s.id)[1:findfirst("_range_", string(s.id))[1]-1] for s in filter_sliders]
+        categorical_filter_cols = [col for col in keys(normalized_filters) if !is_continuous_column(df_work, col)]
+        continuous_filter_cols = [col for col in keys(normalized_filters) if is_continuous_column(df_work, col)]
         choice_cols = collect(keys(normalized_choices))
         categorical_filters_js = build_js_array(categorical_filter_cols)
         continuous_filters_js = build_js_array(continuous_filter_cols)
@@ -144,7 +144,6 @@ struct SanKey <: JSPlotsType
         end
 
         # Create JavaScript arrays
-        filter_cols_js = build_js_array(collect(keys(normalized_filters)))
         color_cols_js = build_js_array(String.(color_cols))
         value_cols_js = build_js_array(String.(value_cols))
 
@@ -324,35 +323,8 @@ struct SanKey <: JSPlotsType
                     return;
                 }
 
-                // Get categorical filter values
-                const filters = {};
-                CATEGORICAL_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_select_$chart_title');
-                    if (select) {
-                        filters[col] = Array.from(select.selectedOptions).map(opt => opt.value);
-                    }
-                });
-
-                // Get continuous filter values (range sliders)
-                const rangeFilters = {};
-                CONTINUOUS_FILTERS.forEach(col => {
-                    const slider = \$('#' + col + '_range_$chart_title' + '_slider');
-                    if (slider.length > 0) {
-                        rangeFilters[col] = {
-                            min: slider.slider("values", 0),
-                            max: slider.slider("values", 1)
-                        };
-                    }
-                });
-
-                // Get choice filter values (single-select)
-                const choices = {};
-                CHOICE_FILTERS.forEach(col => {
-                    const select = document.getElementById(col + '_choice_$chart_title');
-                    if (select) {
-                        choices[col] = select.value;
-                    }
-                });
+                // Get current filter values
+                const { filters, rangeFilters, choices } = readFilterValues('$chart_title', CATEGORICAL_FILTERS, CONTINUOUS_FILTERS, CHOICE_FILTERS);
 
                 // Apply filters with observation counting (centralized function)
                 const filteredData = applyFiltersWithCounting(

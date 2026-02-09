@@ -341,15 +341,13 @@ $style_html        </div>
                 const Y_TRANSFORM = getCol('y_transform_select_$(chart_title_safe)', 'identity');
                 const Z_TRANSFORM = getCol('z_transform_select_$(chart_title_safe)', 'identity');
 
-                // Get facet selections
-                const FACET1_COL = getCol('facet1_select_$(chart_title_safe)', 'None');
-                const FACET2_COL = getCol('facet2_select_$(chart_title_safe)', 'None');
+                const { facet1: FACET1_COL, facet2: FACET2_COL } = readFacetSelections('$(chart_title_safe)');
 
-                if (FACET1_COL === 'None' && FACET2_COL === 'None') {
+                if (!FACET1_COL && !FACET2_COL) {
                     renderNoFacets_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-                } else if (FACET1_COL !== 'None' && FACET2_COL === 'None') {
+                } else if (FACET1_COL && !FACET2_COL) {
                     renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
-                } else if (FACET1_COL !== 'None' && FACET2_COL !== 'None') {
+                } else if (FACET1_COL && FACET2_COL) {
                     renderFacetGrid_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET1_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
                 } else {
                     renderFacetWrap_$(chart_title_safe)(data, X_COL, Y_COL, Z_COL, COLOR_COL, FACET2_COL, X_TRANSFORM, Y_TRANSFORM, Z_TRANSFORM);
@@ -780,11 +778,7 @@ $style_html        </div>
                     }
                 });
 
-                // Get facet selections
-                const facet1Select = document.getElementById('facet1_select_$(chart_title_safe)');
-                const facet2Select = document.getElementById('facet2_select_$(chart_title_safe)');
-                const facet1 = facet1Select && facet1Select.value !== 'None' ? facet1Select.value : null;
-                const facet2 = facet2Select && facet2Select.value !== 'None' ? facet2Select.value : null;
+                const { facet1, facet2 } = readFacetSelections('$(chart_title_safe)');
 
                 // Filter data (support multiple selections per filter and choice filters)
                 const filteredData = window.allData_$(chart_title_safe).filter(row => {
